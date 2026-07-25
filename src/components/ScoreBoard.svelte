@@ -165,19 +165,28 @@
   }
 
   /**
-   * Release the landscape lock (and drop fullscreen) so the next page — setup —
-   * can go back to portrait. Called on unmount and just before we navigate away.
+   * On Close / unmount, actively lock the device to portrait so Android
+   * physically rotates back before we navigate. Setup then calls unlock()
+   * on load, freeing rotation. A plain unlock() alone is not enough: the
+   * OS keeps the current physical orientation until something asks for a
+   * different one.
    */
-  function releaseLandscape() {
+  async function releaseLandscape() {
     try {
-      const so = (screen as unknown as { orientation?: { unlock?: () => void } }).orientation;
-      so?.unlock?.();
+      const so = (screen as unknown as {
+        orientation?: { lock?: (o: string) => Promise<void>; unlock?: () => void };
+      }).orientation;
+      // Attempt portrait lock while we still hold the fullscreen context
+      // that made lock() legal on the way in.
+      if (so?.lock) {
+        await so.lock('portrait').catch(() => {});
+      }
     } catch {
       // silent
     }
     try {
       if (document.fullscreenElement && document.exitFullscreen) {
-        document.exitFullscreen().catch(() => {});
+        await document.exitFullscreen().catch(() => {});
       }
     } catch {
       // silent
@@ -330,13 +339,14 @@
     if (!hasProgress) return exit();
     confirmExit = true;
   }
-  function exit() {
+  async function exit() {
     if (storageKey) {
       try { localStorage.removeItem(storageKey); } catch { /* ignore */ }
     }
-    // Drop landscape lock BEFORE navigating so setup renders in portrait.
-    // Unmount cleanup also releases, but that fires after the navigation.
-    releaseLandscape();
+    // Ask the OS to rotate to portrait before we navigate. Setup page then
+    // unlocks orientation on load. Awaiting the lock call gives the OS a
+    // beat to actually rotate; otherwise setup can flash landscape first.
+    await releaseLandscape();
     window.location.href = import.meta.env.BASE_URL;
   }
 
