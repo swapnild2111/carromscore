@@ -3,11 +3,13 @@
     DEFAULT_CONFIG,
     encodeConfig,
     formatPreset,
+    matchStateKey,
     type Format,
     type MatchConfig,
     type Mode,
     type PlayerRow,
   } from '../lib/match';
+  import { APP_VERSION, fetchLatestReleaseTag, isNewerVersion } from '../lib/version';
 
   const base: string = import.meta.env.BASE_URL;
 
@@ -67,6 +69,13 @@
   function start(e: Event) {
     e.preventDefault();
     if (!canStart()) return;
+    // Wipe any stored in-flight state for this pairing so 'start match'
+    // always begins at 0-0, even if we just played the same players.
+    try {
+      localStorage.removeItem(matchStateKey(cfg.playerA, cfg.playerB));
+    } catch {
+      // ignore
+    }
     window.location.href = `${base}score/?${encodeConfig(cfg)}`;
   }
 
@@ -95,6 +104,17 @@
     await installEvt.prompt();
     installEvt = null;
   }
+
+  // Update check — one call per page load, silent on failure.
+  let latestTag = $state<string | null>(null);
+  const hasUpdate = $derived(latestTag !== null && isNewerVersion(APP_VERSION, latestTag));
+  const releaseUrl = $derived(latestTag
+    ? `https://github.com/swapnild2111/carromscore/releases/tag/${latestTag}`
+    : 'https://github.com/swapnild2111/carromscore/releases/latest');
+
+  $effect(() => {
+    fetchLatestReleaseTag().then((t) => (latestTag = t));
+  });
 </script>
 
 {#snippet picker(label: string, key: keyof MatchConfig)}
@@ -131,23 +151,32 @@
     <legend>Match format</legend>
     <label class:selected={cfg.format === 'india'}>
       <input type="radio" name="format" value="india" checked={cfg.format === 'india'} onchange={() => setFormat('india')} />
-      <div>
-        <strong>Best of 3 sets</strong>
-        <small>25 pts · 8 boards per set</small>
+      <div class="opt-body">
+        <div class="opt-badge">3</div>
+        <div>
+          <strong>Best of 3 sets</strong>
+          <small>25 pts · 8 boards / set</small>
+        </div>
       </div>
     </label>
     <label class:selected={cfg.format === 'europe'}>
       <input type="radio" name="format" value="europe" checked={cfg.format === 'europe'} onchange={() => setFormat('europe')} />
-      <div>
-        <strong>Single set</strong>
-        <small>25 pts · 8 boards</small>
+      <div class="opt-body">
+        <div class="opt-badge">1</div>
+        <div>
+          <strong>Single set</strong>
+          <small>25 pts · 8 boards</small>
+        </div>
       </div>
     </label>
     <label class:selected={cfg.format === 'custom'}>
       <input type="radio" name="format" value="custom" checked={cfg.format === 'custom'} onchange={() => setFormat('custom')} />
-      <div>
-        <strong>Custom</strong>
-        <small>Set your own limits</small>
+      <div class="opt-body">
+        <div class="opt-badge">…</div>
+        <div>
+          <strong>Custom</strong>
+          <small>Set your own limits</small>
+        </div>
       </div>
     </label>
   </fieldset>
@@ -232,11 +261,20 @@
     <p class="hint">{players.length} players available in autocomplete. Free-text names work too.</p>
   {/if}
 
+  {#if hasUpdate}
+    <a class="update-banner" href={releaseUrl} target="_blank" rel="noopener">
+      <strong>Update available:</strong> {latestTag}
+      <span>Tap to download the new APK</span>
+    </a>
+  {/if}
+
   {#if installEvt}
     <button class="install" type="button" onclick={install}>Install Carromscore</button>
   {:else if iOS}
     <p class="hint">Tap Share → Add to Home Screen to install.</p>
   {/if}
+
+  <p class="version">v{APP_VERSION}</p>
 </form>
 
 <style>
@@ -253,10 +291,34 @@
     padding: 0;
     margin: 0;
     display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
+    grid-template-columns: 1fr;
     gap: 0.5rem;
   }
-  fieldset.fmt-mode { grid-template-columns: 1fr 1fr; }
+  @media (min-width: 480px) {
+    fieldset { grid-template-columns: 1fr 1fr 1fr; }
+  }
+  fieldset.fmt-mode {
+    grid-template-columns: 1fr 1fr;
+  }
+  .opt-body {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+  }
+  .opt-badge {
+    width: 2.25rem;
+    height: 2.25rem;
+    border-radius: 0.55rem;
+    background: rgba(255, 213, 74, 0.15);
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 800;
+    font-size: 1.1rem;
+    flex-shrink: 0;
+  }
+  .selected .opt-badge { background: var(--accent); color: #0b0b0b; }
   legend {
     padding: 0;
     margin-bottom: 0.5rem;
@@ -389,6 +451,28 @@
     font-size: 0.95rem;
     cursor: pointer;
     align-self: center;
+  }
+  .update-banner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.15rem;
+    padding: 0.75rem 1rem;
+    background: rgba(255, 213, 74, 0.12);
+    border: 1px solid var(--accent);
+    border-radius: 0.75rem;
+    color: var(--fg);
+    text-decoration: none;
+    text-align: center;
+  }
+  .update-banner strong { color: var(--accent); font-size: 0.95rem; }
+  .update-banner span { color: var(--muted); font-size: 0.8rem; }
+  .version {
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.7rem;
+    margin: 0;
+    letter-spacing: 0.08em;
   }
 
   @media (max-width: 520px) {

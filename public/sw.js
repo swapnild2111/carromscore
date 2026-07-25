@@ -9,7 +9,12 @@
  * because CACHE_NAME uses BUILD_ID (bumped whenever we change the SW).
  */
 
-const CACHE_NAME = 'carromscore-v1';
+/*
+ * Bump this whenever we want to force clients to re-fetch. The `activate`
+ * handler already deletes any cache whose name != CACHE_NAME, so bumping is
+ * enough to purge everything old.
+ */
+const CACHE_NAME = 'carromscore-v1.5.1';
 const OFFLINE_URL = '/carromscore/';
 const PRECACHE = [
   '/carromscore/',
@@ -51,17 +56,20 @@ self.addEventListener('fetch', (event) => {
   }
 
   // All other GETs: cache first, then network, then cache the network response.
-  event.respondWith(
-    caches.match(req).then((cached) => {
-      if (cached) return cached;
-      return fetch(req)
-        .then((res) => {
-          if (!res || res.status !== 200 || res.type !== 'basic') return res;
-          const copy = res.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(req, copy));
-          return res;
-        })
-        .catch(() => cached || Response.error());
-    }),
-  );
+  event.respondWith(cacheFirst(req));
 });
+
+async function cacheFirst(req) {
+  const cached = await caches.match(req);
+  if (cached) return cached;
+  try {
+    const res = await fetch(req);
+    if (res.status === 200 && res.type === 'basic') {
+      const copy = res.clone();
+      caches.open(CACHE_NAME).then((cache) => cache.put(req, copy));
+    }
+    return res;
+  } catch {
+    return Response.error();
+  }
+}

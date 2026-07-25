@@ -120,6 +120,15 @@ export function teamLabel(name: string, partner: string, mode: Mode): string {
 }
 
 /**
+ * localStorage key for a match's in-flight state, derived only from player
+ * names so a refresh mid-match restores the same key. Setup wipes this key
+ * before starting so "same players again" always begins at 0-0.
+ */
+export function matchStateKey(playerA: string, playerB: string): string {
+  return `carromscore:state:${playerA}:${playerB}`;
+}
+
+/**
  * Which side wins the current set, given the current points, or null if tied.
  */
 export function setLeader(pointsA: number, pointsB: number): 'a' | 'b' | null {

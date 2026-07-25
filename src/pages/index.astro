@@ -1,19 +1,51 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
 import MatchSetup from '../components/MatchSetup.svelte';
+const base = import.meta.env.BASE_URL;
 ---
 <BaseLayout title="Carromscore — new match">
   <main class="wrap">
     <header class="hero">
-      <h1>Carromscore</h1>
-      <p class="tag">Live carrom scoring for players and broadcasters.</p>
+      <img class="logo" src={`${base}icon-512.png`} alt="Carromscore logo" width="88" height="88" />
+      <div class="titles">
+        <h1>Carromscore</h1>
+        <p class="tag">Live scoring for players &amp; broadcasters</p>
+      </div>
     </header>
     <MatchSetup client:load />
   </main>
   <style>
     .wrap { padding: 1rem 0 0; }
-    .hero { text-align: center; padding: 1rem 1rem 0; }
-    h1 { font-size: clamp(2rem, 6vw, 2.75rem); letter-spacing: -0.02em; margin: 0; }
-    .tag { color: var(--muted); margin: 0.35rem 0 0; font-size: 0.95rem; }
+    .hero {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      padding: 1.5rem 1.25rem 0.5rem;
+      max-width: 640px;
+      margin: 0 auto;
+    }
+    .logo {
+      width: 88px;
+      height: 88px;
+      border-radius: 20px;
+      flex-shrink: 0;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    }
+    .titles { min-width: 0; }
+    h1 {
+      font-size: clamp(1.75rem, 6vw, 2.4rem);
+      letter-spacing: -0.02em;
+      margin: 0;
+      line-height: 1.05;
+    }
+    .tag {
+      color: var(--muted);
+      margin: 0.25rem 0 0;
+      font-size: 0.9rem;
+    }
+    @media (max-width: 380px) {
+      .hero { gap: 0.75rem; padding: 1rem 1rem 0.25rem; }
+      .logo { width: 64px; height: 64px; border-radius: 14px; }
+    }
   </style>
 </BaseLayout>

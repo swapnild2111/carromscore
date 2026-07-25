@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { DEFAULT_CONFIG, decodeConfig, teamLabel, type MatchConfig } from '../lib/match';
+  import { DEFAULT_CONFIG, decodeConfig, matchStateKey, teamLabel, type MatchConfig } from '../lib/match';
 
   type Side = { name: string; sets: number; points: number };
 
@@ -17,7 +17,7 @@
 
     // Cross-tab live sync: pick up state written to localStorage by the player view.
     // Keys and shape must stay compatible with what ScoreBoard writes.
-    const KEY = `carromscore:state:${q.get('playerA') ?? ''}:${q.get('playerB') ?? ''}`;
+    const KEY = matchStateKey(q.get('playerA') ?? '', q.get('playerB') ?? '');
     const apply = (raw: string | null) => {
       if (!raw) return;
       try {

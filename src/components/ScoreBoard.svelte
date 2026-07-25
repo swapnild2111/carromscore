@@ -1,9 +1,11 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import '@fontsource/dseg7-classic/700.css';
   import {
     DEFAULT_CONFIG,
     decodeConfig,
     evaluateSetEnd,
+    matchStateKey,
     setLeader,
     teamLabel,
     type MatchConfig,
@@ -16,13 +18,14 @@
   let sideA = $state<Side>({ name: 'First Player', sets: 0, points: 0 });
   let sideB = $state<Side>({ name: 'Second Player', sets: 0, points: 0 });
   let board = $state(0);
-  let currentSet = $state(1);       // 1..bestOf
-  let boardsThisSet = $state(0);    // increments on Board +
-  let setStartedAt = $state<number | null>(null); // ms epoch, null until first point
+  let currentSet = $state(1);
+  let boardsThisSet = $state(0);
+  let setStartedAt = $state<number | null>(null);
   let now = $state(Date.now());
   let setEnd = $state<{ reason: SetEndReason; leader: 'a' | 'b' | null } | null>(null);
   let matchWinner = $state<'a' | 'b' | null>(null);
-
+  let confirmExit = $state(false);
+  let isPortrait = $state(false);
   let storageKey = $state<string | null>(null);
 
   onMount(() => {
@@ -30,9 +33,8 @@
     cfg = decodeConfig(q);
     sideA.name = teamLabel(cfg.playerA, cfg.playerA2, cfg.mode) || 'First Player';
     sideB.name = teamLabel(cfg.playerB, cfg.playerB2, cfg.mode) || 'Second Player';
-    storageKey = `carromscore:state:${q.get('playerA') ?? ''}:${q.get('playerB') ?? ''}`;
+    storageKey = matchStateKey(q.get('playerA') ?? '', q.get('playerB') ?? '');
 
-    // Restore in-flight match state (so refresh doesn't wipe the score).
     try {
       const raw = localStorage.getItem(storageKey);
       if (raw) {
@@ -47,14 +49,59 @@
         if (typeof s?.setStartedAt === 'number' || s?.setStartedAt === null) setStartedAt = s.setStartedAt;
       }
     } catch {
-      // ignore malformed / access-denied localStorage
+      // ignore
     }
 
+    updateOrientation();
+    tryLockLandscape();
+    requestWakeLock();
+
     const tick = setInterval(() => (now = Date.now()), 1000);
-    return () => clearInterval(tick);
+    window.addEventListener('resize', updateOrientation);
+    window.addEventListener('orientationchange', updateOrientation);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      clearInterval(tick);
+      window.removeEventListener('resize', updateOrientation);
+      window.removeEventListener('orientationchange', updateOrientation);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      releaseWakeLock();
+    };
   });
 
-  // Persist state on every change so a refresh or the overlay tab picks it up.
+  /**
+   * Screen Wake Lock. Keeps the phone screen from dimming/locking during a
+   * match. Android drops the lock when the tab is backgrounded, so we
+   * re-request on visibilitychange when we come back to the foreground.
+   * iOS Safari doesn't yet support Wake Lock; the API silently no-ops there.
+   */
+  type WakeLockSentinelLike = { release: () => Promise<void> };
+  let wakeLock: WakeLockSentinelLike | null = null;
+
+  async function requestWakeLock() {
+    const wl = (navigator as unknown as { wakeLock?: { request: (type: string) => Promise<WakeLockSentinelLike> } }).wakeLock;
+    if (!wl) return;
+    try {
+      wakeLock = await wl.request('screen');
+    } catch {
+      // Browser refused (unsupported, permission denied, tab not visible)
+    }
+  }
+  async function releaseWakeLock() {
+    if (!wakeLock) return;
+    try {
+      await wakeLock.release();
+    } catch {
+      // ignore
+    }
+    wakeLock = null;
+  }
+  function onVisibilityChange() {
+    if (document.visibilityState === 'visible' && !wakeLock) {
+      requestWakeLock();
+    }
+  }
+
   $effect(() => {
     if (!storageKey) return;
     const s = {
@@ -68,9 +115,34 @@
     try {
       localStorage.setItem(storageKey, JSON.stringify(s));
     } catch {
-      // localStorage quota or access issues — silently ignore
+      // ignore
     }
   });
+
+  function updateOrientation() {
+    isPortrait = window.innerHeight > window.innerWidth;
+  }
+
+  /**
+   * Landscape lock. Bubblewrap TWAs run in fullscreen so this succeeds;
+   * PWAs / regular browser tabs need to enter fullscreen first (best-effort).
+   * iOS Safari refuses in all cases — we fall back to the rotate-hint overlay.
+   */
+  let attemptedLandscapeLock = false;
+  async function tryLockLandscape() {
+    if (attemptedLandscapeLock) return;
+    attemptedLandscapeLock = true;
+    try {
+      const el = document.documentElement;
+      if (!document.fullscreenElement && el.requestFullscreen) {
+        await el.requestFullscreen().catch(() => {});
+      }
+      const so = (screen as unknown as { orientation?: { lock?: (o: string) => Promise<void> } }).orientation;
+      if (so?.lock) await so.lock('landscape');
+    } catch {
+      // silent
+    }
+  }
 
   const elapsedSeconds = $derived(setStartedAt === null ? 0 : Math.floor((now - setStartedAt) / 1000));
 
@@ -80,10 +152,7 @@
 
   function adjustPoints(side: 'a' | 'b', delta: number) {
     if (setEnd || matchWinner) return;
-    if (delta > 0) {
-      markStartedIfIdle();
-      void tryLockLandscape();
-    }
+    if (delta > 0) markStartedIfIdle();
     const s = side === 'a' ? sideA : sideB;
     s.points = Math.max(0, s.points + delta);
     checkSetEnd();
@@ -95,15 +164,11 @@
   }
   function adjustBoard(delta: number) {
     if (setEnd || matchWinner) return;
-    if (delta > 0) {
-      markStartedIfIdle();
-      void tryLockLandscape();
-    }
+    if (delta > 0) markStartedIfIdle();
     const nextBoard = board + delta;
     if (nextBoard < 0) return;
     board = nextBoard;
-    const nextBoards = boardsThisSet + delta;
-    boardsThisSet = Math.max(0, nextBoards);
+    boardsThisSet = Math.max(0, boardsThisSet + delta);
     checkSetEnd();
   }
 
@@ -122,7 +187,6 @@
     }
   }
 
-  // Poll for time-triggered set end (points/boards check on user action; time is passive).
   $effect(() => {
     if (setEnd || matchWinner) return;
     if (cfg.minutesPerSet === null) return;
@@ -134,7 +198,6 @@
     if (!setEnd) return;
     if (setEnd.leader === 'a') sideA.sets += 1;
     else if (setEnd.leader === 'b') sideB.sets += 1;
-    // tied: no set awarded (organizer resolves manually with SET +/-)
     setEnd = null;
     sideA.points = 0;
     sideB.points = 0;
@@ -166,97 +229,82 @@
     setStartedAt = null;
   }
 
-  let confirmExit = $state(false);
-
-  // Orientation: scoring is a landscape experience. Track it and prompt if portrait.
-  let isPortrait = $state(false);
-  function updateOrientation() {
-    isPortrait = window.innerHeight > window.innerWidth;
-  }
-  $effect(() => {
-    updateOrientation();
-    window.addEventListener('resize', updateOrientation);
-    window.addEventListener('orientationchange', updateOrientation);
-    return () => {
-      window.removeEventListener('resize', updateOrientation);
-      window.removeEventListener('orientationchange', updateOrientation);
-    };
-  });
-
-  /**
-   * Try to lock the device to landscape. Only works when the browser is in
-   * fullscreen mode (PWA / TWA / user-invoked). Silently no-ops on iOS Safari
-   * and any browser that hasn't granted the permission. Called on the first
-   * user gesture so the fullscreen request succeeds.
-   */
-  let attemptedLandscapeLock = false;
-  async function tryLockLandscape() {
-    if (attemptedLandscapeLock) return;
-    attemptedLandscapeLock = true;
-    try {
-      const el = document.documentElement;
-      if (!document.fullscreenElement && el.requestFullscreen) {
-        await el.requestFullscreen();
-      }
-      const so = (screen as unknown as { orientation?: { lock?: (o: string) => Promise<void> } }).orientation;
-      if (so?.lock) await so.lock('landscape');
-    } catch {
-      // Browser refused (iOS / non-fullscreen / permission denied). We fall
-      // back to the rotate-prompt overlay when the user is in portrait.
-    }
-  }
-
   const hasProgress = $derived(
-    sideA.points > 0 ||
-    sideB.points > 0 ||
-    sideA.sets > 0 ||
-    sideB.sets > 0 ||
-    board > 0 ||
-    boardsThisSet > 0,
+    sideA.points > 0 || sideB.points > 0 || sideA.sets > 0 || sideB.sets > 0 || board > 0 || boardsThisSet > 0,
   );
 
   function requestExit() {
-    if (!hasProgress) {
-      exit();
-    } else {
-      confirmExit = true;
-    }
+    if (!hasProgress) return exit();
+    confirmExit = true;
   }
   function exit() {
-    // Blow away in-flight state for this pairing so the next match starts clean.
     if (storageKey) {
-      try {
-        localStorage.removeItem(storageKey);
-      } catch {
-        // ignore
-      }
+      try { localStorage.removeItem(storageKey); } catch { /* ignore */ }
     }
     window.location.href = import.meta.env.BASE_URL;
   }
 
-  function saveToGitHub() {
-    const now = new Date().toISOString();
-    const payload = {
-      version: 1,
-      completedAt: now,
-      config: cfg,
-      result: {
-        winner: matchWinner,
-        sideA: { name: sideA.name, sets: sideA.sets, finalPoints: sideA.points },
-        sideB: { name: sideB.name, sets: sideB.sets, finalPoints: sideB.points },
+  /**
+   * Svelte action: change a numeric field by horizontal swipe.
+   *   - swipe right (>= SWIPE_PX)  → onDelta(+1)
+   *   - swipe left  (>= SWIPE_PX)  → onDelta(-1)
+   *   - plain tap (no horizontal movement > threshold) → onDelta(+1)
+   *
+   * If the pointer drifts more vertically than horizontally, we abort the
+   * gesture so the browser's own scroll can win (defensive; the score screen
+   * doesn't scroll but this future-proofs the action).
+   */
+  function swipeAdjust(node: HTMLElement, opts: { onDelta: (d: 1 | -1) => void }) {
+    const SWIPE_PX = 32;
+    let startX = 0;
+    let startY = 0;
+    let active = false;
+    let resolved = false;
+
+    function onPointerDown(ev: PointerEvent) {
+      active = true;
+      resolved = false;
+      startX = ev.clientX;
+      startY = ev.clientY;
+      node.setPointerCapture?.(ev.pointerId);
+    }
+    function onPointerMove(ev: PointerEvent) {
+      if (!active || resolved) return;
+      const dx = ev.clientX - startX;
+      const dy = ev.clientY - startY;
+      // Only fire once the horizontal component clears threshold AND is
+      // dominant over vertical drift.
+      if (Math.abs(dx) < SWIPE_PX) return;
+      if (Math.abs(dx) < Math.abs(dy)) return;
+      resolved = true;
+      opts.onDelta(dx > 0 ? 1 : -1);
+    }
+    function onPointerUp() {
+      if (active && !resolved) opts.onDelta(1); // simple tap
+      active = false;
+      resolved = false;
+    }
+    function onPointerCancel() {
+      active = false;
+      resolved = false;
+    }
+
+    node.addEventListener('pointerdown', onPointerDown);
+    node.addEventListener('pointermove', onPointerMove);
+    node.addEventListener('pointerup', onPointerUp);
+    node.addEventListener('pointercancel', onPointerCancel);
+
+    return {
+      update(next: { onDelta: (d: 1 | -1) => void }) {
+        opts = next;
+      },
+      destroy() {
+        node.removeEventListener('pointerdown', onPointerDown);
+        node.removeEventListener('pointermove', onPointerMove);
+        node.removeEventListener('pointerup', onPointerUp);
+        node.removeEventListener('pointercancel', onPointerCancel);
       },
     };
-    const body = [
-      '<!-- Auto-generated by carromscore. Do not edit above this line. -->',
-      '```json',
-      JSON.stringify(payload, null, 2),
-      '```',
-    ].join('\n');
-    const title = `Match: ${sideA.name} vs ${sideB.name} — ${now.slice(0, 10)}`;
-    const params = new URLSearchParams({ title, body, labels: 'save-match' });
-    // Repo is intentionally hardcoded — this app ships from that repo.
-    const url = `https://github.com/swapnild2111/carromscore/issues/new?${params.toString()}`;
-    window.open(url, '_blank', 'noopener');
   }
 
   const pad2 = (n: number) => (n < 10 ? `0${n}` : `${n}`);
@@ -276,116 +324,81 @@
     return `${ord(currentSet)} OF ${cfg.bestOf} · Boards ${boardsThisSet}/${cfg.maxBoards}`;
   });
 
-  // ICF/AICF rule: the queen (3 pts) no longer scores once a side's cumulative
-  // set score has reached 22. Since our +/- buttons don't distinguish "this was
-  // a queen", we surface the lock as guidance rather than force it.
   const queenLockedA = $derived(sideA.points >= 22);
   const queenLockedB = $derived(sideB.points >= 22);
-
-  const reasonText = (r: SetEndReason) => ({
-    points: `${cfg.pointsTarget}-point target reached`,
-    boards: `${cfg.maxBoards} boards played`,
-    time: `${cfg.minutesPerSet} minute time limit reached`,
-  })[r];
 </script>
 
 <section class="wrap">
   <div class="rotate-hint" aria-hidden="true">
     <div class="rotate-card">
-      <div class="rotate-icon" aria-hidden="true">📱</div>
-      <div class="rotate-msg">
-        <strong>Rotate your phone</strong>
-        <span>Carromscore scores best in landscape.</span>
-      </div>
+      <div class="rotate-icon">📱</div>
+      <strong>Rotate your phone</strong>
+      <span>Carromscore is a landscape scoreboard.</span>
     </div>
   </div>
 
-  <div class="header">
-    <div class="head-cell head-a">
-      <div class="name">{sideA.name}</div>
+  <header class="head">
+    <div class="head-name head-a">{sideA.name}</div>
+    <div class="head-mid">
+      <div class="head-set">{setLabel()}</div>
+      {#if timerText()}<div class="head-timer">{timerText()}</div>{/if}
     </div>
-    <div class="head-cell head-b">
-      <div class="name">{sideB.name}</div>
-    </div>
-  </div>
-
-  <div class="status">
-    <div class="status-set">{setLabel()}</div>
-    {#if timerText()}
-      <div class="status-timer">{timerText()}</div>
-    {/if}
-  </div>
+    <div class="head-name head-b">{sideB.name}</div>
+  </header>
 
   {#if queenLockedA || queenLockedB}
-    <div class="queen-lock" role="status">
-      Queen won't score for
-      {#if queenLockedA}<span class="side-a-name"> {sideA.name}</span>{/if}
-      {#if queenLockedA && queenLockedB} · {/if}
-      {#if queenLockedB}<span class="side-b-name"> {sideB.name}</span>{/if}
-      (past 22)
+    <div class="queen-lock">
+      Queen ≤ 21 pts
+      {#if queenLockedA}<span class="qa"> · {sideA.name}</span>{/if}
+      {#if queenLockedB}<span class="qb"> · {sideB.name}</span>{/if}
     </div>
   {/if}
 
   <div class="grid">
-    <div class="col col-set side-a">
-      <button type="button" class="digit-btn" onclick={() => adjustSets('a', 1)} aria-label="Add 1 set for {sideA.name}">
-        <span class="digit">{setsFmt(sideA.sets)}</span>
-      </button>
+    <button type="button" class="col side-a set" use:swipeAdjust={{ onDelta: (d) => adjustSets('a', d) }} aria-label="{sideA.name} sets: tap or swipe right to add, swipe left to subtract">
+      <div class="digit">{setsFmt(sideA.sets)}</div>
       <div class="label">SET</div>
-      <button type="button" class="minus" onclick={() => adjustSets('a', -1)} aria-label="Subtract 1 set for {sideA.name}">−</button>
-    </div>
-    <div class="col col-points side-a">
-      <button type="button" class="digit-btn" onclick={() => adjustPoints('a', 1)} aria-label="Add 1 point for {sideA.name}">
-        <span class="digit big">{pad2(sideA.points)}</span>
-      </button>
+    </button>
+    <button type="button" class="col side-a pts" use:swipeAdjust={{ onDelta: (d) => adjustPoints('a', d) }} aria-label="{sideA.name} points: tap or swipe right to add, swipe left to subtract">
+      <div class="digit big">{pad2(sideA.points)}</div>
       <div class="label">POINTS</div>
-      <button type="button" class="minus" onclick={() => adjustPoints('a', -1)} aria-label="Subtract 1 point for {sideA.name}">−</button>
-    </div>
-    <div class="col col-board">
-      <button type="button" class="digit-btn" onclick={() => adjustBoard(1)} aria-label="Next board">
-        <span class="digit">{board}</span>
-      </button>
+    </button>
+    <button type="button" class="col mid brd" use:swipeAdjust={{ onDelta: (d) => adjustBoard(d) }} aria-label="Board: tap or swipe right to add, swipe left to subtract">
+      <div class="digit">{board}</div>
       <div class="label">BOARD</div>
-      <button type="button" class="minus" onclick={() => adjustBoard(-1)} aria-label="Previous board">−</button>
-    </div>
-    <div class="col col-points side-b">
-      <button type="button" class="digit-btn" onclick={() => adjustPoints('b', 1)} aria-label="Add 1 point for {sideB.name}">
-        <span class="digit big">{pad2(sideB.points)}</span>
-      </button>
+    </button>
+    <button type="button" class="col side-b pts" use:swipeAdjust={{ onDelta: (d) => adjustPoints('b', d) }} aria-label="{sideB.name} points: tap or swipe right to add, swipe left to subtract">
+      <div class="digit big">{pad2(sideB.points)}</div>
       <div class="label">POINTS</div>
-      <button type="button" class="minus" onclick={() => adjustPoints('b', -1)} aria-label="Subtract 1 point for {sideB.name}">−</button>
-    </div>
-    <div class="col col-set side-b">
-      <button type="button" class="digit-btn" onclick={() => adjustSets('b', 1)} aria-label="Add 1 set for {sideB.name}">
-        <span class="digit">{setsFmt(sideB.sets)}</span>
-      </button>
+    </button>
+    <button type="button" class="col side-b set" use:swipeAdjust={{ onDelta: (d) => adjustSets('b', d) }} aria-label="{sideB.name} sets: tap or swipe right to add, swipe left to subtract">
+      <div class="digit">{setsFmt(sideB.sets)}</div>
       <div class="label">SET</div>
-      <button type="button" class="minus" onclick={() => adjustSets('b', -1)} aria-label="Subtract 1 set for {sideB.name}">−</button>
-    </div>
+    </button>
   </div>
 
-  <p class="hint-line">Tap a number to add 1 · Tap − below it to subtract</p>
-
-  <footer class="foot">
-    <button type="button" class="swap" onclick={swapSides}>Swap sides</button>
-    <button type="button" class="close" onclick={requestExit}>Close match</button>
-  </footer>
+  <div class="foot">
+    <span class="hint">Tap a number to add 1 · Swipe right to add, left to subtract</span>
+    <div class="foot-actions">
+      <button type="button" class="swap" onclick={swapSides}>Swap sides</button>
+      <button type="button" class="close" onclick={requestExit}>Close</button>
+    </div>
+  </div>
 
   {#if setEnd}
     <div class="dialog" role="dialog" aria-modal="true">
       <div class="dialog-card">
         <h2>Set complete</h2>
-        <p class="reason">{reasonText(setEnd.reason)}.</p>
         {#if setEnd.leader === null}
-          <p class="who tie">Scores are tied {sideA.points}–{sideB.points}. Play a sudden-death board or tap SET+ manually below.</p>
+          <p class="who tie">Tied {sideA.points}–{sideB.points}. Sudden-death or adjust SET manually.</p>
         {:else}
           <p class="who">
             <strong>{setEnd.leader === 'a' ? sideA.name : sideB.name}</strong>
-            wins the set {Math.max(sideA.points, sideB.points)}–{Math.min(sideA.points, sideB.points)}.
+            wins {Math.max(sideA.points, sideB.points)}–{Math.min(sideA.points, sideB.points)}
           </p>
         {/if}
         <button class="confirm" onclick={confirmSetEnd}>
-          {setEnd.leader === null ? 'Continue' : 'Award set and start next'}
+          {setEnd.leader === null ? 'Continue' : 'Next set →'}
         </button>
       </div>
     </div>
@@ -397,11 +410,9 @@
         <h2>Match complete</h2>
         <p class="who">
           <strong>{matchWinner === 'a' ? sideA.name : sideB.name}</strong>
-          wins the match {sideA.sets}–{sideB.sets}.
+          wins {sideA.sets}–{sideB.sets}
         </p>
-        <button class="confirm" onclick={saveToGitHub}>
-          Save match to GitHub
-        </button>
+        <button class="confirm" onclick={exit}>New match</button>
       </div>
     </div>
   {/if}
@@ -410,7 +421,7 @@
     <div class="dialog" role="dialog" aria-modal="true">
       <div class="dialog-card exit">
         <h2>Exit match?</h2>
-        <p class="who">This will discard the current score and take you back to setup.</p>
+        <p class="who">Current score will be discarded.</p>
         <div class="dialog-actions">
           <button class="cancel" onclick={() => (confirmExit = false)}>Keep playing</button>
           <button class="danger" onclick={exit}>Exit</button>
@@ -421,126 +432,21 @@
 </section>
 
 <style>
+  /* v1.5.1 score screen: everything must fit in one landscape phone view.
+     Sizes use vh/vw so digits scale with the viewport. */
+
   .wrap {
-    padding: 1rem;
-    max-width: 1024px;
-    margin: 0 auto;
+    height: 100dvh;
+    max-height: 100dvh;
+    padding: 0.4rem 0.5rem;
     display: flex;
     flex-direction: column;
-    gap: 0.75rem;
+    gap: 0.35rem;
     user-select: none;
     -webkit-user-select: none;
-  }
-  .header {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 0.5rem;
-  }
-  .head-cell {
-    text-align: center;
-    padding: 0.5rem;
-    border-radius: 0.5rem;
-    background: #141414;
-    border-bottom: 3px solid transparent;
-  }
-  .head-a { border-color: var(--side-a); }
-  .head-b { border-color: var(--side-b); }
-  .name {
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    font-size: clamp(0.95rem, 3vw, 1.3rem);
+    overflow: hidden;
   }
 
-  .status {
-    display: flex;
-    justify-content: center;
-    align-items: baseline;
-    gap: 1rem;
-    color: var(--muted);
-    font-size: 0.85rem;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-  .status-timer {
-    color: var(--accent);
-    font-family: 'DS-Digital', 'Courier New', ui-monospace, monospace;
-    font-variant-numeric: tabular-nums;
-    font-size: 1.1rem;
-    letter-spacing: 0;
-  }
-  .queen-lock {
-    text-align: center;
-    font-size: 0.8rem;
-    color: var(--muted);
-    background: rgba(255, 213, 74, 0.08);
-    border: 1px solid rgba(255, 213, 74, 0.25);
-    border-radius: 0.5rem;
-    padding: 0.4rem 0.6rem;
-    letter-spacing: 0.04em;
-  }
-  .queen-lock .side-a-name { color: var(--side-a); font-weight: 700; }
-  .queen-lock .side-b-name { color: var(--side-b); font-weight: 700; }
-
-  .grid {
-    display: grid;
-    grid-template-columns: 1fr 2fr 1.2fr 2fr 1fr;
-    gap: 0.5rem;
-    background: #0f0f0f;
-    padding: 0.75rem 0.5rem;
-    border-radius: 1rem;
-    border: 1px solid #222;
-  }
-  .col {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 0.35rem;
-    /* Reset button chrome so the digit reads as a display. */
-    background: transparent;
-    border: none;
-    color: inherit;
-    font: inherit;
-    padding: 0.5rem 0.25rem;
-    border-radius: 0.75rem;
-    cursor: pointer;
-    transition: background 0.1s, transform 0.06s;
-    touch-action: manipulation;
-    -webkit-tap-highlight-color: transparent;
-  }
-  .col:hover { background: rgba(255,255,255,0.03); }
-  .col:active { transform: scale(0.97); background: rgba(255,255,255,0.06); }
-  .col:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
-  }
-  .digit {
-    font-family: 'DS-Digital', 'Courier New', ui-monospace, monospace;
-    font-variant-numeric: tabular-nums;
-    font-weight: 800;
-    line-height: 1;
-    font-size: clamp(3rem, 12vw, 5.5rem);
-  }
-  .digit.big {
-    font-size: clamp(4rem, 18vw, 8rem);
-  }
-  .side-a .digit { color: var(--side-a); text-shadow: 0 0 12px rgba(79,195,247,0.35); }
-  .side-b .digit { color: var(--side-b); text-shadow: 0 0 12px rgba(255,138,101,0.35); }
-  .col-board .digit { color: var(--accent); text-shadow: 0 0 12px rgba(255,213,74,0.35); }
-  .label {
-    color: var(--muted);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-size: 0.7rem;
-  }
-
-  /*
-   * The rotate hint only appears on phones held in portrait. Desktop windows
-   * that happen to be portrait-shaped stay unaffected via the min-height
-   * ceiling; the pure media query is what shows/hides it. isPortrait state
-   * still tracked in JS for future logic (e.g. suppress dialogs while portrait).
-   */
   .rotate-hint {
     display: none;
     position: fixed;
@@ -549,7 +455,7 @@
     background: rgba(11,11,11,0.98);
     align-items: center;
     justify-content: center;
-    padding: 2rem 1.5rem;
+    padding: 2rem;
   }
   @media (orientation: portrait) and (max-width: 900px) {
     .rotate-hint { display: flex; }
@@ -559,7 +465,7 @@
     flex-direction: column;
     align-items: center;
     text-align: center;
-    gap: 1rem;
+    gap: 0.75rem;
     max-width: 20rem;
   }
   .rotate-icon {
@@ -571,48 +477,152 @@
     0%, 60%, 100% { transform: rotate(0deg); }
     30%           { transform: rotate(-90deg); }
   }
-  .rotate-msg strong {
-    display: block;
-    font-size: 1.35rem;
-    letter-spacing: 0.02em;
-    margin-bottom: 0.35rem;
-  }
-  .rotate-msg span { color: var(--muted); font-size: 0.95rem; }
+  .rotate-card strong { font-size: 1.3rem; letter-spacing: 0.02em; }
+  .rotate-card span { color: var(--muted); font-size: 0.9rem; }
 
-  .hint-line {
-    text-align: center;
+  .head {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0 0.25rem;
+    flex-shrink: 0;
+  }
+  .head-name {
+    font-size: clamp(0.9rem, 2.2vw, 1.15rem);
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 0.3rem 0.75rem;
+    border-radius: 0.5rem;
+    color: #0b0b0b;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+  }
+  .head-a {
+    background: var(--side-a);
+    text-align: left;
+    justify-self: start;
+  }
+  .head-b {
+    background: var(--side-b);
+    text-align: right;
+    justify-self: end;
+  }
+  .head-mid { text-align: center; }
+  .head-set {
     color: var(--muted);
-    font-size: 0.8rem;
-    margin: 0.25rem 0 0;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 0.7rem;
+  }
+  .head-timer {
+    color: var(--accent);
+    font-family: 'DSEG7 Classic', 'Courier New', monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 1rem;
+    margin-top: 0.15rem;
+  }
+
+  .queen-lock {
+    flex-shrink: 0;
+    text-align: center;
+    font-size: 0.7rem;
+    color: var(--muted);
+    background: rgba(255, 213, 74, 0.08);
+    border: 1px solid rgba(255, 213, 74, 0.25);
+    border-radius: 0.4rem;
+    padding: 0.25rem 0.5rem;
+    letter-spacing: 0.04em;
+  }
+  .queen-lock .qa { color: var(--side-a); font-weight: 700; }
+  .queen-lock .qb { color: var(--side-b); font-weight: 700; }
+
+  .grid {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: 1fr 2fr 1.2fr 2fr 1fr;
+    gap: 0.4rem;
+    background: #0f0f0f;
+    padding: 0.5rem 0.4rem;
+    border-radius: 0.75rem;
+    border: 1px solid #222;
+  }
+  .col {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.25rem;
+    background: transparent;
+    border: none;
+    color: inherit;
+    font: inherit;
+    padding: 0.25rem;
+    border-radius: 0.5rem;
+    cursor: pointer;
+    transition: background 0.1s, transform 0.06s;
+    touch-action: none;         /* let the scroll/drag action handle vertical gestures */
+    -webkit-tap-highlight-color: transparent;
+    overflow: hidden;
+  }
+  .col:active { transform: scale(0.97); background: rgba(255,255,255,0.06); }
+  .col:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .digit {
+    font-family: 'DSEG7 Classic', 'Courier New', ui-monospace, monospace;
+    font-weight: 700;
+    line-height: 1;
+    font-size: clamp(2rem, 12vh, 5rem);
+    font-variant-numeric: tabular-nums;
     letter-spacing: 0.03em;
+  }
+  .digit.big { font-size: clamp(3rem, 22vh, 8rem); }
+  .side-a .digit { color: var(--side-a); text-shadow: 0 0 12px rgba(79,195,247,0.35); }
+  .side-b .digit { color: var(--side-b); text-shadow: 0 0 12px rgba(255,138,101,0.35); }
+  .mid .digit { color: var(--accent); text-shadow: 0 0 12px rgba(255,213,74,0.35); }
+  .label {
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 0.6rem;
   }
 
   .foot {
+    flex-shrink: 0;
     display: flex;
-    justify-content: center;
-    gap: 0.75rem;
-    padding: 0.5rem 0 1rem;
-    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0 0.25rem;
   }
-  .foot button {
+  .hint {
+    color: var(--muted);
+    font-size: 0.7rem;
+    letter-spacing: 0.02em;
+  }
+  .foot-actions { display: flex; gap: 0.4rem; }
+  .foot-actions button {
     border-radius: 999px;
-    padding: 0.75rem 1.4rem;
-    font-size: 1rem;
+    padding: 0.4rem 0.9rem;
+    font-size: 0.8rem;
     font-weight: 600;
     cursor: pointer;
   }
-  .foot .swap {
+  .foot-actions .swap {
     background: #1f1f1f;
     color: var(--fg);
     border: 1px solid #333;
   }
-  .foot .swap:active { background: #2a2a2a; }
-  .foot .close {
+  .foot-actions .close {
     background: transparent;
     color: var(--muted);
     border: 1px solid #333;
   }
-  .foot .close:active { background: #1c1c1c; color: var(--fg); }
+  .foot-actions button:active { background: #2a2a2a; }
 
   .dialog {
     position: fixed;
@@ -628,46 +638,40 @@
     background: #141414;
     border: 2px solid var(--accent);
     border-radius: 1rem;
-    padding: 1.5rem 1.5rem 1.25rem;
+    padding: 1.25rem;
     max-width: 22rem;
     width: 100%;
     text-align: center;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.6);
   }
   .dialog-card.win { border-color: var(--side-a); }
+  .dialog-card.exit { border-color: var(--danger); }
   .dialog-card h2 {
     margin: 0 0 0.5rem;
-    font-size: 1.4rem;
+    font-size: 1.2rem;
     color: var(--accent);
     text-transform: uppercase;
     letter-spacing: 0.06em;
   }
   .dialog-card.win h2 { color: var(--side-a); }
-  .dialog-card .reason { color: var(--muted); margin: 0 0 0.75rem; font-size: 0.9rem; }
-  .dialog-card .who { margin: 0 0 1.25rem; font-size: 1.05rem; line-height: 1.4; }
-  .dialog-card .who.tie { color: var(--muted); font-size: 0.95rem; }
+  .dialog-card.exit h2 { color: var(--danger); }
+  .dialog-card .who { margin: 0 0 1rem; font-size: 1rem; }
+  .dialog-card .who.tie { color: var(--muted); font-size: 0.9rem; }
   .dialog-card .confirm {
     background: var(--accent);
     color: #0b0b0b;
     border: 0;
     border-radius: 999px;
-    padding: 0.75rem 1.25rem;
+    padding: 0.6rem 1.25rem;
     font-weight: 700;
-    font-size: 1rem;
+    font-size: 0.95rem;
     width: 100%;
     cursor: pointer;
   }
-  .dialog-card.exit { border-color: var(--danger); }
-  .dialog-card.exit h2 { color: var(--danger); }
-  .dialog-actions {
-    display: flex;
-    gap: 0.5rem;
-  }
+  .dialog-actions { display: flex; gap: 0.5rem; }
   .dialog-actions .cancel, .dialog-actions .danger {
     flex: 1;
-    padding: 0.75rem 1rem;
+    padding: 0.6rem 1rem;
     font-weight: 700;
-    font-size: 1rem;
     border-radius: 999px;
     cursor: pointer;
     border: none;
