@@ -8,7 +8,7 @@ const base = import.meta.env.BASE_URL;
     <header class="hero">
       <img class="logo" src={`${base}icon-512.png`} alt="Carromscore logo" width="88" height="88" />
       <div class="titles">
-        <h1>Carromscore</h1>
+        <h1>Carrom<span class="h1-accent">S</span>core</h1>
         <p class="tag">Live scoring for players &amp; broadcasters</p>
       </div>
     </header>
@@ -32,11 +32,51 @@ const base = import.meta.env.BASE_URL;
       box-shadow: 0 4px 16px rgba(0,0,0,0.4);
     }
     .titles { min-width: 0; }
+    /*
+     * Title is the visual anchor of the setup screen. Gold gradient clipped
+     * to the text, gentle drop-shadow, and a small underline accent so it
+     * reads as a product mark, not just a header.
+     */
     h1 {
+      position: relative;
+      display: inline-block;
       font-size: clamp(1.75rem, 6vw, 2.4rem);
-      letter-spacing: -0.02em;
+      letter-spacing: -0.01em;
       margin: 0;
       line-height: 1.05;
+      font-weight: 900;
+      background: linear-gradient(120deg, #ffd54a 0%, #ffb300 45%, #ff8f00 100%);
+      background-clip: text;
+      -webkit-background-clip: text;
+      color: transparent;
+      -webkit-text-fill-color: transparent;
+      filter: drop-shadow(0 2px 6px rgba(255, 179, 0, 0.35));
+    }
+    h1::after {
+      content: '';
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: -0.3rem;
+      height: 3px;
+      background: linear-gradient(90deg, transparent 0%, #ffd54a 30%, #ffb300 70%, transparent 100%);
+      border-radius: 3px;
+    }
+    /*
+     * The `S` in the middle carries a subtle emphasis — slightly larger and
+     * given its own gradient clip. Nested spans inside a background-clip: text
+     * parent paint to nothing unless they re-declare their own clipped fill,
+     * which is why we repeat the gradient here.
+     */
+    .h1-accent {
+      font-size: 1.08em;
+      display: inline-block;
+      transform: translateY(-0.02em);
+      background: linear-gradient(120deg, #ffd54a 0%, #ffb300 45%, #ff8f00 100%);
+      background-clip: text;
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      color: transparent;
     }
     .tag {
       color: var(--muted);

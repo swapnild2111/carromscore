@@ -16,12 +16,13 @@
   "iconUrl": "https://swapnild2111.github.io/carromscore/icon-512.png",
   "maskableIconUrl": null,
   "monochromeIconUrl": null,
+  "splashScreenFadeOutDuration": 300,
   "signingKey": {
     "path": "./android.keystore",
     "alias": "android"
   },
-  "appVersionName": "1.5.1",
-  "appVersionCode": 2,
+  "appVersionName": "1.5.2",
+  "appVersionCode": 4,
   "shortcuts": [],
   "generatorApp": "bubblewrap-cli",
   "webManifestUrl": "https://swapnild2111.github.io/carromscore/manifest.webmanifest",
@@ -37,10 +38,9 @@
   "minSdkVersion": 21,
   "shareTarget": null,
   "orientation": "landscape",
-  "splashScreenFadeOutDuration": 300,
   "fingerprints": [],
   "additionalTrustedOrigins": [],
   "retainedBundles": [],
   "displayOverride": [],
-  "appVersion": "1.5.1"
+  "appVersion": "1.5.2"
 }

@@ -84,4 +84,4 @@ Bubblewrap prerequisites (JDK 17 + Android SDK) live in `~/.bubblewrap/`.
 
 ## License
 
-TBD.
+[MIT](./LICENSE) © Swapnil Deshpande

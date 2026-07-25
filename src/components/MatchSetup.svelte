@@ -96,8 +96,35 @@
     };
     window.addEventListener('beforeinstallprompt', onBIP);
     iOS = /iP(ad|hone|od)/.test(navigator.userAgent) && !('MSStream' in window);
+
+    // Setup is portrait-only. Undo any lingering landscape lock the score
+    // screen left behind (returning users, or reload during a match) and
+    // lock to portrait where the browser supports it.
+    tryLockPortrait();
+
     return () => window.removeEventListener('beforeinstallprompt', onBIP);
   });
+
+  async function tryLockPortrait() {
+    try {
+      const so = (screen as unknown as {
+        orientation?: {
+          lock?: (o: string) => Promise<void>;
+          unlock?: () => void;
+        };
+      }).orientation;
+      // Some engines require an explicit unlock first, or the follow-up lock
+      // no-ops. Others reject unlock() when nothing is locked (silent-catch).
+      so?.unlock?.();
+      // orientation.lock only works when the app is in fullscreen. Setup does
+      // not force fullscreen, so this usually fails — that's OK. The manifest
+      // and the CSS below already make setup lean portrait; the lock is
+      // best-effort insurance when we can get it.
+      if (so?.lock) await so.lock('portrait');
+    } catch {
+      // silent — the CSS rotate-hint / natural portrait layout still applies
+    }
+  }
 
   async function install() {
     if (!installEvt) return;
@@ -145,6 +172,14 @@
     {/if}
   </label>
 {/snippet}
+
+<div class="rotate-hint" aria-hidden="true">
+  <div class="rotate-card">
+    <div class="rotate-icon">📱</div>
+    <strong>Rotate your phone</strong>
+    <span>Setup works best in portrait.</span>
+  </div>
+</div>
 
 <form class="setup" onsubmit={start}>
   <fieldset class="fmt">
@@ -278,6 +313,43 @@
 </form>
 
 <style>
+  /* Setup is a portrait experience: long form + system keyboard. If the phone
+     is currently in landscape, cover the screen with a rotate prompt. Desktop
+     landscape (wider than 900px) is fine and stays unhinted. */
+  .rotate-hint {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    background: rgba(11,11,11,0.98);
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+  }
+  @media (orientation: landscape) and (max-width: 900px) {
+    .rotate-hint { display: flex; }
+  }
+  .rotate-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 0.75rem;
+    max-width: 20rem;
+    color: var(--fg);
+  }
+  .rotate-icon {
+    font-size: 4rem;
+    line-height: 1;
+    animation: rotate-nudge-back 2s ease-in-out infinite;
+  }
+  @keyframes rotate-nudge-back {
+    0%, 60%, 100% { transform: rotate(-90deg); }
+    30%           { transform: rotate(0deg); }
+  }
+  .rotate-card strong { font-size: 1.3rem; letter-spacing: 0.02em; }
+  .rotate-card span { color: var(--muted); font-size: 0.9rem; }
+
   .setup {
     display: flex;
     flex-direction: column;
