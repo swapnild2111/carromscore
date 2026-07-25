@@ -80,7 +80,10 @@
 
   function adjustPoints(side: 'a' | 'b', delta: number) {
     if (setEnd || matchWinner) return;
-    if (delta > 0) markStartedIfIdle();
+    if (delta > 0) {
+      markStartedIfIdle();
+      void tryLockLandscape();
+    }
     const s = side === 'a' ? sideA : sideB;
     s.points = Math.max(0, s.points + delta);
     checkSetEnd();
@@ -92,7 +95,10 @@
   }
   function adjustBoard(delta: number) {
     if (setEnd || matchWinner) return;
-    if (delta > 0) markStartedIfIdle();
+    if (delta > 0) {
+      markStartedIfIdle();
+      void tryLockLandscape();
+    }
     const nextBoard = board + delta;
     if (nextBoard < 0) return;
     board = nextBoard;
@@ -162,85 +168,42 @@
 
   let confirmExit = $state(false);
 
-  /**
-   * Svelte action that recognises three gestures on the same element:
-   *   - tap                          → onTap()   (+1)
-   *   - long-press (≥ HOLD_MS)        → onHold()  (−1)
-   *   - horizontal swipe (≥ SWIPE_PX) → onSwipe(dir)  right=+1, left=−1
-   *
-   * First threshold crossed wins; the other handlers don't fire.
-   */
-  const HOLD_MS = 500;
-  const SWIPE_PX = 40;
-  type TapHoldOpts = {
-    onTap: () => void;
-    onHold: () => void;
-    onSwipe: (dir: 'left' | 'right') => void;
-  };
-  function tapHold(node: HTMLElement, opts: TapHoldOpts) {
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    let startX = 0;
-    let startY = 0;
-    let resolved = false;
-    let active = false;
-
-    function clearTimer() {
-      if (timer) clearTimeout(timer);
-      timer = null;
-    }
-
-    function down(ev: PointerEvent) {
-      ev.preventDefault();
-      active = true;
-      resolved = false;
-      startX = ev.clientX;
-      startY = ev.clientY;
-      node.setPointerCapture?.(ev.pointerId);
-      timer = setTimeout(() => {
-        if (!active || resolved) return;
-        resolved = true;
-        opts.onHold();
-      }, HOLD_MS);
-    }
-    function move(ev: PointerEvent) {
-      if (!active || resolved) return;
-      const dx = ev.clientX - startX;
-      const dy = ev.clientY - startY;
-      if (Math.abs(dx) >= SWIPE_PX && Math.abs(dx) > Math.abs(dy)) {
-        resolved = true;
-        clearTimer();
-        opts.onSwipe(dx > 0 ? 'right' : 'left');
-      }
-    }
-    function up() {
-      if (!active) return;
-      active = false;
-      clearTimer();
-      if (!resolved) opts.onTap();
-    }
-    function cancel() {
-      active = false;
-      clearTimer();
-    }
-
-    node.addEventListener('pointerdown', down);
-    node.addEventListener('pointermove', move);
-    node.addEventListener('pointerup', up);
-    node.addEventListener('pointerleave', cancel);
-    node.addEventListener('pointercancel', cancel);
-    return {
-      update(next: TapHoldOpts) {
-        opts = next;
-      },
-      destroy() {
-        node.removeEventListener('pointerdown', down);
-        node.removeEventListener('pointermove', move);
-        node.removeEventListener('pointerup', up);
-        node.removeEventListener('pointerleave', cancel);
-        node.removeEventListener('pointercancel', cancel);
-        clearTimer();
-      },
+  // Orientation: scoring is a landscape experience. Track it and prompt if portrait.
+  let isPortrait = $state(false);
+  function updateOrientation() {
+    isPortrait = window.innerHeight > window.innerWidth;
+  }
+  $effect(() => {
+    updateOrientation();
+    window.addEventListener('resize', updateOrientation);
+    window.addEventListener('orientationchange', updateOrientation);
+    return () => {
+      window.removeEventListener('resize', updateOrientation);
+      window.removeEventListener('orientationchange', updateOrientation);
     };
+  });
+
+  /**
+   * Try to lock the device to landscape. Only works when the browser is in
+   * fullscreen mode (PWA / TWA / user-invoked). Silently no-ops on iOS Safari
+   * and any browser that hasn't granted the permission. Called on the first
+   * user gesture so the fullscreen request succeeds.
+   */
+  let attemptedLandscapeLock = false;
+  async function tryLockLandscape() {
+    if (attemptedLandscapeLock) return;
+    attemptedLandscapeLock = true;
+    try {
+      const el = document.documentElement;
+      if (!document.fullscreenElement && el.requestFullscreen) {
+        await el.requestFullscreen();
+      }
+      const so = (screen as unknown as { orientation?: { lock?: (o: string) => Promise<void> } }).orientation;
+      if (so?.lock) await so.lock('landscape');
+    } catch {
+      // Browser refused (iOS / non-fullscreen / permission denied). We fall
+      // back to the rotate-prompt overlay when the user is in portrait.
+    }
   }
 
   const hasProgress = $derived(
@@ -327,6 +290,16 @@
 </script>
 
 <section class="wrap">
+  <div class="rotate-hint" aria-hidden="true">
+    <div class="rotate-card">
+      <div class="rotate-icon" aria-hidden="true">📱</div>
+      <div class="rotate-msg">
+        <strong>Rotate your phone</strong>
+        <span>Carromscore scores best in landscape.</span>
+      </div>
+    </div>
+  </div>
+
   <div class="header">
     <div class="head-cell head-a">
       <div class="name">{sideA.name}</div>
@@ -354,29 +327,44 @@
   {/if}
 
   <div class="grid">
-    <button type="button" class="col col-set side-a" use:tapHold={{ onTap: () => adjustSets('a', 1), onHold: () => adjustSets('a', -1), onSwipe: (d) => adjustSets('a', d === 'right' ? 1 : -1) }} aria-label="Side A sets: tap to add, long-press to subtract">
-      <div class="digit">{setsFmt(sideA.sets)}</div>
+    <div class="col col-set side-a">
+      <button type="button" class="digit-btn" onclick={() => adjustSets('a', 1)} aria-label="Add 1 set for {sideA.name}">
+        <span class="digit">{setsFmt(sideA.sets)}</span>
+      </button>
       <div class="label">SET</div>
-    </button>
-    <button type="button" class="col col-points side-a" use:tapHold={{ onTap: () => adjustPoints('a', 1), onHold: () => adjustPoints('a', -1), onSwipe: (d) => adjustPoints('a', d === 'right' ? 1 : -1) }} aria-label="Side A points: tap to add, long-press to subtract">
-      <div class="digit big">{pad2(sideA.points)}</div>
+      <button type="button" class="minus" onclick={() => adjustSets('a', -1)} aria-label="Subtract 1 set for {sideA.name}">−</button>
+    </div>
+    <div class="col col-points side-a">
+      <button type="button" class="digit-btn" onclick={() => adjustPoints('a', 1)} aria-label="Add 1 point for {sideA.name}">
+        <span class="digit big">{pad2(sideA.points)}</span>
+      </button>
       <div class="label">POINTS</div>
-    </button>
-    <button type="button" class="col col-board" use:tapHold={{ onTap: () => adjustBoard(1), onHold: () => adjustBoard(-1), onSwipe: (d) => adjustBoard(d === 'right' ? 1 : -1) }} aria-label="Board: tap to add, long-press to subtract">
-      <div class="digit">{board}</div>
+      <button type="button" class="minus" onclick={() => adjustPoints('a', -1)} aria-label="Subtract 1 point for {sideA.name}">−</button>
+    </div>
+    <div class="col col-board">
+      <button type="button" class="digit-btn" onclick={() => adjustBoard(1)} aria-label="Next board">
+        <span class="digit">{board}</span>
+      </button>
       <div class="label">BOARD</div>
-    </button>
-    <button type="button" class="col col-points side-b" use:tapHold={{ onTap: () => adjustPoints('b', 1), onHold: () => adjustPoints('b', -1), onSwipe: (d) => adjustPoints('b', d === 'right' ? 1 : -1) }} aria-label="Side B points: tap to add, long-press to subtract">
-      <div class="digit big">{pad2(sideB.points)}</div>
+      <button type="button" class="minus" onclick={() => adjustBoard(-1)} aria-label="Previous board">−</button>
+    </div>
+    <div class="col col-points side-b">
+      <button type="button" class="digit-btn" onclick={() => adjustPoints('b', 1)} aria-label="Add 1 point for {sideB.name}">
+        <span class="digit big">{pad2(sideB.points)}</span>
+      </button>
       <div class="label">POINTS</div>
-    </button>
-    <button type="button" class="col col-set side-b" use:tapHold={{ onTap: () => adjustSets('b', 1), onHold: () => adjustSets('b', -1), onSwipe: (d) => adjustSets('b', d === 'right' ? 1 : -1) }} aria-label="Side B sets: tap to add, long-press to subtract">
-      <div class="digit">{setsFmt(sideB.sets)}</div>
+      <button type="button" class="minus" onclick={() => adjustPoints('b', -1)} aria-label="Subtract 1 point for {sideB.name}">−</button>
+    </div>
+    <div class="col col-set side-b">
+      <button type="button" class="digit-btn" onclick={() => adjustSets('b', 1)} aria-label="Add 1 set for {sideB.name}">
+        <span class="digit">{setsFmt(sideB.sets)}</span>
+      </button>
       <div class="label">SET</div>
-    </button>
+      <button type="button" class="minus" onclick={() => adjustSets('b', -1)} aria-label="Subtract 1 set for {sideB.name}">−</button>
+    </div>
   </div>
 
-  <p class="hint-line">Tap or swipe right to add 1 · Swipe left or hold to subtract 1</p>
+  <p class="hint-line">Tap a number to add 1 · Tap − below it to subtract</p>
 
   <footer class="foot">
     <button type="button" class="swap" onclick={swapSides}>Swap sides</button>
@@ -546,6 +534,50 @@
     letter-spacing: 0.08em;
     font-size: 0.7rem;
   }
+
+  /*
+   * The rotate hint only appears on phones held in portrait. Desktop windows
+   * that happen to be portrait-shaped stay unaffected via the min-height
+   * ceiling; the pure media query is what shows/hides it. isPortrait state
+   * still tracked in JS for future logic (e.g. suppress dialogs while portrait).
+   */
+  .rotate-hint {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    background: rgba(11,11,11,0.98);
+    align-items: center;
+    justify-content: center;
+    padding: 2rem 1.5rem;
+  }
+  @media (orientation: portrait) and (max-width: 900px) {
+    .rotate-hint { display: flex; }
+  }
+  .rotate-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 1rem;
+    max-width: 20rem;
+  }
+  .rotate-icon {
+    font-size: 4rem;
+    line-height: 1;
+    animation: rotate-nudge 2s ease-in-out infinite;
+  }
+  @keyframes rotate-nudge {
+    0%, 60%, 100% { transform: rotate(0deg); }
+    30%           { transform: rotate(-90deg); }
+  }
+  .rotate-msg strong {
+    display: block;
+    font-size: 1.35rem;
+    letter-spacing: 0.02em;
+    margin-bottom: 0.35rem;
+  }
+  .rotate-msg span { color: var(--muted); font-size: 0.95rem; }
 
   .hint-line {
     text-align: center;
