@@ -635,7 +635,11 @@
   .wrap {
     height: 100dvh;
     max-height: 100dvh;
-    padding: 0.4rem 0.5rem;
+    /* Honour Android/iOS safe-area insets so the footer isn't hidden behind
+       the system gesture bar in landscape. Only the vertical insets matter
+       here; the horizontal padding stays fixed. */
+    padding: max(0.4rem, env(safe-area-inset-top)) 0.5rem
+             max(0.4rem, env(safe-area-inset-bottom)) 0.5rem;
     display: flex;
     flex-direction: column;
     gap: 0.35rem;
@@ -1014,9 +1018,13 @@
     justify-content: space-between;
     align-items: center;
     gap: 0.5rem;
-    padding: 0.25rem 0.35rem;
+    padding: 0.2rem 0.35rem;
     border-top: 1px solid rgba(255,255,255,0.06);
-    min-height: 2.5rem;
+    min-height: 2.25rem;
+    /* Cap the footer height so a long winner banner cannot push it below
+       the grid. If content overflows horizontally, ellipsis kicks in. */
+    max-height: 3rem;
+    overflow: hidden;
   }
   .hint {
     color: var(--muted);
@@ -1080,12 +1088,19 @@
   .foot-btn.close { border-color: rgba(239,83,80,0.4); color: var(--danger); }
   .foot-btn.close:not(:disabled):hover { border-color: var(--danger); }
 
-  @media (max-width: 640px) {
-    /* On landscape phones the .foot-lbl text starts crowding — hide when very
-       narrow; the icon carries the meaning and aria-label carries the a11y. */
+  /*
+   * Compact-height rules for landscape phones. Landscape width is ~720-900px
+   * on modern phones, and vertical space is what's actually scarce. Use a
+   * height-based media query so desktop landscape stays full-size but phone
+   * landscape collapses.
+   */
+  @media (max-height: 500px) {
     .foot-lbl { display: none; }
-    .foot-btn { padding: 0.4rem 0.7rem; }
-    .foot-ico { font-size: 1.1rem; }
+    .foot-btn { padding: 0.35rem 0.55rem; }
+    .foot-ico { font-size: 1rem; }
+    .foot { min-height: 2rem; padding: 0.15rem 0.35rem; }
+    .hint { font-size: 0.65rem; }
+    .winner { font-size: 0.72rem; padding: 0.15rem 0.6rem 0.15rem 0.4rem; }
   }
 
   .dialog {
