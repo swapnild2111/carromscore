@@ -14,7 +14,7 @@
  * handler already deletes any cache whose name != CACHE_NAME, so bumping is
  * enough to purge everything old.
  */
-const CACHE_NAME = 'carromscore-v1.5.2';
+const CACHE_NAME = 'carromscore-v1.5.3';
 const OFFLINE_URL = '/carromscore/';
 const PRECACHE = [
   '/carromscore/',

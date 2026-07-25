@@ -21,8 +21,8 @@
     "path": "./android.keystore",
     "alias": "android"
   },
-  "appVersionName": "1.5.2",
-  "appVersionCode": 4,
+  "appVersionName": "1.5.3",
+  "appVersionCode": 6,
   "shortcuts": [],
   "generatorApp": "bubblewrap-cli",
   "webManifestUrl": "https://swapnild2111.github.io/carromscore/manifest.webmanifest",
@@ -37,10 +37,10 @@
   "fullScopeUrl": "https://swapnild2111.github.io/carromscore/",
   "minSdkVersion": 21,
   "shareTarget": null,
-  "orientation": "landscape",
+  "orientation": "any",
   "fingerprints": [],
   "additionalTrustedOrigins": [],
   "retainedBundles": [],
   "displayOverride": [],
-  "appVersion": "1.5.2"
+  "appVersion": "1.5.3"
 }
