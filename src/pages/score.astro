@@ -1,0 +1,32 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import ScoreBoard from '../components/ScoreBoard.svelte';
+import OverlayBoard from '../components/OverlayBoard.svelte';
+
+// We can't read the query string at build time; both islands mount and one
+// hides itself. Overlay unmounts the player view via a top-level class.
+---
+<BaseLayout title="Carromscore — live">
+  <div id="app-root">
+    <div class="player-only">
+      <ScoreBoard client:load />
+    </div>
+    <div class="overlay-only">
+      <OverlayBoard client:load />
+    </div>
+  </div>
+  <script>
+    // Toggle which view is visible before hydration lands. Suppresses a flash of
+    // the wrong layout on OBS browser sources.
+    const params = new URLSearchParams(window.location.search);
+    const overlay = params.get('view') === 'overlay';
+    document.documentElement.dataset.view = overlay ? 'overlay' : 'player';
+  </script>
+  <style is:global>
+    html[data-view='overlay'] body { background: transparent !important; }
+    html[data-view='overlay'] .player-only { display: none; }
+    html[data-view='player'] .overlay-only { display: none; }
+    /* Default (SSR, pre-JS): show player view so first paint isn't blank. */
+    html:not([data-view]) .overlay-only { display: none; }
+  </style>
+</BaseLayout>

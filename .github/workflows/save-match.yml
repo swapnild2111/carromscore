@@ -1,0 +1,84 @@
+name: Save match
+
+on:
+  issues:
+    types: [opened, labeled]
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  save:
+    if: contains(github.event.issue.labels.*.name, 'save-match')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Parse issue body and write match file
+        id: parse
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const body = context.payload.issue.body || '';
+
+            const m = body.match(/```json\s*([\s\S]*?)```/);
+            if (!m) {
+              core.setFailed('No ```json block found in the issue body.');
+              return;
+            }
+            let match;
+            try {
+              match = JSON.parse(m[1]);
+            } catch (e) {
+              core.setFailed(`Malformed JSON: ${e.message}`);
+              return;
+            }
+            if (!match?.completedAt || !match?.result) {
+              core.setFailed('Missing required fields: completedAt / result.');
+              return;
+            }
+
+            const iso = new Date(match.completedAt).toISOString();
+            const year = iso.slice(0, 4);
+            const slug = `${iso.replace(/[:.]/g, '-')}-${context.issue.number}`;
+            const outDir = path.join('data', 'matches', year);
+            fs.mkdirSync(outDir, { recursive: true });
+            const outPath = path.join(outDir, `${slug}.json`);
+            fs.writeFileSync(outPath, JSON.stringify(match, null, 2) + '\n');
+            core.setOutput('path', outPath);
+
+      - name: Commit
+        run: |
+          git config user.name  'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add ${{ steps.parse.outputs.path }}
+          if git diff --cached --quiet; then
+            echo 'No changes to commit.'
+          else
+            git commit -m "Save match from issue #${{ github.event.issue.number }}"
+            git push
+          fi
+
+      - name: Close issue on success
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `Committed to \`${{ steps.parse.outputs.path }}\`.`,
+            });
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              state: 'closed',
+            });

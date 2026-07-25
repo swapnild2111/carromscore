@@ -1,0 +1,19 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import MatchSetup from '../components/MatchSetup.svelte';
+---
+<BaseLayout title="Carromscore — new match">
+  <main class="wrap">
+    <header class="hero">
+      <h1>Carromscore</h1>
+      <p class="tag">Live carrom scoring for players and broadcasters.</p>
+    </header>
+    <MatchSetup client:load />
+  </main>
+  <style>
+    .wrap { padding: 1rem 0 0; }
+    .hero { text-align: center; padding: 1rem 1rem 0; }
+    h1 { font-size: clamp(2rem, 6vw, 2.75rem); letter-spacing: -0.02em; margin: 0; }
+    .tag { color: var(--muted); margin: 0.35rem 0 0; font-size: 0.95rem; }
+  </style>
+</BaseLayout>

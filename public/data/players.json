@@ -1,0 +1,649 @@
+[
+  {
+    "name": "Aakanksha Kadam",
+    "country": "India",
+    "club": "Airport Authority of India",
+    "source": "mca-international"
+  },
+  {
+    "name": "Abbas Hussain Javeed",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Abhijit Tripankar",
+    "country": "India",
+    "city": "Pune",
+    "club": "Jain Irigation Systems Ltd.",
+    "source": "mca-international"
+  },
+  {
+    "name": "Afzal Khan",
+    "country": "India",
+    "city": "Mumbai",
+    "club": "Maharashtra",
+    "source": "mca-international"
+  },
+  {
+    "name": "Aisha Sajid Khokawala",
+    "country": "India",
+    "city": "Mumbai",
+    "club": "Jain Irigation Systems Ltd.",
+    "source": "mca-international"
+  },
+  {
+    "name": "Anil Mundhe",
+    "country": "India",
+    "city": "Pune",
+    "club": "Jain Irigation Systems Ltd.",
+    "source": "mca-international"
+  },
+  {
+    "name": "Anupama Kedar",
+    "country": "India",
+    "city": "Mumbai",
+    "club": "BSB / Bank of India",
+    "source": "mca-international"
+  },
+  {
+    "name": "Arun Kedar",
+    "country": "India",
+    "city": "Mumbai",
+    "club": "BSB / Bank of Maharashtra",
+    "source": "mca-international"
+  },
+  {
+    "name": "Ashok Gaur",
+    "country": "India",
+    "city": "Mumbai",
+    "club": "ONGC / PSPB",
+    "source": "mca-international"
+  },
+  {
+    "name": "Balreddy Kurdin",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Balreddy Shravika",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Bhat Gopalakrishna",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Dalvi Manas",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Deshpande Swapnil",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Dilesh Khedekar",
+    "country": "India",
+    "city": "Mumbai",
+    "club": "Indian Audit & Accounts Department (IAAD)",
+    "source": "mca-international"
+  },
+  {
+    "name": "Engineer Manas",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Engineer Nilesh",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Eswaramoorthy Yuvaraj",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Fernandes Royston",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Gawande Vaibhav",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Gawandi Madhura",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Ghummre Kunnal P",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Gujrathi Rupesh",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Guniganti Ramesh Goud",
+    "country": "DNK",
+    "club": "Denmark Indian Sports Association (DISA)",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Gurubaxani Nehit",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Hidayat Ansari",
+    "country": "India",
+    "city": "Mumbai",
+    "club": "Reserve Bank of India",
+    "source": "mca-international"
+  },
+  {
+    "name": "Irrinki Someswara Rao",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Iyer Ramprasath",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Jagan Bangale",
+    "country": "India",
+    "city": "Mumbai",
+    "club": "BSB / Bank of India",
+    "source": "mca-international"
+  },
+  {
+    "name": "Jaganathan Prakash Babu",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Ji Prabhu",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Jitendra Kale",
+    "country": "India",
+    "city": "Mumbai",
+    "club": "Indian Audit & Accounts Department (IAAD)",
+    "source": "mca-international"
+  },
+  {
+    "name": "Kajal Kumari",
+    "country": "India",
+    "city": "Mumbai",
+    "club": "Indian Oil",
+    "source": "mca-international"
+  },
+  {
+    "name": "Kannan Sudharsan",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Kant Tushar",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Kasilingam Panneerselvam",
+    "country": "DNK",
+    "club": "Denmark Indian Sports Association (DISA)",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Khubchandani Harsha",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Kk Tejaswini",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Kodad Smita",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Konda Murali",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Kothari Jubin",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Kulkarni Shrinivas Rajeev",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Kumar Ajay",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Kumar Reddy Bodimani Abhinay",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Kumar Reddy Nanda",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Kumar Rithish",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Kumar Vignesh",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Lokesh Ravichandra",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Mahadevan Ajay",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Mahendra Tambe",
+    "country": "India",
+    "city": "Mumbai",
+    "club": "BSB / Bank of Maharashtra",
+    "source": "mca-international"
+  },
+  {
+    "name": "Millawitiya Purasinghalage Upamali Nayana Sasikala",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Mnegmsey Pbigjwba",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Mohd. Ghufran",
+    "country": "India",
+    "city": "Mumbai",
+    "club": "Indian Oil",
+    "source": "mca-international"
+  },
+  {
+    "name": "Ms Vinod",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Nadukuru Mahesh",
+    "country": "DNK",
+    "club": "Denmark Indian Sports Association (DISA)",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Nagesh Kalamkar",
+    "country": "India",
+    "city": "Mumbai",
+    "club": "Income Tax Dept. of India",
+    "source": "mca-international"
+  },
+  {
+    "name": "Nagsen Etambe",
+    "country": "India",
+    "city": "Mumbai",
+    "club": "BSB / Bank of India",
+    "source": "mca-international"
+  },
+  {
+    "name": "Nalimela Balreddy",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Narsingrao Sakari",
+    "country": "India",
+    "city": "Mumbai",
+    "club": "A.I.E.S.C.B. / Adani Electricity (Mumbai)",
+    "source": "mca-international"
+  },
+  {
+    "name": "Nilam Ghodake",
+    "country": "India",
+    "city": "Mumbai",
+    "club": "Jain Irigation Systems Ltd.",
+    "source": "mca-international"
+  },
+  {
+    "name": "Niranjan Nimkar",
+    "country": "India",
+    "city": "Thane",
+    "club": "BSB / TJSB Bank",
+    "source": "mca-international"
+  },
+  {
+    "name": "Paluri Deepthi",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Paluri Suraj",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Pindi Mayank",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Pragnaratna Sidath",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Prakash Gaikwad",
+    "country": "India",
+    "city": "Pune",
+    "club": "Life Insurance Corporation of India (Pune)",
+    "source": "mca-international"
+  },
+  {
+    "name": "Prashant More",
+    "country": "India",
+    "city": "Mumbai",
+    "club": "Reserve Bank of India",
+    "source": "mca-international"
+  },
+  {
+    "name": "Priyanka Priyanka",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Pushpala Kalyan",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Pushpala Sivarama",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Rajaram Sunil",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Rajesh Gohil",
+    "country": "India",
+    "city": "Thane",
+    "club": "Maharashtra",
+    "source": "mca-international"
+  },
+  {
+    "name": "Ramnani Prakash",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Rathnayaka Rasika",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Rathor Bhanupratap Singh",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Riyas Akbarali",
+    "country": "India",
+    "city": "Mumbai",
+    "club": "Air India",
+    "source": "mca-international"
+  },
+  {
+    "name": "Sai Abhay",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Saldanha Sachit",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Sandeep Deorukhakar",
+    "country": "India",
+    "city": "Mumbai",
+    "club": "P.S.P.B. / O.N.G.C.",
+    "source": "mca-international"
+  },
+  {
+    "name": "Sandeep Dive",
+    "country": "India",
+    "city": "Mumbai",
+    "club": "Air India",
+    "source": "mca-international"
+  },
+  {
+    "name": "Sangeeta Chandorkar",
+    "country": "India",
+    "city": "Mumbai",
+    "club": "Reserve Bank of India",
+    "source": "mca-international"
+  },
+  {
+    "name": "Sanjay Mande",
+    "country": "India",
+    "city": "Mumbai",
+    "club": "TATA, Voltas Ltd.",
+    "source": "mca-international"
+  },
+  {
+    "name": "Sanjay Nagaonkar",
+    "country": "India",
+    "city": "Thane",
+    "club": "Bank of India",
+    "source": "mca-international"
+  },
+  {
+    "name": "Shah Deepak",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Shrivastava Manish",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Singhal Shobhit",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Sinha Akhilesh",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Subramanian Bharani",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Subramanian Saravanan",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Suhas Pomendkar",
+    "country": "India",
+    "city": "Mumbai",
+    "club": "A.I.E.S.C.B. / Adani Electricity (Mumbai)",
+    "source": "mca-international"
+  },
+  {
+    "name": "Sunil Mayuri",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Swamy Sampath",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Tamala Darsh",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Tanya Tanya",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Thamala Akil Kumar",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Thilakaratna Aravinda",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Vanam Abhihit",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Vethanayagam Antonio Sylvester",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Vilas Dalvi",
+    "country": "India",
+    "source": "mca-international"
+  },
+  {
+    "name": "Vinod Srushti",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Withanachchi Nandun",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  },
+  {
+    "name": "Yogesh Pardeshi",
+    "country": "India",
+    "city": "Pune",
+    "club": "ONGC / PSPB",
+    "source": "mca-international"
+  },
+  {
+    "name": "Yuvaraj Nikisha",
+    "country": "DNK",
+    "club": "Denmark Carrom Federation",
+    "source": "sol5-lit"
+  }
+]
