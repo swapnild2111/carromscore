@@ -1,0 +1,36 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          # Grab the top-of-CHANGELOG section for the release notes if one exists,
+          # else fall back to the tag message.
+          NOTES=$(git tag -l --format='%(contents)' "$TAG" | sed '/^$/,$d')
+          if [ -z "$NOTES" ]; then
+            NOTES="Release $TAG"
+          fi
+          echo "$NOTES" > release-notes.md
+          gh release create "$TAG" \
+            --title "Carromscore $TAG" \
+            --notes-file release-notes.md \
+            --draft
+          echo ""
+          echo "Draft release created. Attach the signed APK by running:"
+          echo "  gh release upload $TAG twa/app/build/outputs/apk/release/app-release.apk --repo \$GITHUB_REPOSITORY"
+          echo "Then publish the draft."

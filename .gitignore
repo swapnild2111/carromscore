@@ -22,3 +22,9 @@ pnpm-debug.log*
 
 # jetbrains setting folder
 .idea/
+
+# Bubblewrap TWA (Android app wrapper)
+# Keep twa-manifest.json but ignore everything else — keystore is a secret,
+# Gradle output is generated, all reproducible from twa-manifest.json.
+twa/*
+!twa/twa-manifest.json

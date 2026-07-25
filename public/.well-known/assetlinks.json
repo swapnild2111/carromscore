@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "io.github.swapnild2111.carromscore",
+      "sha256_cert_fingerprints": [
+        "8E:0A:E6:43:99:30:1D:22:37:66:1A:44:BA:54:51:F0:C3:43:A6:9D:10:38:D0:B1:9B:40:C3:03:79:D8:FA:3C"
+      ]
+    }
+  }
+]
