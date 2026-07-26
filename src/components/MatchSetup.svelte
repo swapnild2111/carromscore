@@ -97,10 +97,10 @@
     window.addEventListener('beforeinstallprompt', onBIP);
     iOS = /iP(ad|hone|od)/.test(navigator.userAgent) && !('MSStream' in window);
 
-    // Drop any lingering landscape lock the score screen left behind so
-    // Android is free to rotate the setup screen to whatever orientation
-    // the user is holding the phone. We don't force portrait — the form
-    // is short enough to work either way.
+    // Drop any lingering landscape lock the score screen left behind.
+    // orientation.unlock() only releases the *lock* — it does not force a
+    // physical rotation. The score screen's exit() is what rotates back to
+    // portrait via lock('portrait').
     try {
       const so = (screen as unknown as { orientation?: { unlock?: () => void } }).orientation;
       so?.unlock?.();

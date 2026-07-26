@@ -73,18 +73,22 @@
     }
 
     updateOrientation();
-    tryLockLandscape();
+    // Landscape lock has to wait for a user gesture (tap on a digit or
+    // control) — browsers refuse requestFullscreen()/orientation.lock()
+    // called from a plain onMount. See tryLockLandscape() and adjustPoints().
     requestWakeLock();
 
     const tick = setInterval(() => (now = Date.now()), 1000);
     window.addEventListener('resize', updateOrientation);
     window.addEventListener('orientationchange', updateOrientation);
     document.addEventListener('visibilitychange', onVisibilityChange);
+    document.addEventListener('fullscreenchange', onFullscreenChange);
     return () => {
       clearInterval(tick);
       window.removeEventListener('resize', updateOrientation);
       window.removeEventListener('orientationchange', updateOrientation);
       document.removeEventListener('visibilitychange', onVisibilityChange);
+      document.removeEventListener('fullscreenchange', onFullscreenChange);
       releaseWakeLock();
       releaseLandscape();
     };
@@ -118,8 +122,22 @@
     wakeLock = null;
   }
   function onVisibilityChange() {
-    if (document.visibilityState === 'visible' && !wakeLock) {
-      requestWakeLock();
+    if (document.visibilityState === 'visible') {
+      // Coming back from screen-lock: wake lock is gone, and Android has
+      // usually also dropped our fullscreen + orientation lock. Reset the
+      // guard so the next user tap can re-request everything.
+      if (!wakeLock) requestWakeLock();
+      if (!document.fullscreenElement) landscapeLocked = false;
+    }
+  }
+
+  /*
+   * Any time we lose fullscreen (screen-lock cycle, system UI, user gesture),
+   * clear the guard so the rotate-hint tap can restart the flow.
+   */
+  function onFullscreenChange() {
+    if (!document.fullscreenElement && landscapeLocked) {
+      landscapeLocked = false;
     }
   }
 
@@ -148,48 +166,57 @@
    * PWAs / regular browser tabs need to enter fullscreen first (best-effort).
    * iOS Safari refuses in all cases — we fall back to the rotate-hint overlay.
    */
-  let attemptedLandscapeLock = false;
+  /*
+   * Retry-safe landscape lock. Runs on every user gesture (tap/swipe on a
+   * digit, tap on the rotate-hint). Stops firing once we're both fullscreen
+   * AND the orientation lock has succeeded, so we don't spam the API.
+   *
+   * Chrome refuses requestFullscreen() and orientation.lock() outside a
+   * user-initiated event handler — hence why we can't call this in onMount.
+   */
+  let landscapeLocked = false;
   async function tryLockLandscape() {
-    if (attemptedLandscapeLock) return;
-    attemptedLandscapeLock = true;
-    try {
-      const el = document.documentElement;
-      if (!document.fullscreenElement && el.requestFullscreen) {
-        await el.requestFullscreen().catch(() => {});
+    if (landscapeLocked) return;
+    const el = document.documentElement;
+    if (!document.fullscreenElement && el.requestFullscreen) {
+      try {
+        await el.requestFullscreen();
+      } catch {
+        // Fullscreen was refused (not in a user gesture, permission, etc.).
+        // orientation.lock would also fail — return so the next gesture retries.
+        return;
       }
-      const so = (screen as unknown as { orientation?: { lock?: (o: string) => Promise<void> } }).orientation;
-      if (so?.lock) await so.lock('landscape');
+    }
+    const so = (screen as unknown as { orientation?: { lock?: (o: string) => Promise<void> } }).orientation;
+    if (!so?.lock) {
+      // No lock API: fullscreen alone gets us most of the way.
+      landscapeLocked = true;
+      return;
+    }
+    try {
+      await so.lock('landscape');
+      landscapeLocked = true;
     } catch {
-      // silent
+      // silent — user gesture will retry via next tap
     }
   }
 
   /**
-   * On Close / unmount, actively lock the device to portrait so Android
-   * physically rotates back before we navigate. Setup then calls unlock()
-   * on load, freeing rotation. A plain unlock() alone is not enough: the
-   * OS keeps the current physical orientation until something asks for a
-   * different one.
+   * On Close / unmount, lock the device to portrait so Android physically
+   * rotates back before we navigate. Order matters: lock('portrait') while
+   * we still hold fullscreen (the context that made lock legal), then exit
+   * fullscreen. Reversing that order revokes lock() permission first.
    */
   async function releaseLandscape() {
-    try {
-      const so = (screen as unknown as {
-        orientation?: { lock?: (o: string) => Promise<void>; unlock?: () => void };
-      }).orientation;
-      // Attempt portrait lock while we still hold the fullscreen context
-      // that made lock() legal on the way in.
-      if (so?.lock) {
-        await so.lock('portrait').catch(() => {});
-      }
-    } catch {
-      // silent
+    landscapeLocked = false;
+    const so = (screen as unknown as {
+      orientation?: { lock?: (o: string) => Promise<void>; unlock?: () => void };
+    }).orientation;
+    if (so?.lock) {
+      try { await so.lock('portrait'); } catch { /* silent */ }
     }
-    try {
-      if (document.fullscreenElement && document.exitFullscreen) {
-        await document.exitFullscreen().catch(() => {});
-      }
-    } catch {
-      // silent
+    if (document.fullscreenElement && document.exitFullscreen) {
+      try { await document.exitFullscreen(); } catch { /* silent */ }
     }
   }
 
@@ -206,6 +233,9 @@
    * sets, corrections happen, etc). Nothing should ever hide the score.
    */
   function adjustPoints(side: 'a' | 'b', delta: number) {
+    // Fullscreen + landscape lock only becomes legal inside a user gesture,
+    // so we defer them until the first tap/swipe on any digit.
+    void tryLockLandscape();
     if (delta > 0) markStartedIfIdle();
     const s = side === 'a' ? sideA : sideB;
     // Points are clamped to [0, pointsTarget]. Standard match caps at 25.
@@ -213,6 +243,7 @@
     checkSetEnd();
   }
   function adjustSets(side: 'a' | 'b', delta: number) {
+    void tryLockLandscape();
     const s = side === 'a' ? sideA : sideB;
     // Sets are clamped to [0, bestOf]. A match can never award more than
     // bestOf sets to a single side. Standard India match tops at 3.
@@ -220,6 +251,7 @@
     checkMatchResult();
   }
   function adjustBoard(delta: number) {
+    void tryLockLandscape();
     if (delta > 0) markStartedIfIdle();
     const nextBoard = board + delta;
     // Board count has no upper cap — draws or sudden-death rounds mean a
@@ -356,54 +388,48 @@
    *   - swipe RIGHT (>= SWIPE_PX)  → onDelta(-1)
    *   - plain tap (no horizontal movement > threshold) → onDelta(+1)
    *
-   * On phones we intentionally allow the swipe to fire repeatedly during a
-   * single continuous drag: cross the threshold once → +1, keep dragging
-   * another SWIPE_PX in the same direction → +1 again. Makes big
-   * corrections one-gesture-only.
+   * One gesture = one adjust. A fast flick doesn't accumulate multiple steps
+   * — for a big correction, lift and swipe again.
    */
   function swipeAdjust(node: HTMLElement, opts: { onDelta: (d: 1 | -1) => void }) {
     const SWIPE_PX = 32;
     let startX = 0;
     let startY = 0;
-    let lastFireX = 0;
     let active = false;
-    let didSwipe = false;
+    let fired = false;
 
     function onPointerDown(ev: PointerEvent) {
       // Only handle primary pointer (ignore right-clicks, multi-touch beyond 1st).
       if (!ev.isPrimary) return;
       active = true;
-      didSwipe = false;
+      fired = false;
       startX = ev.clientX;
       startY = ev.clientY;
-      lastFireX = ev.clientX;
       // pointer capture keeps events flowing to us even if the finger drifts
       // out of the button's bounding box mid-swipe.
       try { node.setPointerCapture?.(ev.pointerId); } catch { /* ignore */ }
     }
     function onPointerMove(ev: PointerEvent) {
-      if (!active) return;
-      const totalDx = ev.clientX - startX;
-      const totalDy = ev.clientY - startY;
+      if (!active || fired) return;
+      const dx = ev.clientX - startX;
+      const dy = ev.clientY - startY;
       // Suppress if the gesture is trending more vertical than horizontal.
-      if (Math.abs(totalDx) < Math.abs(totalDy)) return;
-      // Fire once per SWIPE_PX of horizontal travel from the last fire point.
-      const stepDx = ev.clientX - lastFireX;
-      if (Math.abs(stepDx) < SWIPE_PX) return;
-      didSwipe = true;
-      lastFireX = ev.clientX;
-      // Swipe LEFT (stepDx < 0) → +1. Swipe RIGHT → -1.
-      opts.onDelta(stepDx < 0 ? 1 : -1);
+      if (Math.abs(dx) < Math.abs(dy)) return;
+      if (Math.abs(dx) < SWIPE_PX) return;
+      // First threshold crossing wins; no further deltas until the finger
+      // lifts and a new gesture starts. Swipe LEFT → +1, RIGHT → -1.
+      fired = true;
+      opts.onDelta(dx < 0 ? 1 : -1);
     }
     function onPointerUp() {
-      // Simple tap (no horizontal travel) still adds 1.
-      if (active && !didSwipe) opts.onDelta(1);
+      // Simple tap (no horizontal travel above threshold) still adds 1.
+      if (active && !fired) opts.onDelta(1);
       active = false;
-      didSwipe = false;
+      fired = false;
     }
     function onPointerCancel() {
       active = false;
-      didSwipe = false;
+      fired = false;
     }
 
     // touchstart with preventDefault stops the browser from starting its own
@@ -481,13 +507,13 @@
 </script>
 
 <section class="wrap">
-  <div class="rotate-hint" aria-hidden="true">
+  <button type="button" class="rotate-hint" onclick={() => tryLockLandscape()}>
     <div class="rotate-card">
-      <div class="rotate-icon">📱</div>
-      <strong>Rotate your phone</strong>
-      <span>Carromscore is a landscape scoreboard.</span>
+      <div class="rotate-icon" aria-hidden="true">📱</div>
+      <strong>Tap to start scoring</strong>
+      <span>Carromscore uses landscape. Tap here and rotate your phone if it doesn't turn automatically.</span>
     </div>
-  </div>
+  </button>
 
   <header class="head">
     <div class="head-name head-a tone-{colourA}"
@@ -667,7 +693,15 @@
     align-items: center;
     justify-content: center;
     padding: 2rem;
+    /* Kill browser button chrome. */
+    border: none;
+    color: inherit;
+    font: inherit;
+    text-align: center;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
   }
+  .rotate-hint:active { background: rgba(20,20,20,0.98); }
   @media (orientation: portrait) and (max-width: 900px) {
     .rotate-hint { display: flex; }
   }
@@ -678,6 +712,7 @@
     text-align: center;
     gap: 0.75rem;
     max-width: 20rem;
+    color: var(--fg);
   }
   .rotate-icon {
     font-size: 4rem;
