@@ -18,6 +18,69 @@ scoreboard that runs as a website and as an installable Android app.
 Aimed at replacing the buggy MCA Android scoreboard with a single web app
 that also ships as an installable APK — no Play Store required.
 
+## How to use
+
+### 1. Set up the match
+
+Open the app. Enter match rules (Sets / Points / Max boards), pick
+Singles or Doubles, and fill in each player + their "Represents"
+(country, state, club, whatever).
+
+<p align="center">
+  <img src="docs/screenshots/01-setup-blank.png" alt="Blank setup screen with match rules and empty player fields" width="360" />
+  &nbsp;&nbsp;
+  <img src="docs/screenshots/02-setup-filled.png" alt="Setup screen filled with Swapnil Deshpande (Denmark) vs Yuvaraj Eshwaramoorthy (India)" width="360" />
+</p>
+
+The picker autocompletes from ~2,000 real players scraped from MCA and
+Sol5 LIT. Free-text names work if a player isn't in the DB.
+
+### 2. Score the match
+
+Tap **Start match** — the app locks landscape, goes full-screen, and
+opens the scoreboard at 0-0-0.
+
+<p align="center">
+  <img src="docs/screenshots/03-score-fresh.png" alt="Fresh scoreboard at 0-0-0, board 0" width="720" />
+</p>
+
+**Every digit is a control.** Tap a digit for +1. Swipe left for +1,
+swipe right for −1. That's the whole gesture set — deliberately small
+so nothing is accidental.
+
+<p align="center">
+  <img src="docs/screenshots/04-score-midset.png" alt="Mid-set: Swapnil 12, Yuvaraj 8, board 4" width="720" />
+</p>
+
+Once a side crosses 22 points, the **queen-lockout ticker** appears
+under the scoreboard to remind the table that the queen no longer
+counts for the leader.
+
+<p align="center">
+  <img src="docs/screenshots/05-score-queen-lockout.png" alt="Queen-lockout ticker firing at 22+ points" width="720" />
+</p>
+
+Nothing auto-completes. The organiser bumps SET when a set ends,
+POINTS as the board progresses, and BOARD when the next board starts.
+The app only *displays*.
+
+### 3. End the match
+
+Tap the **🏁 End Match** button in the footer. A fireworks popup names
+the champion and shows the final tally.
+
+<p align="center">
+  <img src="docs/screenshots/06-end-match-popup.png" alt="Fireworks popup: Swapnil Deshpande CHAMPION, Sets 2-1, Final board 25-18" width="720" />
+</p>
+
+Dismiss the popup and the winner's name pill switches to **gold**
+(🥇 1ST); the loser's switches to **silver** (🥈 2ND). Same shape,
+same typography — only the palette differs.
+
+<p align="center">
+  <img src="docs/screenshots/07-end-match-medals.png" alt="Twin-medal treatment on the name pills after End Match" width="720" />
+</p>
+
 ## Features
 
 ### Setup screen
