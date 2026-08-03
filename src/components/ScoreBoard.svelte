@@ -389,15 +389,6 @@
   const queenLockedA = $derived(sideA.points >= 22);
   const queenLockedB = $derived(sideB.points >= 22);
 
-  /**
-   * Live leader (who's ahead by points in the current set). null when tied,
-   * or when the match is over — the WINNER ribbon takes over then.
-   */
-  const leader = $derived<'a' | 'b' | null>(() => {
-    if (matchResult) return null;
-    if (sideA.points === sideB.points) return null;
-    return sideA.points > sideB.points ? 'a' : 'b';
-  });
 </script>
 
 <section class="wrap">
@@ -411,8 +402,20 @@
 
   <header class="head">
     <div class="head-name head-a tone-{colourA}"
-         class:winner={matchResult === 'a'}>
-      {#if matchResult === 'a'}<span class="trophy" aria-hidden="true">🏆</span>{/if}
+         class:decided={matchResult !== null}
+         class:gold={matchResult === 'a'}
+         class:silver={matchResult === 'b'}>
+      {#if matchResult === 'a'}
+        <span class="medal" aria-label="First place">
+          <span class="medal-icon" aria-hidden="true">🥇</span>
+          <span class="medal-label">1ST</span>
+        </span>
+      {:else if matchResult === 'b'}
+        <span class="medal" aria-label="Second place">
+          <span class="medal-icon" aria-hidden="true">🥈</span>
+          <span class="medal-label">2ND</span>
+        </span>
+      {/if}
       <span class="hn-name">{sideA.name}</span>
       {#if sideA.note}<span class="hn-note">{sideA.note}</span>{/if}
     </div>
@@ -443,10 +446,22 @@
       </div>
     </div>
     <div class="head-name head-b tone-{colourB}"
-         class:winner={matchResult === 'b'}>
+         class:decided={matchResult !== null}
+         class:gold={matchResult === 'b'}
+         class:silver={matchResult === 'a'}>
       <span class="hn-name">{sideB.name}</span>
       {#if sideB.note}<span class="hn-note">{sideB.note}</span>{/if}
-      {#if matchResult === 'b'}<span class="trophy" aria-hidden="true">🏆</span>{/if}
+      {#if matchResult === 'b'}
+        <span class="medal" aria-label="First place">
+          <span class="medal-icon" aria-hidden="true">🥇</span>
+          <span class="medal-label">1ST</span>
+        </span>
+      {:else if matchResult === 'a'}
+        <span class="medal" aria-label="Second place">
+          <span class="medal-icon" aria-hidden="true">🥈</span>
+          <span class="medal-label">2ND</span>
+        </span>
+      {/if}
     </div>
   </header>
 
@@ -490,11 +505,6 @@
     <button type="button" class="col side-a tone-{colourA} pts" use:swipeAdjust={{ onDelta: (d) => adjustPoints('a', d) }} aria-label="{sideA.name} points: tap or swipe left to add, swipe right to subtract">
       <div class="digit big">{pad2(sideA.points)}</div>
       <div class="label">POINTS</div>
-      {#if leader() === 'a'}
-        <div class="lead-badge leading tone-{colourA}">LEADING</div>
-      {:else if leader() === 'b'}
-        <div class="lead-badge trailing">TRAILING</div>
-      {/if}
     </button>
     <button type="button" class="col mid brd" use:swipeAdjust={{ onDelta: (d) => adjustBoard(d) }} aria-label="Board: tap or swipe left to add, swipe right to subtract">
       <div class="digit">{board}</div>
@@ -503,11 +513,6 @@
     <button type="button" class="col side-b tone-{colourB} pts" use:swipeAdjust={{ onDelta: (d) => adjustPoints('b', d) }} aria-label="{sideB.name} points: tap or swipe left to add, swipe right to subtract">
       <div class="digit big">{pad2(sideB.points)}</div>
       <div class="label">POINTS</div>
-      {#if leader() === 'b'}
-        <div class="lead-badge leading tone-{colourB}">LEADING</div>
-      {:else if leader() === 'a'}
-        <div class="lead-badge trailing">TRAILING</div>
-      {/if}
     </button>
     <button type="button" class="col side-b tone-{colourB} set" use:swipeAdjust={{ onDelta: (d) => adjustSets('b', d) }} aria-label="{sideB.name} sets: tap or swipe left to add, swipe right to subtract">
       <div class="digit">{setsFmt(sideB.sets)}</div>
@@ -694,65 +699,109 @@
   .head-name.tone-a { background: var(--side-a); }
   .head-name.tone-b { background: var(--side-b); }
 
-  .head-name .trophy {
-    display: inline-block;
-    font-size: 1.05em;
-    line-height: 1;
-    vertical-align: -0.05em;
+  /*
+   * Twin-medal treatment when the match is decided.
+   *
+   * Structural rules (typography, spacing, ring, glow, shine, medal-bob
+   * animation) live on the shared .decided / .medal base classes so gold
+   * and silver render identically at the pixel level. The only difference
+   * between winner and loser is the palette, fed through custom
+   * properties on the .gold / .silver modifiers.
+   *
+   * If you want to retune the medal treatment (e.g. bigger ring, faster
+   * shine), edit .head-name.decided and both sides get it for free.
+   */
+
+  /* Palette tokens. Override on .gold and .silver only. */
+  .head-name.decided {
+    --pill-c1: #fff;
+    --pill-c2: #ccc;
+    --pill-c3: #888;
+    --pill-text: #111;
+    --pill-ring: #ccc;
+    --pill-glow: rgba(200, 200, 200, 0.5);
+    --chip-bg: rgba(0, 0, 0, 0.28);
+    --chip-text: #fff;
+  }
+  .head-name.decided.gold {
+    --pill-c1: #ffd54a;
+    --pill-c2: #ffb300;
+    --pill-c3: #ff8f00;
+    --pill-text: #2b1900;
+    --pill-ring: #ffd54a;
+    --pill-glow: rgba(255, 213, 74, 0.65);
+    --chip-bg: rgba(0, 0, 0, 0.28);
+    --chip-text: #fff5d5;
+  }
+  .head-name.decided.silver {
+    --pill-c1: #f4f7fa;
+    --pill-c2: #b6c2cc;
+    --pill-c3: #6a7a86;
+    --pill-text: #1a232b;
+    --pill-ring: #d1dae0;
+    --pill-glow: rgba(209, 218, 224, 0.45);
+    --chip-bg: rgba(0, 0, 0, 0.28);
+    --chip-text: #eef4f7;
   }
 
-  .head-name.winner {
+  /* Shared pill structure. Applied identically to both variants. */
+  .head-name.decided {
     position: relative;
-    background: linear-gradient(135deg, #ffd54a 0%, #ffb300 55%, #ff8f00 100%);
-    color: #2b1900;
+    background: linear-gradient(135deg, var(--pill-c1) 0%, var(--pill-c2) 55%, var(--pill-c3) 100%);
+    color: var(--pill-text);
     box-shadow:
-      0 0 0 2px #ffd54a,
-      0 0 22px rgba(255, 213, 74, 0.65),
+      0 0 0 2px var(--pill-ring),
+      0 0 22px var(--pill-glow),
       0 3px 12px rgba(0, 0, 0, 0.45);
     overflow: hidden;
   }
-  .head-name.winner::before {
-    content: 'WINNER';
-    position: absolute;
-    top: -0.9rem;
-    left: 50%;
-    transform: translateX(-50%);
-    background: #2b1900;
-    color: #ffd54a;
-    font-size: 0.55rem;
-    letter-spacing: 0.18em;
-    padding: 0.15rem 0.55rem;
-    border-radius: 999px;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
-    pointer-events: none;
-  }
-  .head-name.winner::after {
+
+  /* Shared diagonal shine sweep. Same speed/curve on both pills. */
+  .head-name.decided::after {
     content: '';
     position: absolute;
     inset: 0;
     background: linear-gradient(
       110deg,
       transparent 30%,
-      rgba(255, 255, 255, 0.45) 45%,
-      rgba(255, 255, 255, 0.7) 50%,
-      rgba(255, 255, 255, 0.45) 55%,
+      rgba(255, 255, 255, 0.4) 45%,
+      rgba(255, 255, 255, 0.65) 50%,
+      rgba(255, 255, 255, 0.4) 55%,
       transparent 70%
     );
     transform: translateX(-120%);
-    animation: winner-shine 3.5s ease-in-out infinite;
+    animation: pill-shine 3.5s ease-in-out infinite;
     pointer-events: none;
   }
-  @keyframes winner-shine {
+  @keyframes pill-shine {
     0%, 60% { transform: translateX(-120%); }
     100%    { transform: translateX(120%); }
   }
-  .head-name.winner .trophy {
-    animation: winner-trophy 2.4s ease-in-out infinite;
-    filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3));
+
+  /* Medal chip: shared shape + typography, chip colours from --chip-*. */
+  .head-name .medal {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.12rem 0.5rem 0.12rem 0.25rem;
+    border-radius: 999px;
+    font-size: 0.68rem;
+    font-weight: 900;
+    letter-spacing: 0.14em;
+    line-height: 1;
+    flex-shrink: 0;
+    background: var(--chip-bg);
+    color: var(--chip-text);
   }
-  @keyframes winner-trophy {
+  .head-name .medal-icon {
+    font-size: 1.15em;
+    line-height: 1;
+    filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.35));
+    animation: medal-bob 2.4s ease-in-out infinite;
+  }
+  @keyframes medal-bob {
     0%, 100% { transform: translateY(0) rotate(-4deg); }
-    50%      { transform: translateY(-3px) rotate(6deg); }
+    50%      { transform: translateY(-2px) rotate(6deg); }
   }
 
   .head-mid {
@@ -946,26 +995,6 @@
     text-transform: uppercase;
     letter-spacing: 0.08em;
     font-size: 0.6rem;
-  }
-
-  /* Live LEADING / TRAILING pill inside each POINTS column */
-  .lead-badge {
-    margin-top: 0.15rem;
-    font-size: 0.65rem;
-    font-weight: 800;
-    letter-spacing: 0.12em;
-    padding: 0.15rem 0.6rem;
-    border-radius: 999px;
-    text-transform: uppercase;
-    line-height: 1;
-  }
-  .lead-badge.leading { color: #0b0b0b; }
-  .lead-badge.leading.tone-a { background: var(--side-a); box-shadow: 0 0 10px rgba(79,195,247,0.5); }
-  .lead-badge.leading.tone-b { background: var(--side-b); box-shadow: 0 0 10px rgba(255,138,101,0.5); }
-  .lead-badge.trailing {
-    color: var(--muted);
-    background: transparent;
-    border: 1px solid rgba(255,255,255,0.15);
   }
 
   .foot {
