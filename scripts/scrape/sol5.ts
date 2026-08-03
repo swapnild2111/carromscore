@@ -8,9 +8,62 @@ const BASE = 'https://sol5.metapensiero.it';
 const ROOT = `${BASE}/lit`;
 
 /**
- * Countries to crawl. Start narrow (Denmark only); expand as needed.
+ * Countries to crawl. Curated list of nations with active carrom scenes
+ * as reflected in the Sol5 LIT database. Adding a country here just
+ * enumerates one more `/lit/country/<CODE>` page — Sol5 responds 404 or
+ * returns an empty club list silently for countries with no data, so
+ * over-inclusion is cheap.
  */
-const COUNTRY_CODES: readonly string[] = ['DNK'];
+const COUNTRY_CODES: readonly string[] = [
+  // Verified against Sol5 LIT's country listing (Jul 2026). Adding a code
+  // not in that listing gets a 404 — noisy but harmless. Codes below are
+  // all present on the site.
+  'IND', // India — largest carrom scene
+  'DNK', // Denmark
+  'DEU', // Germany
+  'FRA', // France
+  'GBR', // United Kingdom
+  'ITA', // Italy
+  'NLD', // Netherlands
+  'CHE', // Switzerland
+  'ESP', // Spain
+  'PRT', // Portugal
+  'SWE', // Sweden
+  'BEL', // Belgium
+  'POL', // Poland
+  'CZE', // Czech Republic
+  'AUT', // Austria
+  'IRL', // Ireland
+  'FIN', // Finland
+  'HRV', // Croatia
+  'SRB', // Serbia
+  'SVN', // Slovenia
+  'BIH', // Bosnia & Herzegovina
+  'BGR', // Bulgaria
+  'LKA', // Sri Lanka
+  'MDV', // Maldives
+  'BGD', // Bangladesh
+  'PAK', // Pakistan
+  'NPL', // Nepal
+  'MYS', // Malaysia
+  'SGP', // Singapore
+  'JPN', // Japan
+  'KOR', // South Korea
+  'USA', // United States
+  'CAN', // Canada
+  'NZL', // New Zealand
+  'AFG', // Afghanistan
+  'ARE', // United Arab Emirates
+  'JAM', // Jamaica
+  'KAZ', // Kazakhstan
+  'MNG', // Mongolia
+  'MUS', // Mauritius
+  'NCL', // New Caledonia
+  'QAT', // Qatar
+  'REU', // Réunion
+  'SAU', // Saudi Arabia
+  'SYR', // Syria
+];
 
 const CLUB_HREF_RE = /^\/lit\/club\/([0-9a-f]{32})$/;
 

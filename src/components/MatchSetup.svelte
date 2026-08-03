@@ -2,9 +2,7 @@
   import {
     DEFAULT_CONFIG,
     encodeConfig,
-    formatPreset,
     matchStateKey,
-    type Format,
     type MatchConfig,
     type Mode,
     type PlayerRow,
@@ -31,11 +29,6 @@
         loadingPlayers = false;
       });
   });
-
-  function setFormat(f: Format) {
-    cfg.format = f;
-    Object.assign(cfg, formatPreset(f));
-  }
 
   function setMode(m: Mode) {
     cfg.mode = m;
@@ -69,18 +62,12 @@
   function start(e: Event) {
     e.preventDefault();
     if (!canStart()) return;
-    // Wipe any stored in-flight state for this pairing so 'start match'
-    // always begins at 0-0, even if we just played the same players.
     try {
       localStorage.removeItem(matchStateKey(cfg.playerA, cfg.playerB));
     } catch {
       // ignore
     }
     window.location.href = `${base}score/?${encodeConfig(cfg)}`;
-  }
-
-  function toggleTimeLimit(on: boolean) {
-    cfg.minutesPerSet = on ? 20 : null;
   }
 
   // PWA install prompt. Android/desktop Chrome fires `beforeinstallprompt`; iOS
@@ -98,9 +85,6 @@
     iOS = /iP(ad|hone|od)/.test(navigator.userAgent) && !('MSStream' in window);
 
     // Drop any lingering landscape lock the score screen left behind.
-    // orientation.unlock() only releases the *lock* — it does not force a
-    // physical rotation. The score screen's exit() is what rotates back to
-    // portrait via lock('portrait').
     try {
       const so = (screen as unknown as { orientation?: { unlock?: () => void } }).orientation;
       so?.unlock?.();
@@ -147,9 +131,6 @@
           <li>
             <button type="button" onclick={() => pick(key, p.name)}>
               <span class="pname">{p.name}</span>
-              {#if p.city || p.country}
-                <span class="pmeta">{[p.city, p.country].filter(Boolean).join(' · ')}</span>
-              {/if}
             </button>
           </li>
         {/each}
@@ -158,39 +139,35 @@
   </label>
 {/snippet}
 
+{#snippet noteInput(label: string, key: 'noteA' | 'noteB')}
+  <label class="note-input">
+    <span>{label}</span>
+    <input
+      type="text"
+      autocomplete="off"
+      maxlength="24"
+      placeholder="Country, state, club…"
+      value={cfg[key]}
+      oninput={(e) => (cfg[key] = (e.currentTarget as HTMLInputElement).value)}
+    />
+  </label>
+{/snippet}
+
 
 <form class="setup" onsubmit={start}>
-  <fieldset class="fmt">
-    <legend>Match format</legend>
-    <label class:selected={cfg.format === 'india'}>
-      <input type="radio" name="format" value="india" checked={cfg.format === 'india'} onchange={() => setFormat('india')} />
-      <div class="opt-body">
-        <div class="opt-badge">3</div>
-        <div>
-          <strong>Best of 3 sets</strong>
-          <small>25 pts · 8 boards / set</small>
-        </div>
-      </div>
+  <fieldset class="rules">
+    <legend>Match rules</legend>
+    <label>
+      <span>Sets</span>
+      <input type="number" min="1" max="9" step="1" bind:value={cfg.bestOf} />
     </label>
-    <label class:selected={cfg.format === 'europe'}>
-      <input type="radio" name="format" value="europe" checked={cfg.format === 'europe'} onchange={() => setFormat('europe')} />
-      <div class="opt-body">
-        <div class="opt-badge">1</div>
-        <div>
-          <strong>Single set</strong>
-          <small>25 pts · 8 boards</small>
-        </div>
-      </div>
+    <label>
+      <span>Points</span>
+      <input type="number" min="1" step="1" bind:value={cfg.pointsTarget} />
     </label>
-    <label class:selected={cfg.format === 'custom'}>
-      <input type="radio" name="format" value="custom" checked={cfg.format === 'custom'} onchange={() => setFormat('custom')} />
-      <div class="opt-body">
-        <div class="opt-badge">…</div>
-        <div>
-          <strong>Custom</strong>
-          <small>Set your own limits</small>
-        </div>
-      </div>
+    <label>
+      <span>Max boards <em class="hint-inline">(0 = ∞)</em></span>
+      <input type="number" min="0" step="1" bind:value={cfg.maxBoards} />
     </label>
   </fieldset>
 
@@ -198,24 +175,24 @@
     <legend>Mode</legend>
     <label class:selected={cfg.mode === 'singles'}>
       <input type="radio" name="mode" value="singles" checked={cfg.mode === 'singles'} onchange={() => setMode('singles')} />
-      <div>
-        <strong>Singles</strong>
-        <small>1 vs 1</small>
-      </div>
+      <span class="opt-title">Singles</span>
+      <span class="opt-meta">1 vs 1</span>
     </label>
     <label class:selected={cfg.mode === 'doubles'}>
       <input type="radio" name="mode" value="doubles" checked={cfg.mode === 'doubles'} onchange={() => setMode('doubles')} />
-      <div>
-        <strong>Doubles</strong>
-        <small>2 vs 2</small>
-      </div>
+      <span class="opt-title">Doubles</span>
+      <span class="opt-meta">2 vs 2</span>
     </label>
   </fieldset>
 
   {#if cfg.mode === 'singles'}
-    <div class="row2">
+    <div class="player-row">
       {@render picker('Player A', 'playerA')}
+      {@render noteInput('Represents', 'noteA')}
+    </div>
+    <div class="player-row">
       {@render picker('Player B', 'playerB')}
+      {@render noteInput('Represents', 'noteB')}
     </div>
   {:else}
     <div class="team-block">
@@ -224,6 +201,7 @@
         {@render picker('Player 1', 'playerA')}
         {@render picker('Player 2', 'playerA2')}
       </div>
+      {@render noteInput('Team A represents', 'noteA')}
     </div>
     <div class="team-block">
       <h3>Team B</h3>
@@ -231,38 +209,10 @@
         {@render picker('Player 1', 'playerB')}
         {@render picker('Player 2', 'playerB2')}
       </div>
+      {@render noteInput('Team B represents', 'noteB')}
     </div>
   {/if}
 
-  {#if cfg.format === 'custom'}
-    <div class="row3">
-      <label>
-        <span>Best of (sets)</span>
-        <input type="number" min="1" max="9" step="1" bind:value={cfg.bestOf} />
-      </label>
-      <label>
-        <span>Points target</span>
-        <input type="number" min="1" step="1" bind:value={cfg.pointsTarget} />
-      </label>
-      <label>
-        <span>Max boards</span>
-        <input type="number" min="1" step="1" bind:value={cfg.maxBoards} />
-      </label>
-    </div>
-  {/if}
-
-  <div class="time">
-    <label class="check">
-      <input type="checkbox" checked={cfg.minutesPerSet !== null} onchange={(e) => toggleTimeLimit((e.currentTarget as HTMLInputElement).checked)} />
-      <span>Time limit per set</span>
-    </label>
-    {#if cfg.minutesPerSet !== null}
-      <label class="mins">
-        <input type="number" min="1" max="180" step="1" bind:value={cfg.minutesPerSet} />
-        <span>min</span>
-      </label>
-    {/if}
-  </div>
 
   <button class="start" type="submit" disabled={!canStart()}>
     Start match →
@@ -308,30 +258,20 @@
     gap: 0.5rem;
   }
   @media (min-width: 480px) {
-    fieldset { grid-template-columns: 1fr 1fr 1fr; }
+    fieldset { grid-template-columns: 1fr 1fr; }
+  }
+  @media (min-width: 720px) {
+    fieldset { grid-template-columns: repeat(4, 1fr); }
   }
   fieldset.fmt-mode {
     grid-template-columns: 1fr 1fr;
   }
-  .opt-body {
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
+  @media (min-width: 720px) {
+    fieldset.fmt-mode { grid-template-columns: 1fr 1fr; }
   }
-  .opt-badge {
-    width: 2.25rem;
-    height: 2.25rem;
-    border-radius: 0.55rem;
-    background: rgba(255, 213, 74, 0.15);
-    color: var(--accent);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-weight: 800;
-    font-size: 1.1rem;
-    flex-shrink: 0;
-  }
-  .selected .opt-badge { background: var(--accent); color: #0b0b0b; }
+  /* Compact chip-style option: title on one line, meta line beneath.
+     No big badge column — was clutter. Selected state uses only the border
+     + subtle background lift; radio bullet supplies the "picked" affordance. */
   legend {
     padding: 0;
     margin-bottom: 0.5rem;
@@ -342,43 +282,117 @@
   }
   fieldset label {
     display: flex;
-    align-items: center;
-    gap: 0.6rem;
-    padding: 0.75rem 0.85rem;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.15rem;
+    padding: 0.6rem 0.85rem;
     background: #141414;
-    border: 2px solid #262626;
-    border-radius: 0.75rem;
+    border: 1.5px solid #232323;
+    border-radius: 0.6rem;
     cursor: pointer;
+    min-height: 3.25rem;
+    transition: border-color 0.15s, background 0.15s;
   }
-  fieldset label.selected { border-color: var(--accent); background: #1c1c1c; }
-  fieldset input[type='radio'] { accent-color: var(--accent); }
-  fieldset strong { display: block; font-size: 0.95rem; }
-  fieldset small { display: block; color: var(--muted); font-size: 0.75rem; margin-top: 0.15rem; }
+  fieldset label:hover { border-color: #333; }
+  fieldset label.selected {
+    border-color: var(--accent);
+    background: #1a1613;
+  }
+  fieldset input[type='radio'] { display: none; }
+  .opt-title {
+    font-weight: 700;
+    font-size: 0.95rem;
+    color: var(--fg);
+    letter-spacing: 0.01em;
+  }
+  fieldset label.selected .opt-title { color: var(--accent); }
+  .opt-meta {
+    color: var(--muted);
+    font-size: 0.7rem;
+    letter-spacing: 0.02em;
+  }
 
   .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
   .row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.75rem; }
+
+  /* Match-rules row: 3 number inputs side by side. Same grid on all screen
+     sizes since they're compact numeric fields. */
+  fieldset.rules {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 0.6rem;
+  }
+  fieldset.rules label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    background: #141414;
+    border: 1.5px solid #232323;
+    border-radius: 0.6rem;
+    padding: 0.55rem 0.85rem;
+    cursor: default;
+  }
+  fieldset.rules label:focus-within { border-color: var(--accent); }
+  fieldset.rules label > span {
+    color: var(--muted);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  fieldset.rules input[type='number'] {
+    background: transparent;
+    border: none;
+    color: var(--fg);
+    padding: 0;
+    font-size: 1.1rem;
+    font-weight: 600;
+    font-family: inherit;
+    outline: none;
+    width: 100%;
+    min-width: 0;
+  }
+  .hint-inline {
+    color: var(--muted);
+    font-style: normal;
+    font-size: 0.9em;
+    text-transform: none;
+    letter-spacing: 0;
+    opacity: 0.7;
+    margin-left: 0.2rem;
+  }
+
+  /* Singles: player-row pairs a name picker with a shorter note field.
+     Note gets ~40% width so it stays clearly secondary to the name. */
+  .player-row {
+    display: grid;
+    grid-template-columns: 3fr 2fr;
+    gap: 0.6rem;
+  }
 
   .team-block {
     background: #0f0f0f;
     border: 1px solid #222;
     border-radius: 0.75rem;
     padding: 0.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
   }
   .team-block h3 {
-    margin: 0 0 0.5rem;
+    margin: 0;
     color: var(--muted);
     text-transform: uppercase;
     letter-spacing: 0.08em;
     font-size: 0.75rem;
   }
 
-  label.picker, .row3 label, .time .mins {
+  label.picker, .note-input, .row3 label {
     display: flex;
     flex-direction: column;
     gap: 0.35rem;
     position: relative;
   }
-  label > span, .time span {
+  label > span {
     color: var(--muted);
     font-size: 0.75rem;
     text-transform: uppercase;
@@ -393,6 +407,8 @@
     font-size: 1rem;
     font-family: inherit;
     outline: none;
+    width: 100%;
+    min-width: 0;
   }
   input[type='text']:focus, input[type='number']:focus { border-color: var(--accent); }
 
@@ -427,18 +443,6 @@
   .suggest button:hover { background: #1c1c1c; }
   .pname { font-size: 0.95rem; }
   .pmeta { color: var(--muted); font-size: 0.75rem; }
-
-  .time {
-    display: flex;
-    align-items: end;
-    gap: 1rem;
-    flex-wrap: wrap;
-  }
-  .check { display: flex; align-items: center; gap: 0.6rem; cursor: pointer; }
-  .check input { width: 1.15rem; height: 1.15rem; accent-color: var(--accent); }
-  .check span { color: var(--fg); text-transform: none; font-size: 1rem; letter-spacing: 0; }
-  .time .mins { flex-direction: row; align-items: center; gap: 0.5rem; }
-  .time .mins input { width: 5rem; }
 
   .start {
     background: var(--accent);
@@ -493,5 +497,6 @@
     fieldset.fmt-mode { grid-template-columns: 1fr 1fr; }
     .row2 { grid-template-columns: 1fr; }
     .row3 { grid-template-columns: 1fr 1fr; }
+    .player-row { grid-template-columns: 1fr; }
   }
 </style>

@@ -1,9 +1,23 @@
 /**
  * MatchConfig lives in the URL as a small querystring so a match link is
  * shareable and refresh-safe. Live scores live in localStorage keyed by matchId.
+ *
+ * Auto set-end / auto match-end / timer are deliberately NOT part of this
+ * model any more (see v1.6.0 changelog). The app is a display + human-driven
+ * scoreboard: users bump SET / POINTS / BOARD themselves via tap or swipe.
+ * The only automatic behaviour left is: (a) the winner-highlight when a
+ * side manually reaches bestOf/2+1 sets, and (b) the leader badges under
+ * POINTS which are pure display.
  */
 
-export type Format = 'india' | 'europe' | 'custom';
+/**
+ * Match format — named by rules, not region, because the same rules appear in
+ * multiple tournaments. Mapping to real tournaments (for the setup UI copy):
+ *   - 'bo3'              → India Bo3, EuroCup singles, most national leagues
+ *   - 'single'           → European league play (single set to 25, cap 8 boards)
+ *   - 'single-unlimited' → EuroCup doubles final (single set, no board cap)
+ */
+export type Format = 'bo3' | 'single' | 'single-unlimited' | 'custom';
 export type Mode = 'singles' | 'doubles';
 
 export type MatchConfig = {
@@ -13,34 +27,49 @@ export type MatchConfig = {
   playerA2: string;  // doubles only: 2nd player of team A.
   playerB: string;
   playerB2: string;
-  bestOf: number;       // number of sets in the match (India=3, Europe=1)
-  pointsTarget: number; // set ends when a side reaches this (default 25)
-  maxBoards: number;    // set ends when this many boards have been played (default 8)
-  minutesPerSet: number | null; // null = no time limit
+  // Free-form suffix / tag rendered next to each player pill on the scoreboard.
+  // Common uses: club abbreviation, city, sponsor, seed number. Optional.
+  noteA: string;
+  noteB: string;
+  bestOf: number;       // number of sets in the match (India=3, Europe/EuroCup=1)
+  pointsTarget: number; // POINTS clamp (default 25)
+  maxBoards: number;    // BOARD cap (default 8, 0 for unlimited in EuroCup)
 };
 
 export const DEFAULT_CONFIG: MatchConfig = {
-  format: 'india',
+  format: 'bo3',
   mode: 'singles',
   playerA: '',
   playerA2: '',
   playerB: '',
   playerB2: '',
+  noteA: '',
+  noteB: '',
   bestOf: 3,
   pointsTarget: 25,
   maxBoards: 8,
-  minutesPerSet: null,
 };
 
 export function formatPreset(format: Format): Partial<MatchConfig> {
   switch (format) {
-    case 'india':
+    case 'bo3':
       return { bestOf: 3, pointsTarget: 25, maxBoards: 8 };
-    case 'europe':
+    case 'single':
       return { bestOf: 1, pointsTarget: 25, maxBoards: 8 };
+    case 'single-unlimited':
+      // EuroCup doubles final: single set, 25 points, no board cap.
+      return { bestOf: 1, pointsTarget: 25, maxBoards: 0 };
     case 'custom':
       return {};
   }
+}
+
+/**
+ * True if the match has no upper limit on boards per set. Represented as
+ * maxBoards === 0 in the config for URL-encoding compactness.
+ */
+export function isBoardsUnlimited(cfg: Pick<MatchConfig, 'maxBoards'>): boolean {
+  return cfg.maxBoards === 0;
 }
 
 const QUERY_KEYS: (keyof MatchConfig)[] = [
@@ -50,10 +79,11 @@ const QUERY_KEYS: (keyof MatchConfig)[] = [
   'playerA2',
   'playerB',
   'playerB2',
+  'noteA',
+  'noteB',
   'bestOf',
   'pointsTarget',
   'maxBoards',
-  'minutesPerSet',
 ];
 
 export function encodeConfig(cfg: MatchConfig): string {
@@ -72,14 +102,10 @@ function parseInRange(raw: string | null, min: number, max = Infinity): number |
   return Number.isFinite(n) && n >= min && n <= max ? n : null;
 }
 
-function parseMinutes(raw: string | null): number | null | undefined {
-  if (raw === null) return undefined;
-  const n = Number(raw);
-  return Number.isFinite(n) && n > 0 ? n : null;
-}
-
 function parseFormat(raw: string | null): Format | null {
-  return raw === 'india' || raw === 'europe' || raw === 'custom' ? raw : null;
+  return raw === 'bo3' || raw === 'single' || raw === 'single-unlimited' || raw === 'custom'
+    ? raw
+    : null;
 }
 
 function parseMode(raw: string | null): Mode | null {
@@ -97,16 +123,16 @@ export function decodeConfig(query: URLSearchParams): MatchConfig {
   out.playerA2 = query.get('playerA2') || out.playerA2;
   out.playerB = query.get('playerB') || out.playerB;
   out.playerB2 = query.get('playerB2') || out.playerB2;
+  out.noteA = query.get('noteA') || out.noteA;
+  out.noteB = query.get('noteB') || out.noteB;
 
   const bestOf = parseInRange(query.get('bestOf'), 1, 9);
   if (bestOf !== null) out.bestOf = bestOf;
   const pointsTarget = parseInRange(query.get('pointsTarget'), 1);
   if (pointsTarget !== null) out.pointsTarget = pointsTarget;
-  const maxBoards = parseInRange(query.get('maxBoards'), 1);
+  // 0 is a valid maxBoards value (EuroCup unlimited).
+  const maxBoards = parseInRange(query.get('maxBoards'), 0);
   if (maxBoards !== null) out.maxBoards = maxBoards;
-
-  const mps = parseMinutes(query.get('minutesPerSet'));
-  if (mps !== undefined) out.minutesPerSet = mps;
 
   return out;
 }
@@ -126,34 +152,6 @@ export function teamLabel(name: string, partner: string, mode: Mode): string {
  */
 export function matchStateKey(playerA: string, playerB: string): string {
   return `carromscore:state:${playerA}:${playerB}`;
-}
-
-/**
- * Which side wins the current set, given the current points, or null if tied.
- */
-export function setLeader(pointsA: number, pointsB: number): 'a' | 'b' | null {
-  if (pointsA > pointsB) return 'a';
-  if (pointsB > pointsA) return 'b';
-  return null;
-}
-
-/**
- * Given the current set state, decide if the set has ended and why.
- * Returns null if the set is still in progress.
- */
-export type SetEndReason = 'points' | 'boards' | 'time';
-export function evaluateSetEnd(args: {
-  pointsA: number;
-  pointsB: number;
-  boardsPlayed: number;
-  elapsedSeconds: number;
-  cfg: Pick<MatchConfig, 'pointsTarget' | 'maxBoards' | 'minutesPerSet'>;
-}): SetEndReason | null {
-  const { pointsA, pointsB, boardsPlayed, elapsedSeconds, cfg } = args;
-  if (pointsA >= cfg.pointsTarget || pointsB >= cfg.pointsTarget) return 'points';
-  if (boardsPlayed >= cfg.maxBoards) return 'boards';
-  if (cfg.minutesPerSet !== null && elapsedSeconds >= cfg.minutesPerSet * 60) return 'time';
-  return null;
 }
 
 /**

@@ -4,14 +4,13 @@
   import {
     DEFAULT_CONFIG,
     decodeConfig,
-    evaluateSetEnd,
+    isBoardsUnlimited,
     matchStateKey,
-    setLeader,
     teamLabel,
     type MatchConfig,
   } from '../lib/match';
 
-  type Side = { name: string; sets: number; points: number };
+  type Side = { name: string; note: string; sets: number; points: number };
   /*
    * Colour tokens follow the player, not the seat. When players swap sides,
    * the colour swaps with the name so the same person keeps their pill/digit
@@ -20,13 +19,12 @@
   type Colour = 'a' | 'b';
 
   let cfg = $state<MatchConfig>({ ...DEFAULT_CONFIG });
-  let sideA = $state<Side>({ name: 'First Player', sets: 0, points: 0 });
-  let sideB = $state<Side>({ name: 'Second Player', sets: 0, points: 0 });
+  let sideA = $state<Side>({ name: 'First Player', note: '', sets: 0, points: 0 });
+  let sideB = $state<Side>({ name: 'Second Player', note: '', sets: 0, points: 0 });
   // Which colour token is painted on each seat. Flipped by swapSides().
   let colourA = $state<Colour>('a');
   let colourB = $state<Colour>('b');
   let board = $state(0);
-  let boardsThisSet = $state(0);
 
   /*
    * currentSet is derived from actual sets won, so manual SET +/- swipes
@@ -34,16 +32,7 @@
    * bestOf. When the match is decided we stop advancing.
    */
   const currentSet = $derived(Math.min(cfg.bestOf, sideA.sets + sideB.sets + 1));
-  let setStartedAt = $state<number | null>(null);
-  let now = $state(Date.now());
-  /*
-   * Match result:
-   *   'a' | 'b' — a side won the required number of sets
-   *   'draw'   — the final set ended tied (equal points, boards fully played)
-   *              tournaments count this as 0.5 match points each side
-   *   null     — undecided
-   */
-  let matchResult = $state<'a' | 'b' | 'draw' | null>(null);
+  let matchResult = $state<'a' | 'b' | null>(null);
   let confirmExit = $state(false);
   let isPortrait = $state(false);
   let storageKey = $state<string | null>(null);
@@ -53,6 +42,8 @@
     cfg = decodeConfig(q);
     sideA.name = teamLabel(cfg.playerA, cfg.playerA2, cfg.mode) || 'First Player';
     sideB.name = teamLabel(cfg.playerB, cfg.playerB2, cfg.mode) || 'Second Player';
+    sideA.note = cfg.noteA;
+    sideB.note = cfg.noteB;
     storageKey = matchStateKey(q.get('playerA') ?? '', q.get('playerB') ?? '');
 
     try {
@@ -64,27 +55,19 @@
         if (typeof s?.sideA?.sets === 'number') sideA.sets = s.sideA.sets;
         if (typeof s?.sideB?.sets === 'number') sideB.sets = s.sideB.sets;
         if (typeof s?.board === 'number') board = s.board;
-        if (typeof s?.boardsThisSet === 'number') boardsThisSet = s.boardsThisSet;
-        // currentSet is derived from sideA.sets + sideB.sets, not persisted.
-        if (typeof s?.setStartedAt === 'number' || s?.setStartedAt === null) setStartedAt = s.setStartedAt;
       }
     } catch {
       // ignore
     }
 
     updateOrientation();
-    // Landscape lock has to wait for a user gesture (tap on a digit or
-    // control) — browsers refuse requestFullscreen()/orientation.lock()
-    // called from a plain onMount. See tryLockLandscape() and adjustPoints().
     requestWakeLock();
 
-    const tick = setInterval(() => (now = Date.now()), 1000);
     window.addEventListener('resize', updateOrientation);
     window.addEventListener('orientationchange', updateOrientation);
     document.addEventListener('visibilitychange', onVisibilityChange);
     document.addEventListener('fullscreenchange', onFullscreenChange);
     return () => {
-      clearInterval(tick);
       window.removeEventListener('resize', updateOrientation);
       window.removeEventListener('orientationchange', updateOrientation);
       document.removeEventListener('visibilitychange', onVisibilityChange);
@@ -98,7 +81,6 @@
    * Screen Wake Lock. Keeps the phone screen from dimming/locking during a
    * match. Android drops the lock when the tab is backgrounded, so we
    * re-request on visibilitychange when we come back to the foreground.
-   * iOS Safari doesn't yet support Wake Lock; the API silently no-ops there.
    */
   type WakeLockSentinelLike = { release: () => Promise<void> };
   let wakeLock: WakeLockSentinelLike | null = null;
@@ -109,7 +91,7 @@
     try {
       wakeLock = await wl.request('screen');
     } catch {
-      // Browser refused (unsupported, permission denied, tab not visible)
+      // Browser refused
     }
   }
   async function releaseWakeLock() {
@@ -123,18 +105,10 @@
   }
   function onVisibilityChange() {
     if (document.visibilityState === 'visible') {
-      // Coming back from screen-lock: wake lock is gone, and Android has
-      // usually also dropped our fullscreen + orientation lock. Reset the
-      // guard so the next user tap can re-request everything.
       if (!wakeLock) requestWakeLock();
       if (!document.fullscreenElement) landscapeLocked = false;
     }
   }
-
-  /*
-   * Any time we lose fullscreen (screen-lock cycle, system UI, user gesture),
-   * clear the guard so the rotate-hint tap can restart the flow.
-   */
   function onFullscreenChange() {
     if (!document.fullscreenElement && landscapeLocked) {
       landscapeLocked = false;
@@ -147,8 +121,6 @@
       sideA: { points: sideA.points, sets: sideA.sets },
       sideB: { points: sideB.points, sets: sideB.sets },
       board,
-      boardsThisSet,
-      setStartedAt,
     };
     try {
       localStorage.setItem(storageKey, JSON.stringify(s));
@@ -161,19 +133,6 @@
     isPortrait = window.innerHeight > window.innerWidth;
   }
 
-  /**
-   * Landscape lock. Bubblewrap TWAs run in fullscreen so this succeeds;
-   * PWAs / regular browser tabs need to enter fullscreen first (best-effort).
-   * iOS Safari refuses in all cases — we fall back to the rotate-hint overlay.
-   */
-  /*
-   * Retry-safe landscape lock. Runs on every user gesture (tap/swipe on a
-   * digit, tap on the rotate-hint). Stops firing once we're both fullscreen
-   * AND the orientation lock has succeeded, so we don't spam the API.
-   *
-   * Chrome refuses requestFullscreen() and orientation.lock() outside a
-   * user-initiated event handler — hence why we can't call this in onMount.
-   */
   let landscapeLocked = false;
   async function tryLockLandscape() {
     if (landscapeLocked) return;
@@ -182,14 +141,11 @@
       try {
         await el.requestFullscreen();
       } catch {
-        // Fullscreen was refused (not in a user gesture, permission, etc.).
-        // orientation.lock would also fail — return so the next gesture retries.
         return;
       }
     }
     const so = (screen as unknown as { orientation?: { lock?: (o: string) => Promise<void> } }).orientation;
     if (!so?.lock) {
-      // No lock API: fullscreen alone gets us most of the way.
       landscapeLocked = true;
       return;
     }
@@ -197,16 +153,10 @@
       await so.lock('landscape');
       landscapeLocked = true;
     } catch {
-      // silent — user gesture will retry via next tap
+      // silent
     }
   }
 
-  /**
-   * On Close / unmount, lock the device to portrait so Android physically
-   * rotates back before we navigate. Order matters: lock('portrait') while
-   * we still hold fullscreen (the context that made lock legal), then exit
-   * fullscreen. Reversing that order revokes lock() permission first.
-   */
   async function releaseLandscape() {
     landscapeLocked = false;
     const so = (screen as unknown as {
@@ -220,151 +170,124 @@
     }
   }
 
-  const elapsedSeconds = $derived(setStartedAt === null ? 0 : Math.floor((now - setStartedAt) / 1000));
-
-  function markStartedIfIdle() {
-    if (setStartedAt === null) setStartedAt = Date.now();
-  }
-
   /*
-   * Only the transient set-end dialog blocks input. Once a match is won,
-   * scoring stays fully enabled — the winner banner in the footer signals
-   * the state and organisers may keep adjusting (players can play more
-   * sets, corrections happen, etc). Nothing should ever hide the score.
+   * BOARD cap. Normally cap at maxBoards (default 8). At the cap, if points
+   * are tied, allow one extra decider board (board 9 in the standard case).
+   * When maxBoards === 0 the format is boards-unlimited (EuroCup doubles);
+   * cap is effectively Number.MAX_SAFE_INTEGER.
    */
+  const boardCap = $derived(() => {
+    if (isBoardsUnlimited(cfg)) return Number.MAX_SAFE_INTEGER;
+    const base = cfg.maxBoards;
+    // At the cap, if points are tied, permit one decider board on top.
+    if (board >= base && sideA.points === sideB.points) return base + 1;
+    return base;
+  });
+
   function adjustPoints(side: 'a' | 'b', delta: number) {
-    // Fullscreen + landscape lock only becomes legal inside a user gesture,
-    // so we defer them until the first tap/swipe on any digit.
     void tryLockLandscape();
-    if (delta > 0) markStartedIfIdle();
     const s = side === 'a' ? sideA : sideB;
-    // Points are clamped to [0, pointsTarget]. Standard match caps at 25.
     s.points = Math.min(cfg.pointsTarget, Math.max(0, s.points + delta));
-    checkSetEnd();
   }
   function adjustSets(side: 'a' | 'b', delta: number) {
     void tryLockLandscape();
     const s = side === 'a' ? sideA : sideB;
-    // Sets are clamped to [0, bestOf]. A match can never award more than
-    // bestOf sets to a single side. Standard India match tops at 3.
+    const prev = s.sets;
     s.sets = Math.min(cfg.bestOf, Math.max(0, s.sets + delta));
-    checkMatchResult();
+    // If the SET count actually changed, we're transitioning between sets —
+    // zero out POINTS on both sides and BOARD, ready for the next set. No
+    // reset when the clamp swallowed the delta (already at cap / floor).
+    if (s.sets !== prev) {
+      sideA.points = 0;
+      sideB.points = 0;
+      board = 0;
+    }
+    // matchResult stays untouched: the WINNER ribbon only appears when the
+    // organiser taps End Match, never on a SET +/- alone.
   }
   function adjustBoard(delta: number) {
     void tryLockLandscape();
-    if (delta > 0) markStartedIfIdle();
-    const nextBoard = board + delta;
-    // Board count has no upper cap — draws or sudden-death rounds mean a
-    // set can legitimately run past cfg.maxBoards. Only floor is enforced.
-    if (nextBoard < 0) return;
-    board = nextBoard;
-    boardsThisSet = Math.max(0, boardsThisSet + delta);
-    checkSetEnd();
+    const next = board + delta;
+    if (next < 0) return;
+    if (next > boardCap()) return;
+    board = next;
   }
 
   /*
-   * When a set-end condition is hit (25 points reached, 8 boards played, or
-   * per-set time expired), we silently:
-   *   - award the set to the leader (if any),
-   *   - detect a draw if this was the final set and points are tied,
-   *   - zero out points/board/timer so the next set starts fresh.
-   * No dialog. The score screen stays untouched — audience keeps reading
-   * the numbers. Set counter ticks up as the only "notification".
+   * End Match: organiser-triggered finalisation. The ONLY thing that sets
+   * matchResult — no auto-detect on set count. That way SET +/- swipes in
+   * the middle of a match never flash the WINNER ribbon.
+   * Precedence for picking the winner: more SETs wins; if tied, more POINTS
+   * wins; if still tied, no winner (organiser resolves via manual bump).
    */
-  function checkSetEnd() {
-    const reason = evaluateSetEnd({
-      pointsA: sideA.points,
-      pointsB: sideB.points,
-      boardsPlayed: boardsThisSet,
-      elapsedSeconds,
-      cfg,
-    });
-    if (!reason) return;
-
-    const leader = setLeader(sideA.points, sideB.points);
-    const isFinalSet = sideA.sets + sideB.sets + 1 >= cfg.bestOf;
-
-    if (leader === 'a') sideA.sets += 1;
-    else if (leader === 'b') sideB.sets += 1;
-    else if (isFinalSet) matchResult = 'draw';
-    // (Tied non-final set: no side awarded. Organiser can adjust SET manually
-    // if a tie-breaker was played off-scoreboard.)
-
-    sideA.points = 0;
-    sideB.points = 0;
-    board = 0;
-    boardsThisSet = 0;
-    setStartedAt = null;
-    checkMatchResult();
+  let showWinnerPopup = $state(false);
+  // Fixed array of spark indices for the fireworks each-loop.
+  const SPARK_INDICES = Array.from({ length: 20 }, (_, i) => i);
+  function endMatch() {
+    let winner: 'a' | 'b' | null = null;
+    let awardExtraSet = false;
+    if (sideA.sets > sideB.sets) {
+      winner = 'a';
+    } else if (sideB.sets > sideA.sets) {
+      winner = 'b';
+    } else if (sideA.points > sideB.points) {
+      // Sets tied — winner decided by current-set POINTS. The winning side
+      // also gets credited with that decider set so the footer reads
+      // e.g. "wins 2-1" rather than a misleading "wins 1-1".
+      winner = 'a';
+      awardExtraSet = true;
+    } else if (sideB.points > sideA.points) {
+      winner = 'b';
+      awardExtraSet = true;
+    }
+    if (!winner) return; // fully tied — organiser must adjust manually first
+    if (awardExtraSet) {
+      const s = winner === 'a' ? sideA : sideB;
+      s.sets = Math.min(cfg.bestOf, s.sets + 1);
+    }
+    matchResult = winner;
+    showWinnerPopup = true;
   }
 
-  $effect(() => {
-    if (matchResult) return;
-    if (cfg.minutesPerSet === null) return;
-    if (setStartedAt === null) return;
-    if (elapsedSeconds >= cfg.minutesPerSet * 60) checkSetEnd();
-  });
+  function swapSides() {
+    // Physical seat swap: every per-player attribute travels with the player,
+    // so their names, notes, colours, SET counts, AND current-set POINTS all
+    // move together. BOARD stays put — it belongs to the match, not a player.
+    const tmpName = sideA.name;
+    sideA.name = sideB.name;
+    sideB.name = tmpName;
+    const tmpNote = sideA.note;
+    sideA.note = sideB.note;
+    sideB.note = tmpNote;
+    const tmpSets = sideA.sets;
+    sideA.sets = sideB.sets;
+    sideB.sets = tmpSets;
+    const tmpPoints = sideA.points;
+    sideA.points = sideB.points;
+    sideB.points = tmpPoints;
+    const tmpColour = colourA;
+    colourA = colourB;
+    colourB = tmpColour;
+  }
 
-  /**
-   * Reset every score to zero but keep player names + match config. Used
-   * after the match is decided so the players can play another match with
-   * the same setup without going back to the setup screen. Also clears
-   * the persistent match-winner banner state.
-   */
   function resetScores() {
     sideA.sets = 0;
     sideB.sets = 0;
     sideA.points = 0;
     sideB.points = 0;
     board = 0;
-    boardsThisSet = 0;
-    setStartedAt = null;
     matchResult = null;
-    // Reset colours to their default pairing (A→a, B→b) too, so a fresh
-    // match starts visually identical every time regardless of swaps in the
-    // previous match. currentSet is derived; auto-becomes 1 when sets go to 0.
     colourA = 'a';
     colourB = 'b';
   }
   let confirmReset = $state(false);
   function requestReset() {
-    if (!hasProgress) return; // nothing to reset
+    if (!hasProgress) return;
     confirmReset = true;
   }
 
-  function checkMatchResult() {
-    const needed = Math.floor(cfg.bestOf / 2) + 1;
-    if (sideA.sets >= needed) {
-      matchResult = 'a';
-    } else if (sideB.sets >= needed) {
-      matchResult = 'b';
-    } else {
-      // Draw is latched by checkSetEnd() when the final set ends tied, not
-      // recomputed here. Only clear the result if neither side won yet AND
-      // no draw was previously latched.
-      if (matchResult !== 'draw') matchResult = null;
-    }
-  }
-
-  function swapSides() {
-    const tmpName = sideA.name;
-    sideA.name = sideB.name;
-    sideB.name = tmpName;
-    const tmpSets = sideA.sets;
-    sideA.sets = sideB.sets;
-    sideB.sets = tmpSets;
-    const tmpColour = colourA;
-    colourA = colourB;
-    colourB = tmpColour;
-    sideA.points = 0;
-    sideB.points = 0;
-    board = 0;
-    boardsThisSet = 0;
-    setStartedAt = null;
-  }
-
   const hasProgress = $derived(
-    sideA.points > 0 || sideB.points > 0 || sideA.sets > 0 || sideB.sets > 0 || board > 0 || boardsThisSet > 0,
+    sideA.points > 0 || sideB.points > 0 || sideA.sets > 0 || sideB.sets > 0 || board > 0,
   );
 
   function requestExit() {
@@ -375,21 +298,15 @@
     if (storageKey) {
       try { localStorage.removeItem(storageKey); } catch { /* ignore */ }
     }
-    // Ask the OS to rotate to portrait before we navigate. Setup page then
-    // unlocks orientation on load. Awaiting the lock call gives the OS a
-    // beat to actually rotate; otherwise setup can flash landscape first.
     await releaseLandscape();
     window.location.href = import.meta.env.BASE_URL;
   }
 
   /**
-   * Svelte action: change a numeric field by horizontal swipe or tap.
-   *   - swipe LEFT  (>= SWIPE_PX)  → onDelta(+1)
-   *   - swipe RIGHT (>= SWIPE_PX)  → onDelta(-1)
+   * Swipe action: one gesture = one adjust.
+   *   - swipe LEFT  (≥ SWIPE_PX)  → onDelta(+1)
+   *   - swipe RIGHT (≥ SWIPE_PX)  → onDelta(-1)
    *   - plain tap (no horizontal movement > threshold) → onDelta(+1)
-   *
-   * One gesture = one adjust. A fast flick doesn't accumulate multiple steps
-   * — for a big correction, lift and swipe again.
    */
   function swipeAdjust(node: HTMLElement, opts: { onDelta: (d: 1 | -1) => void }) {
     const SWIPE_PX = 32;
@@ -399,30 +316,23 @@
     let fired = false;
 
     function onPointerDown(ev: PointerEvent) {
-      // Only handle primary pointer (ignore right-clicks, multi-touch beyond 1st).
       if (!ev.isPrimary) return;
       active = true;
       fired = false;
       startX = ev.clientX;
       startY = ev.clientY;
-      // pointer capture keeps events flowing to us even if the finger drifts
-      // out of the button's bounding box mid-swipe.
       try { node.setPointerCapture?.(ev.pointerId); } catch { /* ignore */ }
     }
     function onPointerMove(ev: PointerEvent) {
       if (!active || fired) return;
       const dx = ev.clientX - startX;
       const dy = ev.clientY - startY;
-      // Suppress if the gesture is trending more vertical than horizontal.
       if (Math.abs(dx) < Math.abs(dy)) return;
       if (Math.abs(dx) < SWIPE_PX) return;
-      // First threshold crossing wins; no further deltas until the finger
-      // lifts and a new gesture starts. Swipe LEFT → +1, RIGHT → -1.
       fired = true;
       opts.onDelta(dx < 0 ? 1 : -1);
     }
     function onPointerUp() {
-      // Simple tap (no horizontal travel above threshold) still adds 1.
       if (active && !fired) opts.onDelta(1);
       active = false;
       fired = false;
@@ -431,9 +341,6 @@
       active = false;
       fired = false;
     }
-
-    // touchstart with preventDefault stops the browser from starting its own
-    // scroll/edge-swipe gesture on Chrome Android.
     function onTouchStart(ev: TouchEvent) {
       if (ev.cancelable) ev.preventDefault();
     }
@@ -461,32 +368,11 @@
   const pad2 = (n: number) => (n < 10 ? `0${n}` : `${n}`);
   const setsFmt = (n: number) => `${Math.min(9, Math.max(0, n))}`;
 
-  const timerText = $derived(() => {
-    if (cfg.minutesPerSet === null) return null;
-    const remaining = Math.max(0, cfg.minutesPerSet * 60 - elapsedSeconds);
-    const mm = Math.floor(remaining / 60);
-    const ss = remaining % 60;
-    return `${pad2(mm)}:${pad2(ss)}`;
-  });
-
   const ordinal = (n: number) => (['1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th', '9th'][n - 1] ?? `${n}th`);
-  /**
-   * Per-set-slot indicator: filled with the winner's side colour, or shown
-   * as the "current" pip (accent-outlined) or a pending empty pip.
-   *   'a' → filled with side-a colour
-   *   'b' → filled with side-b colour
-   *   'current' → outlined in accent, pulsing
-   *   'pending' → empty muted outline
-   */
+
   type SetPip = 'a' | 'b' | 'current' | 'pending';
   const setPips = $derived<SetPip[]>(() => {
-    // Total pip slots is always exactly bestOf. Sets can't go beyond bestOf
-    // (adjustSets clamps them), and we never grow the pip strip past the
-    // configured match length.
     const total = cfg.bestOf;
-    // Filled slots for sets already won. Order isn't tracked, so we simply
-    // fill A's wins first then B's — visually reads as "how many pips of
-    // each colour", which is what matters.
     const aWins = Math.min(sideA.sets, total);
     const bWins = Math.min(sideB.sets, Math.max(0, total - aWins));
     const pips: SetPip[] = [];
@@ -494,8 +380,6 @@
     for (let i = 0; i < bWins; i += 1) pips.push('b');
     const completed = pips.length;
     for (let i = completed; i < total; i += 1) {
-      // If the match is decided (or drawn), don't show a "current" pulsing
-      // pip — nothing is currently being played.
       const isCurrent = i === completed && !matchResult;
       pips.push(isCurrent ? 'current' : 'pending');
     }
@@ -504,6 +388,16 @@
 
   const queenLockedA = $derived(sideA.points >= 22);
   const queenLockedB = $derived(sideB.points >= 22);
+
+  /**
+   * Live leader (who's ahead by points in the current set). null when tied,
+   * or when the match is over — the WINNER ribbon takes over then.
+   */
+  const leader = $derived<'a' | 'b' | null>(() => {
+    if (matchResult) return null;
+    if (sideA.points === sideB.points) return null;
+    return sideA.points > sideB.points ? 'a' : 'b';
+  });
 </script>
 
 <section class="wrap">
@@ -517,11 +411,10 @@
 
   <header class="head">
     <div class="head-name head-a tone-{colourA}"
-         class:winner={matchResult === 'a'}
-         class:draw={matchResult === 'draw'}>
+         class:winner={matchResult === 'a'}>
       {#if matchResult === 'a'}<span class="trophy" aria-hidden="true">🏆</span>{/if}
-      {#if matchResult === 'draw'}<span class="draw-badge" aria-hidden="true">½</span>{/if}
-      {sideA.name}
+      <span class="hn-name">{sideA.name}</span>
+      {#if sideA.note}<span class="hn-note">{sideA.note}</span>{/if}
     </div>
     <div class="head-mid">
       {#if cfg.bestOf === 1}
@@ -536,21 +429,24 @@
           <span class="set-caption">SET {ordinal(currentSet)}</span>
         </div>
       {/if}
-      <div class="board-progress" aria-label="Board {boardsThisSet} of {cfg.maxBoards}">
+      <div class="board-progress" aria-label="Board {board} of {isBoardsUnlimited(cfg) ? '∞' : cfg.maxBoards}">
         <span class="board-caption">BOARD</span>
         <span class="board-track">
-          <span class="board-fill" style="width: {Math.min(100, (boardsThisSet / cfg.maxBoards) * 100)}%"></span>
+          {#if !isBoardsUnlimited(cfg)}
+            <span class="board-fill" style="width: {Math.min(100, (board / cfg.maxBoards) * 100)}%"></span>
+          {/if}
         </span>
-        <span class="board-count">{boardsThisSet}<span class="board-total">/{cfg.maxBoards}</span></span>
+        <span class="board-count">
+          {board}
+          {#if !isBoardsUnlimited(cfg)}<span class="board-total">/{cfg.maxBoards}</span>{/if}
+        </span>
       </div>
-      {#if timerText()}<div class="head-timer">{timerText()}</div>{/if}
     </div>
     <div class="head-name head-b tone-{colourB}"
-         class:winner={matchResult === 'b'}
-         class:draw={matchResult === 'draw'}>
-      {sideB.name}
+         class:winner={matchResult === 'b'}>
+      <span class="hn-name">{sideB.name}</span>
+      {#if sideB.note}<span class="hn-note">{sideB.note}</span>{/if}
       {#if matchResult === 'b'}<span class="trophy" aria-hidden="true">🏆</span>{/if}
-      {#if matchResult === 'draw'}<span class="draw-badge" aria-hidden="true">½</span>{/if}
     </div>
   </header>
 
@@ -558,7 +454,7 @@
     <div class="queen-lock">
       <span class="ql-line">
         {#if queenLockedA && queenLockedB}
-          <!-- Both sides in the lockout: single compact line, one shared trailer. -->
+          <!-- Both sides locked out: compact form -->
           <span class="ql-name qa">{sideA.name}</span>
           <span class="ql-num">{cfg.pointsTarget - sideA.points}</span>
           <span class="ql-sep">·</span>
@@ -594,6 +490,11 @@
     <button type="button" class="col side-a tone-{colourA} pts" use:swipeAdjust={{ onDelta: (d) => adjustPoints('a', d) }} aria-label="{sideA.name} points: tap or swipe left to add, swipe right to subtract">
       <div class="digit big">{pad2(sideA.points)}</div>
       <div class="label">POINTS</div>
+      {#if leader() === 'a'}
+        <div class="lead-badge leading tone-{colourA}">LEADING</div>
+      {:else if leader() === 'b'}
+        <div class="lead-badge trailing">TRAILING</div>
+      {/if}
     </button>
     <button type="button" class="col mid brd" use:swipeAdjust={{ onDelta: (d) => adjustBoard(d) }} aria-label="Board: tap or swipe left to add, swipe right to subtract">
       <div class="digit">{board}</div>
@@ -602,6 +503,11 @@
     <button type="button" class="col side-b tone-{colourB} pts" use:swipeAdjust={{ onDelta: (d) => adjustPoints('b', d) }} aria-label="{sideB.name} points: tap or swipe left to add, swipe right to subtract">
       <div class="digit big">{pad2(sideB.points)}</div>
       <div class="label">POINTS</div>
+      {#if leader() === 'b'}
+        <div class="lead-badge leading tone-{colourB}">LEADING</div>
+      {:else if leader() === 'a'}
+        <div class="lead-badge trailing">TRAILING</div>
+      {/if}
     </button>
     <button type="button" class="col side-b tone-{colourB} set" use:swipeAdjust={{ onDelta: (d) => adjustSets('b', d) }} aria-label="{sideB.name} sets: tap or swipe left to add, swipe right to subtract">
       <div class="digit">{setsFmt(sideB.sets)}</div>
@@ -610,12 +516,7 @@
   </div>
 
   <div class="foot">
-    {#if matchResult === 'draw'}
-      <span class="winner drawn">
-        <span class="winner-dot"></span>
-        Match drawn · ½ point each
-      </span>
-    {:else if matchResult === 'a' || matchResult === 'b'}
+    {#if matchResult}
       <span class="winner">
         <span class="winner-dot"></span>
         <strong>{matchResult === 'a' ? sideA.name : sideB.name}</strong>
@@ -631,11 +532,42 @@
       <button type="button" class="foot-btn reset" onclick={requestReset} disabled={!hasProgress} aria-label="Reset scores">
         <span class="foot-ico" aria-hidden="true">↻</span><span class="foot-lbl">Reset</span>
       </button>
+      <button type="button" class="foot-btn endm" onclick={endMatch} disabled={!hasProgress} aria-label="End match">
+        <span class="foot-ico" aria-hidden="true">🏁</span><span class="foot-lbl">End</span>
+      </button>
       <button type="button" class="foot-btn close" onclick={requestExit} aria-label="Close match">
         <span class="foot-ico" aria-hidden="true">✕</span><span class="foot-lbl">Close</span>
       </button>
     </div>
   </div>
+
+  {#if showWinnerPopup && matchResult}
+    <div class="dialog winner-dialog" role="dialog" aria-modal="true">
+      <!--
+        Fireworks: 20 particles arranged around the popup, each animating
+        outward on its own delay + colour. Purely decorative, dismissible
+        by tap. inert on aria — the button below carries all the a11y.
+      -->
+      <div class="fireworks" aria-hidden="true">
+        {#each SPARK_INDICES as i (i)}
+          <span class="spark spark-{i % 8}" style="--n: {i}"></span>
+        {/each}
+      </div>
+      <div class="dialog-card champion">
+        <div class="champ-trophy" aria-hidden="true">🏆</div>
+        <div class="champ-label">CHAMPION</div>
+        <div class="champ-name">{matchResult === 'a' ? sideA.name : sideB.name}</div>
+        <div class="champ-score">
+          Sets <strong>{sideA.sets}–{sideB.sets}</strong>
+          <span class="champ-sep">·</span>
+          Final board <strong>{pad2(sideA.points)}–{pad2(sideB.points)}</strong>
+        </div>
+        <button class="confirm-big" onclick={() => (showWinnerPopup = false)}>
+          Show scoreboard
+        </button>
+      </div>
+    </div>
+  {/if}
 
   {#if confirmExit}
     <div class="dialog" role="dialog" aria-modal="true">
@@ -665,15 +597,9 @@
 </section>
 
 <style>
-  /* v1.5.1 score screen: everything must fit in one landscape phone view.
-     Sizes use vh/vw so digits scale with the viewport. */
-
   .wrap {
     height: 100dvh;
     max-height: 100dvh;
-    /* Honour Android/iOS safe-area insets so the footer isn't hidden behind
-       the system gesture bar in landscape. Only the vertical insets matter
-       here; the horizontal padding stays fixed. */
     padding: max(0.4rem, env(safe-area-inset-top)) 0.5rem
              max(0.4rem, env(safe-area-inset-bottom)) 0.5rem;
     display: flex;
@@ -693,7 +619,6 @@
     align-items: center;
     justify-content: center;
     padding: 2rem;
-    /* Kill browser button chrome. */
     border: none;
     color: inherit;
     font: inherit;
@@ -735,38 +660,47 @@
     flex-shrink: 0;
   }
   .head-name {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
     font-size: clamp(0.9rem, 2.2vw, 1.15rem);
     font-weight: 800;
     letter-spacing: 0.06em;
     text-transform: uppercase;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    max-width: 100%;
     padding: 0.3rem 0.75rem;
     border-radius: 0.5rem;
     color: #0b0b0b;
     box-shadow: 0 2px 8px rgba(0,0,0,0.35);
   }
-  /* Seat classes: layout / alignment only. */
+  .head-name .hn-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
+  .head-name .hn-note {
+    font-size: 0.7em;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    opacity: 0.75;
+    padding: 0.05rem 0.4rem;
+    border-radius: 0.35rem;
+    background: rgba(0,0,0,0.18);
+    flex-shrink: 0;
+  }
   .head-a { text-align: left;  justify-self: start; }
   .head-b { text-align: right; justify-self: end; }
-  /* Tone classes: colour. Applied to whichever seat the player is on. */
   .head-name.tone-a { background: var(--side-a); }
   .head-name.tone-b { background: var(--side-b); }
-  .head-name .trophy,
-  .head-name .draw-badge {
+
+  .head-name .trophy {
     display: inline-block;
     font-size: 1.05em;
     line-height: 1;
-    margin: 0 0.35rem;
     vertical-align: -0.05em;
   }
 
-  /*
-   * Winner card: gold gradient background, gold ring, a glossy shine that
-   * sweeps across every few seconds, plus a "WINNER" ribbon tab at the top.
-   * The audience should be able to spot the winner from across a room.
-   */
   .head-name.winner {
     position: relative;
     background: linear-gradient(135deg, #ffd54a 0%, #ffb300 55%, #ff8f00 100%);
@@ -778,7 +712,6 @@
     overflow: hidden;
   }
   .head-name.winner::before {
-    /* WINNER ribbon tab */
     content: 'WINNER';
     position: absolute;
     top: -0.9rem;
@@ -794,7 +727,6 @@
     pointer-events: none;
   }
   .head-name.winner::after {
-    /* Glossy shine that sweeps left→right every few seconds */
     content: '';
     position: absolute;
     inset: 0;
@@ -823,21 +755,6 @@
     50%      { transform: translateY(-3px) rotate(6deg); }
   }
 
-  /* Draw: both sides get a matched silver treatment with a "½" badge. */
-  .head-name.draw {
-    background: linear-gradient(135deg, #cfd8dc 0%, #90a4ae 100%);
-    color: #263238;
-    box-shadow:
-      0 0 0 2px #b0bec5,
-      0 0 14px rgba(176, 190, 197, 0.35),
-      0 2px 8px rgba(0, 0, 0, 0.35);
-  }
-  .head-name.draw .draw-badge {
-    font-weight: 900;
-    font-size: 1.25em;
-    color: #37474f;
-    letter-spacing: 0;
-  }
   .head-mid {
     text-align: center;
     display: flex;
@@ -852,7 +769,6 @@
     font-size: 0.7rem;
   }
 
-  /* SET indicator: dots per set-in-match, filled with winner's colour. */
   .set-pips {
     display: inline-flex;
     align-items: center;
@@ -876,26 +792,15 @@
     color: #0b0b0b;
     transition: transform 0.15s, box-shadow 0.15s;
   }
-  .set-pip.pip-a {
-    background: var(--side-a);
-    border-color: var(--side-a);
-    box-shadow: 0 0 8px rgba(79,195,247,0.4);
-  }
-  .set-pip.pip-b {
-    background: var(--side-b);
-    border-color: var(--side-b);
-    box-shadow: 0 0 8px rgba(255,138,101,0.4);
-  }
+  .set-pip.pip-a { background: var(--side-a); border-color: var(--side-a); box-shadow: 0 0 8px rgba(79,195,247,0.4); }
+  .set-pip.pip-b { background: var(--side-b); border-color: var(--side-b); box-shadow: 0 0 8px rgba(255,138,101,0.4); }
   .set-pip.pip-current {
     background: transparent;
     border-color: var(--accent);
     box-shadow: 0 0 8px rgba(255,213,74,0.35);
     animation: pip-pulse 1.6s ease-in-out infinite;
   }
-  .set-pip.pip-pending {
-    background: transparent;
-    border-color: rgba(255,255,255,0.15);
-  }
+  .set-pip.pip-pending { background: transparent; border-color: rgba(255,255,255,0.15); }
   @keyframes pip-pulse {
     0%, 100% { transform: scale(1); }
     50%      { transform: scale(1.18); }
@@ -909,7 +814,6 @@
     line-height: 1;
   }
 
-  /* BOARD progress bar: labeled bar showing boardsThisSet / maxBoards. */
   .board-progress {
     display: inline-flex;
     align-items: center;
@@ -945,19 +849,6 @@
   }
   .board-total { color: var(--muted); font-size: 0.7em; margin-left: 0.1rem; }
 
-  .head-timer {
-    color: var(--accent);
-    font-family: 'DSEG7 Classic', 'Courier New', monospace;
-    font-variant-numeric: tabular-nums;
-    font-size: 0.95rem;
-    letter-spacing: 0.02em;
-  }
-
-  /*
-   * Queen-lock ticker: when a side crosses 22 pts, the queen's 3-point bonus
-   * no longer counts (ICF rule). Frame it as a live-commentator line so the
-   * scoreboard reads like a broadcast, not a legal footnote.
-   */
   .queen-lock {
     flex-shrink: 0;
     display: flex;
@@ -1016,6 +907,7 @@
     border: 1px solid #222;
   }
   .col {
+    position: relative;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -1029,7 +921,7 @@
     border-radius: 0.5rem;
     cursor: pointer;
     transition: background 0.1s, transform 0.06s;
-    touch-action: none;         /* let the scroll/drag action handle vertical gestures */
+    touch-action: none;
     -webkit-tap-highlight-color: transparent;
     overflow: hidden;
   }
@@ -1040,13 +932,12 @@
     font-family: 'DSEG7 Classic', 'Courier New', ui-monospace, monospace;
     font-weight: 700;
     line-height: 1;
-    font-size: clamp(2rem, 12vh, 5rem);
+    font-size: clamp(2.5rem, 16vh, 6rem);
     font-variant-numeric: tabular-nums;
     letter-spacing: 0.03em;
   }
-  .digit.big { font-size: clamp(3rem, 22vh, 8rem); }
-  /* Digit colours follow the tone class (which swaps with the player), not
-     the seat class (which stays with the layout). */
+  /* POINTS is the audience's focal point — make it dominate the panel. */
+  .digit.big { font-size: clamp(4rem, 32vh, 12rem); }
   .col.tone-a .digit { color: var(--side-a); text-shadow: 0 0 12px rgba(79,195,247,0.35); }
   .col.tone-b .digit { color: var(--side-b); text-shadow: 0 0 12px rgba(255,138,101,0.35); }
   .mid .digit { color: var(--accent); text-shadow: 0 0 12px rgba(255,213,74,0.35); }
@@ -1055,6 +946,26 @@
     text-transform: uppercase;
     letter-spacing: 0.08em;
     font-size: 0.6rem;
+  }
+
+  /* Live LEADING / TRAILING pill inside each POINTS column */
+  .lead-badge {
+    margin-top: 0.15rem;
+    font-size: 0.65rem;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+    padding: 0.15rem 0.6rem;
+    border-radius: 999px;
+    text-transform: uppercase;
+    line-height: 1;
+  }
+  .lead-badge.leading { color: #0b0b0b; }
+  .lead-badge.leading.tone-a { background: var(--side-a); box-shadow: 0 0 10px rgba(79,195,247,0.5); }
+  .lead-badge.leading.tone-b { background: var(--side-b); box-shadow: 0 0 10px rgba(255,138,101,0.5); }
+  .lead-badge.trailing {
+    color: var(--muted);
+    background: transparent;
+    border: 1px solid rgba(255,255,255,0.15);
   }
 
   .foot {
@@ -1066,8 +977,6 @@
     padding: 0.2rem 0.35rem;
     border-top: 1px solid rgba(255,255,255,0.06);
     min-height: 2.25rem;
-    /* Cap the footer height so a long winner banner cannot push it below
-       the grid. If content overflows horizontally, ellipsis kicks in. */
     max-height: 3rem;
     overflow: hidden;
   }
@@ -1088,11 +997,6 @@
     letter-spacing: 0.02em;
   }
   .winner strong { color: var(--accent); letter-spacing: 0.04em; }
-  .winner.drawn {
-    background: linear-gradient(90deg, rgba(176,190,197,0.18), rgba(176,190,197,0.18));
-    color: #cfd8dc;
-  }
-  .winner.drawn .winner-dot { background: #b0bec5; box-shadow: 0 0 8px rgba(176,190,197,0.6); }
   .winner-dot {
     width: 0.55rem;
     height: 0.55rem;
@@ -1127,18 +1031,10 @@
   .foot-lbl { letter-spacing: 0.04em; }
 
   .foot-btn.swap { border-color: rgba(79,195,247,0.4); color: var(--side-a); }
-  .foot-btn.swap:not(:disabled):hover { border-color: var(--side-a); }
   .foot-btn.reset { border-color: rgba(255,213,74,0.4); color: var(--accent); }
-  .foot-btn.reset:not(:disabled):hover { border-color: var(--accent); }
+  .foot-btn.endm { border-color: rgba(76,175,80,0.5); color: #66bb6a; }
   .foot-btn.close { border-color: rgba(239,83,80,0.4); color: var(--danger); }
-  .foot-btn.close:not(:disabled):hover { border-color: var(--danger); }
 
-  /*
-   * Compact-height rules for landscape phones. Landscape width is ~720-900px
-   * on modern phones, and vertical space is what's actually scarce. Use a
-   * height-based media query so desktop landscape stays full-size but phone
-   * landscape collapses.
-   */
   @media (max-height: 500px) {
     .foot-lbl { display: none; }
     .foot-btn { padding: 0.35rem 0.55rem; }
@@ -1167,7 +1063,6 @@
     width: 100%;
     text-align: center;
   }
-  .dialog-card.win { border-color: var(--side-a); }
   .dialog-card.exit { border-color: var(--danger); }
   .dialog-card h2 {
     margin: 0 0 0.5rem;
@@ -1176,20 +1071,8 @@
     text-transform: uppercase;
     letter-spacing: 0.06em;
   }
-  .dialog-card.win h2 { color: var(--side-a); }
   .dialog-card.exit h2 { color: var(--danger); }
   .dialog-card .who { margin: 0 0 1rem; font-size: 1rem; }
-  .dialog-card .confirm {
-    background: var(--accent);
-    color: #0b0b0b;
-    border: 0;
-    border-radius: 999px;
-    padding: 0.6rem 1.25rem;
-    font-weight: 700;
-    font-size: 0.95rem;
-    width: 100%;
-    cursor: pointer;
-  }
   .dialog-actions { display: flex; gap: 0.5rem; }
   .dialog-actions .cancel, .dialog-actions .danger {
     flex: 1;
@@ -1202,4 +1085,175 @@
   }
   .dialog-actions .cancel { background: #1f1f1f; color: var(--fg); border: 1px solid #333; }
   .dialog-actions .danger { background: var(--danger); color: #0b0b0b; }
+
+  /*
+   * Winner popup with fireworks. Fireworks are pure CSS: 20 <span>s each
+   * with its own hue, offset, and delay, using a single keyframe that
+   * fires them outward from the centre of the screen. No canvas / no JS
+   * animation loop — cheap and durable.
+   */
+  .winner-dialog { padding: 1.5rem; }
+  .winner-dialog .dialog-card.champion {
+    background: linear-gradient(160deg, #1a1a1a 0%, #141414 100%);
+    border: 3px solid var(--accent);
+    box-shadow:
+      0 0 0 1px rgba(255, 213, 74, 0.35),
+      0 0 60px rgba(255, 213, 74, 0.35),
+      0 12px 40px rgba(0, 0, 0, 0.6);
+    padding: 2rem 1.5rem 1.5rem;
+    max-width: 28rem;
+    position: relative;
+    z-index: 2;
+    overflow: hidden;
+  }
+  .winner-dialog .dialog-card.champion::before {
+    /* Diagonal shine sweep across the card, once every few seconds. */
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      110deg,
+      transparent 30%,
+      rgba(255, 213, 74, 0.18) 45%,
+      rgba(255, 255, 255, 0.28) 50%,
+      rgba(255, 213, 74, 0.18) 55%,
+      transparent 70%
+    );
+    transform: translateX(-120%);
+    animation: champ-shine 3.2s ease-in-out infinite;
+    pointer-events: none;
+  }
+  @keyframes champ-shine {
+    0%, 55% { transform: translateX(-120%); }
+    100%    { transform: translateX(120%); }
+  }
+  .champ-trophy {
+    font-size: 4rem;
+    line-height: 1;
+    filter: drop-shadow(0 4px 12px rgba(255, 213, 74, 0.5));
+    animation: champ-trophy 2s ease-in-out infinite;
+  }
+  @keyframes champ-trophy {
+    0%, 100% { transform: translateY(0) rotate(-4deg) scale(1); }
+    50%      { transform: translateY(-6px) rotate(4deg) scale(1.05); }
+  }
+  .champ-label {
+    color: var(--accent);
+    font-size: 0.8rem;
+    letter-spacing: 0.35em;
+    font-weight: 800;
+    margin-top: 0.75rem;
+    text-shadow: 0 0 12px rgba(255, 213, 74, 0.5);
+  }
+  .champ-name {
+    font-size: clamp(1.5rem, 6vw, 2.5rem);
+    font-weight: 900;
+    color: var(--fg);
+    letter-spacing: -0.01em;
+    margin: 0.4rem 0 0.75rem;
+    text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+  }
+  .champ-score {
+    color: var(--muted);
+    font-size: 0.95rem;
+    letter-spacing: 0.02em;
+    margin-bottom: 1.5rem;
+  }
+  .champ-score strong {
+    color: var(--fg);
+    font-family: 'DSEG7 Classic', 'Courier New', monospace;
+    letter-spacing: 0.03em;
+    padding: 0 0.15rem;
+  }
+  .champ-sep { color: var(--muted); opacity: 0.4; margin: 0 0.35rem; }
+  .confirm-big {
+    background: var(--accent);
+    color: #0b0b0b;
+    border: 0;
+    border-radius: 999px;
+    padding: 0.8rem 1.5rem;
+    font-weight: 800;
+    font-size: 1rem;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+    box-shadow: 0 4px 14px rgba(255, 213, 74, 0.35);
+    transition: transform 0.1s;
+  }
+  .confirm-big:active { transform: translateY(1px); }
+
+  .fireworks {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 1;
+    overflow: hidden;
+  }
+  .spark {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    opacity: 0;
+    /* Each spark reads --n (its index 0..19), spreads its own launch
+       angle and delay from that number. --tx/--ty are the target offsets
+       set below by nth-child. */
+    animation: burst 2.2s ease-out infinite;
+    animation-delay: calc(var(--n) * 0.11s);
+  }
+  /* 8 colour classes cycle through the deck; enough that adjacent sparks
+     differ but the palette stays tight. */
+  .spark-0 { background: #ffd54a; box-shadow: 0 0 16px 4px rgba(255,213,74,0.7); }
+  .spark-1 { background: #ff6b6b; box-shadow: 0 0 16px 4px rgba(255,107,107,0.7); }
+  .spark-2 { background: #4fc3f7; box-shadow: 0 0 16px 4px rgba(79,195,247,0.7); }
+  .spark-3 { background: #66bb6a; box-shadow: 0 0 16px 4px rgba(102,187,106,0.7); }
+  .spark-4 { background: #ba68c8; box-shadow: 0 0 16px 4px rgba(186,104,200,0.7); }
+  .spark-5 { background: #ffb74d; box-shadow: 0 0 16px 4px rgba(255,183,77,0.7); }
+  .spark-6 { background: #ff8a65; box-shadow: 0 0 16px 4px rgba(255,138,101,0.7); }
+  .spark-7 { background: #f06292; box-shadow: 0 0 16px 4px rgba(240,98,146,0.7); }
+  /* Angles for the 20 particles, spread around a full circle. Distances
+     mix short + long so the burst has depth. */
+  .spark:nth-child(1)  { --tx:  240px; --ty: -140px; }
+  .spark:nth-child(2)  { --tx: -260px; --ty:   40px; }
+  .spark:nth-child(3)  { --tx:  100px; --ty:  280px; }
+  .spark:nth-child(4)  { --tx: -180px; --ty: -240px; }
+  .spark:nth-child(5)  { --tx:  300px; --ty:   60px; }
+  .spark:nth-child(6)  { --tx:  -60px; --ty:  300px; }
+  .spark:nth-child(7)  { --tx: -300px; --ty: -100px; }
+  .spark:nth-child(8)  { --tx:  180px; --ty: -260px; }
+  .spark:nth-child(9)  { --tx:  260px; --ty:  180px; }
+  .spark:nth-child(10) { --tx: -220px; --ty:  200px; }
+  .spark:nth-child(11) { --tx:   40px; --ty: -320px; }
+  .spark:nth-child(12) { --tx: -120px; --ty: -280px; }
+  .spark:nth-child(13) { --tx:  320px; --ty:  -60px; }
+  .spark:nth-child(14) { --tx: -280px; --ty:  120px; }
+  .spark:nth-child(15) { --tx:   80px; --ty:  320px; }
+  .spark:nth-child(16) { --tx:  200px; --ty:  240px; }
+  .spark:nth-child(17) { --tx: -240px; --ty: -180px; }
+  .spark:nth-child(18) { --tx:  340px; --ty:   20px; }
+  .spark:nth-child(19) { --tx: -100px; --ty:  340px; }
+  .spark:nth-child(20) { --tx:  140px; --ty: -320px; }
+
+  @keyframes burst {
+    0% {
+      opacity: 0;
+      transform: translate(-50%, -50%) scale(0.4);
+    }
+    10% {
+      opacity: 1;
+      transform: translate(-50%, -50%) scale(1.6);
+    }
+    100% {
+      opacity: 0;
+      transform: translate(calc(-50% + var(--tx, 0)), calc(-50% + var(--ty, 0))) scale(0.5);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    /* Accessibility: no explosions. Just fade the sparks in place. */
+    .spark, .champ-trophy, .winner-dialog .dialog-card.champion::before {
+      animation: none;
+    }
+    .spark { opacity: 0.55; }
+  }
 </style>

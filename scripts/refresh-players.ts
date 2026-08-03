@@ -1,12 +1,12 @@
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { dedupePlayers, type Player } from './scrape/lib.ts';
-import { scrapeMcaInternational } from './scrape/mca.ts';
+import { scrapeMcaAll } from './scrape/mca.ts';
 import { scrapeSol5Lit } from './scrape/sol5.ts';
 
 async function main() {
   const buckets = await Promise.all([
-    scrapeMcaInternational().catch((err) => {
+    scrapeMcaAll().catch((err) => {
       console.error('[mca] scrape failed:', err.message);
       return [] as Player[];
     }),
