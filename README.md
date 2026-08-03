@@ -20,33 +20,77 @@ that also ships as an installable APK — no Play Store required.
 
 ## Features
 
-- **Match setup:** pick format (Best of 3 / Single set / Custom), mode
-  (Singles / Doubles), player-name autocomplete over a scraped player DB.
-- **Scoring layout:** MCA-style `SET | POINTS | BOARD | POINTS | SET` grid
-  with real 7-segment digits (DSEG7 Classic).
-- **Gestures:** tap a digit for +1, swipe left for +1, swipe right for −1.
-  One gesture = one adjust.
-- **Landscape lock:** score screen locks to landscape on the first user
-  gesture (fullscreen + Screen Orientation API); Close returns to portrait.
-- **Set-end auto-detect:** 25-point target, 8-board cap, or per-set time
-  limit. Silent — no popup covers the score. Winner's SET count ticks up,
-  everything else resets, next set begins.
-- **Draw handling:** final set tied → both player pills go silver with a
-  ½ badge; footer reads "Match drawn · ½ point each".
-- **Match winner:** gold "WINNER" ribbon on the winning name pill, gold
-  gradient background, glossy shine sweep, wobbling 🏆.
-- **Live queen-lockout ticker:** at 22+ pts, header reads
-  "SWAPNIL needs 3 points to win · NO QUEEN" (compact form for both sides).
-- **Colours follow players:** Swap sides moves names, SET counts, and
-  colour tokens together — the same person keeps their pill colour.
-- **State persistence:** in-flight match auto-saved to localStorage;
-  a refresh mid-match restores. "Start match" wipes the pair's cached
-  state, so replaying the same players always begins at 0-0-0.
-- **Wake lock:** phone screen stays awake during a match.
+### Setup screen
+
+- **Match rules** entered as three plain number inputs: **Sets**, **Points**,
+  and **Max boards** (`0` for unlimited — for EuroCup doubles-final format).
+- **Mode:** Singles (1v1) or Doubles (2v2).
+- **Player picker** with autocomplete over **~2,000 players** scraped from
+  MCA (international + ranking tables) and Sol5 LIT (44 countries). Free-text
+  names work too if a player isn't in the DB.
+- **"Represents" field** per player (singles) or per team (doubles) — free
+  text for country, state, club, sponsor, seed number, etc. Renders as a
+  small chip next to the name pill on the scoreboard.
+- **Update banner:** setup checks GitHub Releases on load; if a newer
+  version is out, a pulsing gold banner shows the `current → new` version
+  delta and links to the APK download.
+
+### Score screen (human-driven)
+
+- **Landscape only.** Score screen locks to landscape on the first user
+  gesture (fullscreen + Screen Orientation API). Close returns to portrait.
+- **MCA-style layout:** `SET | POINTS | BOARD | POINTS | SET` grid with
+  real 7-segment digits (DSEG7 Classic). POINTS digit is enlarged
+  (`clamp(4rem, 32vh, 12rem)`) for camera / projector legibility.
+- **Every digit is a control.** Tap a digit for +1. Swipe left for +1,
+  swipe right for −1. One gesture = one adjust.
+- **Nothing auto-completes.** The organiser drives every number. No
+  auto set-end at 25 points, no auto-end at 8 boards, no timer. The app
+  only *displays* — the human decides when a set or match is over.
+- **Board 9 decider.** In fixed-cap formats, the BOARD digit refuses to go
+  past the cap unless the current-set POINTS are tied — then it unlocks
+  one decider board (e.g. `9` in an 8-board format).
+- **Points clamp at 25** and **sets clamp at Best-of-N**. Board has no
+  upper cap in unlimited formats.
+- **Set-pip strip** in the header shows sets won by each side (colour-coded
+  pips), the current set as a pulsing accent pip, and pending sets as
+  muted outlines.
+- **Board progress bar** shows current board vs. max as a filled bar.
+- **Live queen-lockout ticker** at 22+ pts, e.g. `SWAPNIL needs 3 points
+  to win · NO QUEEN` (compact form when both sides are locked out).
+
+### Sides + colours
+
+- **Colours follow players, not seats.** Swap-sides moves names, notes,
+  colours, SET counts, and current-set POINTS together. BOARD stays put
+  (it's a match-wide counter). Mid-set swaps preserve the running score.
+
+### End of match
+
+- **End Match** button (🏁) in the footer. Picks the winner by SET count
+  first, POINTS as tiebreaker. On a POINTS tiebreak, the winner is
+  auto-credited the decider set so the footer reads a correct final
+  tally (e.g. `wins 1–2`, not `wins 1–1`).
+- **Fireworks popup:** gold gradient champion card with an animated 🏆,
+  "CHAMPION" ribbon, big name, sets + final-board score, and a 20-particle
+  CSS fireworks burst. Respects `prefers-reduced-motion`.
+- **Twin-medal treatment** on the player pills: winner gets a **gold**
+  gradient pill with a **🥇 1ST** badge; loser gets a **silver** gradient
+  pill with a **🥈 2ND** badge. Structurally identical (typography,
+  ring, glow, shine, medal-bob animation) — only palette differs, driven
+  by CSS custom properties.
+- **Winner UI is gated** on the explicit End Match tap. Manually adjusting
+  SET+/- mid-match never flashes the winner treatment.
+
+### Reliability
+
+- **Persistence:** in-flight match auto-saved to `localStorage`; a mid-match
+  refresh restores. "Start match" wipes the pair's cached state so
+  replaying the same players always begins at 0-0-0.
+- **Wake lock:** phone screen stays awake during a match (Screen Wake
+  Lock API; re-requests on `visibilitychange` when the screen unlocks).
 - **PWA installable** on Android/desktop Chrome and **Android APK** via
   a Trusted Web Activity wrapper.
-- **In-app update banner:** setup screen checks GitHub Releases and shows
-  "Update available" pointing at the download.
 
 ## Install on Android
 
@@ -79,15 +123,16 @@ npm run refresh-players
 ```
 
 The scraper pulls from
-[Maharashtra Carrom Association](https://maharashtracarromassociation.com/international_player.php)
-and (with a valid Anubis proof-of-work cookie in `.env`) from
-[Sol5 LIT](https://sol5.metapensiero.it/lit).
+[Maharashtra Carrom Association](https://maharashtracarromassociation.com)
+(international + seasonal ranking tables) and, with a valid Anubis
+proof-of-work cookie in `.env`, from
+[Sol5 LIT](https://sol5.metapensiero.it/lit) across 44 countries.
 
 ## Deployment
 
 Every push to `main` deploys to GitHub Pages via
 `.github/workflows/deploy.yml`. Tagging a release
-(`git tag v1.5.6 && git push --tags`) creates a draft GitHub Release —
+(`git tag v1.6.2 && git push --tags`) creates a draft GitHub Release —
 build the APK locally, attach it, publish:
 
 ```sh
@@ -96,11 +141,11 @@ cd twa
 $ANDROID_HOME/build-tools/34.0.0/apksigner sign \
   --ks android.keystore \
   --ks-key-alias android \
-  --out carromscore-v1.5.6.apk \
+  --out carromscore-v1.6.2.apk \
   app/build/outputs/apk/release/app-release-unsigned.apk
 
-gh release upload v1.5.6 carromscore-v1.5.6.apk
-gh release edit v1.5.6 --draft=false
+gh release upload v1.6.2 carromscore-v1.6.2.apk
+gh release edit v1.6.2 --draft=false --notes-file release-notes-v1.6.2.md
 ```
 
 Bubblewrap prerequisites (JDK 17 + Android SDK) live in `~/.bubblewrap/`.
