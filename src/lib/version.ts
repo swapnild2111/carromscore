@@ -3,7 +3,7 @@
  * appVersionName. The update-check compares this string against the
  * `tag_name` on the latest GitHub Release.
  */
-export const APP_VERSION = '1.6.1';
+export const APP_VERSION = '1.6.2';
 
 const REPO = 'swapnild2111/carromscore';
 

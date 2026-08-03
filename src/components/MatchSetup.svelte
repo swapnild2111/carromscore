@@ -220,14 +220,20 @@
 
   {#if loadingPlayers}
     <p class="hint">Loading player list…</p>
-  {:else}
-    <p class="hint">{players.length} players available in autocomplete. Free-text names work too.</p>
   {/if}
 
   {#if hasUpdate}
     <a class="update-banner" href={releaseUrl} target="_blank" rel="noopener">
-      <strong>Update available:</strong> {latestTag}
-      <span>Tap to download the new APK</span>
+      <span class="upd-dot" aria-hidden="true"></span>
+      <span class="upd-body">
+        <strong class="upd-title">New version available</strong>
+        <span class="upd-sub">
+          <span class="upd-from">v{APP_VERSION}</span>
+          <span class="upd-arrow" aria-hidden="true">→</span>
+          <span class="upd-to">{latestTag}</span>
+          <span class="upd-cta">· Tap to download the new APK</span>
+        </span>
+      </span>
     </a>
   {/if}
 
@@ -237,7 +243,11 @@
     <p class="hint">Tap Share → Add to Home Screen to install.</p>
   {/if}
 
-  <p class="version">v{APP_VERSION}</p>
+  <p class="version-line">
+    © 2026 Swapnil Deshpande
+    <span class="hint-sep" aria-hidden="true">·</span>
+    <span class="hint-ver">v{APP_VERSION}</span>
+  </p>
 </form>
 
 <style>
@@ -469,27 +479,95 @@
     cursor: pointer;
     align-self: center;
   }
+  /*
+   * Update-available banner. Amber gold gradient with a soft pulsing dot
+   * on the left so it catches the eye. Rows: title on top, version delta
+   * on the bottom.
+   */
   .update-banner {
     display: flex;
-    flex-direction: column;
     align-items: center;
-    gap: 0.15rem;
-    padding: 0.75rem 1rem;
-    background: rgba(255, 213, 74, 0.12);
+    gap: 0.75rem;
+    padding: 0.8rem 1rem;
+    background: linear-gradient(120deg, rgba(255, 213, 74, 0.18), rgba(255, 143, 0, 0.12));
     border: 1px solid var(--accent);
     border-radius: 0.75rem;
     color: var(--fg);
     text-decoration: none;
-    text-align: center;
+    box-shadow: 0 0 24px rgba(255, 213, 74, 0.15);
   }
-  .update-banner strong { color: var(--accent); font-size: 0.95rem; }
-  .update-banner span { color: var(--muted); font-size: 0.8rem; }
-  .version {
+  .update-banner:hover { background: linear-gradient(120deg, rgba(255, 213, 74, 0.25), rgba(255, 143, 0, 0.18)); }
+  .upd-dot {
+    flex-shrink: 0;
+    width: 0.75rem;
+    height: 0.75rem;
+    border-radius: 999px;
+    background: var(--accent);
+    box-shadow: 0 0 0 4px rgba(255, 213, 74, 0.25), 0 0 12px var(--accent);
+    animation: upd-pulse 1.6s ease-in-out infinite;
+  }
+  @keyframes upd-pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%      { opacity: 0.75; transform: scale(1.15); }
+  }
+  .upd-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    min-width: 0;
+  }
+  .upd-title {
+    color: var(--accent);
+    font-size: 0.95rem;
+    letter-spacing: 0.02em;
+    font-weight: 800;
+  }
+  .upd-sub {
+    color: var(--muted);
+    font-size: 0.8rem;
+    letter-spacing: 0.02em;
+  }
+  .upd-from, .upd-to {
+    display: inline-block;
+    padding: 0.05rem 0.4rem;
+    border-radius: 999px;
+    font-family: inherit;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    font-size: 0.75rem;
+    vertical-align: baseline;
+  }
+  .upd-from { background: rgba(255,255,255,0.06); color: var(--muted); }
+  .upd-to { background: rgba(255, 213, 74, 0.2); color: var(--accent); border: 1px solid rgba(255, 213, 74, 0.4); }
+  .upd-arrow { margin: 0 0.3rem; opacity: 0.6; }
+  .upd-cta { margin-left: 0.25rem; }
+
+  /*
+   * Footer copyright + version pill. Matches the score-screen footer so
+   * both screens read as one product. Version chip: soft accent pill,
+   * sans-serif, bold — glanceable but doesn't fight the copyright text.
+   */
+  .version-line {
     text-align: center;
     color: var(--muted);
-    font-size: 0.7rem;
+    font-size: 0.75rem;
     margin: 0;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.02em;
+  }
+  .hint-sep { opacity: 0.4; margin: 0 0.3rem; }
+  .hint-ver {
+    display: inline-block;
+    padding: 0.1rem 0.5rem;
+    background: rgba(255, 213, 74, 0.14);
+    border: 1px solid rgba(255, 213, 74, 0.35);
+    border-radius: 999px;
+    color: var(--accent);
+    font-family: inherit;
+    font-weight: 700;
+    font-size: 0.7rem;
+    letter-spacing: 0.06em;
+    line-height: 1;
+    vertical-align: baseline;
   }
 
   @media (max-width: 520px) {

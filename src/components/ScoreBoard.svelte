@@ -9,6 +9,7 @@
     teamLabel,
     type MatchConfig,
   } from '../lib/match';
+  import { APP_VERSION } from '../lib/version';
 
   type Side = { name: string; note: string; sets: number; points: number };
   /*
@@ -528,7 +529,11 @@
         wins {sideA.sets}–{sideB.sets}
       </span>
     {:else}
-      <span class="hint">© 2026 Swapnil Deshpande</span>
+      <span class="hint">
+        © 2026 Swapnil Deshpande
+        <span class="hint-sep" aria-hidden="true">·</span>
+        <span class="hint-ver">v{APP_VERSION}</span>
+      </span>
     {/if}
     <div class="foot-actions">
       <button type="button" class="foot-btn swap" onclick={swapSides} aria-label="Swap sides">
@@ -1013,6 +1018,26 @@
     color: var(--muted);
     font-size: 0.7rem;
     letter-spacing: 0.02em;
+  }
+  .hint-sep { opacity: 0.4; margin: 0 0.3rem; }
+  /*
+   * Version chip: same sans-serif family as the rest of the app so it reads
+   * as UI type, not seven-segment. Highlighted with a soft accent pill so
+   * the number is glanceable at broadcast distance.
+   */
+  .hint-ver {
+    display: inline-block;
+    padding: 0.1rem 0.5rem;
+    background: rgba(255, 213, 74, 0.14);
+    border: 1px solid rgba(255, 213, 74, 0.35);
+    border-radius: 999px;
+    color: var(--accent);
+    font-family: inherit;
+    font-weight: 700;
+    font-size: 0.7rem;
+    letter-spacing: 0.06em;
+    line-height: 1;
+    vertical-align: baseline;
   }
   .winner {
     display: inline-flex;
