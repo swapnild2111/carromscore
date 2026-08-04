@@ -15,8 +15,8 @@ scoreboard that runs as a website and as an installable Android app.
 [![PWA](https://img.shields.io/badge/PWA-installable-5A0FC8?logo=pwa&logoColor=white)](https://swapnild2111.github.io/carromscore/)
 [![TWA](https://img.shields.io/badge/Android-Bubblewrap%20TWA-3DDC84?logo=android&logoColor=white)](https://github.com/GoogleChromeLabs/bubblewrap)
 
-Aimed at replacing the buggy MCA Android scoreboard with a single web app
-that also ships as an installable APK — no Play Store required.
+A single web app for live carrom scoring, that also ships as an
+installable Android APK — no Play Store required.
 
 ## How to use
 
@@ -32,8 +32,9 @@ Singles, Doubles, or Practice, and fill in each player + their "Represents"
   <img src="docs/screenshots/02-setup-filled.png" alt="Setup screen filled with Swapnil Deshpande (Denmark) vs Yuvaraj Eshwaramoorthy (India)" width="360" />
 </p>
 
-The picker autocompletes from ~2,000 real players scraped from MCA and
-Sol5 LIT. Free-text names work if a player isn't in the DB.
+The picker autocompletes from ~2,000 real player names. Free-text
+names work if a player isn't in the DB. See the [Credits](#credits)
+section for name sources.
 
 ### 2. Score the match
 
@@ -123,9 +124,9 @@ board-by-board matrix with per-set totals and grand total missed.
   and **Max boards** (`0` for unlimited — for EuroCup doubles-final format).
 - **Mode:** Singles (1v1), Doubles (2v2), or **Practice** (solo drill —
   no opponent; track missed shots per board across N sets × M boards).
-- **Player picker** with autocomplete over **~2,000 players** scraped from
-  MCA (international + ranking tables) and Sol5 LIT (44 countries). Free-text
-  names work too if a player isn't in the DB.
+- **Player picker** with autocomplete over **~2,000 players**. Free-text
+  names work too if a player isn't in the DB. See the
+  [Credits](#credits) section for name sources.
 - **"Represents" field** per player (singles) or per team (doubles) — free
   text for country, state, club, sponsor, seed number, etc. Renders as a
   small chip next to the name pill on the scoreboard.
@@ -137,9 +138,9 @@ board-by-board matrix with per-set totals and grand total missed.
 
 - **Landscape only.** Score screen locks to landscape on the first user
   gesture (fullscreen + Screen Orientation API). Close returns to portrait.
-- **MCA-style layout:** `SET | POINTS | BOARD | POINTS | SET` grid with
-  real 7-segment digits (DSEG7 Classic). POINTS digit is enlarged
-  (`clamp(4rem, 32vh, 12rem)`) for camera / projector legibility.
+- **Broadcast-ready layout:** `SET | POINTS | BOARD | POINTS | SET`
+  grid with real 7-segment digits (DSEG7 Classic). POINTS digit is
+  enlarged (`clamp(4rem, 32vh, 12rem)`) for camera / projector legibility.
 - **Every digit is a control.** Tap a digit for +1. Swipe left for +1,
   swipe right for −1. One gesture = one adjust.
 - **Nothing auto-completes.** The organiser drives every number. No
@@ -235,11 +236,8 @@ Refresh the player-name DB (writes to `public/data/players.json`):
 npm run refresh-players
 ```
 
-The scraper pulls from
-[Maharashtra Carrom Association](https://maharashtracarromassociation.com)
-(international + seasonal ranking tables) and, with a valid Anubis
-proof-of-work cookie in `.env`, from
-[Sol5 LIT](https://sol5.metapensiero.it/lit) across 44 countries.
+See the [Credits](#credits) section below for the sources the scraper
+pulls from.
 
 ## Deployment
 
@@ -268,3 +266,20 @@ must uninstall + reinstall before any future update.
 ## License
 
 [MIT](./LICENSE) © Swapnil Deshpande
+
+## Credits
+
+The player-picker autocomplete is seeded with **player names only** from
+two public federation websites. Nothing else — no rankings, ratings,
+match histories, photos, or personal data — is scraped or bundled with
+this app. Names are used solely so the organiser can find and pick a
+player at match setup instead of typing every name from scratch.
+
+- **[Maharashtra Carrom Association](https://maharashtracarromassociation.com/)** —
+  international player list + seasonal ranking tables. Names only.
+- **[Sol5 LIT](https://sol5.metapensiero.it/lit)** — 44 national
+  federation rosters. Names only.
+
+If you're a rights holder for either site and would like your names
+removed from the seed data, open an issue on this repository and we'll
+drop them from the next `refresh-players` build.
