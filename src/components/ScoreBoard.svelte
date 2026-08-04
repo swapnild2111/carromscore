@@ -132,11 +132,13 @@
 
     window.addEventListener('resize', updateOrientation);
     window.addEventListener('orientationchange', updateOrientation);
+    window.addEventListener('focus', onFocus);
     document.addEventListener('visibilitychange', onVisibilityChange);
     document.addEventListener('fullscreenchange', onFullscreenChange);
     return () => {
       window.removeEventListener('resize', updateOrientation);
       window.removeEventListener('orientationchange', updateOrientation);
+      window.removeEventListener('focus', onFocus);
       document.removeEventListener('visibilitychange', onVisibilityChange);
       document.removeEventListener('fullscreenchange', onFullscreenChange);
       releaseWakeLock();
@@ -146,35 +148,61 @@
 
   /**
    * Screen Wake Lock. Keeps the phone screen from dimming/locking during a
-   * match. Android drops the lock when the tab is backgrounded, so we
-   * re-request on visibilitychange when we come back to the foreground.
+   * match. Android drops the lock when the tab is backgrounded (incoming
+   * call, app switch, screen off), so we re-request on visibilitychange
+   * and on window focus. Crucially, the browser also fires a `release`
+   * event on the sentinel when it drops the lock silently — we listen
+   * for that and null out our reference so the next re-acquire attempt
+   * actually runs (previously our `if (!wakeLock)` guard could skip the
+   * re-request because the reference was stale-but-not-null).
    */
-  type WakeLockSentinelLike = { release: () => Promise<void> };
+  type WakeLockSentinelLike = {
+    release: () => Promise<void>;
+    addEventListener?: (type: 'release', listener: () => void) => void;
+  };
   let wakeLock: WakeLockSentinelLike | null = null;
 
   async function requestWakeLock() {
+    if (wakeLock) return; // already held
     const wl = (navigator as unknown as { wakeLock?: { request: (type: string) => Promise<WakeLockSentinelLike> } }).wakeLock;
     if (!wl) return;
+    // Wake lock can only be requested while the document is visible;
+    // Chrome rejects otherwise. Skip silently and wait for the next
+    // visibility change to try again.
+    if (document.visibilityState !== 'visible') return;
     try {
-      wakeLock = await wl.request('screen');
+      const sentinel = await wl.request('screen');
+      wakeLock = sentinel;
+      // When Android/Chrome releases the lock in the background, clear our
+      // reference so onVisibilityChange / onFocus can re-request cleanly.
+      sentinel.addEventListener?.('release', () => {
+        if (wakeLock === sentinel) wakeLock = null;
+      });
     } catch {
-      // Browser refused
+      // Browser refused (not visible, not secure context, etc.)
     }
   }
   async function releaseWakeLock() {
     if (!wakeLock) return;
+    const held = wakeLock;
+    wakeLock = null;
     try {
-      await wakeLock.release();
+      await held.release();
     } catch {
       // ignore
     }
-    wakeLock = null;
   }
   function onVisibilityChange() {
     if (document.visibilityState === 'visible') {
       if (!wakeLock) requestWakeLock();
       if (!document.fullscreenElement) landscapeLocked = false;
     }
+  }
+  // Belt-and-braces backup for Android WebView / Chrome edge cases where
+  // `visibilitychange` doesn't refire on unlock (some devices only send
+  // `focus`). Cheap to try — requestWakeLock is a no-op if already held.
+  function onFocus() {
+    if (document.visibilityState === 'visible' && !wakeLock) requestWakeLock();
   }
   function onFullscreenChange() {
     if (!document.fullscreenElement && landscapeLocked) {
@@ -547,13 +575,14 @@
         </div>
         <div class="pscroll-row">
           {#each Array.from({ length: cfg.maxBoards }, (_, i) => i) as boardIdx (boardIdx)}
+            {@const cellVal = (practiceBoards[practiceSetIdx]?.[boardIdx]) ?? 0}
             <button
               type="button"
               class="pcell"
               use:swipeAdjust={{ onDelta: (d) => adjustPracticeBoard(practiceSetIdx, boardIdx, d) }}
-              aria-label="Set {practiceSetIdx + 1} board {boardIdx + 1}: {(practiceBoards[practiceSetIdx]?.[boardIdx]) ?? 0} missed"
+              aria-label="Set {practiceSetIdx + 1} board {boardIdx + 1}: {cellVal} missed"
             >
-              <div class="digit pdigit">{pad2((practiceBoards[practiceSetIdx]?.[boardIdx]) ?? 0)}</div>
+              <div class="digit pdigit">{cellVal}</div>
             </button>
           {/each}
         </div>
@@ -754,7 +783,7 @@
       <button type="button" class="foot-btn reset" onclick={requestReset} disabled={!hasProgress} aria-label="Reset scores">
         <span class="foot-ico" aria-hidden="true">↻</span><span class="foot-lbl">Reset</span>
       </button>
-      <button type="button" class="foot-btn endm" onclick={endMatch} disabled={!isPractice && !hasProgress} aria-label="End match">
+      <button type="button" class="foot-btn endm" onclick={endMatch} disabled={!isPractice && (sideA.sets === sideB.sets && sideA.points === sideB.points)} aria-label="End match">
         <span class="foot-ico" aria-hidden="true">🏁</span><span class="foot-lbl">End</span>
       </button>
       <button type="button" class="foot-btn close" onclick={requestExit} aria-label="Close match">
@@ -811,7 +840,7 @@
               <tr>
                 <td class="rc-set">{setIdx + 1}</td>
                 {#each row as cell, boardIdx (boardIdx)}
-                  <td>{pad2(cell)}</td>
+                  <td>{cell}</td>
                 {/each}
                 <td class="rc-total">{practiceSetTotal(setIdx)}</td>
               </tr>
@@ -1723,15 +1752,20 @@
   .pscroll::-webkit-scrollbar { display: none; }
   .pscroll-head,
   .pscroll-row {
-    /* The row is (board-count / visible) × 100% wide of the viewport
-       slot; each cell is 1/board-count of the row, which resolves to
-       exactly 1/visible of the *viewport* — so `visible` cells fit and
-       the rest scroll. */
+    /* Grid of `board-count` cells laid out so exactly `visible` fit
+       inside .pscroll (the scroller's viewport slot) with the same
+       0.4rem inter-cell gap. Trick: give each track a fixed width of
+       `1/visible` of the SCROLLER, minus its share of the gap so the
+       gap doesn't push cells off the right edge.
+         cell-width = (100% - (visible-1) * gap) / visible
+       No outer width override — `grid-auto-flow: column` lets the row
+       expand horizontally past the scroller for board-count > visible,
+       which is exactly the scrollable overflow we want. */
+    --gap: 0.4rem;
     display: grid;
     grid-auto-flow: column;
-    grid-auto-columns: calc(100% / var(--board-count, 4));
-    column-gap: 0.4rem;
-    width: calc(100% * var(--board-count, 4) / var(--visible, 4));
+    grid-auto-columns: calc((100% - (var(--visible, 4) - 1) * var(--gap)) / var(--visible, 4));
+    column-gap: var(--gap);
   }
   .pscroll-head { align-items: center; }
   .pscroll-row > .pcell { scroll-snap-align: start; }
@@ -1739,9 +1773,13 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    background: transparent;
-    border: 1px solid #222;
-    border-radius: 0.5rem;
+    /* Very light card treatment: subtle inner fill + soft warm border so
+       each B-column is a distinct rounded tile. Anchors the digit inside
+       its cell and reinforces the tap target without competing with the
+       digits themselves. */
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 213, 74, 0.14);
+    border-radius: 0.6rem;
     color: inherit;
     cursor: pointer;
     padding: 0.1rem;
@@ -1755,7 +1793,12 @@
     -webkit-tap-highlight-color: transparent;
     transition: background 0.1s, transform 0.06s, border-color 0.15s;
   }
-  .pcell:active { transform: scale(0.97); background: rgba(255,255,255,0.06); }
+  .pcell:hover { border-color: rgba(255, 213, 74, 0.28); }
+  .pcell:active {
+    transform: scale(0.97);
+    background: rgba(255, 213, 74, 0.06);
+    border-color: rgba(255, 213, 74, 0.4);
+  }
   .pcell:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .pdigit {
     color: var(--accent);
