@@ -18,7 +18,7 @@
  *   - 'single-unlimited' → EuroCup doubles final (single set, no board cap)
  */
 export type Format = 'bo3' | 'single' | 'single-unlimited' | 'custom';
-export type Mode = 'singles' | 'doubles';
+export type Mode = 'singles' | 'doubles' | 'practice';
 
 export type MatchConfig = {
   format: Format;
@@ -109,7 +109,7 @@ function parseFormat(raw: string | null): Format | null {
 }
 
 function parseMode(raw: string | null): Mode | null {
-  return raw === 'singles' || raw === 'doubles' ? raw : null;
+  return raw === 'singles' || raw === 'doubles' || raw === 'practice' ? raw : null;
 }
 
 export function decodeConfig(query: URLSearchParams): MatchConfig {
@@ -146,12 +146,14 @@ export function teamLabel(name: string, partner: string, mode: Mode): string {
 }
 
 /**
- * localStorage key for a match's in-flight state, derived only from player
- * names so a refresh mid-match restores the same key. Setup wipes this key
- * before starting so "same players again" always begins at 0-0.
+ * localStorage key for a match's in-flight state, derived from mode + player
+ * names so a refresh mid-match restores the same key. Mode is part of the key
+ * so a Practice run with only playerA doesn't collide with a Singles match
+ * where playerB was left blank. Setup wipes this key before starting so
+ * "same players again" always begins at 0-0.
  */
-export function matchStateKey(playerA: string, playerB: string): string {
-  return `carromscore:state:${playerA}:${playerB}`;
+export function matchStateKey(mode: Mode, playerA: string, playerB: string): string {
+  return `carromscore:state:${mode}:${playerA}:${playerB}`;
 }
 
 /**

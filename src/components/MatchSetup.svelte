@@ -31,10 +31,32 @@
   });
 
   function setMode(m: Mode) {
+    const wasPractice = cfg.mode === 'practice';
     cfg.mode = m;
     if (m === 'singles') {
       cfg.playerA2 = '';
       cfg.playerB2 = '';
+      // Restore match-shape defaults if we're coming back from Practice.
+      if (wasPractice) {
+        cfg.bestOf = 3;
+        cfg.maxBoards = 8;
+        cfg.pointsTarget = 25;
+      }
+    } else if (m === 'practice') {
+      // Solo drill: clear the whole B side and the doubles partner.
+      // Practice defaults: 1 set × 4 boards, points unused. Overwriting
+      // here (rather than at $state init) means switching back and forth
+      // between modes always seeds sensible defaults.
+      cfg.playerA2 = '';
+      cfg.playerB = '';
+      cfg.playerB2 = '';
+      cfg.noteB = '';
+      cfg.bestOf = 1;
+      cfg.maxBoards = 4;
+    } else if (m === 'doubles' && wasPractice) {
+      cfg.bestOf = 3;
+      cfg.maxBoards = 8;
+      cfg.pointsTarget = 25;
     }
   }
 
@@ -54,6 +76,11 @@
 
   let canStart = $derived(() => {
     const a1 = cfg.playerA.trim().length > 0;
+    if (cfg.mode === 'practice') {
+      // Solo drill: one player is enough. Also need a real per-set board count
+      // so the score grid has a shape — reject 0 (unlimited) here.
+      return a1 && cfg.maxBoards > 0;
+    }
     const b1 = cfg.playerB.trim().length > 0;
     if (cfg.mode === 'singles') return a1 && b1;
     return a1 && b1 && cfg.playerA2.trim().length > 0 && cfg.playerB2.trim().length > 0;
@@ -63,7 +90,7 @@
     e.preventDefault();
     if (!canStart()) return;
     try {
-      localStorage.removeItem(matchStateKey(cfg.playerA, cfg.playerB));
+      localStorage.removeItem(matchStateKey(cfg.mode, cfg.playerA, cfg.playerB));
     } catch {
       // ignore
     }
@@ -155,19 +182,24 @@
 
 
 <form class="setup" onsubmit={start}>
-  <fieldset class="rules">
+  <fieldset class="rules" class:rules-practice={cfg.mode === 'practice'}>
     <legend>Match rules</legend>
     <label>
       <span>Sets</span>
       <input type="number" min="1" max="9" step="1" bind:value={cfg.bestOf} />
     </label>
+    {#if cfg.mode !== 'practice'}
+      <label>
+        <span>Points</span>
+        <input type="number" min="1" step="1" bind:value={cfg.pointsTarget} />
+      </label>
+    {/if}
     <label>
-      <span>Points</span>
-      <input type="number" min="1" step="1" bind:value={cfg.pointsTarget} />
-    </label>
-    <label>
-      <span>Max boards <em class="hint-inline">(0 = ∞)</em></span>
-      <input type="number" min="0" step="1" bind:value={cfg.maxBoards} />
+      <span>
+        {cfg.mode === 'practice' ? 'Boards per set' : 'Max boards'}
+        {#if cfg.mode !== 'practice'}<em class="hint-inline">(0 = ∞)</em>{/if}
+      </span>
+      <input type="number" min={cfg.mode === 'practice' ? 1 : 0} step="1" bind:value={cfg.maxBoards} />
     </label>
   </fieldset>
 
@@ -183,6 +215,11 @@
       <span class="opt-title">Doubles</span>
       <span class="opt-meta">2 vs 2</span>
     </label>
+    <label class:selected={cfg.mode === 'practice'}>
+      <input type="radio" name="mode" value="practice" checked={cfg.mode === 'practice'} onchange={() => setMode('practice')} />
+      <span class="opt-title">Practice</span>
+      <span class="opt-meta">Solo drill</span>
+    </label>
   </fieldset>
 
   {#if cfg.mode === 'singles'}
@@ -193,6 +230,11 @@
     <div class="player-row">
       {@render picker('Player B', 'playerB')}
       {@render noteInput('Represents', 'noteB')}
+    </div>
+  {:else if cfg.mode === 'practice'}
+    <div class="player-row">
+      {@render picker('Player', 'playerA')}
+      {@render noteInput('Represents', 'noteA')}
     </div>
   {:else}
     <div class="team-block">
@@ -274,10 +316,10 @@
     fieldset { grid-template-columns: repeat(4, 1fr); }
   }
   fieldset.fmt-mode {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr 1fr 1fr;
   }
   @media (min-width: 720px) {
-    fieldset.fmt-mode { grid-template-columns: 1fr 1fr; }
+    fieldset.fmt-mode { grid-template-columns: 1fr 1fr 1fr; }
   }
   /* Compact chip-style option: title on one line, meta line beneath.
      No big badge column — was clutter. Selected state uses only the border
@@ -331,6 +373,9 @@
     display: grid;
     grid-template-columns: 1fr 1fr 1fr;
     gap: 0.6rem;
+  }
+  fieldset.rules-practice {
+    grid-template-columns: 1fr 1fr;
   }
   fieldset.rules label {
     display: flex;
@@ -572,7 +617,7 @@
 
   @media (max-width: 520px) {
     fieldset { grid-template-columns: 1fr; }
-    fieldset.fmt-mode { grid-template-columns: 1fr 1fr; }
+    fieldset.fmt-mode { grid-template-columns: 1fr 1fr 1fr; }
     .row2 { grid-template-columns: 1fr; }
     .row3 { grid-template-columns: 1fr 1fr; }
     .player-row { grid-template-columns: 1fr; }

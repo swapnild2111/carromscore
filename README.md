@@ -23,7 +23,7 @@ that also ships as an installable APK — no Play Store required.
 ### 1. Set up the match
 
 Open the app. Enter match rules (Sets / Points / Max boards), pick
-Singles or Doubles, and fill in each player + their "Represents"
+Singles, Doubles, or Practice, and fill in each player + their "Represents"
 (country, state, club, whatever).
 
 <p align="center">
@@ -81,13 +81,48 @@ same typography — only the palette differs.
   <img src="docs/screenshots/07-end-match-medals.png" alt="Twin-medal treatment on the name pills after End Match" width="720" />
 </p>
 
+### 4. Practice mode (solo drill)
+
+Playing alone at home? Pick **Practice** in the setup screen. Practice is
+a solo drill: you play N sets × M boards and record the number of
+**missed shots** per board. Lower is better; there is no winner.
+
+<p align="center">
+  <img src="docs/screenshots/08-practice-setup.png" alt="Practice mode setup with only a single player row and Boards per set input" width="360" />
+</p>
+
+The scoreboard shows one row (SET · B1 · B2 · … · TOTAL) at a time.
+Tap or swipe on a cell to bump the miss count.
+
+<p align="center">
+  <img src="docs/screenshots/09-practice-single-set.png" alt="Practice single-set scoreboard, four boards" width="720" />
+</p>
+
+For more than 4 boards, the row scrolls horizontally in pages of 4 with
+**B1–4 / B5–8** chips underneath, and SET / TOTAL columns stay pinned
+so the totals are always in view. For multi-set drills, prev / next
+arrows advance the set and the running **Total missed** in the header
+accumulates across all sets.
+
+<p align="center">
+  <img src="docs/screenshots/10-practice-multi-scroll.png" alt="Practice multi-set with scrollable boards, B1-4 chip active, set pager below" width="720" />
+</p>
+
+Tap **🏁 End Match** at any time — the recap popup shows the full
+board-by-board matrix with per-set totals and grand total missed.
+
+<p align="center">
+  <img src="docs/screenshots/11-practice-recap.png" alt="Practice recap popup with three sets of eight boards, per-row totals and grand total" width="720" />
+</p>
+
 ## Features
 
 ### Setup screen
 
 - **Match rules** entered as three plain number inputs: **Sets**, **Points**,
   and **Max boards** (`0` for unlimited — for EuroCup doubles-final format).
-- **Mode:** Singles (1v1) or Doubles (2v2).
+- **Mode:** Singles (1v1), Doubles (2v2), or **Practice** (solo drill —
+  no opponent; track missed shots per board across N sets × M boards).
 - **Player picker** with autocomplete over **~2,000 players** scraped from
   MCA (international + ranking tables) and Sol5 LIT (44 countries). Free-text
   names work too if a player isn't in the DB.
@@ -127,6 +162,21 @@ same typography — only the palette differs.
 - **Colours follow players, not seats.** Swap-sides moves names, notes,
   colours, SET counts, and current-set POINTS together. BOARD stays put
   (it's a match-wide counter). Mid-set swaps preserve the running score.
+
+### Practice mode
+
+- **Solo drill:** no opponent, no winner. Record how many shots you
+  missed on each board — lower total = better session.
+- **N sets × M boards.** Default 1 × 4; go up to 9 × any.
+- **One row on screen at a time.** SET column left, TOTAL right, and
+  the boards in the middle. On phones with more than 4 boards the row
+  scrolls horizontally in **B1–4 / B5–8** chip pages.
+- **Multi-set pager.** Prev / next arrows and set-pip dots advance
+  between sets. Board scroll resets to B1–4 on each set change.
+- **Running total** in the header sums across all sets.
+- **End Match recap:** full board-by-board matrix with per-set totals
+  and grand total missed. No fireworks, no medals — Practice never
+  declares a winner.
 
 ### End of match
 
@@ -195,7 +245,7 @@ proof-of-work cookie in `.env`, from
 
 Every push to `main` deploys to GitHub Pages via
 `.github/workflows/deploy.yml`. Tagging a release
-(`git tag v1.6.2 && git push --tags`) creates a draft GitHub Release —
+(`git tag v1.7.0 && git push --tags`) creates a draft GitHub Release —
 build the APK locally, attach it, publish:
 
 ```sh
@@ -204,11 +254,11 @@ cd twa
 $ANDROID_HOME/build-tools/34.0.0/apksigner sign \
   --ks android.keystore \
   --ks-key-alias android \
-  --out carromscore-v1.6.2.apk \
+  --out carromscore-v1.7.0.apk \
   app/build/outputs/apk/release/app-release-unsigned.apk
 
-gh release upload v1.6.2 carromscore-v1.6.2.apk
-gh release edit v1.6.2 --draft=false --notes-file release-notes-v1.6.2.md
+gh release upload v1.7.0 carromscore-v1.7.0.apk
+gh release edit v1.7.0 --draft=false --notes-file release-notes-v1.7.0.md
 ```
 
 Bubblewrap prerequisites (JDK 17 + Android SDK) live in `~/.bubblewrap/`.

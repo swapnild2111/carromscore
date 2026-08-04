@@ -17,7 +17,7 @@
 
     // Cross-tab live sync: pick up state written to localStorage by the player view.
     // Keys and shape must stay compatible with what ScoreBoard writes.
-    const KEY = matchStateKey(q.get('playerA') ?? '', q.get('playerB') ?? '');
+    const KEY = matchStateKey(cfg.mode, q.get('playerA') ?? '', q.get('playerB') ?? '');
     const apply = (raw: string | null) => {
       if (!raw) return;
       try {
@@ -43,26 +43,32 @@
 </script>
 
 <div class="overlay">
-  <div class="strip">
-    <div class="team team-a">
-      <div class="name">{sideA.name}</div>
-      <div class="row">
-        <span class="score">{pad2(sideA.points)}</span>
-        <span class="sets">{sideA.sets}</span>
+  {#if cfg.mode === 'practice'}
+    <div class="strip practice-strip">
+      <span class="practice-note">Practice mode — no live overlay</span>
+    </div>
+  {:else}
+    <div class="strip">
+      <div class="team team-a">
+        <div class="name">{sideA.name}</div>
+        <div class="row">
+          <span class="score">{pad2(sideA.points)}</span>
+          <span class="sets">{sideA.sets}</span>
+        </div>
+      </div>
+      <div class="board">
+        <div class="board-label">BOARD</div>
+        <div class="board-num">{board}</div>
+      </div>
+      <div class="team team-b">
+        <div class="name">{sideB.name}</div>
+        <div class="row">
+          <span class="sets">{sideB.sets}</span>
+          <span class="score">{pad2(sideB.points)}</span>
+        </div>
       </div>
     </div>
-    <div class="board">
-      <div class="board-label">BOARD</div>
-      <div class="board-num">{board}</div>
-    </div>
-    <div class="team team-b">
-      <div class="name">{sideB.name}</div>
-      <div class="row">
-        <span class="sets">{sideB.sets}</span>
-        <span class="score">{pad2(sideB.points)}</span>
-      </div>
-    </div>
-  </div>
+  {/if}
 </div>
 
 <style>
@@ -159,5 +165,12 @@
     font-size: clamp(2rem, 3vw, 2.5rem);
     color: var(--accent);
     line-height: 1;
+  }
+  .practice-strip { min-width: 0; padding: 0.6rem 1.25rem; }
+  .practice-note {
+    color: var(--muted);
+    font-size: 0.85rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
   }
 </style>

@@ -161,6 +161,118 @@ async function main() {
   await p2.screenshot({ path: `${OUT}/07-end-match-medals.png` });
   console.log('07-end-match-medals.png');
 
+  await tv.close();
+
+  /*
+   * Practice mode shots. Solo drill flow: setup → single-set scoreboard
+   * → multi-set with horizontal board scroll → End Match recap matrix.
+   */
+
+  // 08 Setup with Practice mode selected (portrait phone).
+  const phone2 = await browser.newContext({
+    ...devices['Pixel 7'],
+    viewport: PORTRAIT,
+    reducedMotion: 'reduce',
+  });
+  const p3 = await phone2.newPage();
+  await p3.goto(BASE + '/', { waitUntil: 'networkidle' });
+  await p3.waitForTimeout(400);
+  await p3.locator('label:has(input[value="practice"])').click();
+  await p3.waitForTimeout(150);
+  await p3.locator('input[placeholder="Type a name…"]').first().fill(PLAYER_A);
+  await p3.locator('input[placeholder="Country, state, club…"]').first().fill(NOTE_A);
+  await p3.locator('body').click({ position: { x: 10, y: 10 } });
+  await p3.waitForTimeout(200);
+  await p3.screenshot({ path: `${OUT}/08-practice-setup.png` });
+  console.log('08-practice-setup.png');
+  await phone2.close();
+
+  // 09 Practice single-set (1 × 4). Landscape phone-ish viewport.
+  const tv2 = await browser.newContext({
+    viewport: LANDSCAPE,
+    deviceScaleFactor: 2,
+    reducedMotion: 'reduce',
+  });
+  const p4 = await tv2.newPage();
+  const practiceSingleUrl = `${BASE}/score/?${new URLSearchParams({
+    mode: 'practice',
+    playerA: PLAYER_A,
+    noteA: NOTE_A,
+    bestOf: '1',
+    maxBoards: '4',
+  }).toString()}`;
+  await p4.goto(practiceSingleUrl, { waitUntil: 'networkidle' });
+  await p4.waitForTimeout(400);
+  await p4.evaluate(`
+    (async () => {
+      const cells = document.querySelectorAll('.pcell');
+      const tap = async (i, n) => {
+        for (let k = 0; k < n; k += 1) {
+          cells[i].dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, isPrimary: true, clientX: 0, clientY: 0 }));
+          cells[i].dispatchEvent(new PointerEvent('pointerup', { bubbles: true, isPrimary: true, clientX: 0, clientY: 0 }));
+          await new Promise((r) => setTimeout(r, 4));
+        }
+      };
+      await tap(0, 3); await tap(1, 5); await tap(2, 2); await tap(3, 4);
+    })();
+  `);
+  await p4.waitForTimeout(200);
+  await p4.screenshot({ path: `${OUT}/09-practice-single-set.png` });
+  console.log('09-practice-single-set.png');
+  await tv2.close();
+
+  // 10 Practice multi-set with 8 boards → horizontal scroll + chips + pager.
+  const tv3 = await browser.newContext({
+    viewport: LANDSCAPE,
+    deviceScaleFactor: 2,
+    reducedMotion: 'reduce',
+  });
+  const p5 = await tv3.newPage();
+  const practiceMultiUrl = `${BASE}/score/?${new URLSearchParams({
+    mode: 'practice',
+    playerA: PLAYER_A,
+    noteA: NOTE_A,
+    bestOf: '3',
+    maxBoards: '8',
+  }).toString()}`;
+  await p5.goto(practiceMultiUrl, { waitUntil: 'networkidle' });
+  await p5.waitForTimeout(400);
+  const bumpMulti = async (page: import('playwright').Page, pairs: [number, number][]) => {
+    await page.evaluate(`
+      (async () => {
+        const cells = document.querySelectorAll('.pcell');
+        const tap = async (i, n) => {
+          for (let k = 0; k < n; k += 1) {
+            cells[i].dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, isPrimary: true, clientX: 0, clientY: 0 }));
+            cells[i].dispatchEvent(new PointerEvent('pointerup', { bubbles: true, isPrimary: true, clientX: 0, clientY: 0 }));
+            await new Promise((r) => setTimeout(r, 4));
+          }
+        };
+        const pairs = ${JSON.stringify(pairs)};
+        for (const [i, n] of pairs) await tap(i, n);
+      })();
+    `);
+  };
+  // Fill B1–B4 in set 1
+  await bumpMulti(p5, [[0, 3], [1, 5], [2, 2], [3, 4]]);
+  await p5.waitForTimeout(200);
+  await p5.screenshot({ path: `${OUT}/10-practice-multi-scroll.png` });
+  console.log('10-practice-multi-scroll.png');
+
+  // Fill B5–B8, advance to set 2, set 3, then End Match
+  await bumpMulti(p5, [[4, 1], [5, 6], [6, 2], [7, 3]]);
+  await p5.locator('.practice-pager .practice-pager-btn').nth(1).click();
+  await p5.waitForTimeout(200);
+  await bumpMulti(p5, [[0, 2], [1, 3], [2, 1], [3, 4], [4, 2], [5, 5], [6, 3], [7, 2]]);
+  await p5.locator('.practice-pager .practice-pager-btn').nth(1).click();
+  await p5.waitForTimeout(200);
+  await bumpMulti(p5, [[0, 4], [1, 2], [2, 3], [3, 1], [4, 5], [5, 2], [6, 4], [7, 3]]);
+  await p5.locator('.foot-btn.endm').click();
+  await p5.waitForTimeout(400);
+  await p5.screenshot({ path: `${OUT}/11-practice-recap.png` });
+  console.log('11-practice-recap.png');
+  await tv3.close();
+
   await browser.close();
   console.log(`Wrote screenshots to ${OUT}`);
 }
