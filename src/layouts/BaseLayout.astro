@@ -48,11 +48,29 @@ const base = import.meta.env.BASE_URL;
   <body>
     <slot />
     <script>
+      /*
+       * Service worker registration + update detection.
+       *
+       * The SW uses skipWaiting() + clients.claim(), so any new version
+       * takes over as soon as it's fetched. When that happens while the
+       * user is already on the page, we dispatch a `carrom:sw-updated`
+       * event so the UI can show a small "New version installed —
+       * restart" hint.
+       *
+       * The initial controller acquisition on first load is filtered
+       * out: only *changes* to an existing controller count as updates.
+       */
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
           navigator.serviceWorker
             .register(`${import.meta.env.BASE_URL}sw.js`, { scope: import.meta.env.BASE_URL })
             .catch(() => {});
+
+          const hadControllerAtLoad = !!navigator.serviceWorker.controller;
+          navigator.serviceWorker.addEventListener('controllerchange', () => {
+            if (!hadControllerAtLoad) return;
+            window.dispatchEvent(new CustomEvent('carrom:sw-updated'));
+          });
         });
       }
     </script>

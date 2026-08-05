@@ -243,8 +243,60 @@ JSON directly.
 
 Every push to `main` deploys to GitHub Pages via
 `.github/workflows/deploy.yml`. Tagging a release
-(`git tag v1.7.2 && git push --tags`) creates a draft GitHub Release —
-build the APK locally, attach it, publish:
+(`git tag v1.7.2 && git push --tags`) creates a draft GitHub Release
+whose notes come from `twa/release-notes-vX.Y.Z.md`. What you do next
+depends on **whether the release needs a new APK**.
+
+### Do I need to rebuild the APK?
+
+**Rule of thumb:** the APK is a thin native shell around the live
+website. If your change only touches `src/`, `public/`, or docs, users
+get it automatically the next time they launch the app — no APK
+rebuild required. Bump `APP_VERSION` in `src/lib/version.ts` and
+`CACHE_NAME` in `public/sw.js`, `git push main`, and you're done.
+
+Rebuild the APK **only** when one of these changes:
+
+- `twa/twa-manifest.json` — icon, name, orientation, display mode,
+  `startUrl` / `host`, `themeColor`, target/min SDK.
+- `twa/app/build.gradle` — `versionCode` / `versionName`.
+- `public/.well-known/assetlinks.json` (rare — only if the keystore
+  fingerprint changes).
+- The keystore itself (never intentionally).
+
+If in doubt: **don't** rebuild. Everything shipped in v1.6.x, v1.7.0,
+v1.7.1, v1.7.2 was a code-only release and would have worked fine
+without a fresh APK.
+
+### Mark the release for the in-app update banner
+
+The app's setup screen distinguishes between two kinds of updates:
+
+- **Web-only release (default)**: users see a soft "Carromscore just
+  updated — tap to restart" toast when the service worker picks up the
+  new bundle. Non-blocking; no download.
+- **APK-required release (rare)**: users see a sharp amber "New
+  Android version required" banner with a Download APK CTA.
+
+The app decides which one to show by parsing HTML-comment markers in
+the GitHub Release body. Add these to `twa/release-notes-vX.Y.Z.md`
+before running `gh release edit`:
+
+```markdown
+<!-- apk-required: false -->
+```
+
+or for the rare case where the wrapper itself changed:
+
+```markdown
+<!-- apk-required: true -->
+<!-- apk-required-reason: Icon and orientation changed. -->
+```
+
+Missing marker → app assumes `apk-required: false`, which is the safe
+default. The markers are invisible on the GitHub Releases page.
+
+### Building the APK (when it's actually needed)
 
 ```sh
 cd twa

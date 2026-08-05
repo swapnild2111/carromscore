@@ -8,7 +8,12 @@
     type PlayerRow,
   } from '../lib/match';
   import { loadKnownPlayers, rememberPlayers } from '../lib/known-players';
-  import { APP_VERSION, fetchLatestReleaseTag, isNewerVersion } from '../lib/version';
+  import {
+    APP_VERSION,
+    fetchLatestRelease,
+    isNewerVersion,
+    type ReleaseInfo,
+  } from '../lib/version';
 
   const base: string = import.meta.env.BASE_URL;
 
@@ -153,15 +158,40 @@
   }
 
   // Update check — one call per page load, silent on failure.
-  let latestTag = $state<string | null>(null);
-  const hasUpdate = $derived(latestTag !== null && isNewerVersion(APP_VERSION, latestTag));
-  const releaseUrl = $derived(latestTag
-    ? `https://github.com/swapnild2111/carromscore/releases/tag/${latestTag}`
+  //
+  // Two very different signals live here:
+  //   - `apkUpdateAvailable`: the LATEST GitHub Release has an
+  //     apk-required marker AND is newer than the currently-running web
+  //     APP_VERSION. This is rare — icon/orientation/SDK bumps only.
+  //     Shown as a sharp amber-red banner with a download-APK CTA.
+  //   - `swJustUpdated`: the service worker just installed a new
+  //     bundle while the user was on the page (see BaseLayout.astro).
+  //     Shown as a soft info toast — "restart to see the latest",
+  //     no download involved.
+  let latestRelease = $state<ReleaseInfo | null>(null);
+  let swJustUpdated = $state(false);
+
+  const apkUpdateAvailable = $derived(
+    latestRelease !== null
+    && latestRelease.apkRequired
+    && isNewerVersion(APP_VERSION, latestRelease.tag),
+  );
+  const releaseUrl = $derived(latestRelease
+    ? `https://github.com/swapnild2111/carromscore/releases/tag/${latestRelease.tag}`
     : 'https://github.com/swapnild2111/carromscore/releases/latest');
 
   $effect(() => {
-    fetchLatestReleaseTag().then((t) => (latestTag = t));
+    fetchLatestRelease().then((info) => (latestRelease = info));
+
+    const onSwUpdated = () => { swJustUpdated = true; };
+    window.addEventListener('carrom:sw-updated', onSwUpdated);
+    return () => window.removeEventListener('carrom:sw-updated', onSwUpdated);
   });
+
+  function restartApp() {
+    // Bypass the SW cache for the reload — we want the freshest HTML shell.
+    window.location.reload();
+  }
 </script>
 
 {#snippet picker(label: string, key: keyof MatchConfig)}
@@ -288,19 +318,43 @@
     <p class="hint">Loading player list…</p>
   {/if}
 
-  {#if hasUpdate}
-    <a class="update-banner" href={releaseUrl} target="_blank" rel="noopener">
+  {#if apkUpdateAvailable}
+    <!--
+      APK-required release. This is the rare case where the wrapper
+      itself changed (icon, orientation, SDK, URL) and the user needs to
+      install the new APK — the automatic web update wouldn't pick up
+      wrapper-level changes.
+    -->
+    <a class="update-banner update-banner-apk" href={releaseUrl} target="_blank" rel="noopener">
       <span class="upd-dot" aria-hidden="true"></span>
       <span class="upd-body">
-        <strong class="upd-title">New version available</strong>
+        <strong class="upd-title">New Android version required</strong>
         <span class="upd-sub">
           <span class="upd-from">v{APP_VERSION}</span>
           <span class="upd-arrow" aria-hidden="true">→</span>
-          <span class="upd-to">{latestTag}</span>
+          <span class="upd-to">{latestRelease?.tag}</span>
           <span class="upd-cta">· Tap to download the new APK</span>
         </span>
+        {#if latestRelease?.apkRequiredReason}
+          <span class="upd-reason">Why: {latestRelease.apkRequiredReason}</span>
+        {/if}
       </span>
     </a>
+  {/if}
+
+  {#if swJustUpdated}
+    <!--
+      Web-layer refresh detected via service-worker controllerchange.
+      Soft, non-blocking: the user can keep scoring; when they're ready
+      they tap Restart to pick up the freshest bundle.
+    -->
+    <button type="button" class="sw-toast" onclick={restartApp}>
+      <span class="sw-toast-icon" aria-hidden="true">✨</span>
+      <span class="sw-toast-body">
+        <strong>Carromscore just updated.</strong>
+        Tap to restart and see the latest.
+      </span>
+    </button>
   {/if}
 
   {#if installEvt}
@@ -549,30 +603,33 @@
     align-self: center;
   }
   /*
-   * Update-available banner. Amber gold gradient with a soft pulsing dot
-   * on the left so it catches the eye. Rows: title on top, version delta
-   * on the bottom.
+   * APK-required banner. Reserved for the rare release where the wrapper
+   * itself must be reinstalled. Warm amber-red gradient + pulsing dot so
+   * it feels distinct from the softer sw-toast that fires on ordinary
+   * web-layer updates.
    */
   .update-banner {
     display: flex;
     align-items: center;
     gap: 0.75rem;
     padding: 0.8rem 1rem;
-    background: linear-gradient(120deg, rgba(255, 213, 74, 0.18), rgba(255, 143, 0, 0.12));
-    border: 1px solid var(--accent);
+    background: linear-gradient(120deg, rgba(255, 143, 0, 0.22), rgba(239, 83, 80, 0.18));
+    border: 1px solid #ffb300;
     border-radius: 0.75rem;
     color: var(--fg);
     text-decoration: none;
-    box-shadow: 0 0 24px rgba(255, 213, 74, 0.15);
+    box-shadow: 0 0 24px rgba(255, 143, 0, 0.22);
   }
-  .update-banner:hover { background: linear-gradient(120deg, rgba(255, 213, 74, 0.25), rgba(255, 143, 0, 0.18)); }
+  .update-banner:hover {
+    background: linear-gradient(120deg, rgba(255, 143, 0, 0.3), rgba(239, 83, 80, 0.24));
+  }
   .upd-dot {
     flex-shrink: 0;
     width: 0.75rem;
     height: 0.75rem;
     border-radius: 999px;
-    background: var(--accent);
-    box-shadow: 0 0 0 4px rgba(255, 213, 74, 0.25), 0 0 12px var(--accent);
+    background: #ffb300;
+    box-shadow: 0 0 0 4px rgba(255, 143, 0, 0.28), 0 0 12px #ffb300;
     animation: upd-pulse 1.6s ease-in-out infinite;
   }
   @keyframes upd-pulse {
@@ -586,7 +643,7 @@
     min-width: 0;
   }
   .upd-title {
-    color: var(--accent);
+    color: #ffb300;
     font-size: 0.95rem;
     letter-spacing: 0.02em;
     font-weight: 800;
@@ -595,6 +652,12 @@
     color: var(--muted);
     font-size: 0.8rem;
     letter-spacing: 0.02em;
+  }
+  .upd-reason {
+    color: var(--muted);
+    font-size: 0.72rem;
+    font-style: italic;
+    margin-top: 0.15rem;
   }
   .upd-from, .upd-to {
     display: inline-block;
@@ -607,9 +670,52 @@
     vertical-align: baseline;
   }
   .upd-from { background: rgba(255,255,255,0.06); color: var(--muted); }
-  .upd-to { background: rgba(255, 213, 74, 0.2); color: var(--accent); border: 1px solid rgba(255, 213, 74, 0.4); }
+  .upd-to {
+    background: rgba(255, 143, 0, 0.22);
+    color: #ffb300;
+    border: 1px solid rgba(255, 143, 0, 0.5);
+  }
   .upd-arrow { margin: 0 0.3rem; opacity: 0.6; }
   .upd-cta { margin-left: 0.25rem; }
+
+  /*
+   * Web-update toast. Soft accent chip, no gradient, no scary red. Fires
+   * when the service worker installs a new bundle in the background so
+   * the user can tap once to reload into the fresh version. Distinct
+   * enough from the APK banner that the user learns "gold pill = harmless
+   * refresh, red banner = time to reinstall".
+   */
+  .sw-toast {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    padding: 0.6rem 0.9rem;
+    background: rgba(255, 213, 74, 0.1);
+    border: 1px solid rgba(255, 213, 74, 0.35);
+    border-radius: 0.65rem;
+    color: var(--fg);
+    text-align: left;
+    font-family: inherit;
+    font-size: 0.85rem;
+    cursor: pointer;
+    line-height: 1.35;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .sw-toast:hover {
+    background: rgba(255, 213, 74, 0.16);
+    border-color: rgba(255, 213, 74, 0.55);
+  }
+  .sw-toast-icon {
+    font-size: 1.1rem;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+  .sw-toast-body { min-width: 0; }
+  .sw-toast-body strong {
+    color: var(--accent);
+    font-weight: 700;
+    margin-right: 0.25rem;
+  }
 
   /*
    * Footer copyright + version pill. Matches the score-screen footer so

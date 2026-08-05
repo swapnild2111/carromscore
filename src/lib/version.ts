@@ -3,16 +3,58 @@
  * appVersionName. The update-check compares this string against the
  * `tag_name` on the latest GitHub Release.
  */
-export const APP_VERSION = '1.7.2';
+export const APP_VERSION = '1.7.3';
 
 const REPO = 'swapnild2111/carromscore';
 
 /**
- * Fetches the latest release tag from GitHub. Returns null on network or
+ * Metadata about the latest release, extracted from the GitHub Release
+ * body. `apkRequired` distinguishes:
+ *   - false (default): a code-only release. Users on an older APK still
+ *     get the update automatically via the TWA — no download needed,
+ *     just relaunch. The banner should say so calmly.
+ *   - true: the wrapper itself changed (icon, orientation, target SDK,
+ *     URL, keystore) and users must install the new APK to get parity.
+ *     The banner should be sharp and stick.
+ *
+ * The marker is a plain HTML comment in the release body so it's
+ * invisible to readers on GitHub but easy for us to parse:
+ *
+ *     <!-- apk-required: true -->
+ *     <!-- apk-required-reason: Icon and orientation changed. -->
+ *
+ * Missing marker → apkRequired: false. That's the safe default; historically
+ * only 1 in ~10 releases has ever required a new APK.
+ */
+export type ReleaseInfo = {
+  tag: string;
+  apkRequired: boolean;
+  apkRequiredReason: string | null;
+};
+
+// Match a `<!-- key: value -->` marker. `[^\n<]{0,200}` bounds the value
+// so the regex is linear (no super-linear backtracking) and can't span
+// newlines or nest inside another HTML comment.
+const MARKER_RE = /<!--\s*([a-z-]+):([^\n<]{0,200})-->/gi;
+
+function parseApkRequired(body: string): { required: boolean; reason: string | null } {
+  let required = false;
+  let reason: string | null = null;
+  for (const m of body.matchAll(MARKER_RE)) {
+    const key = m[1].toLowerCase();
+    const value = m[2].trim();
+    if (key === 'apk-required') required = value.toLowerCase() === 'true';
+    else if (key === 'apk-required-reason' && value) reason = value;
+  }
+  return { required, reason };
+}
+
+/**
+ * Fetches the latest release from GitHub. Returns null on network or
  * rate-limit failure — the caller silently hides the update banner in that
  * case (never surface an infrastructure error to a player mid-scoring).
  */
-export async function fetchLatestReleaseTag(): Promise<string | null> {
+export async function fetchLatestRelease(): Promise<ReleaseInfo | null> {
   try {
     const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
       headers: { Accept: 'application/vnd.github+json' },
@@ -20,10 +62,23 @@ export async function fetchLatestReleaseTag(): Promise<string | null> {
     if (!res.ok) return null;
     const data = await res.json();
     const tag = data?.tag_name;
-    return typeof tag === 'string' ? tag : null;
+    if (typeof tag !== 'string') return null;
+    const body = typeof data?.body === 'string' ? data.body : '';
+    const { required, reason } = parseApkRequired(body);
+    return { tag, apkRequired: required, apkRequiredReason: reason };
   } catch {
     return null;
   }
+}
+
+/**
+ * @deprecated retained for backwards compatibility with any callers that
+ * only care about the tag. Prefer `fetchLatestRelease` — it also tells
+ * you whether the release requires a new APK.
+ */
+export async function fetchLatestReleaseTag(): Promise<string | null> {
+  const info = await fetchLatestRelease();
+  return info?.tag ?? null;
 }
 
 /**
