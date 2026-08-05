@@ -157,12 +157,17 @@ export function matchStateKey(mode: Mode, playerA: string, playerB: string): str
 }
 
 /**
- * Player-list JSON shape (public/data/players.json). Only fields the picker cares about.
+ * Player-list JSON shape (public/data/players.json).
+ *
+ * The bundled seed is a small hand-curated list of players who have a
+ * public Wikipedia article. Users grow their local roster by simply
+ * typing new names in the setup picker — those names are remembered per
+ * device (see src/lib/known-players.ts). `source: 'local'` marks such
+ * entries; `source: 'wikipedia'` marks bundled entries with a `wikiUrl`.
  */
 export type PlayerRow = {
   name: string;
   country?: string;
-  city?: string;
-  club?: string;
   source: string;
+  wikiUrl?: string;
 };

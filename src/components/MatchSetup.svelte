@@ -7,23 +7,43 @@
     type Mode,
     type PlayerRow,
   } from '../lib/match';
+  import { loadKnownPlayers, rememberPlayers } from '../lib/known-players';
   import { APP_VERSION, fetchLatestReleaseTag, isNewerVersion } from '../lib/version';
 
   const base: string = import.meta.env.BASE_URL;
 
   let cfg = $state<MatchConfig>({ ...DEFAULT_CONFIG });
 
-  let players = $state<PlayerRow[]>([]);
+  // Bundled seed from public/data/players.json (small, Wikipedia-sourced).
+  let seedPlayers = $state<PlayerRow[]>([]);
+  // Per-device roster grown from past match setups. Merged with the seed at
+  // render time so the picker gets more useful the more matches a user plays.
+  let localPlayers = $state<PlayerRow[]>([]);
   let loadingPlayers = $state(true);
 
+  const players = $derived<PlayerRow[]>(() => {
+    // Concatenate seed + local, then dedupe by case-insensitive name.
+    const seen = new Set<string>();
+    const out: PlayerRow[] = [];
+    for (const p of [...seedPlayers, ...localPlayers]) {
+      const key = p.name.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(p);
+    }
+    return out;
+  });
+
   $effect(() => {
+    // Load local roster first — always cheap, never fails hard.
+    localPlayers = loadKnownPlayers();
     fetch(`${base}data/players.json`)
       .then((r) => (r.ok ? r.json() : []))
       .then((rows: PlayerRow[]) => {
-        players = rows;
+        seedPlayers = rows;
       })
       .catch(() => {
-        players = [];
+        seedPlayers = [];
       })
       .finally(() => {
         loadingPlayers = false;
@@ -63,7 +83,7 @@
   function suggest(query: string): PlayerRow[] {
     const q = query.trim().toLowerCase();
     if (!q) return [];
-    return players.filter((p) => p.name.toLowerCase().includes(q)).slice(0, 8);
+    return players().filter((p) => p.name.toLowerCase().includes(q)).slice(0, 8);
   }
 
   // Which picker's suggestions are currently visible (by key).
@@ -94,6 +114,10 @@
     } catch {
       // ignore
     }
+    // Remember these names in the per-device roster so the picker
+    // autocompletes them next time. Practice mode contributes only
+    // playerA; Doubles contributes all four.
+    rememberPlayers(cfg.playerA, cfg.playerA2, cfg.playerB, cfg.playerB2);
     window.location.href = `${base}score/?${encodeConfig(cfg)}`;
   }
 

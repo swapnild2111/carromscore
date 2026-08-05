@@ -32,9 +32,11 @@ Singles, Doubles, or Practice, and fill in each player + their "Represents"
   <img src="docs/screenshots/02-setup-filled.png" alt="Setup screen filled with Swapnil Deshpande (Denmark) vs Yuvaraj Eshwaramoorthy (India)" width="360" />
 </p>
 
-The picker autocompletes from ~2,000 real player names. Free-text
-names work if a player isn't in the DB. See the [Credits](#credits)
-section for name sources.
+The picker autocompletes from a small seed list of top international
+players and — as you use the app — from **every name you've typed
+before on this device**. So the picker gets more useful the more
+matches you play. Free-text names always work if a player isn't in
+the list. See [Credits](#credits) for where the seed comes from.
 
 ### 2. Score the match
 
@@ -124,9 +126,11 @@ board-by-board matrix with per-set totals and grand total missed.
   and **Max boards** (`0` for unlimited — for EuroCup doubles-final format).
 - **Mode:** Singles (1v1), Doubles (2v2), or **Practice** (solo drill —
   no opponent; track missed shots per board across N sets × M boards).
-- **Player picker** with autocomplete over **~2,000 players**. Free-text
-  names work too if a player isn't in the DB. See the
-  [Credits](#credits) section for name sources.
+- **Player picker** with autocomplete over a small **Wikipedia-sourced
+  seed** of top international players, **plus every name you've typed
+  before on this device** (remembered in `localStorage`, never sent
+  anywhere). The picker gets more useful the more matches you play.
+  Free-text names always work.
 - **"Represents" field** per player (singles) or per team (doubles) — free
   text for country, state, club, sponsor, seed number, etc. Renders as a
   small chip next to the name pill on the scoreboard.
@@ -230,20 +234,16 @@ npm run dev        # http://localhost:4321/carromscore/
 npm run build      # emit static site to ./dist/
 ```
 
-Refresh the player-name DB (writes to `public/data/players.json`):
-
-```sh
-npm run refresh-players
-```
-
-See the [Credits](#credits) section below for the sources the scraper
-pulls from.
+The player-name seed lives in `public/data/players.json`. It's a small
+hand-curated file of top international players who have Wikipedia
+articles — see [Credits](#credits). To add or edit entries, edit the
+JSON directly.
 
 ## Deployment
 
 Every push to `main` deploys to GitHub Pages via
 `.github/workflows/deploy.yml`. Tagging a release
-(`git tag v1.7.0 && git push --tags`) creates a draft GitHub Release —
+(`git tag v1.7.2 && git push --tags`) creates a draft GitHub Release —
 build the APK locally, attach it, publish:
 
 ```sh
@@ -252,11 +252,11 @@ cd twa
 $ANDROID_HOME/build-tools/34.0.0/apksigner sign \
   --ks android.keystore \
   --ks-key-alias android \
-  --out carromscore-v1.7.0.apk \
+  --out carromscore-v1.7.2.apk \
   app/build/outputs/apk/release/app-release-unsigned.apk
 
-gh release upload v1.7.0 carromscore-v1.7.0.apk
-gh release edit v1.7.0 --draft=false --notes-file release-notes-v1.7.0.md
+gh release upload v1.7.2 carromscore-v1.7.2.apk
+gh release edit v1.7.2 --draft=false --notes-file release-notes-v1.7.2.md
 ```
 
 Bubblewrap prerequisites (JDK 17 + Android SDK) live in `~/.bubblewrap/`.
@@ -269,17 +269,18 @@ must uninstall + reinstall before any future update.
 
 ## Credits
 
-The player-picker autocomplete is seeded with **player names only** from
-two public federation websites. Nothing else — no rankings, ratings,
-match histories, photos, or personal data — is scraped or bundled with
-this app. Names are used solely so the organiser can find and pick a
-player at match setup instead of typing every name from scratch.
+The player-picker autocomplete is seeded with a small list of top
+international carrom players who have their own Wikipedia articles.
+Each entry in [`public/data/players.json`](./public/data/players.json)
+links to its Wikipedia source (`wikiUrl`) so the reference is
+transparent.
 
-- **[Maharashtra Carrom Association](https://maharashtracarromassociation.com/)** —
-  international player list + seasonal ranking tables. Names only.
-- **[Sol5 LIT](https://sol5.metapensiero.it/lit)** — 44 national
-  federation rosters. Names only.
+- **[Wikipedia](https://en.wikipedia.org/wiki/Category:Indian_carrom_players)** —
+  the seed list mirrors Wikipedia's Category: Indian carrom players.
+  Content there is licensed CC-BY-SA. Only the player's name and
+  article URL are used.
 
-If you're a rights holder for either site and would like your names
-removed from the seed data, open an issue on this repository and we'll
-drop them from the next `refresh-players` build.
+Beyond the seed, every name you type at match setup is remembered on
+your own device (via `localStorage`) and used to autocomplete your
+future matches. Those names are never uploaded anywhere — the app has
+no server and no cloud storage.

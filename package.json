@@ -9,8 +9,7 @@
     "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
-    "astro": "astro",
-    "refresh-players": "tsx scripts/refresh-players.ts"
+    "astro": "astro"
   },
   "dependencies": {
     "@astrojs/svelte": "^9.0.1",
@@ -20,7 +19,6 @@
     "typescript": "^6.0.3"
   },
   "devDependencies": {
-    "cheerio": "^1.2.0",
     "playwright": "^1.62.1",
     "tsx": "^4.23.1"
   }
