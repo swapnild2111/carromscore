@@ -133,8 +133,13 @@ welcome.
 - 🐞 GitHub Issues: <https://github.com/swapnild2111/carromscore/issues>
 
 Inside the app, the setup screen has a **Feedback ⇗** link next to
-the version pill that opens your default mail client with the version
-pre-filled. See [Contact](./docs/contact.md) for details.
+the version pill. It opens a popup with Copy / Open in Gmail / Use my
+mail app / Start a GitHub Discussion — see
+[Contact](./docs/contact.md) for details.
+
+<p align="center">
+  <img src="docs/screenshots/16-feedback-popup.png" alt="Send feedback popup on the setup screen" width="360" />
+</p>
 
 ## License
 

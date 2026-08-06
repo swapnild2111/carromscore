@@ -12,9 +12,15 @@ Include what version you're on (visible in the app's footer, e.g.
 `v1.8.0`) and roughly what happened. Screenshots help when something
 looked wrong on-screen.
 
-Or click the **Feedback ⇗** link in the app's setup screen footer —
-that opens your default mail app with the version pre-filled in the
-subject line.
+Or click the **Feedback ⇗** link in the app's setup screen footer.
+That opens a popup with four options: **Copy** the address to your
+clipboard, **Open in Gmail** (web compose window with the version
+pre-filled), **Use my mail app** (`mailto:` for people with a default
+mail client), or **Start a GitHub Discussion**.
+
+<p align="center">
+  <img src="./screenshots/16-feedback-popup.png" alt="Send feedback popup on the setup screen — Copy, Open in Gmail, Use my mail app, Start a GitHub Discussion, Close" width="360" />
+</p>
 
 ## GitHub Discussions
 
