@@ -1,4 +1,20 @@
-# CarromScore
+<h1 align="center">CarromScore</h1>
+
+<p align="center">
+  <a href="https://github.com/swapnild2111/carromscore/releases/latest"><img src="https://img.shields.io/github/v/release/swapnild2111/carromscore?label=release&color=ffb300" alt="Latest release" /></a>
+  <a href="https://github.com/swapnild2111/carromscore/releases/latest"><img src="https://img.shields.io/badge/download-Android%20APK-brightgreen?logo=android" alt="Download APK" /></a>
+  <a href="https://swapnild2111.github.io/carromscore/"><img src="https://img.shields.io/website?url=https%3A%2F%2Fswapnild2111.github.io%2Fcarromscore%2F&label=carromscore.app&up_color=ffb300" alt="Website" /></a>
+  <a href="https://github.com/swapnild2111/carromscore/actions/workflows/deploy.yml"><img src="https://github.com/swapnild2111/carromscore/actions/workflows/deploy.yml/badge.svg" alt="Deploy status" /></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT" /></a>
+</p>
+
+<p align="center">
+  <a href="https://astro.build"><img src="https://img.shields.io/badge/Astro-BC52EE?logo=astro&logoColor=white" alt="Astro" /></a>
+  <a href="https://svelte.dev"><img src="https://img.shields.io/badge/Svelte-5-FF3E00?logo=svelte&logoColor=white" alt="Svelte 5" /></a>
+  <a href="https://www.typescriptlang.org"><img src="https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white" alt="TypeScript" /></a>
+  <a href="https://swapnild2111.github.io/carromscore/"><img src="https://img.shields.io/badge/PWA-installable-5A0FC8?logo=pwa&logoColor=white" alt="PWA" /></a>
+  <a href="https://github.com/GoogleChromeLabs/bubblewrap"><img src="https://img.shields.io/badge/Android-Bubblewrap%20TWA-3DDC84?logo=android&logoColor=white" alt="TWA" /></a>
+</p>
 
 **A free live scoreboard for carrom matches** — for players at the
 board, for organisers running club nights, and for anyone streaming a
@@ -6,18 +22,6 @@ tournament to YouTube or Facebook.
 
 Runs on your phone, tablet, laptop, or projector. No accounts, no ads,
 no cloud, no subscription. Same code on every device.
-
-[![Latest release](https://img.shields.io/github/v/release/swapnild2111/carromscore?label=release&color=ffb300)](https://github.com/swapnild2111/carromscore/releases/latest)
-[![Download APK](https://img.shields.io/badge/download-Android%20APK-brightgreen?logo=android)](https://github.com/swapnild2111/carromscore/releases/latest)
-[![Website](https://img.shields.io/website?url=https%3A%2F%2Fswapnild2111.github.io%2Fcarromscore%2F&label=carromscore.app&up_color=ffb300)](https://swapnild2111.github.io/carromscore/)
-[![Deploy status](https://github.com/swapnild2111/carromscore/actions/workflows/deploy.yml/badge.svg)](https://github.com/swapnild2111/carromscore/actions/workflows/deploy.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
-
-[![Astro](https://img.shields.io/badge/Astro-BC52EE?logo=astro&logoColor=white)](https://astro.build)
-[![Svelte 5](https://img.shields.io/badge/Svelte-5-FF3E00?logo=svelte&logoColor=white)](https://svelte.dev)
-[![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
-[![PWA](https://img.shields.io/badge/PWA-installable-5A0FC8?logo=pwa&logoColor=white)](https://swapnild2111.github.io/carromscore/)
-[![TWA](https://img.shields.io/badge/Android-Bubblewrap%20TWA-3DDC84?logo=android&logoColor=white)](https://github.com/GoogleChromeLabs/bubblewrap)
 
 <p align="center">
   <img src="docs/screenshots/04-score-midset.png" alt="Carromscore mid-match: cyan and coral player pills, big 7-segment digits, gold BREAK chip" width="800" />
