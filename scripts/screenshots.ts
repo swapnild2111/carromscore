@@ -60,7 +60,7 @@ async function main() {
   await p1.locator('input[placeholder="Country, state, club…"]').first().fill(NOTE_A);
   await p1.locator('input[placeholder="Type a name…"]').nth(1).fill(PLAYER_B);
   await p1.locator('input[placeholder="Country, state, club…"]').nth(1).fill(NOTE_B);
-  await p1.locator('body').click({ position: { x: 10, y: 10 } });  // dismiss any suggestion
+  await p1.locator('body').click({ position: { x: 10, y: 10 }, force: true });  // dismiss any suggestion
   await p1.waitForTimeout(200);
   await p1.screenshot({ path: `${OUT}/02-setup-filled.png` });
   console.log('02-setup-filled.png');
@@ -150,13 +150,13 @@ async function main() {
       await tap('.col.mid.brd', 7);
     })();
   `);
-  await p2.locator('.foot-btn.endm').click();
+  await p2.locator('.foot-btn.endm').click({ force: true });
   await p2.waitForTimeout(400);
   await p2.screenshot({ path: `${OUT}/06-end-match-popup.png` });
   console.log('06-end-match-popup.png');
 
   // Dismiss the popup → show the twin-medal treatment on the name pills.
-  await p2.locator('.confirm-big').click();
+  await p2.locator('.confirm-big').click({ force: true });
   await p2.waitForTimeout(200);
   await p2.screenshot({ path: `${OUT}/07-end-match-medals.png` });
   console.log('07-end-match-medals.png');
@@ -177,11 +177,11 @@ async function main() {
   const p3 = await phone2.newPage();
   await p3.goto(BASE + '/', { waitUntil: 'networkidle' });
   await p3.waitForTimeout(400);
-  await p3.locator('label:has(input[value="practice"])').click();
+  await p3.locator('label:has(input[value="practice"])').click({ force: true });
   await p3.waitForTimeout(150);
   await p3.locator('input[placeholder="Type a name…"]').first().fill(PLAYER_A);
   await p3.locator('input[placeholder="Country, state, club…"]').first().fill(NOTE_A);
-  await p3.locator('body').click({ position: { x: 10, y: 10 } });
+  await p3.locator('body').click({ position: { x: 10, y: 10 }, force: true });
   await p3.waitForTimeout(200);
   await p3.screenshot({ path: `${OUT}/08-practice-setup.png` });
   console.log('08-practice-setup.png');
@@ -261,17 +261,107 @@ async function main() {
 
   // Fill B5–B8, advance to set 2, set 3, then End Match
   await bumpMulti(p5, [[4, 1], [5, 6], [6, 2], [7, 3]]);
-  await p5.locator('.practice-pager .practice-pager-btn').nth(1).click();
+  await p5.locator('.practice-pager .practice-pager-btn').nth(1).click({ force: true });
   await p5.waitForTimeout(200);
   await bumpMulti(p5, [[0, 2], [1, 3], [2, 1], [3, 4], [4, 2], [5, 5], [6, 3], [7, 2]]);
-  await p5.locator('.practice-pager .practice-pager-btn').nth(1).click();
+  await p5.locator('.practice-pager .practice-pager-btn').nth(1).click({ force: true });
   await p5.waitForTimeout(200);
   await bumpMulti(p5, [[0, 4], [1, 2], [2, 3], [3, 1], [4, 5], [5, 2], [6, 4], [7, 3]]);
-  await p5.locator('.foot-btn.endm').click();
+  await p5.locator('.foot-btn.endm').click({ force: true });
   await p5.waitForTimeout(400);
   await p5.screenshot({ path: `${OUT}/11-practice-recap.png` });
   console.log('11-practice-recap.png');
   await tv3.close();
+
+  /*
+   * 12 Share URL popup. Score screen (singles), tap Share URL button.
+   * Shows both URL rows (overlay ready, live spectator coming soon).
+   */
+  const tv4 = await browser.newContext({
+    viewport: LANDSCAPE,
+    deviceScaleFactor: 2,
+    reducedMotion: 'reduce',
+  });
+  const p6 = await tv4.newPage();
+  await p6.goto(SCORE_URL, { waitUntil: 'networkidle' });
+  await p6.waitForTimeout(400);
+  await p6.locator('.foot-btn.share').click({ force: true });
+  await p6.waitForTimeout(300);
+  await p6.screenshot({ path: `${OUT}/12-share-popup.png` });
+  console.log('12-share-popup.png');
+  await tv4.close();
+
+  /*
+   * 13 Overlay bare (1920×1080 broadcast canvas). Mid-match state seeded
+   * via localStorage so the DSEG7 digits, coloured pills, set pips,
+   * BREAK chip, and red queen coin are all visible in one shot.
+   */
+  const stream = await browser.newContext({
+    viewport: { width: 1920, height: 1080 },
+    deviceScaleFactor: 1,
+    reducedMotion: 'reduce',
+  });
+  const p7 = await stream.newPage();
+  const overlayUrl = `${SCORE_URL}&view=overlay`;
+  await p7.goto(overlayUrl, { waitUntil: 'networkidle' });
+  await p7.waitForTimeout(300);
+  await p7.evaluate(`
+    localStorage.setItem(
+      'carromscore:state:singles:${PLAYER_A}:${PLAYER_B}',
+      JSON.stringify({
+        sideA: { points: 18, sets: 1 },
+        sideB: { points: 12, sets: 0 },
+        board: 5,
+        currentBreak: 'a',
+        queenHolder: 'b',
+        matchResult: null,
+      }),
+    );
+  `);
+  await p7.reload({ waitUntil: 'networkidle' });
+  await p7.waitForTimeout(400);
+  await p7.screenshot({ path: `${OUT}/13-overlay-bare.png` });
+  console.log('13-overlay-bare.png');
+
+  /*
+   * 14 Overlay composited over a mock carrom-green camera feed. Shows
+   * how the transparent strip lands on top of live footage in OBS/Prism.
+   */
+  await p7.evaluate(`
+    document.documentElement.style.background = 'linear-gradient(180deg, #2c4b1e 0%, #1a2c11 100%)';
+    document.body.style.background = 'transparent';
+  `);
+  await p7.waitForTimeout(150);
+  await p7.screenshot({ path: `${OUT}/14-overlay-composited.png` });
+  console.log('14-overlay-composited.png');
+
+  /*
+   * 15 Overlay end-of-match with winner medal treatment. Same 1920×1080
+   * canvas so the twin-medal pill design reads at broadcast scale.
+   */
+  await p7.evaluate(`
+    localStorage.setItem(
+      'carromscore:state:singles:${PLAYER_A}:${PLAYER_B}',
+      JSON.stringify({
+        sideA: { points: 25, sets: 2 },
+        sideB: { points: 18, sets: 1 },
+        board: 7,
+        currentBreak: 'a',
+        queenHolder: null,
+        matchResult: 'a',
+      }),
+    );
+  `);
+  await p7.reload({ waitUntil: 'networkidle' });
+  await p7.waitForTimeout(400);
+  await p7.evaluate(`
+    document.documentElement.style.background = 'linear-gradient(180deg, #2c4b1e 0%, #1a2c11 100%)';
+    document.body.style.background = 'transparent';
+  `);
+  await p7.waitForTimeout(150);
+  await p7.screenshot({ path: `${OUT}/15-overlay-endgame.png` });
+  console.log('15-overlay-endgame.png');
+  await stream.close();
 
   await browser.close();
   console.log(`Wrote screenshots to ${OUT}`);

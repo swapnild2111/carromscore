@@ -309,7 +309,6 @@
     </div>
   {/if}
 
-
   <button class="start" type="submit" disabled={!canStart()}>
     Start match →
   </button>

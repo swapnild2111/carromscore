@@ -1,338 +1,116 @@
 # CarromScore
 
-Live carrom scoring for players and broadcasters — a landscape-first
-scoreboard that runs as a website and as an installable Android app.
+**A free live scoreboard for carrom matches** — for players at the
+board, for organisers running club nights, and for anyone streaming a
+tournament to YouTube or Facebook.
+
+Runs on your phone, tablet, laptop, or projector. No accounts, no ads,
+no cloud, no subscription. Same code on every device.
 
 [![Latest release](https://img.shields.io/github/v/release/swapnild2111/carromscore?label=release&color=ffb300)](https://github.com/swapnild2111/carromscore/releases/latest)
-[![Download APK](https://img.shields.io/badge/download-Android%20APK-brightgreen?logo=android)](https://github.com/swapnild2111/carromscore/releases/latest)
 [![Website](https://img.shields.io/website?url=https%3A%2F%2Fswapnild2111.github.io%2Fcarromscore%2F&label=carromscore.app&up_color=ffb300)](https://swapnild2111.github.io/carromscore/)
-[![Deploy status](https://github.com/swapnild2111/carromscore/actions/workflows/deploy.yml/badge.svg)](https://github.com/swapnild2111/carromscore/actions/workflows/deploy.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 
-[![Astro](https://img.shields.io/badge/Astro-BC52EE?logo=astro&logoColor=white)](https://astro.build)
-[![Svelte 5](https://img.shields.io/badge/Svelte-5-FF3E00?logo=svelte&logoColor=white)](https://svelte.dev)
-[![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
-[![PWA](https://img.shields.io/badge/PWA-installable-5A0FC8?logo=pwa&logoColor=white)](https://swapnild2111.github.io/carromscore/)
-[![TWA](https://img.shields.io/badge/Android-Bubblewrap%20TWA-3DDC84?logo=android&logoColor=white)](https://github.com/GoogleChromeLabs/bubblewrap)
-
-A single web app for live carrom scoring, that also ships as an
-installable Android APK — no Play Store required.
-
-## How to use
-
-### 1. Set up the match
-
-Open the app. Enter match rules (Sets / Points / Max boards), pick
-Singles, Doubles, or Practice, and fill in each player + their "Represents"
-(country, state, club, whatever).
-
 <p align="center">
-  <img src="docs/screenshots/01-setup-blank.png" alt="Blank setup screen with match rules and empty player fields" width="360" />
-  &nbsp;&nbsp;
-  <img src="docs/screenshots/02-setup-filled.png" alt="Setup screen filled with Swapnil Deshpande (Denmark) vs Yuvaraj Eshwaramoorthy (India)" width="360" />
+  <img src="docs/screenshots/04-score-midset.png" alt="Carromscore mid-match: cyan and coral player pills, big 7-segment digits, gold BREAK chip" width="800" />
 </p>
 
-The picker autocompletes from a small seed list of top international
-players and — as you use the app — from **every name you've typed
-before on this device**. So the picker gets more useful the more
-matches you play. Free-text names always work if a player isn't in
-the list. See [Credits](#credits) for where the seed comes from.
+## Try it now
 
-### 2. Score the match
+- 🌐 **Any device with a browser** → open **https://swapnild2111.github.io/carromscore/**
+- 📱 **Android** → [Install guide](./docs/features/install-android.md)
+- 🍎 **iPhone / iPad** → [Install guide](./docs/features/install-iphone.md)
 
-Tap **Start match** — the app locks landscape, goes full-screen, and
-opens the scoreboard at 0-0-0.
+That's it. No account. No download from an app store.
 
-<p align="center">
-  <img src="docs/screenshots/03-score-fresh.png" alt="Fresh scoreboard at 0-0-0, board 0" width="720" />
-</p>
+## What it does
 
-**Every digit is a control.** Tap a digit for +1. Swipe left for +1,
-swipe right for −1. That's the whole gesture set — deliberately small
-so nothing is accidental.
+**Score any carrom match.** Singles, doubles, or a solo drill.
 
-<p align="center">
-  <img src="docs/screenshots/04-score-midset.png" alt="Mid-set: Swapnil 12, Yuvaraj 8, board 4" width="720" />
-</p>
+- 🎯 **[Keeping the score](./docs/features/keeping-the-score.md)** —
+  tap a digit to add a point, swipe to fix a mistake. Big high-contrast
+  numbers for camera legibility.
+- 🎱 **[Break and queen indicators](./docs/features/break-and-queen.md)** —
+  a small chip shows who's breaking and a red carrom coin shows who
+  has the queen. Never lose track mid-match.
+- 🏓 **[Practice mode](./docs/features/practice-mode.md)** — solo drill
+  format. Track missed shots per board, get a full recap at the end.
+  Lower total = better session.
+- 📺 **[Broadcast overlay](./docs/features/broadcast-overlay.md)** —
+  point OBS or Prism at a URL and get a transparent scoreboard strip
+  live-composited over your camera feed.
+- 🔗 **[Share URL](./docs/features/share-url.md)** — one-tap copy of
+  the overlay URL for streaming, popup with instructions.
 
-Once a side crosses 22 points, the **queen-lockout ticker** appears
-under the scoreboard to remind the table that the queen no longer
-counts for the leader.
+Everything else — landscape lock, wake lock, offline play, mid-match
+refresh restoration — just works.
 
-<p align="center">
-  <img src="docs/screenshots/05-score-queen-lockout.png" alt="Queen-lockout ticker firing at 22+ points" width="720" />
-</p>
+## How to use it
 
-Nothing auto-completes. The organiser bumps SET when a set ends,
-POINTS as the board progresses, and BOARD when the next board starts.
-The app only *displays*.
-
-### 3. End the match
-
-Tap the **🏁 End Match** button in the footer. A fireworks popup names
-the champion and shows the final tally.
+**Set up the match.** Pick Singles, Doubles, or Practice. Enter
+players and where they represent. Tap Start match.
 
 <p align="center">
-  <img src="docs/screenshots/06-end-match-popup.png" alt="Fireworks popup: Swapnil Deshpande CHAMPION, Sets 2-1, Final board 25-18" width="720" />
+  <img src="docs/screenshots/01-setup-blank.png" alt="Blank setup screen" width="320" />
+  &nbsp;
+  <img src="docs/screenshots/02-setup-filled.png" alt="Setup filled with two players" width="320" />
 </p>
 
-Dismiss the popup and the winner's name pill switches to **gold**
-(🥇 1ST); the loser's switches to **silver** (🥈 2ND). Same shape,
-same typography — only the palette differs.
+**Score the match.** Tap a digit for +1. Swipe left for +1, swipe
+right for −1. That's the whole gesture set. Nothing auto-completes —
+you decide when a set is over, when a board is over, when the match
+is over.
 
 <p align="center">
-  <img src="docs/screenshots/07-end-match-medals.png" alt="Twin-medal treatment on the name pills after End Match" width="720" />
+  <img src="docs/screenshots/03-score-fresh.png" alt="Fresh score screen, ready to play" width="800" />
 </p>
 
-### 4. Practice mode (solo drill)
-
-Playing alone at home? Pick **Practice** in the setup screen. Practice is
-a solo drill: you play N sets × M boards and record the number of
-**missed shots** per board. Lower is better; there is no winner.
+**End the match.** Tap the 🏁 End button. Fireworks popup, then the
+winner's pill turns gold and the loser's turns silver.
 
 <p align="center">
-  <img src="docs/screenshots/08-practice-setup.png" alt="Practice mode setup with only a single player row and Boards per set input" width="360" />
+  <img src="docs/screenshots/06-end-match-popup.png" alt="Fireworks popup: CHAMPION" width="800" />
 </p>
 
-The scoreboard shows one row (SET · B1 · B2 · … · TOTAL) at a time.
-Tap or swipe on a cell to bump the miss count.
+For the full walkthrough, see
+[Keeping the score](./docs/features/keeping-the-score.md).
+
+## Streaming a match
+
+Point OBS or Prism at the overlay URL for a live transparent scoreboard
+composited over your camera feed:
 
 <p align="center">
-  <img src="docs/screenshots/09-practice-single-set.png" alt="Practice single-set scoreboard, four boards" width="720" />
+  <img src="docs/screenshots/13-overlay-bare.png" alt="Broadcast overlay strip" width="900" />
 </p>
 
-For more than 4 boards, the row scrolls horizontally in pages of 4 with
-**B1–4 / B5–8** chips underneath, and SET / TOTAL columns stay pinned
-so the totals are always in view. For multi-set drills, prev / next
-arrows advance the set and the running **Total missed** in the header
-accumulates across all sets.
+Full guide: [Broadcast overlay](./docs/features/broadcast-overlay.md).
 
-<p align="center">
-  <img src="docs/screenshots/10-practice-multi-scroll.png" alt="Practice multi-set with scrollable boards, B1-4 chip active, set pager below" width="720" />
-</p>
+## Credits
 
-Tap **🏁 End Match** at any time — the recap popup shows the full
-board-by-board matrix with per-set totals and grand total missed.
+Player-name autocomplete is seeded with a small hand-curated list of
+top international carrom players who have their own Wikipedia articles.
+Each entry links to its Wikipedia source — see
+[`public/data/players.json`](./public/data/players.json).
 
-<p align="center">
-  <img src="docs/screenshots/11-practice-recap.png" alt="Practice recap popup with three sets of eight boards, per-row totals and grand total" width="720" />
-</p>
+- **[Wikipedia contributors](https://en.wikipedia.org/wiki/Category:Indian_carrom_players)**
+  — content licensed CC-BY-SA. Only player names and article URLs are
+  used.
 
-## Features
+Beyond the seed, every name you type at match setup is remembered on
+your own device (in the browser's local storage) so the picker
+autocompletes your regular playing partners next time. Those names
+never leave your device.
 
-### Setup screen
+## Developing Carromscore
 
-- **Match rules** entered as three plain number inputs: **Sets**, **Points**,
-  and **Max boards** (`0` for unlimited — for EuroCup doubles-final format).
-- **Mode:** Singles (1v1), Doubles (2v2), or **Practice** (solo drill —
-  no opponent; track missed shots per board across N sets × M boards).
-- **Player picker** with autocomplete over a small **Wikipedia-sourced
-  seed** of top international players, **plus every name you've typed
-  before on this device** (remembered in `localStorage`, never sent
-  anywhere). The picker gets more useful the more matches you play.
-  Free-text names always work.
-- **"Represents" field** per player (singles) or per team (doubles) — free
-  text for country, state, club, sponsor, seed number, etc. Renders as a
-  small chip next to the name pill on the scoreboard.
-- **Update banner:** setup checks GitHub Releases on load; if a newer
-  version is out, a pulsing gold banner shows the `current → new` version
-  delta and links to the APK download.
+See [`docs/dev/`](./docs/dev/) for developer-facing docs:
 
-### Score screen (human-driven)
-
-- **Landscape only.** Score screen locks to landscape on the first user
-  gesture (fullscreen + Screen Orientation API). Close returns to portrait.
-- **Broadcast-ready layout:** `SET | POINTS | BOARD | POINTS | SET`
-  grid with real 7-segment digits (DSEG7 Classic). POINTS digit is
-  enlarged (`clamp(4rem, 32vh, 12rem)`) for camera / projector legibility.
-- **Every digit is a control.** Tap a digit for +1. Swipe left for +1,
-  swipe right for −1. One gesture = one adjust.
-- **Nothing auto-completes.** The organiser drives every number. No
-  auto set-end at 25 points, no auto-end at 8 boards, no timer. The app
-  only *displays* — the human decides when a set or match is over.
-- **Board 9 decider.** In fixed-cap formats, the BOARD digit refuses to go
-  past the cap unless the current-set POINTS are tied — then it unlocks
-  one decider board (e.g. `9` in an 8-board format).
-- **Points clamp at 25** and **sets clamp at Best-of-N**. Board has no
-  upper cap in unlimited formats.
-- **Set-pip strip** in the header shows sets won by each side (colour-coded
-  pips), the current set as a pulsing accent pip, and pending sets as
-  muted outlines.
-- **Board progress bar** shows current board vs. max as a filled bar.
-- **Live queen-lockout ticker** at 22+ pts, e.g. `SWAPNIL needs 3 points
-  to win · NO QUEEN` (compact form when both sides are locked out).
-
-### Sides + colours
-
-- **Colours follow players, not seats.** Swap-sides moves names, notes,
-  colours, SET counts, and current-set POINTS together. BOARD stays put
-  (it's a match-wide counter). Mid-set swaps preserve the running score.
-
-### Practice mode
-
-- **Solo drill:** no opponent, no winner. Record how many shots you
-  missed on each board — lower total = better session.
-- **N sets × M boards.** Default 1 × 4; go up to 9 × any.
-- **One row on screen at a time.** SET column left, TOTAL right, and
-  the boards in the middle. On phones with more than 4 boards the row
-  scrolls horizontally in **B1–4 / B5–8** chip pages.
-- **Multi-set pager.** Prev / next arrows and set-pip dots advance
-  between sets. Board scroll resets to B1–4 on each set change.
-- **Running total** in the header sums across all sets.
-- **End Match recap:** full board-by-board matrix with per-set totals
-  and grand total missed. No fireworks, no medals — Practice never
-  declares a winner.
-
-### End of match
-
-- **End Match** button (🏁) in the footer. Picks the winner by SET count
-  first, POINTS as tiebreaker. On a POINTS tiebreak, the winner is
-  auto-credited the decider set so the footer reads a correct final
-  tally (e.g. `wins 1–2`, not `wins 1–1`).
-- **Fireworks popup:** gold gradient champion card with an animated 🏆,
-  "CHAMPION" ribbon, big name, sets + final-board score, and a 20-particle
-  CSS fireworks burst. Respects `prefers-reduced-motion`.
-- **Twin-medal treatment** on the player pills: winner gets a **gold**
-  gradient pill with a **🥇 1ST** badge; loser gets a **silver** gradient
-  pill with a **🥈 2ND** badge. Structurally identical (typography,
-  ring, glow, shine, medal-bob animation) — only palette differs, driven
-  by CSS custom properties.
-- **Winner UI is gated** on the explicit End Match tap. Manually adjusting
-  SET+/- mid-match never flashes the winner treatment.
-
-### Reliability
-
-- **Persistence:** in-flight match auto-saved to `localStorage`; a mid-match
-  refresh restores. "Start match" wipes the pair's cached state so
-  replaying the same players always begins at 0-0-0.
-- **Wake lock:** phone screen stays awake during a match (Screen Wake
-  Lock API; re-requests on `visibilitychange` when the screen unlocks).
-- **PWA installable** on Android/desktop Chrome and **Android APK** via
-  a Trusted Web Activity wrapper.
-
-## Install on Android
-
-The APK is signed and hosted on this repo's Releases page — no Play
-Store account, no store review.
-
-1. On your Android phone, open
-   [releases/latest](https://github.com/swapnild2111/carromscore/releases/latest).
-2. Download the latest `carromscore-*.apk`.
-3. Tap the downloaded file. Android will ask for "Install unknown apps"
-   permission for your browser once; accept.
-4. Confirm the install. **Carromscore** appears on your home screen.
-
-The APK is a thin wrapper around the live website — every website
-update is instantly in the app. You only need a new APK when the wrapper
-itself changes (icon, name, target Android SDK, orientation, etc.).
-
-## Local development
-
-```sh
-npm install
-npm run dev        # http://localhost:4321/carromscore/
-npm run build      # emit static site to ./dist/
-```
-
-The player-name seed lives in `public/data/players.json`. It's a small
-hand-curated file of top international players who have Wikipedia
-articles — see [Credits](#credits). To add or edit entries, edit the
-JSON directly.
-
-## Deployment
-
-Every push to `main` deploys to GitHub Pages via
-`.github/workflows/deploy.yml`. Tagging a release
-(`git tag v1.7.2 && git push --tags`) creates a draft GitHub Release
-whose notes come from `twa/release-notes-vX.Y.Z.md`. What you do next
-depends on **whether the release needs a new APK**.
-
-### Do I need to rebuild the APK?
-
-**Rule of thumb:** the APK is a thin native shell around the live
-website. If your change only touches `src/`, `public/`, or docs, users
-get it automatically the next time they launch the app — no APK
-rebuild required. Bump `APP_VERSION` in `src/lib/version.ts` and
-`CACHE_NAME` in `public/sw.js`, `git push main`, and you're done.
-
-Rebuild the APK **only** when one of these changes:
-
-- `twa/twa-manifest.json` — icon, name, orientation, display mode,
-  `startUrl` / `host`, `themeColor`, target/min SDK.
-- `twa/app/build.gradle` — `versionCode` / `versionName`.
-- `public/.well-known/assetlinks.json` (rare — only if the keystore
-  fingerprint changes).
-- The keystore itself (never intentionally).
-
-If in doubt: **don't** rebuild. Everything shipped in v1.6.x, v1.7.0,
-v1.7.1, v1.7.2 was a code-only release and would have worked fine
-without a fresh APK.
-
-### Mark the release for the in-app update banner
-
-The app's setup screen distinguishes between two kinds of updates:
-
-- **Web-only release (default)**: users see a soft "Carromscore just
-  updated — tap to restart" toast when the service worker picks up the
-  new bundle. Non-blocking; no download.
-- **APK-required release (rare)**: users see a sharp amber "New
-  Android version required" banner with a Download APK CTA.
-
-The app decides which one to show by parsing HTML-comment markers in
-the GitHub Release body. Add these to `twa/release-notes-vX.Y.Z.md`
-before running `gh release edit`:
-
-```markdown
-<!-- apk-required: false -->
-```
-
-or for the rare case where the wrapper itself changed:
-
-```markdown
-<!-- apk-required: true -->
-<!-- apk-required-reason: Icon and orientation changed. -->
-```
-
-Missing marker → app assumes `apk-required: false`, which is the safe
-default. The markers are invisible on the GitHub Releases page.
-
-### Building the APK (when it's actually needed)
-
-```sh
-cd twa
-./gradlew assembleRelease
-$ANDROID_HOME/build-tools/34.0.0/apksigner sign \
-  --ks android.keystore \
-  --ks-key-alias android \
-  --out carromscore-v1.7.2.apk \
-  app/build/outputs/apk/release/app-release-unsigned.apk
-
-gh release upload v1.7.2 carromscore-v1.7.2.apk
-gh release edit v1.7.2 --draft=false --notes-file release-notes-v1.7.2.md
-```
-
-Bubblewrap prerequisites (JDK 17 + Android SDK) live in `~/.bubblewrap/`.
-The keystore stays local and is git-ignored — losing it means users
-must uninstall + reinstall before any future update.
+- [Local development](./docs/dev/local-development.md)
+- [Deployment + release flow](./docs/dev/deployment.md)
+- [Update notifications](./docs/dev/update-notifications.md)
+- [Architecture rationale](./docs/dev/architecture.md)
 
 ## License
 
 [MIT](./LICENSE) © Swapnil Deshpande
-
-## Credits
-
-The player-picker autocomplete is seeded with a small list of top
-international carrom players who have their own Wikipedia articles.
-Each entry in [`public/data/players.json`](./public/data/players.json)
-links to its Wikipedia source (`wikiUrl`) so the reference is
-transparent.
-
-- **[Wikipedia](https://en.wikipedia.org/wiki/Category:Indian_carrom_players)** —
-  the seed list mirrors Wikipedia's Category: Indian carrom players.
-  Content there is licensed CC-BY-SA. Only the player's name and
-  article URL are used.
-
-Beyond the seed, every name you type at match setup is remembered on
-your own device (via `localStorage`) and used to autocomplete your
-future matches. Those names are never uploaded anywhere — the app has
-no server and no cloud storage.

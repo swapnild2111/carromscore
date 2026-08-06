@@ -8,6 +8,7 @@
     matchStateKey,
     teamLabel,
     type MatchConfig,
+    type Side as SideId,
   } from '../lib/match';
   import { APP_VERSION } from '../lib/version';
 
@@ -26,6 +27,28 @@
   let colourA = $state<Colour>('a');
   let colourB = $state<Colour>('b');
   let board = $state(0);
+
+  /*
+   * BREAK indicator: which side breaks (assigned once at match start).
+   *   - Match starts with currentBreak = 'a' (player A holds the toss
+   *     by default). If B won the toss, the organiser taps the BREAK
+   *     chip once and it hops over to B's side.
+   *   - BOARD +/- and SET +/- do NOT change BREAK — it's a match-long
+   *     display, not per-board.
+   *   - Tapping the chip toggles between 'a' and 'b'. Never null — the
+   *     chip always lives next to one of the two player pills.
+   */
+  let currentBreak = $state<SideId>('a');
+
+  /*
+   * QUEEN indicator: who currently holds the queen this board.
+   *   null → queen is on the table (uncovered or not yet pocketed)
+   *   'a'  → side A has covered the queen (3 pts already in POINTS)
+   *   'b'  → side B has covered the queen (3 pts already in POINTS)
+   * Tapping the chip cycles null → 'a' → 'b' → null. Every BOARD +1
+   * auto-resets to null (new board starts with queen at centre).
+   */
+  let queenHolder = $state<SideId | null>(null);
 
   /*
    * Practice mode: solo drill. Player runs N sets × M boards and records
@@ -68,6 +91,58 @@
     Math.min(practiceBoardPageCount - 1, Math.floor(practiceBoardScroll / PRACTICE_BOARDS_VISIBLE)),
   );
   let showPracticePopup = $state(false);
+
+  /*
+   * Share URL popup. Two URLs on offer:
+   *
+   *   1. Overlay URL — the score-page URL with ?view=overlay appended.
+   *      OBS/Prism paste this as a Browser Source and get the
+   *      transparent bottom-third scoreboard strip. Live sync works
+   *      because both tabs share the same browser's localStorage.
+   *
+   *   2. Live spectator URL — same URL without ?view=overlay, meant
+   *      for a spectator device to watch the match live. Disabled
+   *      today because cross-device sync isn't shipped yet — needs
+   *      Firebase/Supabase, planned for v1.8+.
+   *
+   * The popup shows both, each with its own Copy button. The live-sync
+   * button is greyed with a "coming soon" note so users don't wonder
+   * why sharing doesn't work between phones.
+   */
+  let showSharePopup = $state(false);
+  let copiedUrl = $state<'overlay' | 'live' | null>(null);
+  let copiedTimer: number | null = null;
+
+  const overlayUrl = $derived.by(() => {
+    if (typeof window === 'undefined') return '';
+    const params = new URLSearchParams(window.location.search);
+    params.set('view', 'overlay');
+    return `${window.location.origin}${window.location.pathname}?${params.toString()}`;
+  });
+  const liveUrl = $derived.by(() => {
+    if (typeof window === 'undefined') return '';
+    return `${window.location.origin}${window.location.pathname}${window.location.search}`;
+  });
+
+  function shareOverlay() {
+    showSharePopup = true;
+  }
+  async function copyToClipboard(url: string, which: 'overlay' | 'live') {
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch {
+      // Fallback for older browsers / restricted contexts.
+      const el = document.createElement('input');
+      el.value = url;
+      document.body.appendChild(el);
+      el.select();
+      try { document.execCommand('copy'); } catch { /* silent */ }
+      el.remove();
+    }
+    copiedUrl = which;
+    if (copiedTimer !== null) clearTimeout(copiedTimer);
+    copiedTimer = window.setTimeout(() => { copiedUrl = null; }, 1500);
+  }
   const PRACTICE_BOARD_MAX = 99;
 
   function blankMatrix(rows: number, cols: number): number[][] {
@@ -93,6 +168,8 @@
     sideA.note = cfg.noteA;
     sideB.note = cfg.noteB;
     storageKey = matchStateKey(cfg.mode, q.get('playerA') ?? '', q.get('playerB') ?? '');
+    // currentBreak stays null until the organiser marks board 0's breaker;
+    // hydrate below can restore a live value if we're resuming a match.
 
     // Seed the Practice matrix from cfg. Do this BEFORE hydrating so a
     // saved matrix can overwrite the blanks below.
@@ -109,6 +186,9 @@
         if (typeof s?.sideA?.sets === 'number') sideA.sets = s.sideA.sets;
         if (typeof s?.sideB?.sets === 'number') sideB.sets = s.sideB.sets;
         if (typeof s?.board === 'number') board = s.board;
+        if (s?.currentBreak === 'a' || s?.currentBreak === 'b') currentBreak = s.currentBreak;
+        if (s?.queenHolder === 'a' || s?.queenHolder === 'b' || s?.queenHolder === null) queenHolder = s.queenHolder;
+        if (s?.matchResult === 'a' || s?.matchResult === 'b' || s?.matchResult === null) matchResult = s.matchResult;
         // Practice: matrix is a 2D array of ints. Only accept it if the
         // shape matches the current cfg — otherwise a stale localStorage
         // entry from a differently-shaped match would leak in.
@@ -216,6 +296,9 @@
       sideA: { points: sideA.points, sets: sideA.sets },
       sideB: { points: sideB.points, sets: sideB.sets },
       board,
+      currentBreak,
+      queenHolder,
+      matchResult,
     };
     if (isPractice) s.practiceBoards = practiceBoards;
     try {
@@ -291,12 +374,14 @@
     const prev = s.sets;
     s.sets = Math.min(cfg.bestOf, Math.max(0, s.sets + delta));
     // If the SET count actually changed, we're transitioning between sets —
-    // zero out POINTS on both sides and BOARD, ready for the next set. No
-    // reset when the clamp swallowed the delta (already at cap / floor).
+    // zero out POINTS on both sides and BOARD, and clear the queen (new
+    // set = new board = queen at centre). BREAK is match-long, so it
+    // survives the set change.
     if (s.sets !== prev) {
       sideA.points = 0;
       sideB.points = 0;
       board = 0;
+      queenHolder = null;
     }
     // matchResult stays untouched: the WINNER ribbon only appears when the
     // organiser taps End Match, never on a SET +/- alone.
@@ -306,7 +391,44 @@
     const next = board + delta;
     if (next < 0) return;
     if (next > boardCap()) return;
+    const prev = board;
     board = next;
+    // BOARD change → clear QUEEN (new board starts with the red coin at
+    // the centre of the table). BREAK is match-long, not per-board, so
+    // it stays. Board-going-backward (undo) also clears queen — the
+    // previous board's ownership doesn't apply to this one.
+    if (next !== prev) {
+      queenHolder = null;
+    }
+  }
+
+  /*
+   * BREAK toggle. Never null — the chip always lives next to one of
+   * the two players. Tapping flips it between the two sides.
+   */
+  function cycleBreak() {
+    currentBreak = currentBreak === 'a' ? 'b' : 'a';
+  }
+  function cycleQueen() {
+    if (queenHolder === null) queenHolder = 'a';
+    else if (queenHolder === 'a') queenHolder = 'b';
+    else queenHolder = null;
+  }
+  /*
+   * tapCoin: one-shot handler per side's carrom-coin button.
+   *   - If nobody has the queen (null), tapping either side's coin gives
+   *     the queen to that side (coin turns red).
+   *   - If the tapped side already has the queen, tapping again returns
+   *     the queen to the table (both coins go grey).
+   *   - If the OTHER side has the queen, tapping this side transfers
+   *     ownership (this coin turns red, the other returns to grey).
+   */
+  function tapCoin(side: SideId) {
+    if (queenHolder === side) {
+      queenHolder = null;
+    } else {
+      queenHolder = side;
+    }
   }
 
   function adjustPracticeBoard(setIdx: number, boardIdx: number, delta: number) {
@@ -390,6 +512,14 @@
     const tmpColour = colourA;
     colourA = colourB;
     colourB = tmpColour;
+    // BREAK belongs to a player (match-long assignment), so flip it so
+    // the chip visually stays with the same person after the seat swap.
+    currentBreak = currentBreak === 'a' ? 'b' : 'a';
+    // QUEEN is per-board and often re-negotiated after a swap-sides
+    // (players re-position, previous board's queen is no longer the
+    // authoritative state). Clear it to grey on both sides — organiser
+    // can tap either coin to re-mark once play resumes.
+    queenHolder = null;
   }
 
   function resetScores() {
@@ -401,6 +531,8 @@
     matchResult = null;
     colourA = 'a';
     colourB = 'b';
+    currentBreak = 'a';
+    queenHolder = null;
     if (isPractice) {
       practiceBoards = blankMatrix(cfg.bestOf, cfg.maxBoards);
       practiceSetIdx = 0;
@@ -522,6 +654,24 @@
 </script>
 
 <section class="wrap">
+  {#snippet coinSvg()}
+    <!--
+      Carrom queen coin. Concentric ring geometry mimics the grooved
+      circles on a real red wooden coin (see amzn.in/dp/B0HCNWLZ5D). The
+      same paths render in both states — CSS variables --coin-face,
+      --coin-ring, --coin-shadow, --coin-highlight swap between grey (no
+      queen) and red (this side has the queen) via the .coin-red modifier.
+    -->
+    <svg viewBox="-16 -16 32 32" width="1.55em" height="1.55em" aria-hidden="true" focusable="false">
+      <ellipse cx="0" cy="8" rx="12.5" ry="2" fill="var(--coin-shadow)" />
+      <circle cx="0" cy="0" r="13" fill="var(--coin-face)" stroke="var(--coin-outline)" stroke-width="1.2" />
+      <circle cx="0" cy="0" r="10.5" fill="none" stroke="var(--coin-ring)" stroke-width="0.9" opacity="0.9" />
+      <circle cx="0" cy="0" r="7"    fill="none" stroke="var(--coin-ring)" stroke-width="0.7" opacity="0.75" />
+      <circle cx="0" cy="0" r="1.6" fill="var(--coin-ring)" opacity="0.9" />
+      <ellipse cx="-4.5" cy="-5.5" rx="4.2" ry="2.5" fill="var(--coin-highlight)" opacity="0.55" transform="rotate(-30)" />
+    </svg>
+  {/snippet}
+
   <button type="button" class="rotate-hint" onclick={() => tryLockLandscape()}>
     <div class="rotate-card">
       <div class="rotate-icon" aria-hidden="true">📱</div>
@@ -640,24 +790,48 @@
     {/if}
   {:else}
   <header class="head">
-    <div class="head-name head-a tone-{colourA}"
-         class:decided={matchResult !== null}
-         class:gold={matchResult === 'a'}
-         class:silver={matchResult === 'b'}>
-      {#if matchResult === 'a'}
-        <span class="medal" aria-label="First place">
-          <span class="medal-icon" aria-hidden="true">🥇</span>
-          <span class="medal-label">1ST</span>
-        </span>
-      {:else if matchResult === 'b'}
-        <span class="medal" aria-label="Second place">
-          <span class="medal-icon" aria-hidden="true">🥈</span>
-          <span class="medal-label">2ND</span>
-        </span>
+    <!-- Side A: [NAME PILL] [BREAK-chip?] [coin] -->
+    <div class="head-side head-side-a">
+      <div class="head-name head-a tone-{colourA}"
+           class:decided={matchResult !== null}
+           class:gold={matchResult === 'a'}
+           class:silver={matchResult === 'b'}>
+        {#if matchResult === 'a'}
+          <span class="medal" aria-label="First place">
+            <span class="medal-icon" aria-hidden="true">🥇</span>
+            <span class="medal-label">1ST</span>
+          </span>
+        {:else if matchResult === 'b'}
+          <span class="medal" aria-label="Second place">
+            <span class="medal-icon" aria-hidden="true">🥈</span>
+            <span class="medal-label">2ND</span>
+          </span>
+        {/if}
+        <span class="hn-name">{sideA.name}</span>
+        {#if sideA.note}<span class="hn-note">{sideA.note}</span>{/if}
+      </div>
+      {#if currentBreak === 'a'}
+        <button
+          type="button"
+          class="chip chip-break tone-{colourA}"
+          onclick={cycleBreak}
+          aria-label="{sideA.name} breaks. Tap to change."
+        >
+          <span class="chip-lbl">BREAK</span>
+        </button>
       {/if}
-      <span class="hn-name">{sideA.name}</span>
-      {#if sideA.note}<span class="hn-note">{sideA.note}</span>{/if}
+      <button
+        type="button"
+        class="coin-btn"
+        class:coin-red={queenHolder === 'a'}
+        onclick={() => tapCoin('a')}
+        aria-label={queenHolder === 'a' ? `${sideA.name} has the queen. Tap to return.` : `Tap when ${sideA.name} pockets the queen.`}
+      >
+        {@render coinSvg()}
+      </button>
     </div>
+
+    <!-- Middle: set pips + board + optional centred BREAK? chip when unassigned -->
     <div class="head-mid">
       {#if cfg.bestOf === 1}
         <div class="set-label">SINGLE SET</div>
@@ -684,23 +858,46 @@
         </span>
       </div>
     </div>
-    <div class="head-name head-b tone-{colourB}"
-         class:decided={matchResult !== null}
-         class:gold={matchResult === 'b'}
-         class:silver={matchResult === 'a'}>
-      <span class="hn-name">{sideB.name}</span>
-      {#if sideB.note}<span class="hn-note">{sideB.note}</span>{/if}
-      {#if matchResult === 'b'}
-        <span class="medal" aria-label="First place">
-          <span class="medal-icon" aria-hidden="true">🥇</span>
-          <span class="medal-label">1ST</span>
-        </span>
-      {:else if matchResult === 'a'}
-        <span class="medal" aria-label="Second place">
-          <span class="medal-icon" aria-hidden="true">🥈</span>
-          <span class="medal-label">2ND</span>
-        </span>
+
+    <!-- Side B: [coin] [BREAK-chip?] [NAME PILL] -->
+    <div class="head-side head-side-b">
+      <button
+        type="button"
+        class="coin-btn"
+        class:coin-red={queenHolder === 'b'}
+        onclick={() => tapCoin('b')}
+        aria-label={queenHolder === 'b' ? `${sideB.name} has the queen. Tap to return.` : `Tap when ${sideB.name} pockets the queen.`}
+      >
+        {@render coinSvg()}
+      </button>
+      {#if currentBreak === 'b'}
+        <button
+          type="button"
+          class="chip chip-break tone-{colourB}"
+          onclick={cycleBreak}
+          aria-label="{sideB.name} breaks. Tap to change."
+        >
+          <span class="chip-lbl">BREAK</span>
+        </button>
       {/if}
+      <div class="head-name head-b tone-{colourB}"
+           class:decided={matchResult !== null}
+           class:gold={matchResult === 'b'}
+           class:silver={matchResult === 'a'}>
+        <span class="hn-name">{sideB.name}</span>
+        {#if sideB.note}<span class="hn-note">{sideB.note}</span>{/if}
+        {#if matchResult === 'b'}
+          <span class="medal" aria-label="First place">
+            <span class="medal-icon" aria-hidden="true">🥇</span>
+            <span class="medal-label">1ST</span>
+          </span>
+        {:else if matchResult === 'a'}
+          <span class="medal" aria-label="Second place">
+            <span class="medal-icon" aria-hidden="true">🥈</span>
+            <span class="medal-label">2ND</span>
+          </span>
+        {/if}
+      </div>
     </div>
   </header>
 
@@ -776,6 +973,9 @@
     {/if}
     <div class="foot-actions">
       {#if !isPractice}
+        <button type="button" class="foot-btn share" onclick={shareOverlay} aria-label="Copy overlay URL">
+          <span class="foot-ico" aria-hidden="true">⧉</span><span class="foot-lbl">Share URL</span>
+        </button>
         <button type="button" class="foot-btn swap" onclick={swapSides} aria-label="Swap sides">
           <span class="foot-ico" aria-hidden="true">⇄</span><span class="foot-lbl">Swap</span>
         </button>
@@ -791,6 +991,44 @@
       </button>
     </div>
   </div>
+
+  {#if showSharePopup}
+    <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="share-title">
+      <div class="dialog-card share-card">
+        <h2 id="share-title">Share match URL</h2>
+
+        <!-- Overlay URL — usable today for OBS/Prism as a Browser Source. -->
+        <div class="share-row">
+          <div class="share-row-head">
+            <div class="share-row-title">Overlay URL <span class="share-badge share-badge-ok">Ready</span></div>
+            <div class="share-row-sub">Paste into OBS or Prism as a Browser Source. Renders the transparent bottom-third scoreboard on your broadcast.</div>
+          </div>
+          <div class="share-url-row">
+            <input type="text" readonly value={overlayUrl} class="share-url" aria-label="Overlay URL" onclick={(e) => (e.currentTarget as HTMLInputElement).select()} />
+            <button type="button" class="share-copy" onclick={() => copyToClipboard(overlayUrl, 'overlay')} aria-label="Copy overlay URL">
+              {copiedUrl === 'overlay' ? '✓ Copied' : 'Copy'}
+            </button>
+          </div>
+        </div>
+
+        <!-- Live spectator URL — disabled until Firebase-backed cross-device sync ships. -->
+        <div class="share-row share-row-disabled">
+          <div class="share-row-head">
+            <div class="share-row-title">Live spectator URL <span class="share-badge share-badge-soon">Coming soon</span></div>
+            <div class="share-row-sub">For sending to friends/family so they can watch the live score on their own phone. Cross-device live sync is planned for a future release.</div>
+          </div>
+          <div class="share-url-row">
+            <input type="text" readonly value={liveUrl} class="share-url" aria-label="Live spectator URL (disabled)" disabled />
+            <button type="button" class="share-copy" disabled aria-label="Copy live spectator URL (disabled)">Copy</button>
+          </div>
+        </div>
+
+        <div class="dialog-actions">
+          <button class="cancel" onclick={() => (showSharePopup = false)}>Close</button>
+        </div>
+      </div>
+    </div>
+  {/if}
 
   {#if showWinnerPopup && matchResult}
     <div class="dialog winner-dialog" role="dialog" aria-modal="true">
@@ -958,7 +1196,11 @@
     font-weight: 800;
     letter-spacing: 0.06em;
     text-transform: uppercase;
-    max-width: 100%;
+    /* Pill shrinks when the row is too narrow so the sibling BREAK chip
+       and coin fit next to it. min-width:0 + flex:1 1 auto makes sure
+       the pill (not the chips) gives up space first. */
+    flex: 1 1 auto;
+    min-width: 0;
     padding: 0.3rem 0.75rem;
     border-radius: 0.5rem;
     color: #0b0b0b;
@@ -984,6 +1226,113 @@
   .head-b { text-align: right; justify-self: end; }
   .head-name.tone-a { background: var(--side-a); }
   .head-name.tone-b { background: var(--side-b); }
+
+  /*
+   * Each side of the header is a single horizontal row: [coin]
+   * [BREAK-chip?] [name-pill] (left side) or the mirror (right side).
+   * Everything sits on the same baseline so the row reads as one block
+   * of "who this player is + their current match indicators".
+   */
+  .head-side {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    /* min-width:0 lets the child pill's text ellipsis-truncate when the
+       row runs out of horizontal space, instead of pushing the coin
+       and BREAK chip out of the grid cell into the middle column. */
+    min-width: 0;
+    /* max-width:100% keeps the whole row inside its grid cell. */
+    max-width: 100%;
+  }
+  .head-side-a { justify-self: start; }
+  .head-side-b { justify-self: end;   }
+
+  /*
+   * Carrom queen coin. Renders identically on either side of the pill,
+   * greyed when nobody has the queen, red when this side holds it.
+   * Same SVG paths, colours swapped via CSS custom properties, so the
+   * grey→red transition is a pure recolour (no layout shift).
+   */
+  .coin-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.1rem;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    line-height: 1;
+    border-radius: 999px;
+    -webkit-tap-highlight-color: transparent;
+    flex-shrink: 0;
+    /* Greyed / unowned default. Concrete tokens live here so the SVG
+       stays a pure geometry ref. */
+    --coin-face:      #4a4a4a;
+    --coin-outline:   #2a2a2a;
+    --coin-ring:      rgba(255, 255, 255, 0.28);
+    --coin-shadow:    rgba(0, 0, 0, 0.4);
+    --coin-highlight: #7a7a7a;
+    opacity: 0.55;
+    transition: opacity 0.15s, transform 0.08s;
+  }
+  .coin-btn:hover { opacity: 0.85; }
+  .coin-btn:active { transform: translateY(1px); }
+  .coin-btn.coin-red {
+    /* Live queen: red wooden coin. Slight glow so it pops out. */
+    --coin-face:      #b21818;
+    --coin-outline:   #5a0808;
+    --coin-ring:      rgba(255, 200, 200, 0.6);
+    --coin-shadow:    rgba(0, 0, 0, 0.6);
+    --coin-highlight: #f37070;
+    opacity: 1;
+    filter: drop-shadow(0 0 6px rgba(220, 40, 40, 0.5));
+  }
+
+  /*
+   * BREAK chip. One constant colour regardless of which player is
+   * breaking — the chip communicates a *state* ("someone is breaking"),
+   * not the identity of the player, so tying it to the side colour
+   * (cyan / coral) was confusing. Neutral accent gold works with both
+   * sides and doesn't fight the pill next to it.
+   *
+   * The `.tone-a` / `.tone-b` class hooks are kept for the aria label
+   * mapping and for possible future re-tinting, but visually both
+   * variants render identically.
+   */
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.22rem 0.6rem 0.22rem 0.5rem;
+    color: var(--accent);
+    background: linear-gradient(120deg, rgba(255, 213, 74, 0.2), rgba(255, 213, 74, 0.06));
+    border: 1.5px solid var(--accent);
+    border-radius: 999px;
+    font-family: inherit;
+    font-weight: 800;
+    font-size: 0.68rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    line-height: 1;
+    cursor: pointer;
+    flex-shrink: 0;
+    white-space: nowrap;
+    box-shadow: inset 0 0 8px rgba(255, 213, 74, 0.14), 0 0 8px rgba(255, 213, 74, 0.18);
+    -webkit-tap-highlight-color: transparent;
+    transition: background 0.1s, transform 0.06s, box-shadow 0.15s;
+  }
+  .chip:hover {
+    background: linear-gradient(120deg, rgba(255, 213, 74, 0.3), rgba(255, 213, 74, 0.12));
+  }
+  .chip:active { transform: translateY(1px); }
+
+  .chip-lbl { line-height: 1; }
+
+  /* When a pill is in the decided (gold/silver) state, hide its
+     sibling BREAK chip and coin so the medal treatment reads clean.
+     Match is over — the indicators aren't useful any more. */
+  .head-side:has(.head-name.decided) .chip-break,
+  .head-side:has(.head-name.decided) .coin-btn { display: none; }
 
   /*
    * Twin-medal treatment when the match is decided.
@@ -1369,11 +1718,97 @@
   .foot-btn.reset { border-color: rgba(255,213,74,0.4); color: var(--accent); }
   .foot-btn.endm { border-color: rgba(76,175,80,0.5); color: #66bb6a; }
   .foot-btn.close { border-color: rgba(239,83,80,0.4); color: var(--danger); }
+  .foot-btn.share { border-color: rgba(186,104,200,0.45); color: #ba68c8; }
 
+  /*
+   * Share-URL popup. Two rows (Overlay + Live-sync), each with a
+   * readonly text field + Copy button. Same .dialog / .dialog-card
+   * base as Exit/Reset/Practice confirmations so it inherits the
+   * accent border and z-index.
+   */
+  .share-card { max-width: 32rem; text-align: left; }
+  .share-card h2 { text-align: center; }
+  .share-row {
+    padding: 0.85rem 0;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+  .share-row:last-of-type { border-bottom: none; }
+  .share-row-disabled { opacity: 0.55; }
+  .share-row-head { margin-bottom: 0.55rem; }
+  .share-row-title {
+    color: var(--fg);
+    font-weight: 800;
+    font-size: 0.95rem;
+    letter-spacing: 0.02em;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.15rem;
+  }
+  .share-row-sub {
+    color: var(--muted);
+    font-size: 0.78rem;
+    line-height: 1.35;
+  }
+  .share-badge {
+    display: inline-block;
+    padding: 0.1rem 0.45rem;
+    border-radius: 999px;
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    line-height: 1;
+  }
+  .share-badge-ok {
+    background: rgba(102, 187, 106, 0.15);
+    color: #66bb6a;
+    border: 1px solid rgba(102, 187, 106, 0.4);
+  }
+  .share-badge-soon {
+    background: rgba(255, 213, 74, 0.14);
+    color: var(--accent);
+    border: 1px solid rgba(255, 213, 74, 0.35);
+  }
+  .share-url-row { display: flex; gap: 0.5rem; }
+  .share-url {
+    flex: 1;
+    min-width: 0;
+    padding: 0.5rem 0.7rem;
+    background: #0b0b0b;
+    border: 1px solid #2a2a2a;
+    border-radius: 0.5rem;
+    color: var(--fg);
+    font-family: ui-monospace, 'SF Mono', Consolas, monospace;
+    font-size: 0.78rem;
+  }
+  .share-url:focus { outline: none; border-color: var(--accent); }
+  .share-url:disabled { color: var(--muted); cursor: not-allowed; }
+  .share-copy {
+    flex-shrink: 0;
+    padding: 0.5rem 0.9rem;
+    background: var(--accent);
+    color: #0b0b0b;
+    border: none;
+    border-radius: 0.5rem;
+    font-weight: 800;
+    font-size: 0.8rem;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+  .share-copy:hover:not(:disabled) { filter: brightness(1.1); }
+  .share-copy:disabled {
+    background: rgba(255,255,255,0.06);
+    color: var(--muted);
+    cursor: not-allowed;
+  }
+
+  /* Tight-height layout tweaks — labels stay visible (landscape has
+     room); only the button padding and hint size get trimmed. */
   @media (max-height: 500px) {
-    .foot-lbl { display: none; }
-    .foot-btn { padding: 0.35rem 0.55rem; }
-    .foot-ico { font-size: 1rem; }
+    .foot-btn { padding: 0.3rem 0.65rem; font-size: 0.72rem; }
+    .foot-ico { font-size: 0.9rem; }
     .foot { min-height: 2rem; padding: 0.15rem 0.35rem; }
     .hint { font-size: 0.65rem; }
     .winner { font-size: 0.72rem; padding: 0.15rem 0.6rem 0.15rem 0.4rem; }

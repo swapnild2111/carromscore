@@ -19,6 +19,7 @@
  */
 export type Format = 'bo3' | 'single' | 'single-unlimited' | 'custom';
 export type Mode = 'singles' | 'doubles' | 'practice';
+export type Side = 'a' | 'b';
 
 export type MatchConfig = {
   format: Format;
