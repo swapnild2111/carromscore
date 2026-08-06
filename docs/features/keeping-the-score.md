@@ -100,3 +100,4 @@ match too, so you don't have to keep tapping it.
 - [Practice mode](./practice-mode.md) — solo drill with no opponent.
 - [Broadcast overlay](./broadcast-overlay.md) — for streaming with OBS/Prism.
 - [Share URL](./share-url.md) — how to hand off the overlay to a streamer.
+- [Contact](../contact.md) — email, GitHub Discussions, feedback.

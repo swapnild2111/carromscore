@@ -123,6 +123,19 @@ See [`docs/dev/`](./docs/dev/) for developer-facing docs:
 - [Update notifications](./docs/dev/update-notifications.md)
 - [Architecture rationale](./docs/dev/architecture.md)
 
+## Contact
+
+Bug reports, feature ideas, or just "hey, I use this at my club" — all
+welcome.
+
+- 📧 Email: **swapnild2111 [at] gmail [dot] com**
+- 💬 [Start a GitHub Discussion](https://github.com/swapnild2111/carromscore/discussions/new?category=general)
+- 🐞 GitHub Issues: <https://github.com/swapnild2111/carromscore/issues>
+
+Inside the app, the setup screen has a **Feedback ⇗** link next to
+the version pill that opens your default mail client with the version
+pre-filled. See [Contact](./docs/contact.md) for details.
+
 ## License
 
 [MIT](./LICENSE) © Swapnil Deshpande
