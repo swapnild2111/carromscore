@@ -75,8 +75,17 @@ const base = import.meta.env.BASE_URL;
     <script is:inline define:vars={{ base }}>
       // Set data-channel="beta" on <html> so the tiny beta banner
       // and any future channel-specific tweaks can key off it.
+      // Restricted to the home page — the banner would eat vertical
+      // room the score screen and live lobby genuinely need for their
+      // own chrome (End/Close buttons falling off the bottom of the
+      // viewport on shorter phones). Users see it once when they
+      // land, then it's out of the way.
       if (base.includes('/beta/')) {
-        document.documentElement.dataset.channel = 'beta';
+        const path = window.location.pathname;
+        const isHome = path === base || path === base.replace(/\/$/, '');
+        if (isHome) {
+          document.documentElement.dataset.channel = 'beta';
+        }
       }
     </script>
     <slot />
