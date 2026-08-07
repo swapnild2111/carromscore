@@ -1,0 +1,61 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+
+    "players": {
+      ".read": true,
+      ".indexOn": ["canonicalName"],
+      "$playerId": {
+        ".write": "!data.exists() && newData.exists()",
+        ".validate": "newData.hasChildren(['canonicalName', 'createdAt']) && newData.child('canonicalName').isString() && newData.child('canonicalName').val().length >= 2 && newData.child('canonicalName').val().length <= 60 && newData.child('createdAt').isNumber() && newData.child('createdAt').val() <= now && newData.child('createdAt').val() > now - 300000",
+        "canonicalName": { ".validate": "newData.isString()" },
+        "createdAt":     { ".validate": "newData.isNumber()" },
+        "createdBy":     { ".validate": "newData.isString() && newData.val().length <= 64" },
+        "aliases": {
+          ".write": "data.parent().exists()",
+          "$aliasKey": {
+            ".validate": "newData.isBoolean() && newData.val() == true && $aliasKey.length >= 1 && $aliasKey.length <= 60"
+          }
+        },
+        "normalisedIndex": {
+          ".write": "data.parent().exists()",
+          "$i": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 60" }
+        },
+        "$other": { ".validate": false }
+      }
+    },
+
+    "matches": {
+      ".read": true,
+      "$matchId": {
+        ".write": "!data.exists() && newData.exists()",
+        ".validate": "newData.hasChildren(['mode', 'startedAt', 'endedAt']) && newData.child('mode').isString() && (newData.child('mode').val() == 'singles' || newData.child('mode').val() == 'doubles' || newData.child('mode').val() == 'practice') && newData.child('startedAt').isNumber() && newData.child('endedAt').isNumber() && newData.child('endedAt').val() <= now && newData.child('endedAt').val() > now - 300000 && newData.child('endedAt').val() >= newData.child('startedAt').val()",
+        "mode":       { ".validate": "newData.isString()" },
+        "playerAId":  { ".validate": "newData.isString() && newData.val().length <= 80" },
+        "playerA2Id": { ".validate": "newData.isString() && newData.val().length <= 80" },
+        "playerBId":  { ".validate": "newData.isString() && newData.val().length <= 80" },
+        "playerB2Id": { ".validate": "newData.isString() && newData.val().length <= 80" },
+        "startedAt":  { ".validate": "newData.isNumber()" },
+        "endedAt":    { ".validate": "newData.isNumber()" },
+        "createdBy":  { ".validate": "newData.isString() && newData.val().length <= 64" },
+        "notes":      { ".validate": "newData.hasChildren()" },
+        "cfg":        { ".validate": "newData.hasChildren()" },
+        "result":     { ".validate": "newData.hasChildren()" },
+        "$other":     { ".validate": false }
+      }
+    },
+
+    "live": {
+      "$mid": {
+        ".read": true,
+        ".write": "$mid.length >= 4 && $mid.length <= 12 && newData.exists()",
+        ".validate": "newData.hasChildren(['matchId', 'updatedAt']) && newData.child('updatedAt').isNumber() && newData.child('updatedAt').val() <= now && newData.child('updatedAt').val() > now - 60000",
+        "matchId":   { ".validate": "newData.isString()" },
+        "updatedAt": { ".validate": "newData.isNumber()" },
+        "liveState": { ".validate": "newData.hasChildren()" },
+        "$other":    { ".validate": false }
+      }
+    }
+  }
+}

@@ -373,11 +373,20 @@
     const s = side === 'a' ? sideA : sideB;
     const prev = s.sets;
     s.sets = Math.min(cfg.bestOf, Math.max(0, s.sets + delta));
-    // If the SET count actually changed, we're transitioning between sets —
-    // zero out POINTS on both sides and BOARD, and clear the queen (new
-    // set = new board = queen at centre). BREAK is match-long, so it
-    // survives the set change.
-    if (s.sets !== prev) {
+    if (s.sets === prev) return;
+
+    // A SET change either transitions into a NEW set (which needs
+    // fresh points + board + queen), or credits the FINAL set of the
+    // match (nothing more to play, no reset needed). Distinguish by
+    // whether another set remains after this one.
+    //
+    // "Another set exists" iff the total sets played so far is still
+    // below cfg.bestOf. In a bo1 (or any match's decider), SET+1
+    // credits the last set and preserves the points that decided it,
+    // so End can render "wins 25-18" honestly instead of "0-0".
+    const totalPlayed = sideA.sets + sideB.sets;
+    const anotherSetRemains = delta > 0 && totalPlayed < cfg.bestOf;
+    if (anotherSetRemains) {
       sideA.points = 0;
       sideB.points = 0;
       board = 0;

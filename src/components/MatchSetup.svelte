@@ -9,6 +9,15 @@
   } from '../lib/match';
   import { loadKnownPlayers, rememberPlayers } from '../lib/known-players';
   import {
+    seedFromRows as seedPlayerIdentity,
+    subscribePlayers,
+    subscribeStore,
+    rankMatches,
+    addAlias,
+    loadAll as loadAllPlayers,
+    type PlayerMatch,
+  } from '../lib/players';
+  import {
     APP_VERSION,
     fetchLatestRelease,
     isNewerVersion,
@@ -46,6 +55,9 @@
       .then((r) => (r.ok ? r.json() : []))
       .then((rows: PlayerRow[]) => {
         seedPlayers = rows;
+        // Feed the same seed into the identity store so the fuzzy-match
+        // ranker has something to work with even before Firebase syncs.
+        seedPlayerIdentity(rows);
       })
       .catch(() => {
         seedPlayers = [];
@@ -53,6 +65,16 @@
       .finally(() => {
         loadingPlayers = false;
       });
+  });
+
+  // Identity store: subscribe to Firebase-backed /players and bump a
+  // reactivity trigger whenever the store changes. This is how the
+  // ranker (which reads from module-level state) triggers re-render.
+  let identityTick = $state(0);
+  $effect(() => {
+    const unsub = subscribeStore(() => (identityTick += 1));
+    void subscribePlayers();
+    return unsub;
   });
 
   function setMode(m: Mode) {
@@ -94,9 +116,74 @@
   // Which picker's suggestions are currently visible (by key).
   let openPicker = $state<string | null>(null);
 
-  function pick(key: keyof MatchConfig, name: string) {
-    (cfg[key] as string) = name;
+  // ─── Player identity resolution ───────────────────────────────────────
+  // Which Firebase playerId each input field currently resolves to (or
+  // null if the typed name hasn't been matched to an existing player,
+  // which means "create a new player when the match is saved").
+  //
+  // Keyed by the four possible name-input MatchConfig fields.
+  let resolvedPlayerIds = $state<Record<string, string | null>>({
+    playerA: null,
+    playerA2: null,
+    playerB: null,
+    playerB2: null,
+  });
+
+  /**
+   * Top ranker hit for a given typed name — recomputed reactively via
+   * identityTick + the raw text. Returns null on empty input, on no
+   * matches, or on rank 'prefix' (which is handled by the existing
+   * dropdown UI, not the confirm chip).
+   */
+  function topHit(text: string): PlayerMatch | null {
+    // Read the tick so the derivation depends on it — Svelte's reactivity
+    // then re-runs this on every subscribeStore() notify.
+    void identityTick;
+    const q = text.trim();
+    if (!q) return null;
+    const hits = rankMatches(loadAllPlayers(), q, 1);
+    const h = hits[0];
+    if (!h) return null;
+    if (h.rank === 'prefix') return null;
+    return h;
+  }
+
+  /**
+   * On text change: clear the resolved id (user is editing) and, if the
+   * new text is an exact-normalised match, auto-resolve to that player.
+   * Fuzzy hits do NOT auto-resolve — the user has to tap the chip.
+   */
+  function onNameInput(key: keyof MatchConfig, text: string): void {
+    (cfg[key] as string) = text;
+    const h = topHit(text);
+    if (h && h.rank === 'exact') {
+      resolvedPlayerIds[key as string] = h.player.id;
+    } else {
+      resolvedPlayerIds[key as string] = null;
+    }
+  }
+
+  /**
+   * Handler for the gold confirm chip: user has confirmed that their
+   * typed string is an alias of the suggested player. Add the alias in
+   * the identity store (which mirrors to Firebase) and mark this input
+   * field as resolved.
+   */
+  function confirmAlias(key: keyof MatchConfig, hit: PlayerMatch, typed: string): void {
+    addAlias(hit.player.id, typed);
+    resolvedPlayerIds[key as string] = hit.player.id;
+  }
+
+  function pick(key: keyof MatchConfig, row: PlayerRow) {
+    (cfg[key] as string) = row.name;
     openPicker = null;
+    // If the picked row corresponds to an identity-store player, resolve
+    // to that id. Otherwise clear — a new player record will be created
+    // when the match ends.
+    const q = row.name.trim();
+    const hits = rankMatches(loadAllPlayers(), q, 1);
+    const h = hits[0];
+    resolvedPlayerIds[key as string] = h && h.rank === 'exact' ? h.player.id : null;
   }
 
   let canStart = $derived(() => {
@@ -247,27 +334,50 @@
 </script>
 
 {#snippet picker(label: string, key: keyof MatchConfig)}
+  {@const typed = (cfg[key] as string)}
+  {@const suggestions = suggest(typed)}
+  {@const dropdownVisible = openPicker === key && suggestions.length > 0}
+  {@const hit = topHit(typed)}
   <label class="picker">
     <span>{label}</span>
     <input
       type="text"
       autocomplete="off"
       placeholder="Type a name…"
-      value={cfg[key] as string}
-      oninput={(e) => ((cfg[key] as string) = (e.currentTarget as HTMLInputElement).value)}
+      value={typed}
+      oninput={(e) => onNameInput(key, (e.currentTarget as HTMLInputElement).value)}
       onfocus={() => (openPicker = key)}
       onblur={() => setTimeout(() => { if (openPicker === key) openPicker = null; }, 200)}
     />
-    {#if openPicker === key && suggest(cfg[key] as string).length > 0}
+    {#if dropdownVisible}
       <ul class="suggest">
-        {#each suggest(cfg[key] as string) as p (p.name + p.source)}
+        {#each suggestions as p (p.name + p.source)}
           <li>
-            <button type="button" onclick={() => pick(key, p.name)}>
+            <button type="button" onclick={() => pick(key, p)}>
               <span class="pname">{p.name}</span>
             </button>
           </li>
         {/each}
       </ul>
+    {/if}
+
+    <!--
+      Identity chip: only renders for fuzzy hits — the case where the
+      typed text differs from the suggested canonical name. Exact
+      matches auto-resolve silently (input value already IS the
+      canonical name; no chip needed). Prefix hits are handled by the
+      substring dropdown above. Hidden while the dropdown is open to
+      avoid double-signalling.
+    -->
+    {#if hit && hit.rank === 'fuzzy' && !dropdownVisible}
+      <button
+        type="button"
+        class="id-chip id-chip-suggest"
+        onmousedown={(e) => e.preventDefault()}
+        onclick={() => confirmAlias(key, hit, typed)}
+      >
+        Same as <strong>{hit.player.canonicalName}</strong>? Tap to link.
+      </button>
     {/if}
   </label>
 {/snippet}
@@ -684,6 +794,29 @@
   .suggest button:hover { background: #1c1c1c; }
   .pname { font-size: 0.95rem; }
   .pmeta { color: var(--muted); font-size: 0.75rem; }
+
+  /* "Same as X? Tap to link" chip below a name input, shown only when
+     the ranker finds a fuzzy match the user should confirm. */
+  .id-chip-suggest {
+    display: inline-block;
+    margin: 0.35rem 0 0;
+    padding: 0.25rem 0.55rem;
+    border-radius: 0.5rem;
+    font: inherit;
+    font-size: 0.78rem;
+    line-height: 1.2;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: left;
+    color: #ffd54a;
+    background: rgba(255, 213, 74, 0.08);
+    border: 1px solid rgba(255, 213, 74, 0.35);
+    cursor: pointer;
+  }
+  .id-chip-suggest:hover { background: rgba(255, 213, 74, 0.16); }
+  .id-chip-suggest strong { color: #ffd54a; }
 
   .start {
     background: var(--accent);
