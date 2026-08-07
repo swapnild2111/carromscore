@@ -59,19 +59,32 @@ const base = import.meta.env.BASE_URL;
        *
        * The initial controller acquisition on first load is filtered
        * out: only *changes* to an existing controller count as updates.
+       *
+       * DEV MODE: any existing SW is aggressively unregistered on load,
+       * and no new SW is registered. Without this, an SW installed from
+       * a prior production visit to swapnild2111.github.io/carromscore
+       * (or a previous localhost dev session) intercepts fetches on
+       * localhost and serves stale bundle chunks, causing changes to
+       * appear not to take effect until DevTools → Clear site data.
        */
       if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker
-            .register(`${import.meta.env.BASE_URL}sw.js`, { scope: import.meta.env.BASE_URL })
-            .catch(() => {});
-
-          const hadControllerAtLoad = !!navigator.serviceWorker.controller;
-          navigator.serviceWorker.addEventListener('controllerchange', () => {
-            if (!hadControllerAtLoad) return;
-            window.dispatchEvent(new CustomEvent('carrom:sw-updated'));
+        if (import.meta.env.DEV) {
+          navigator.serviceWorker.getRegistrations().then((regs) => {
+            regs.forEach((r) => r.unregister());
           });
-        });
+        } else {
+          window.addEventListener('load', () => {
+            navigator.serviceWorker
+              .register(`${import.meta.env.BASE_URL}sw.js`, { scope: import.meta.env.BASE_URL })
+              .catch(() => {});
+
+            const hadControllerAtLoad = !!navigator.serviceWorker.controller;
+            navigator.serviceWorker.addEventListener('controllerchange', () => {
+              if (!hadControllerAtLoad) return;
+              window.dispatchEvent(new CustomEvent('carrom:sw-updated'));
+            });
+          });
+        }
       }
     </script>
   </body>

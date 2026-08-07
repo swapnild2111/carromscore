@@ -12,7 +12,7 @@ const base = import.meta.env.BASE_URL;
         <p class="tag">Live scoring for players &amp; broadcasters</p>
       </div>
     </header>
-    <MatchSetup client:load />
+    <MatchSetup client:only="svelte" />
   </main>
   <style>
     .wrap { padding: 1rem 0 0; }

@@ -11,6 +11,13 @@
     type Side as SideId,
   } from '../lib/match';
   import { APP_VERSION } from '../lib/version';
+  import {
+    finishMatch,
+    loadMatchIdentity,
+    loadMatchStart,
+    clearMatchIdentity,
+  } from '../lib/history';
+  import { subscribePlayers } from '../lib/players';
 
   type Side = { name: string; note: string; sets: number; points: number };
   /*
@@ -168,6 +175,11 @@
     sideA.note = cfg.noteA;
     sideB.note = cfg.noteB;
     storageKey = matchStateKey(cfg.mode, q.get('playerA') ?? '', q.get('playerB') ?? '');
+    // Populate the Player identity store from Firebase so endMatch()'s
+    // finishMatch() call can resolve existing player IDs (rather than
+    // forking identity on a page-refreshed-mid-match device).
+    // Silent-on-failure inside the module.
+    void subscribePlayers();
     // currentBreak stays null until the organiser marks board 0's breaker;
     // hydrate below can restore a live value if we're resuming a match.
 
@@ -475,6 +487,7 @@
     // Practice: no winner. Just surface the matrix.
     if (isPractice) {
       showPracticePopup = true;
+      recordFinishedMatch(null);
       return;
     }
     let winner: 'a' | 'b' | null = null;
@@ -500,6 +513,61 @@
     }
     matchResult = winner;
     showWinnerPopup = true;
+    recordFinishedMatch(winner);
+  }
+
+  /**
+   * Fire-and-forget write of the finished match to Firebase. Uses the
+   * identity handoff (playerId resolutions saved at Setup time) so the
+   * matches/{id} record refers to Player identities, not name strings.
+   * Failures are absorbed silently: the user still sees the winner
+   * popup, the History page will show every match Firebase managed to
+   * record.
+   *
+   * The `winner` param mirrors the value assigned to matchResult
+   * (never yet read by finishMatch — passed for future practice-record
+   * shape parity).
+   */
+  function recordFinishedMatch(winner: 'a' | 'b' | null): void {
+    try {
+      const key = matchStateKey(cfg.mode, cfg.playerA, cfg.playerB);
+      const identity = loadMatchIdentity(key);
+      const startedAt = loadMatchStart(key) ?? Date.now();
+      void finishMatch(
+        {
+          aName: cfg.playerA,
+          aResolvedId: identity.aResolvedId,
+          a2Name: cfg.playerA2,
+          a2ResolvedId: identity.a2ResolvedId,
+          bName: cfg.playerB,
+          bResolvedId: identity.bResolvedId,
+          b2Name: cfg.playerB2,
+          b2ResolvedId: identity.b2ResolvedId,
+        },
+        {
+          mode: cfg.mode,
+          winner,
+          sideA: { points: sideA.points, sets: sideA.sets },
+          sideB: { points: sideB.points, sets: sideB.sets },
+          board,
+          cfg: {
+            bestOf: cfg.bestOf,
+            maxBoards: cfg.maxBoards,
+            pointsTarget: cfg.pointsTarget,
+            format: cfg.format,
+          },
+          notes: { a: sideA.note, b: sideB.note },
+          startedAt,
+          endedAt: Date.now(),
+        },
+      );
+      // Clear the handoff so a "same names again" match after this one
+      // doesn't accidentally reuse the same startedAt / resolutions.
+      clearMatchIdentity(key);
+    } catch {
+      // Even the local pre-work threw — very unusual. Swallow so the
+      // winner popup renders regardless of Firebase state.
+    }
   }
 
   function swapSides() {

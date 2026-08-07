@@ -18,6 +18,11 @@
     type PlayerMatch,
   } from '../lib/players';
   import {
+    saveMatchIdentity,
+    saveMatchStart,
+    clearMatchIdentity,
+  } from '../lib/history';
+  import {
     APP_VERSION,
     fetchLatestRelease,
     isNewerVersion,
@@ -201,11 +206,23 @@
   function start(e: Event) {
     e.preventDefault();
     if (!canStart()) return;
+    const key = matchStateKey(cfg.mode, cfg.playerA, cfg.playerB);
     try {
-      localStorage.removeItem(matchStateKey(cfg.mode, cfg.playerA, cfg.playerB));
+      localStorage.removeItem(key);
     } catch {
       // ignore
     }
+    // Clear any stale identity handoff from a previous match with these
+    // same names, then persist the fresh resolutions + start timestamp
+    // so the score screen can pass them into finishMatch() on End.
+    clearMatchIdentity(key);
+    saveMatchIdentity(key, {
+      aResolvedId: resolvedPlayerIds.playerA,
+      a2ResolvedId: resolvedPlayerIds.playerA2,
+      bResolvedId: resolvedPlayerIds.playerB,
+      b2ResolvedId: resolvedPlayerIds.playerB2,
+    });
+    saveMatchStart(key, Date.now());
     // Remember these names in the per-device roster so the picker
     // autocompletes them next time. Practice mode contributes only
     // playerA; Doubles contributes all four.
@@ -528,6 +545,8 @@
     © 2026 Swapnil Deshpande
     <span class="hint-sep" aria-hidden="true">·</span>
     <span class="hint-ver">v{APP_VERSION}</span>
+    <span class="hint-sep" aria-hidden="true">·</span>
+    <a class="feedback-link" href={`${base}history/`}>History ⇗</a>
     <span class="hint-sep" aria-hidden="true">·</span>
     <a
       href="#feedback"

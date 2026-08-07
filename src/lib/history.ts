@@ -24,7 +24,12 @@
  * is dead or rules deny, the match record is skipped. localStorage
  * mirror will be added in the "keep on device only" toggle work later.
  */
-import { createPlayer, loadAll, type Player } from './players';
+import {
+  createPlayer,
+  ensurePlayerInFirebase,
+  loadAll,
+  type Player,
+} from './players';
 
 /**
  * The full identity block passed from ScoreBoard's endMatch() to
@@ -107,6 +112,17 @@ export async function finishMatch(
   const playerB2Id = isPractice
     ? null
     : resolvePlayerId(identity.b2Name ?? '', identity.b2ResolvedId);
+
+  // If any resolved id points to a seed-only player (bundled Wikipedia
+  // entry never materialised to Firebase), materialise now — otherwise
+  // future History page reads would see /matches/{id}.playerAId pointing
+  // at a /players/{id} that RTDB doesn't know about, and the display
+  // would fall back to rendering the raw slug.
+  await Promise.all(
+    [playerAId, playerA2Id, playerBId, playerB2Id]
+      .filter((id): id is string => !!id)
+      .map((id) => ensurePlayerInFirebase(id)),
+  );
 
   const record = {
     mode: result.mode,
@@ -209,15 +225,31 @@ export async function loadHistory(): Promise<MatchRecord[]> {
 }
 
 /**
- * Look up a player's display name by id. Returns the id itself as a
- * fallback if the player isn't in the in-memory store (unresolved
- * subscription, transient network issue).
+ * Look up a player's display name by id. Returns a friendly fallback
+ * if the identity store hasn't yet loaded the player — better than
+ * showing the raw kebab-slug.
+ *
+ * The slug is derived from the canonical name (lowercased + hyphenated
+ * + 4-char random suffix). We can reverse it approximately by
+ * stripping the suffix and title-casing the hyphens — good enough for
+ * the "player record exists in Firebase but our subscription hasn't
+ * hydrated yet" case.
  */
 export function playerName(id: string | undefined | null): string {
   if (!id) return '';
   const all: readonly Player[] = loadAll();
   const p = all.find((x) => x.id === id);
-  return p?.canonicalName ?? id;
+  if (p) return p.canonicalName;
+  return prettifySlug(id);
+}
+
+function prettifySlug(slug: string): string {
+  const withoutSuffix = slug.replace(/-[a-z0-9]{4}$/i, '');
+  const words = withoutSuffix.split('-').filter(Boolean);
+  if (words.length === 0) return slug;
+  return words
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
 }
 
 // ─── Cross-page identity handoff ─────────────────────────────────────

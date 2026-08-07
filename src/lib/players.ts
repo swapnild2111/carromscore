@@ -401,6 +401,27 @@ function parseAliases(raw: unknown): Record<string, true> {
   return out;
 }
 
+/**
+ * Materialise a seed-only player (createdAt === 0, never written to
+ * Firebase) into the RTDB `/players/{id}` path. No-op for players
+ * already synced from Firebase or previously created via createPlayer.
+ *
+ * Callers pass a playerId; the function looks it up in the in-memory
+ * store and writes if needed. Silent-on-failure per house style.
+ *
+ * Rationale: match records can reference IDs that came from the
+ * bundled Wikipedia seed. Without materialising, the History page
+ * reads /matches/{id}.playerAId and gets an ID Firebase doesn't know
+ * about, so playerName() falls back to rendering the raw slug.
+ */
+export async function ensurePlayerInFirebase(playerId: string): Promise<void> {
+  const p = memoryStore.find((x) => x.id === playerId);
+  if (!p) return;
+  if (p.createdAt !== 0) return;
+  p.createdAt = Date.now();
+  await writePlayerToFirebase(p);
+}
+
 async function writePlayerToFirebase(p: Player): Promise<void> {
   try {
     const [{ firebaseApp }, { getDatabase, ref, set }] = await Promise.all([
