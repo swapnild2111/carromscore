@@ -147,6 +147,10 @@
     border-radius: 0.7rem;
     min-width: 0;
   }
+  /* Two-row layout by default: name + accessories on top, note under.
+     On narrow phones the accessories drop to their own third row so
+     the name gets the full pill width (otherwise it word-breaks one
+     letter at a time). */
   .pill-a {
     border-color: rgba(79, 195, 247, 0.6);
     grid-template-columns: 1fr auto;
@@ -161,9 +165,8 @@
     grid-area: name;
     font-weight: 700;
     font-size: 1rem;
-    line-height: 1.15;
+    line-height: 1.2;
     min-width: 0;
-    overflow-wrap: anywhere;
   }
   .pill-a .name { color: var(--side-a); }
   .pill-b .name { color: var(--side-b); text-align: right; }
@@ -273,6 +276,23 @@
   }
   .pip-a { background: var(--side-a); }
   .pip-b { background: var(--side-b); }
+
+  /* Narrow-screen (phone popup) refuge: when the pill is too thin
+     for name + accessories side-by-side, restack the accessories on
+     their own row underneath — accessories anchored to the outer edge
+     of the pill (right for pill-a, left for pill-b). */
+  @media (max-width: 440px) {
+    .pill-a {
+      grid-template-columns: 1fr;
+      grid-template-areas: 'name' 'accs' 'note';
+    }
+    .pill-b {
+      grid-template-columns: 1fr;
+      grid-template-areas: 'name' 'accs' 'note';
+    }
+    .pill-a .accs { justify-self: end; }
+    .pill-b .accs { justify-self: start; }
+  }
 
   @media (orientation: landscape) and (min-height: 400px) {
     .board { min-height: 12rem; }

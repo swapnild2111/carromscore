@@ -915,12 +915,19 @@
   }
   .sheet-inner {
     background: #0f0f0f;
-    border: 1px solid #262626;
+    border: 1px solid rgba(255, 213, 74, 0.55);
     border-radius: 1rem;
     padding: 0.85rem 1rem 1.1rem;
     max-height: min(90dvh, 44rem);
     overflow-y: auto;
-    box-shadow: 0 12px 48px rgba(0, 0, 0, 0.55);
+    /* Gold glow ring + hard drop shadow so the popup pops off the
+       dimmed lobby behind. Two shadows: the inner amber halo carries
+       the "match spotlight" feel; the outer black shadow anchors the
+       popup on darker surfaces. */
+    box-shadow:
+      0 0 0 1px rgba(255, 213, 74, 0.35),
+      0 0 32px rgba(255, 213, 74, 0.22),
+      0 18px 60px rgba(0, 0, 0, 0.75);
     animation: fadeIn 0.18s ease-out;
   }
   @keyframes fadeIn {
