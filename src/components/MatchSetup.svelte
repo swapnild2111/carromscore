@@ -22,6 +22,7 @@
     saveMatchStart,
     clearMatchIdentity,
   } from '../lib/history';
+  import { newMid } from '../lib/live-sync';
   import {
     APP_VERSION,
     fetchLatestRelease,
@@ -211,6 +212,17 @@
       localStorage.removeItem(key);
     } catch {
       // ignore
+    }
+    // Every non-practice match broadcasts live to /live/{mid}. The
+    // slug rides the URL to the score screen so a mid-match refresh
+    // preserves the broadcast. Practice (solo drill) never gets a
+    // mid — there's no meaningful spectator use case for it.
+    if (cfg.mode !== 'practice') {
+      cfg.live = true;
+      cfg.mid = newMid();
+    } else {
+      cfg.live = false;
+      cfg.mid = '';
     }
     // Clear any stale identity handoff from a previous match with these
     // same names, then persist the fresh resolutions + start timestamp
@@ -455,6 +467,7 @@
     </label>
   </fieldset>
 
+
   {#if cfg.mode === 'singles'}
     <div class="player-row">
       {@render picker('Player A', 'playerA')}
@@ -546,7 +559,7 @@
     <span class="hint-sep" aria-hidden="true">·</span>
     <span class="hint-ver">v{APP_VERSION}</span>
     <span class="hint-sep" aria-hidden="true">·</span>
-    <a class="feedback-link" href={`${base}history/`}>History ⇗</a>
+    <a class="feedback-link" href={`${base}live/`}>Live ⚡</a>
     <span class="hint-sep" aria-hidden="true">·</span>
     <a
       href="#feedback"

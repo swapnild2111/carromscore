@@ -47,12 +47,13 @@
     },
 
     "live": {
+      ".read": true,
       "$mid": {
-        ".read": true,
         ".write": "$mid.length >= 4 && $mid.length <= 12 && newData.exists()",
-        ".validate": "newData.hasChildren(['matchId', 'updatedAt']) && newData.child('updatedAt').isNumber() && newData.child('updatedAt').val() <= now && newData.child('updatedAt').val() > now - 60000",
+        ".validate": "newData.hasChildren(['updatedAt', 'liveState']) && newData.child('updatedAt').isNumber() && newData.child('updatedAt').val() <= now && newData.child('updatedAt').val() > now - 60000",
         "matchId":   { ".validate": "newData.isString()" },
         "updatedAt": { ".validate": "newData.isNumber()" },
+        "meta":      { ".validate": "newData.hasChildren()" },
         "liveState": { ".validate": "newData.hasChildren()" },
         "$other":    { ".validate": false }
       }

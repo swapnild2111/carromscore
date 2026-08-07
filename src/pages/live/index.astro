@@ -1,0 +1,7 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import LiveLobby from '../../components/LiveLobby.svelte';
+---
+<BaseLayout title="Carromscore — live">
+  <LiveLobby client:only="svelte" />
+</BaseLayout>

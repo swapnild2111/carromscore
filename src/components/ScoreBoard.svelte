@@ -18,6 +18,7 @@
     clearMatchIdentity,
   } from '../lib/history';
   import { subscribePlayers } from '../lib/players';
+  import { armLiveCleanup, publishLive, type LivePayload } from '../lib/live-sync';
 
   type Side = { name: string; note: string; sets: number; points: number };
   /*
@@ -99,57 +100,6 @@
   );
   let showPracticePopup = $state(false);
 
-  /*
-   * Share URL popup. Two URLs on offer:
-   *
-   *   1. Overlay URL — the score-page URL with ?view=overlay appended.
-   *      OBS/Prism paste this as a Browser Source and get the
-   *      transparent bottom-third scoreboard strip. Live sync works
-   *      because both tabs share the same browser's localStorage.
-   *
-   *   2. Live spectator URL — same URL without ?view=overlay, meant
-   *      for a spectator device to watch the match live. Disabled
-   *      today because cross-device sync isn't shipped yet — needs
-   *      Firebase/Supabase, planned for v1.8+.
-   *
-   * The popup shows both, each with its own Copy button. The live-sync
-   * button is greyed with a "coming soon" note so users don't wonder
-   * why sharing doesn't work between phones.
-   */
-  let showSharePopup = $state(false);
-  let copiedUrl = $state<'overlay' | 'live' | null>(null);
-  let copiedTimer: number | null = null;
-
-  const overlayUrl = $derived.by(() => {
-    if (typeof window === 'undefined') return '';
-    const params = new URLSearchParams(window.location.search);
-    params.set('view', 'overlay');
-    return `${window.location.origin}${window.location.pathname}?${params.toString()}`;
-  });
-  const liveUrl = $derived.by(() => {
-    if (typeof window === 'undefined') return '';
-    return `${window.location.origin}${window.location.pathname}${window.location.search}`;
-  });
-
-  function shareOverlay() {
-    showSharePopup = true;
-  }
-  async function copyToClipboard(url: string, which: 'overlay' | 'live') {
-    try {
-      await navigator.clipboard.writeText(url);
-    } catch {
-      // Fallback for older browsers / restricted contexts.
-      const el = document.createElement('input');
-      el.value = url;
-      document.body.appendChild(el);
-      el.select();
-      try { document.execCommand('copy'); } catch { /* silent */ }
-      el.remove();
-    }
-    copiedUrl = which;
-    if (copiedTimer !== null) clearTimeout(copiedTimer);
-    copiedTimer = window.setTimeout(() => { copiedUrl = null; }, 1500);
-  }
   const PRACTICE_BOARD_MAX = 99;
 
   function blankMatrix(rows: number, cols: number): number[][] {
@@ -180,6 +130,11 @@
     // forking identity on a page-refreshed-mid-match device).
     // Silent-on-failure inside the module.
     void subscribePlayers();
+    // If this match broadcasts live, register a Firebase auto-cleanup
+    // that removes /live/{mid} when the umpire's tab closes without
+    // tapping End. Firebase honours this server-side once the
+    // WebSocket drops. Practice mode has no mid, so this is a no-op.
+    if (cfg.live && cfg.mid) void armLiveCleanup(cfg.mid);
     // currentBreak stays null until the organiser marks board 0's breaker;
     // hydrate below can restore a live value if we're resuming a match.
 
@@ -317,6 +272,37 @@
       localStorage.setItem(storageKey, JSON.stringify(s));
     } catch {
       // ignore
+    }
+    // Live broadcast: when the umpire toggled Live at Setup, mirror
+    // the same payload to Firebase /live/{mid}. Spectator devices
+    // subscribed to that slug receive the update ~500 ms later.
+    // Silent-on-failure via publishLive.
+    if (cfg.live && cfg.mid) {
+      const payload: LivePayload = {
+        sideA: { points: sideA.points, sets: sideA.sets },
+        sideB: { points: sideB.points, sets: sideB.sets },
+        board,
+        currentBreak,
+        queenHolder,
+        matchResult,
+        ...(isPractice ? { practiceBoards } : {}),
+      };
+      void publishLive(
+        cfg.mid,
+        {
+          mode: cfg.mode,
+          playerA: cfg.playerA,
+          playerA2: cfg.playerA2,
+          playerB: cfg.playerB,
+          playerB2: cfg.playerB2,
+          noteA: cfg.noteA,
+          noteB: cfg.noteB,
+          bestOf: cfg.bestOf,
+          pointsTarget: cfg.pointsTarget,
+          maxBoards: cfg.maxBoards,
+        },
+        payload,
+      );
     }
   });
 
@@ -1050,9 +1036,6 @@
     {/if}
     <div class="foot-actions">
       {#if !isPractice}
-        <button type="button" class="foot-btn share" onclick={shareOverlay} aria-label="Copy overlay URL">
-          <span class="foot-ico" aria-hidden="true">⧉</span><span class="foot-lbl">Share URL</span>
-        </button>
         <button type="button" class="foot-btn swap" onclick={swapSides} aria-label="Swap sides">
           <span class="foot-ico" aria-hidden="true">⇄</span><span class="foot-lbl">Swap</span>
         </button>
@@ -1068,44 +1051,6 @@
       </button>
     </div>
   </div>
-
-  {#if showSharePopup}
-    <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="share-title">
-      <div class="dialog-card share-card">
-        <h2 id="share-title">Share match URL</h2>
-
-        <!-- Overlay URL — usable today for OBS/Prism as a Browser Source. -->
-        <div class="share-row">
-          <div class="share-row-head">
-            <div class="share-row-title">Overlay URL <span class="share-badge share-badge-ok">Ready</span></div>
-            <div class="share-row-sub">Paste into OBS or Prism as a Browser Source. Renders the transparent bottom-third scoreboard on your broadcast.</div>
-          </div>
-          <div class="share-url-row">
-            <input type="text" readonly value={overlayUrl} class="share-url" aria-label="Overlay URL" onclick={(e) => (e.currentTarget as HTMLInputElement).select()} />
-            <button type="button" class="share-copy" onclick={() => copyToClipboard(overlayUrl, 'overlay')} aria-label="Copy overlay URL">
-              {copiedUrl === 'overlay' ? '✓ Copied' : 'Copy'}
-            </button>
-          </div>
-        </div>
-
-        <!-- Live spectator URL — disabled until Firebase-backed cross-device sync ships. -->
-        <div class="share-row share-row-disabled">
-          <div class="share-row-head">
-            <div class="share-row-title">Live spectator URL <span class="share-badge share-badge-soon">Coming soon</span></div>
-            <div class="share-row-sub">For sending to friends/family so they can watch the live score on their own phone. Cross-device live sync is planned for a future release.</div>
-          </div>
-          <div class="share-url-row">
-            <input type="text" readonly value={liveUrl} class="share-url" aria-label="Live spectator URL (disabled)" disabled />
-            <button type="button" class="share-copy" disabled aria-label="Copy live spectator URL (disabled)">Copy</button>
-          </div>
-        </div>
-
-        <div class="dialog-actions">
-          <button class="cancel" onclick={() => (showSharePopup = false)}>Close</button>
-        </div>
-      </div>
-    </div>
-  {/if}
 
   {#if showWinnerPopup && matchResult}
     <div class="dialog winner-dialog" role="dialog" aria-modal="true">
@@ -1795,91 +1740,6 @@
   .foot-btn.reset { border-color: rgba(255,213,74,0.4); color: var(--accent); }
   .foot-btn.endm { border-color: rgba(76,175,80,0.5); color: #66bb6a; }
   .foot-btn.close { border-color: rgba(239,83,80,0.4); color: var(--danger); }
-  .foot-btn.share { border-color: rgba(186,104,200,0.45); color: #ba68c8; }
-
-  /*
-   * Share-URL popup. Two rows (Overlay + Live-sync), each with a
-   * readonly text field + Copy button. Same .dialog / .dialog-card
-   * base as Exit/Reset/Practice confirmations so it inherits the
-   * accent border and z-index.
-   */
-  .share-card { max-width: 32rem; text-align: left; }
-  .share-card h2 { text-align: center; }
-  .share-row {
-    padding: 0.85rem 0;
-    border-bottom: 1px solid rgba(255,255,255,0.06);
-  }
-  .share-row:last-of-type { border-bottom: none; }
-  .share-row-disabled { opacity: 0.55; }
-  .share-row-head { margin-bottom: 0.55rem; }
-  .share-row-title {
-    color: var(--fg);
-    font-weight: 800;
-    font-size: 0.95rem;
-    letter-spacing: 0.02em;
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    margin-bottom: 0.15rem;
-  }
-  .share-row-sub {
-    color: var(--muted);
-    font-size: 0.78rem;
-    line-height: 1.35;
-  }
-  .share-badge {
-    display: inline-block;
-    padding: 0.1rem 0.45rem;
-    border-radius: 999px;
-    font-size: 0.62rem;
-    font-weight: 700;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    line-height: 1;
-  }
-  .share-badge-ok {
-    background: rgba(102, 187, 106, 0.15);
-    color: #66bb6a;
-    border: 1px solid rgba(102, 187, 106, 0.4);
-  }
-  .share-badge-soon {
-    background: rgba(255, 213, 74, 0.14);
-    color: var(--accent);
-    border: 1px solid rgba(255, 213, 74, 0.35);
-  }
-  .share-url-row { display: flex; gap: 0.5rem; }
-  .share-url {
-    flex: 1;
-    min-width: 0;
-    padding: 0.5rem 0.7rem;
-    background: #0b0b0b;
-    border: 1px solid #2a2a2a;
-    border-radius: 0.5rem;
-    color: var(--fg);
-    font-family: ui-monospace, 'SF Mono', Consolas, monospace;
-    font-size: 0.78rem;
-  }
-  .share-url:focus { outline: none; border-color: var(--accent); }
-  .share-url:disabled { color: var(--muted); cursor: not-allowed; }
-  .share-copy {
-    flex-shrink: 0;
-    padding: 0.5rem 0.9rem;
-    background: var(--accent);
-    color: #0b0b0b;
-    border: none;
-    border-radius: 0.5rem;
-    font-weight: 800;
-    font-size: 0.8rem;
-    letter-spacing: 0.04em;
-    cursor: pointer;
-    transition: background 0.1s;
-  }
-  .share-copy:hover:not(:disabled) { filter: brightness(1.1); }
-  .share-copy:disabled {
-    background: rgba(255,255,255,0.06);
-    color: var(--muted);
-    cursor: not-allowed;
-  }
 
   /* Tight-height layout tweaks — labels stay visible (landscape has
      room); only the button padding and hint size get trimmed. */
