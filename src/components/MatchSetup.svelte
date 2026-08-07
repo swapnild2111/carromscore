@@ -554,19 +554,27 @@
     <p class="hint">Tap Share → Add to Home Screen to install.</p>
   {/if}
 
-  <p class="version-line">
-    © 2026 Swapnil Deshpande
-    <span class="hint-sep" aria-hidden="true">·</span>
-    <span class="hint-ver">v{APP_VERSION}</span>
-    <span class="hint-sep" aria-hidden="true">·</span>
-    <a class="feedback-link" href={`${base}live/`}>Live ⚡</a>
-    <span class="hint-sep" aria-hidden="true">·</span>
+  <!--
+    Footer: two rows.
+      Row 1 (nav): thumb-priority actions the user might actually tap.
+      Row 2 (meta): version + copyright — informational, quieter.
+    Rendered as two separate <p>s to make the visual hierarchy explicit
+    without CSS grid gymnastics.
+  -->
+  <nav class="foot-nav" aria-label="Site navigation">
+    <a class="foot-link" href={`${base}live/`}>Live ⚡</a>
+    <span class="foot-sep" aria-hidden="true">·</span>
     <a
       href="#feedback"
-      class="feedback-link"
+      class="foot-link"
       onclick={openFeedback}
       aria-label="Send feedback about Carromscore"
     >Feedback ⇗</a>
+  </nav>
+  <p class="foot-meta">
+    <span class="foot-ver">v{APP_VERSION}</span>
+    <span class="foot-sep" aria-hidden="true">·</span>
+    © 2026 Swapnil Deshpande
   </p>
 </form>
 
@@ -690,6 +698,22 @@
     color: var(--muted);
     font-size: 0.7rem;
     letter-spacing: 0.02em;
+  }
+
+  /* Very narrow phones (≤ 360px): trim padding + text so the three-
+     column Mode / Match-rules grids fit without spilling out of the
+     container. Label text still wraps if needed. */
+  @media (max-width: 380px) {
+    fieldset label {
+      padding: 0.5rem 0.4rem;
+      min-height: 3rem;
+    }
+    .opt-title { font-size: 0.82rem; }
+    .opt-meta { font-size: 0.62rem; }
+    fieldset.rules label { padding: 0.5rem 0.55rem; }
+    fieldset.rules label > span { font-size: 0.62rem; }
+    fieldset.rules input[type='number'] { font-size: 1rem; }
+    legend { font-size: 0.7rem; }
   }
 
   .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
@@ -995,15 +1019,30 @@
    * both screens read as one product. Version chip: soft accent pill,
    * sans-serif, bold — glanceable but doesn't fight the copyright text.
    */
-  .version-line {
+  /* Footer: two rows. Nav on top (thumb-priority), meta below. */
+  .foot-nav {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 1rem 0 0.35rem;
+    font-size: 0.85rem;
+    flex-wrap: wrap;
+  }
+  .foot-meta {
     text-align: center;
     color: var(--muted);
-    font-size: 0.75rem;
+    font-size: 0.72rem;
     margin: 0;
     letter-spacing: 0.02em;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 0.3rem;
+    flex-wrap: wrap;
   }
-  .hint-sep { opacity: 0.4; margin: 0 0.3rem; }
-  .hint-ver {
+  .foot-sep { opacity: 0.4; }
+  .foot-ver {
     display: inline-block;
     padding: 0.1rem 0.5rem;
     background: rgba(255, 213, 74, 0.14);
@@ -1015,17 +1054,18 @@
     font-size: 0.7rem;
     letter-spacing: 0.06em;
     line-height: 1;
-    vertical-align: baseline;
   }
-  .feedback-link {
-    color: var(--muted);
+  .foot-link {
+    color: var(--fg);
     text-decoration: none;
-    border-bottom: 1px dotted rgba(255,255,255,0.35);
-    transition: color 0.15s, border-color 0.15s;
+    padding: 0.15rem 0.5rem;
+    border-radius: 0.35rem;
+    font-weight: 600;
+    transition: color 0.15s, background 0.15s;
   }
-  .feedback-link:hover {
+  .foot-link:hover {
     color: var(--accent);
-    border-bottom-color: var(--accent);
+    background: rgba(255, 213, 74, 0.08);
   }
 
   /*
