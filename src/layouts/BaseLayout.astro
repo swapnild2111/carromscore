@@ -43,9 +43,42 @@ const base = import.meta.env.BASE_URL;
         cursor: pointer;
         touch-action: manipulation;
       }
+
+      /* Beta channel banner — only visible when the deploy landed
+         under /carromscore/beta/. Small strip pinned to the top of
+         the viewport so testers can never forget which build they're
+         on. `data-channel="beta"` is set inline before hydration by
+         the script in <body>. */
+      html[data-channel="beta"] body {
+        padding-top: 1.75rem;
+      }
+      html[data-channel="beta"] body::before {
+        content: "BETA · v2.0 preview · not for production";
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 200;
+        padding: 0.35rem 0.75rem;
+        background: linear-gradient(90deg, #7a1c1c, #a02525);
+        color: #fff;
+        font-size: 0.7rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        text-align: center;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      }
     </style>
   </head>
   <body>
+    <script is:inline define:vars={{ base }}>
+      // Set data-channel="beta" on <html> so the tiny beta banner
+      // and any future channel-specific tweaks can key off it.
+      if (base.includes('/beta/')) {
+        document.documentElement.dataset.channel = 'beta';
+      }
+    </script>
     <slot />
     <script>
       /*
@@ -59,19 +92,32 @@ const base = import.meta.env.BASE_URL;
        *
        * The initial controller acquisition on first load is filtered
        * out: only *changes* to an existing controller count as updates.
+       *
+       * SKIP on the beta channel — beta builds change frequently and
+       * every visit should pull the latest. public/sw.js also hardcodes
+       * /carromscore/ paths so it wouldn't work under /carromscore/beta/
+       * anyway; better to skip than poison the tab with a broken
+       * registration.
        */
       if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker
-            .register(`${import.meta.env.BASE_URL}sw.js`, { scope: import.meta.env.BASE_URL })
-            .catch(() => {});
-
-          const hadControllerAtLoad = !!navigator.serviceWorker.controller;
-          navigator.serviceWorker.addEventListener('controllerchange', () => {
-            if (!hadControllerAtLoad) return;
-            window.dispatchEvent(new CustomEvent('carrom:sw-updated'));
+        const isBeta = import.meta.env.BASE_URL.includes('/beta/');
+        if (isBeta) {
+          navigator.serviceWorker.getRegistrations().then((regs) => {
+            regs.forEach((r) => r.unregister());
           });
-        });
+        } else {
+          window.addEventListener('load', () => {
+            navigator.serviceWorker
+              .register(`${import.meta.env.BASE_URL}sw.js`, { scope: import.meta.env.BASE_URL })
+              .catch(() => {});
+
+            const hadControllerAtLoad = !!navigator.serviceWorker.controller;
+            navigator.serviceWorker.addEventListener('controllerchange', () => {
+              if (!hadControllerAtLoad) return;
+              window.dispatchEvent(new CustomEvent('carrom:sw-updated'));
+            });
+          });
+        }
       }
     </script>
   </body>
