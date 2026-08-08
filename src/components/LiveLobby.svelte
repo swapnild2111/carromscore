@@ -574,7 +574,15 @@
     font-size: 1.5rem !important;
   }
   :global(.overlay-wrap .note) {
-    font-size: 0.85rem !important;
+    font-size: 0.9rem !important;
+    /* Overlay context: muted grey gets swallowed by the semi-
+       transparent pill tile over a busy camera feed. Bump to
+       near-white with a hard text-shadow so the country/region
+       reads on any background. */
+    color: rgba(240, 240, 240, 0.9) !important;
+    font-weight: 600 !important;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+    letter-spacing: 0.02em;
   }
   /* Slightly larger BREAK chip + queen coin so they read on a
      broadcast feed at a distance. */
