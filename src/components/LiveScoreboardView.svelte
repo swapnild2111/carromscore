@@ -42,7 +42,10 @@
       class:gold={state.matchResult === 'a'}
       class:silver={state.matchResult === 'b'}
     >
-      <span class="name">{sideName('a')}</span>
+      <span class="name">
+        {#if state.matchResult === 'a'}<span class="trophy" aria-label="Winner">🏆</span>{/if}
+        {sideName('a')}
+      </span>
       <span class="accs">
         {#if state.currentBreak === 'a'}<span class="chip chip-break">BREAK</span>{/if}
         <span
@@ -71,12 +74,19 @@
         ></span>
         {#if state.currentBreak === 'b'}<span class="chip chip-break">BREAK</span>{/if}
       </span>
-      <span class="name">{sideName('b')}</span>
+      <span class="name">
+        {#if state.matchResult === 'b'}<span class="trophy" aria-label="Winner">🏆</span>{/if}
+        {sideName('b')}
+      </span>
       {#if sideNote('b')}<span class="note">{sideNote('b')}</span>{/if}
     </div>
   </header>
 
-  <section class="board">
+  <section
+    class="board"
+    class:winner-a={state.matchResult === 'a'}
+    class:winner-b={state.matchResult === 'b'}
+  >
     <div class="col col-set">
       <div class="lbl">SET</div>
       <div class="digit digit-a">{state.sideA.sets}</div>
@@ -215,15 +225,44 @@
     text-transform: uppercase;
     letter-spacing: 0.1em;
   }
+  /* Winner pill — much bolder than the previous subtle border tint.
+     Solid amber border, warm gold gradient background, gold text on
+     the name, glow ring. The trophy emoji inline further hammers it
+     home. Reads as "this is the winner" from across a room. */
   .pill.gold {
-    border-color: rgba(255, 213, 74, 0.8);
-    background: linear-gradient(120deg, #2a2410 0%, #1a1610 100%);
-    box-shadow: 0 0 24px rgba(255, 213, 74, 0.15);
+    border-color: rgba(255, 213, 74, 0.95);
+    background: linear-gradient(135deg, #3d3418 0%, #221c0c 100%);
+    box-shadow:
+      0 0 0 1px rgba(255, 213, 74, 0.5),
+      0 0 28px rgba(255, 213, 74, 0.35),
+      inset 0 1px 0 rgba(255, 220, 100, 0.15);
   }
+  .pill.gold .name { color: var(--accent, #ffd54a); }
+  .trophy {
+    display: inline-block;
+    font-size: 1em;
+    margin-right: 0.15rem;
+    filter: drop-shadow(0 0 4px rgba(255, 213, 74, 0.6));
+  }
+
+  /* Loser pill — desaturated silver. Weaker than winner in every way
+     (dimmer border, muted colour on name, no glow). Reads as "not
+     the winner" without being harsh. */
   .pill.silver {
-    border-color: rgba(180, 180, 180, 0.5);
-    background: linear-gradient(120deg, #1a1a1a 0%, #131313 100%);
+    border-color: rgba(160, 160, 160, 0.35);
+    background: linear-gradient(135deg, #171717 0%, #101010 100%);
+    opacity: 0.85;
   }
+  .pill.silver .name { color: #b4bac0; }
+  .pill.silver .note { opacity: 0.6; }
+
+  /* Score-digit medal treatment: winner side digits shine gold,
+     loser side digits fade to silver. Overrides digit-a / digit-b
+     side colours only after a match is decided. */
+  .board.winner-a .digit-a { color: var(--accent, #ffd54a); text-shadow: 0 0 12px rgba(255, 213, 74, 0.35); }
+  .board.winner-a .digit-b { color: #b4bac0; opacity: 0.7; }
+  .board.winner-b .digit-b { color: var(--accent, #ffd54a); text-shadow: 0 0 12px rgba(255, 213, 74, 0.35); }
+  .board.winner-b .digit-a { color: #b4bac0; opacity: 0.7; }
 
   .board {
     display: grid;
