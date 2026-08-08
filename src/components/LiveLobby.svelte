@@ -566,7 +566,7 @@
      scoped and we can't otherwise reach them. */
   :global(.overlay-wrap .pill) {
     padding: 0.35rem 0.55rem !important;
-    background: rgba(15, 15, 15, 0.62) !important;
+    background: rgba(15, 15, 15, 0.75) !important;
     backdrop-filter: blur(4px);
     -webkit-backdrop-filter: blur(4px);
   }
@@ -599,7 +599,7 @@
     padding: 0.15rem 0 !important;
   }
   :global(.overlay-wrap .col) {
-    background: rgba(15, 15, 15, 0.62) !important;
+    background: rgba(15, 15, 15, 0.75) !important;
     backdrop-filter: blur(4px);
     -webkit-backdrop-filter: blur(4px);
     padding: 0.3rem 0.2rem !important;

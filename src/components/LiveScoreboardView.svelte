@@ -245,24 +245,22 @@
     filter: drop-shadow(0 0 4px rgba(255, 213, 74, 0.6));
   }
 
-  /* Loser pill — desaturated silver. Weaker than winner in every way
-     (dimmer border, muted colour on name, no glow). Reads as "not
-     the winner" without being harsh. */
+  /* Loser pill — stays plain (neutral border, plain white name).
+     Winner does all the emphasis; the loser doesn't get "punished"
+     with a dim treatment. Cleaner and less patronising. */
   .pill.silver {
     border-color: rgba(160, 160, 160, 0.35);
     background: linear-gradient(135deg, #171717 0%, #101010 100%);
-    opacity: 0.85;
   }
-  .pill.silver .name { color: #b4bac0; }
-  .pill.silver .note { opacity: 0.6; }
+  .pill.silver .name { color: var(--fg, #f5f5f5); }
 
-  /* Score-digit medal treatment: winner side digits shine gold,
-     loser side digits fade to silver. Overrides digit-a / digit-b
-     side colours only after a match is decided. */
+  /* Score-digit medal treatment: winner side digits shine gold.
+     Loser side stays plain white (not dimmed) so the score is still
+     clearly readable at a glance. */
   .board.winner-a .digit-a { color: var(--accent, #ffd54a); text-shadow: 0 0 12px rgba(255, 213, 74, 0.35); }
-  .board.winner-a .digit-b { color: #b4bac0; opacity: 0.7; }
+  .board.winner-a .digit-b { color: var(--fg, #f5f5f5); }
   .board.winner-b .digit-b { color: var(--accent, #ffd54a); text-shadow: 0 0 12px rgba(255, 213, 74, 0.35); }
-  .board.winner-b .digit-a { color: #b4bac0; opacity: 0.7; }
+  .board.winner-b .digit-a { color: var(--fg, #f5f5f5); }
 
   .board {
     display: grid;
