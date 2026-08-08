@@ -11,13 +11,22 @@ const base = import.meta.env.BASE_URL;
         <h1>Carrom<span class="h1-accent">S</span>core</h1>
         <p class="tag">Live scoring for players &amp; broadcasters</p>
       </div>
+      <!-- Live pill sits top-right so it doesn't get lost in the
+           footer. Prominent enough to catch first-time visitors'
+           eye; not so loud that it competes with the Start-match
+           button. -->
+      <a class="live-cta" href={`${base}live/`} aria-label="Watch live matches">
+        <span class="live-dot" aria-hidden="true"></span>
+        <span class="live-lbl">Live</span>
+      </a>
     </header>
     <MatchSetup client:only="svelte" />
   </main>
   <style>
     .wrap { padding: 1rem 0 0; }
     .hero {
-      display: flex;
+      display: grid;
+      grid-template-columns: auto 1fr auto;
       align-items: center;
       gap: 1rem;
       padding: 1.5rem 1.25rem 0.5rem;
@@ -32,6 +41,43 @@ const base = import.meta.env.BASE_URL;
       box-shadow: 0 4px 16px rgba(0,0,0,0.4);
     }
     .titles { min-width: 0; }
+
+    /* Live pill — pulsing red dot + label. Sits top-right of the hero.
+       Gets a subtle rise on hover / active so it feels tappable. */
+    .live-cta {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.45rem 0.75rem;
+      background: rgba(239, 83, 80, 0.1);
+      border: 1px solid rgba(239, 83, 80, 0.5);
+      border-radius: 999px;
+      color: #ef5350;
+      font-weight: 700;
+      font-size: 0.82rem;
+      letter-spacing: 0.04em;
+      text-decoration: none;
+      transition: background 0.15s, border-color 0.15s, transform 0.1s;
+      flex-shrink: 0;
+      align-self: center;
+    }
+    .live-cta:hover {
+      background: rgba(239, 83, 80, 0.18);
+      border-color: rgba(239, 83, 80, 0.8);
+    }
+    .live-cta:active { transform: scale(0.97); }
+    .live-dot {
+      width: 0.5rem;
+      height: 0.5rem;
+      border-radius: 50%;
+      background: #ef5350;
+      box-shadow: 0 0 8px rgba(239, 83, 80, 0.9);
+      animation: livePulse 1.6s ease-in-out infinite;
+    }
+    @keyframes livePulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
     /*
      * Title is the visual anchor of the setup screen. Gold gradient clipped
      * to the text, gentle drop-shadow, and a small underline accent so it
@@ -90,8 +136,12 @@ const base = import.meta.env.BASE_URL;
       font-size: 0.9rem;
     }
     @media (max-width: 380px) {
-      .hero { gap: 0.75rem; padding: 1rem 1rem 0.25rem; }
+      .hero { gap: 0.6rem; padding: 1rem 1rem 0.25rem; }
       .logo { width: 64px; height: 64px; border-radius: 14px; }
+      .live-cta {
+        padding: 0.35rem 0.55rem;
+        font-size: 0.72rem;
+      }
     }
   </style>
 </BaseLayout>

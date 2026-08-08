@@ -555,14 +555,14 @@
   {/if}
 
   <!--
-    Footer: two rows.
-      Row 1 (nav): thumb-priority actions the user might actually tap.
-      Row 2 (meta): version + copyright — informational, quieter.
-    Rendered as two separate <p>s to make the visual hierarchy explicit
-    without CSS grid gymnastics.
+    Footer: quiet meta strip. Live moved to the hero top-right for
+    prominence; only version + copyright + Feedback (the "small
+    ask", not a primary action) live here.
   -->
-  <nav class="foot-nav" aria-label="Site navigation">
-    <a class="foot-link" href={`${base}live/`}>Live ⚡</a>
+  <p class="foot-meta">
+    <span class="foot-ver">v{APP_VERSION}</span>
+    <span class="foot-sep" aria-hidden="true">·</span>
+    © 2026 Swapnil Deshpande
     <span class="foot-sep" aria-hidden="true">·</span>
     <a
       href="#feedback"
@@ -570,11 +570,6 @@
       onclick={openFeedback}
       aria-label="Send feedback about Carromscore"
     >Feedback ⇗</a>
-  </nav>
-  <p class="foot-meta">
-    <span class="foot-ver">v{APP_VERSION}</span>
-    <span class="foot-sep" aria-hidden="true">·</span>
-    © 2026 Swapnil Deshpande
   </p>
 </form>
 
