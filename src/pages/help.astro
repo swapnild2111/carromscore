@@ -1,0 +1,271 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+const base = import.meta.env.BASE_URL;
+
+/**
+ * Section anchor + copy structure lives here so the markup stays lean.
+ * Screenshots are checked into public/help/ (copied from
+ * docs/screenshots/) so they ship with every build without needing a
+ * separate CDN. Kept lightweight — the images are the main payload.
+ */
+const sections = [
+  {
+    id: 'setup',
+    title: 'Setting up a match',
+    body:
+      'Pick a format (Best of 3, Single set 25, or Custom), a mode ' +
+      '(Singles, Doubles, or Practice), type the players, and hit Start. ' +
+      'Names you type are remembered so autocomplete gets faster over ' +
+      'time.',
+    shots: [
+      { src: '01-setup-blank.png', caption: 'Setup screen fresh — pick a format and start typing.' },
+      { src: '02-setup-filled.png', caption: 'Filled setup ready to start. The Live toggle enables an OBS-friendly broadcast.' },
+    ],
+  },
+  {
+    id: 'tournament',
+    title: 'Tagging a tournament',
+    body:
+      'On Singles & Doubles setup, there is a "Tournament" field above ' +
+      'the player rows. Tag a match with an event name like "Silver Cup ' +
+      '2026" and every match sharing that tag groups together in the ' +
+      'lobby (Now Playing + History). Untagged matches fall into a ' +
+      '"Default" bucket. Retention differs: tagged matches keep for a ' +
+      'year, Default matches for 3 months, Practice runs for 3 months ' +
+      'always. Names are auto-suggested as you type from your previous ' +
+      'tags — so a second match at the same event picks the exact same ' +
+      'tag without a typo.',
+    shots: [],
+  },
+  {
+    id: 'scoring',
+    title: 'Scoring on the board',
+    body:
+      'The scoreboard is a 5-column strip: SETS · POINTS · BOARD · POINTS ' +
+      '· SETS. Every column is tappable. Tap adds one, swipe left adds, ' +
+      'swipe right subtracts. The BREAK chip shows who is opening; it ' +
+      'auto-flips when you tap BOARD +1. If someone pocketed the queen ' +
+      'this board, tap the small circle above their name so the coin ' +
+      'value on their side records "+Q". BOARD +1 is blocked until you ' +
+      'either mark a queen or explicitly say "no queen this board" — ' +
+      'that pattern prevents accidentally moving past a board you have ' +
+      'not scored fully.',
+    shots: [
+      { src: '03-score-fresh.png', caption: 'Scoreboard at match start — SET 0 both sides, BOARD 1.' },
+      { src: '04-score-midset.png', caption: 'Mid-set. Note the BREAK chip on the left side.' },
+      { src: '05-score-queen-lockout.png', caption: 'BOARD +1 lockout: mark queen (or "no queen") before advancing.' },
+    ],
+  },
+  {
+    id: 'end',
+    title: 'Ending a match',
+    body:
+      'Tap End to close a match at any time. A recap dialog shows every ' +
+      'board of every set with the queen marked as a "+Q" suffix on ' +
+      'whichever side pocketed it. Winner medals appear on the board ' +
+      'itself if someone crossed the sets-to-win threshold.',
+    shots: [
+      { src: '06-end-match-popup.png', caption: 'End-match recap: paper-scorecard-style matrix.' },
+      { src: '07-end-match-medals.png', caption: 'Winner medals on the main board when the match resolves.' },
+    ],
+  },
+  {
+    id: 'practice',
+    title: 'Practice / solo drills',
+    body:
+      'Practice mode is one player, one drill session. Tap MISS every ' +
+      'time you miss; the counter tracks per-board. BOARD +1 advances ' +
+      'to a fresh row. SET +1 starts a new drill set. The End recap ' +
+      'shows every board of every set so you can compare sessions. ' +
+      'Practice runs are recorded to History for 3 months.',
+    shots: [
+      { src: '08-practice-setup.png', caption: 'Practice setup — one player, no opponent.' },
+      { src: '09-practice-single-set.png', caption: 'Single-set drill in progress.' },
+      { src: '10-practice-multi-scroll.png', caption: 'Multi-set practice with horizontal scroll.' },
+      { src: '11-practice-recap.png', caption: 'Practice recap dialog on End.' },
+    ],
+  },
+  {
+    id: 'live',
+    title: 'Live broadcast + OBS overlay',
+    body:
+      'Toggle "Live" on setup and every state change publishes to a ' +
+      'shareable URL. From the score screen tap the Share button to ' +
+      'copy either (a) the spectator URL — a full read-only scoreboard, ' +
+      'or (b) the OBS/Prism overlay URL — a transparent scoreboard tile ' +
+      'you drop into a Browser Source over your camera feed. Both URLs ' +
+      'stay live for the duration of the match.',
+    shots: [
+      { src: '12-share-popup.png', caption: 'Share popup with spectator + OBS links.' },
+      { src: '13-overlay-bare.png', caption: 'Overlay tile on its own — transparent background.' },
+      { src: '14-overlay-composited.png', caption: 'Overlay composited over a live camera feed in OBS.' },
+      { src: '15-overlay-endgame.png', caption: 'Overlay at end-of-match with winner emphasis.' },
+    ],
+  },
+  {
+    id: 'lobby',
+    title: 'Lobby: Now Playing & History',
+    body:
+      'Tap the red Live pill on the home screen to open the lobby. ' +
+      '"Now Playing" lists ongoing broadcasts. "History" lists every ' +
+      'finished match. Both tabs group matches by tournament tag. ' +
+      'Tapping any card opens a full read-only recap. History groups ' +
+      'default to folded; Now Playing groups default to open.',
+    shots: [],
+  },
+  {
+    id: 'feedback',
+    title: 'Reporting bugs or ideas',
+    body:
+      'Feedback link in the home footer opens a small dialog with an ' +
+      'email address. The version tag is included in the subject line ' +
+      'so I can tell whether a report is against the current build.',
+    shots: [
+      { src: '16-feedback-popup.png', caption: 'Feedback popup with pre-filled version.' },
+    ],
+  },
+];
+---
+<BaseLayout title="Carromscore — how to use">
+  <main class="wrap">
+    <header class="hero">
+      <a class="back" href={base} aria-label="Back to home">← Home</a>
+      <h1>How to use Carromscore</h1>
+      <p class="tag">A quick tour of match setup, scoring, and broadcast.</p>
+    </header>
+
+    <nav class="toc" aria-label="Sections">
+      {sections.map((s) => (
+        <a href={`#${s.id}`}>{s.title}</a>
+      ))}
+    </nav>
+
+    {sections.map((s) => (
+      <section class="sec" id={s.id}>
+        <h2>{s.title}</h2>
+        <p>{s.body}</p>
+        {s.shots.length > 0 && (
+          <div class="shots">
+            {s.shots.map((sh) => (
+              <figure>
+                <img src={`${base}help/${sh.src}`} alt={sh.caption} loading="lazy" />
+                <figcaption>{sh.caption}</figcaption>
+              </figure>
+            ))}
+          </div>
+        )}
+      </section>
+    ))}
+
+    <footer class="foot">
+      <a class="back" href={base}>← Back to home</a>
+    </footer>
+  </main>
+
+  <style>
+    .wrap {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 1.25rem 1rem 4rem;
+    }
+    .hero { margin: 0.5rem 0 1.5rem; }
+    .hero h1 {
+      margin: 0.5rem 0 0.25rem;
+      font-size: clamp(1.5rem, 4vw, 2rem);
+    }
+    .hero .tag {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+    .back {
+      display: inline-block;
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 0.9rem;
+      padding: 0.25rem 0.4rem;
+      margin-left: -0.4rem;
+      border-radius: 0.35rem;
+    }
+    .back:hover { color: var(--accent); background: rgba(255,255,255,0.04); }
+
+    .toc {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      padding: 0.75rem 0.9rem;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 0.65rem;
+      margin: 0 0 2rem;
+    }
+    .toc a {
+      color: var(--fg);
+      text-decoration: none;
+      font-size: 0.85rem;
+      padding: 0.3rem 0.55rem;
+      background: rgba(255,213,74,0.08);
+      border: 1px solid rgba(255,213,74,0.24);
+      border-radius: 999px;
+      transition: background 0.12s, border-color 0.12s;
+    }
+    .toc a:hover {
+      background: rgba(255,213,74,0.16);
+      border-color: rgba(255,213,74,0.44);
+    }
+
+    .sec {
+      margin: 0 0 2.25rem;
+      scroll-margin-top: 1rem;
+    }
+    .sec h2 {
+      margin: 0 0 0.5rem;
+      font-size: 1.15rem;
+      color: var(--accent);
+      letter-spacing: 0.02em;
+    }
+    .sec p {
+      margin: 0 0 1rem;
+      line-height: 1.55;
+      color: rgba(245,245,245,0.9);
+    }
+
+    .shots {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 1rem;
+    }
+    @media (min-width: 640px) {
+      .shots { grid-template-columns: 1fr 1fr; }
+    }
+    figure {
+      margin: 0;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 0.65rem;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    figure img {
+      display: block;
+      width: 100%;
+      height: auto;
+      background: #000;
+    }
+    figcaption {
+      padding: 0.55rem 0.75rem;
+      color: var(--muted);
+      font-size: 0.82rem;
+      line-height: 1.4;
+    }
+
+    .foot {
+      margin: 2rem 0 0;
+      padding-top: 1rem;
+      border-top: 1px solid rgba(255,255,255,0.08);
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+  </style>
+</BaseLayout>

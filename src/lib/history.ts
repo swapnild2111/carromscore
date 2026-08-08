@@ -64,8 +64,34 @@ export type MatchResultInput = {
     format: string;
   };
   notes: { a: string; b: string };
+  /**
+   * Tournament / event tag. Empty = untagged (grouped as "Default"
+   * in the lobby, kept 3 months). Non-empty = "protected" tag
+   * (grouped by name, kept 1 year for versus matches).
+   */
+  tournament?: string;
   startedAt: number;
   endedAt: number;
+  /**
+   * Board-by-board log captured across the match. Empty in Practice
+   * mode. May be shorter than `board` if BOARD+1 was pressed without
+   * queen (blocked) or if the umpire manually adjusted BOARD after
+   * a snapshot; both are edge cases and non-fatal.
+   */
+  boardLog?: Array<{
+    set: number;
+    board: number;
+    breakSide: 'a' | 'b';
+    queen: 'a' | 'b';
+    pointsA: number;
+    pointsB: number;
+    endedAt: number;
+  }>;
+  /**
+   * Practice-only: 2D matrix of missed-shot counts. Outer index = set,
+   * inner = board. Present only when mode === 'practice'.
+   */
+  practiceBoards?: number[][];
 };
 
 /**
@@ -148,6 +174,15 @@ export async function finishMatch(
       setsB: result.sideB.sets,
       boardCount: result.board,
     },
+    ...(result.boardLog && result.boardLog.length > 0
+      ? { boardLog: result.boardLog }
+      : {}),
+    ...(result.practiceBoards && result.practiceBoards.length > 0
+      ? { practiceBoards: result.practiceBoards }
+      : {}),
+    ...(result.tournament?.trim()
+      ? { tournament: result.tournament.trim().slice(0, 60) }
+      : {}),
     startedAt: result.startedAt,
     endedAt: result.endedAt,
     ...(createdBy ? { createdBy } : {}),
@@ -198,9 +233,91 @@ export type MatchRecord = {
     setsB?: number;
     boardCount?: number;
   };
+  boardLog?: Array<{
+    set: number;
+    board: number;
+    breakSide: 'a' | 'b';
+    queen: 'a' | 'b';
+    pointsA: number;
+    pointsB: number;
+    endedAt: number;
+  }>;
+  practiceBoards?: number[][];
+  /**
+   * Tournament tag. Absent / empty → treated as "Default" bucket in
+   * the lobby, and gets the shorter (3-month) retention.
+   */
+  tournament?: string;
   startedAt?: number;
   endedAt?: number;
 };
+
+/**
+ * Best-effort sweep: remove match records whose `endedAt` is older
+ * than a mode+tournament-aware threshold. Piggybacks on the lobby
+ * load — no scheduled infrastructure, no Blaze tier. Silent-on-
+ * failure per house style; a failed sweep just leaves old records
+ * in place until the next successful call.
+ *
+ * Retention thresholds:
+ *   - versus WITH tournament tag: 1 year. Tagged matches are the
+ *     ones a user cared enough to bucket into an event — keep them
+ *     long enough that "Silver Cup 2026 → last year's final" is
+ *     still a lookup that works.
+ *   - versus WITHOUT tag (Default bucket): 3 months. Casual play,
+ *     high-volume, short TTL keeps the lobby uncluttered.
+ *   - practice: 3 months regardless of tag. Solo drills are the
+ *     highest-volume record kind; tagging doesn't change that.
+ *
+ * Player + tournament records are NOT swept — tiny, and their
+ * presence powers future identity/tag autocomplete even after the
+ * referencing matches age out.
+ */
+const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
+const THREE_MONTHS_MS = 90 * 24 * 60 * 60 * 1000;
+let sweepInFlight = false;
+
+export async function sweepOldMatches(
+  taggedVsMaxAgeMs = ONE_YEAR_MS,
+  untaggedMaxAgeMs = THREE_MONTHS_MS,
+): Promise<number> {
+  if (sweepInFlight) return 0;
+  sweepInFlight = true;
+  try {
+    const [{ firebaseApp }, { getDatabase, ref, get, remove }] = await Promise.all([
+      import('./firebase'),
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    const snap = await get(ref(db, 'matches'));
+    const val = snap.val() as Record<string, MatchRecord> | null;
+    if (!val) return 0;
+    const now = Date.now();
+    const taggedVsCutoff = now - taggedVsMaxAgeMs;
+    const untaggedCutoff = now - untaggedMaxAgeMs;
+    const stale: string[] = [];
+    for (const [id, r] of Object.entries(val)) {
+      if (!r || typeof r !== 'object') continue;
+      const endedAt = typeof r.endedAt === 'number' ? r.endedAt : 0;
+      if (endedAt <= 0) continue;
+      const tagged = !!r.tournament?.trim();
+      // Practice always uses the short TTL, even if someone
+      // synthetically set a tag on a practice record.
+      const cutoff = r.mode === 'practice' || !tagged ? untaggedCutoff : taggedVsCutoff;
+      if (endedAt < cutoff) stale.push(id);
+    }
+    // Fire deletes in parallel. Cap the batch so a huge backlog on
+    // first-ever sweep doesn't stall the caller — future lobby loads
+    // will finish the rest.
+    const batch = stale.slice(0, 100);
+    await Promise.all(batch.map((id) => remove(ref(db, `matches/${id}`)).catch(() => {})));
+    return batch.length;
+  } catch {
+    return 0;
+  } finally {
+    sweepInFlight = false;
+  }
+}
 
 export async function loadHistory(): Promise<MatchRecord[]> {
   try {

@@ -24,6 +24,23 @@
  */
 
 /** Shape of the payload written to `/live/{mid}/liveState`. */
+/**
+ * One completed board's snapshot. Log grows by one entry per BOARD+1
+ * tap on the umpire's device (see ScoreBoard.adjustBoard). Includes
+ * break, queen holder, per-board points delta, and timestamp.
+ */
+export type BoardLogEntry = {
+  /** Zero-indexed set within the match. bo1 → always 0. */
+  set: number;
+  /** 1-indexed board number within its set. */
+  board: number;
+  breakSide: 'a' | 'b';
+  queen: 'a' | 'b';
+  pointsA: number;
+  pointsB: number;
+  endedAt: number;
+};
+
 export type LivePayload = {
   sideA: { points: number; sets: number };
   sideB: { points: number; sets: number };
@@ -31,6 +48,7 @@ export type LivePayload = {
   currentBreak: 'a' | 'b' | null;
   queenHolder: 'a' | 'b' | null;
   matchResult: 'a' | 'b' | null;
+  boardLog?: BoardLogEntry[];
   practiceBoards?: number[][];
 };
 
@@ -50,6 +68,8 @@ export type LiveMeta = {
   bestOf: number;
   pointsTarget: number;
   maxBoards: number;
+  /** Tournament / event tag. Blank = "Default" bucket in the lobby. */
+  tournament?: string;
 };
 
 /** Metadata + payload — what actually lives at `/live/{mid}`. */
@@ -109,6 +129,9 @@ export async function publishLive(
       currentBreak: payload.currentBreak,
       queenHolder: payload.queenHolder,
       matchResult: payload.matchResult,
+      ...(payload.boardLog && payload.boardLog.length > 0
+        ? { boardLog: payload.boardLog }
+        : {}),
       ...(payload.practiceBoards ? { practiceBoards: payload.practiceBoards } : {}),
     };
     const metaClean: Record<string, unknown> = {
@@ -123,6 +146,7 @@ export async function publishLive(
     if (meta.playerB2) metaClean.playerB2 = meta.playerB2;
     if (meta.noteA) metaClean.noteA = meta.noteA;
     if (meta.noteB) metaClean.noteB = meta.noteB;
+    if (meta.tournament) metaClean.tournament = meta.tournament;
     await set(ref(db, `live/${mid}`), {
       ...(matchId ? { matchId } : {}),
       updatedAt: Date.now(),

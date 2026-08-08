@@ -34,7 +34,10 @@
   // Which colour token is painted on each seat. Flipped by swapSides().
   let colourA = $state<Colour>('a');
   let colourB = $state<Colour>('b');
-  let board = $state(0);
+  // 1-indexed: `board` is the currently-being-played board. Match
+  // starts on board 1 (you're already playing when the score screen
+  // mounts). boardLog.length = boards completed so far.
+  let board = $state(1);
 
   /*
    * BREAK indicator: which side breaks (assigned once at match start).
@@ -57,6 +60,38 @@
    * auto-resets to null (new board starts with queen at centre).
    */
   let queenHolder = $state<SideId | null>(null);
+
+  /*
+   * BOARD LOG: per-board history built up as the match progresses.
+   * Each entry is a snapshot captured when the umpire taps BOARD+1
+   * (which is why the log length equals `board` at any given moment).
+   *   {
+   *     board:     N,           // 1-indexed board number that just ended
+   *     breakSide: 'a' | 'b',   // who broke this board
+   *     queen:     'a' | 'b',   // who held the queen at board end
+   *     pointsA:   Δ points sideA scored on this board
+   *     pointsB:   Δ points sideB scored on this board
+   *     endedAt:   ms timestamp
+   *   }
+   * We track `pointsAtBoardStart` so we can compute per-board deltas
+   * when the umpire's model uses cumulative points across a set.
+   * BOARD-1 pops the last entry off (undo) and restores currentBreak.
+   */
+  type BoardEntry = {
+    // The set this board belongs to. Zero-indexed across the match so
+    // clients can group entries by set in a bo3+ recap. In a bo1 all
+    // entries are `set: 0`.
+    set: number;
+    board: number;
+    breakSide: SideId;
+    queen: SideId;
+    pointsA: number;
+    pointsB: number;
+    endedAt: number;
+  };
+  let boardLog = $state<BoardEntry[]>([]);
+  let pointsAtBoardStart = $state<{ a: number; b: number }>({ a: 0, b: 0 });
+  let queenRequiredToast = $state(false);
 
   /*
    * Practice mode: solo drill. Player runs N sets × M boards and records
@@ -156,6 +191,10 @@
         if (s?.currentBreak === 'a' || s?.currentBreak === 'b') currentBreak = s.currentBreak;
         if (s?.queenHolder === 'a' || s?.queenHolder === 'b' || s?.queenHolder === null) queenHolder = s.queenHolder;
         if (s?.matchResult === 'a' || s?.matchResult === 'b' || s?.matchResult === null) matchResult = s.matchResult;
+        if (Array.isArray(s?.boardLog)) boardLog = s.boardLog as BoardEntry[];
+        if (typeof s?.pointsAtBoardStart?.a === 'number' && typeof s?.pointsAtBoardStart?.b === 'number') {
+          pointsAtBoardStart = s.pointsAtBoardStart;
+        }
         // Practice: matrix is a 2D array of ints. Only accept it if the
         // shape matches the current cfg — otherwise a stale localStorage
         // entry from a differently-shaped match would leak in.
@@ -266,6 +305,8 @@
       currentBreak,
       queenHolder,
       matchResult,
+      boardLog,
+      pointsAtBoardStart,
     };
     if (isPractice) s.practiceBoards = practiceBoards;
     try {
@@ -278,13 +319,25 @@
     // subscribed to that slug receive the update ~500 ms later.
     // Silent-on-failure via publishLive.
     if (cfg.live && cfg.mid) {
+      // Practice: sideA.points isn't updated by adjustPracticeBoard —
+      // the real data lives in practiceBoards[]. To keep spectator +
+      // OBS-overlay views showing a running "SCORE" digit that reflects
+      // what the umpire has entered, publish the grand total of missed
+      // shots (sum across all sets + boards) as sideA.points.
+      const publishedPointsA = isPractice
+        ? practiceBoards.reduce(
+            (sum, row) => sum + row.reduce((r, v) => r + (v ?? 0), 0),
+            0,
+          )
+        : sideA.points;
       const payload: LivePayload = {
-        sideA: { points: sideA.points, sets: sideA.sets },
+        sideA: { points: publishedPointsA, sets: sideA.sets },
         sideB: { points: sideB.points, sets: sideB.sets },
         board,
         currentBreak,
         queenHolder,
         matchResult,
+        ...(!isPractice && boardLog.length > 0 ? { boardLog } : {}),
         ...(isPractice ? { practiceBoards } : {}),
       };
       void publishLive(
@@ -300,6 +353,7 @@
           bestOf: cfg.bestOf,
           pointsTarget: cfg.pointsTarget,
           maxBoards: cfg.maxBoards,
+          tournament: cfg.tournament,
         },
         payload,
       );
@@ -368,6 +422,36 @@
   }
   function adjustSets(side: 'a' | 'b', delta: number) {
     void tryLockLandscape();
+    // Before the SET+ handler could reset points/board/queen for the
+    // new set, we need to snapshot the running (in-progress) board so
+    // it lands in the boardLog — otherwise the last board of every
+    // set gets silently dropped from the recap. Same rule as
+    // endMatch(): if the current board has scoring, require a queen
+    // holder before advancing.
+    if (delta > 0 && !isPractice) {
+      const currentBoardHasScore =
+        sideA.points > pointsAtBoardStart.a || sideB.points > pointsAtBoardStart.b;
+      if (currentBoardHasScore) {
+        if (queenHolder === null) {
+          // Block SET+1 with the same toast BOARD+1 uses. Real carrom:
+          // no board can end without a queen result.
+          queenRequiredToast = true;
+          window.setTimeout(() => { queenRequiredToast = false; }, 2500);
+          return;
+        }
+        const entry: BoardEntry = {
+          set: sideA.sets + sideB.sets,
+          board,
+          breakSide: currentBreak,
+          queen: queenHolder,
+          pointsA: sideA.points - pointsAtBoardStart.a,
+          pointsB: sideB.points - pointsAtBoardStart.b,
+          endedAt: Date.now(),
+        };
+        boardLog = [...boardLog, entry];
+      }
+    }
+
     const s = side === 'a' ? sideA : sideB;
     const prev = s.sets;
     s.sets = Math.min(cfg.bestOf, Math.max(0, s.sets + delta));
@@ -387,8 +471,21 @@
     if (anotherSetRemains) {
       sideA.points = 0;
       sideB.points = 0;
-      board = 0;
+      // Board counter resets to 1 for the new set. boardLog persists
+      // across sets — each entry carries `set` so consumers can group.
+      board = 1;
       queenHolder = null;
+      pointsAtBoardStart = { a: 0, b: 0 };
+      // First-break rotates every set: the player who did NOT open
+      // the previous set opens the next one. Find the previous set's
+      // first-board breaker from the log and flip it. If the log is
+      // empty (edge case: SET+1 tapped before any board completed)
+      // keep currentBreak as-is.
+      const prevSetIdx = sideA.sets + sideB.sets - 1; // set that just ended, 0-indexed
+      const prevSetOpener = boardLog.find((e) => e.set === prevSetIdx)?.breakSide;
+      if (prevSetOpener) {
+        currentBreak = prevSetOpener === 'a' ? 'b' : 'a';
+      }
     }
     // matchResult stays untouched: the WINNER ribbon only appears when the
     // organiser taps End Match, never on a SET +/- alone.
@@ -398,13 +495,62 @@
     const next = board + delta;
     if (next < 0) return;
     if (next > boardCap()) return;
-    const prev = board;
-    board = next;
-    // BOARD change → clear QUEEN (new board starts with the red coin at
-    // the centre of the table). BREAK is match-long, not per-board, so
-    // it stays. Board-going-backward (undo) also clears queen — the
-    // previous board's ownership doesn't apply to this one.
-    if (next !== prev) {
+
+    // Practice mode doesn't have a queen/break/log concept — just
+    // increment the counter and clear stale queen state.
+    if (isPractice) {
+      board = next;
+      queenHolder = null;
+      return;
+    }
+
+    if (delta > 0) {
+      // BOARD+1: the just-completed board must have a queen holder.
+      // ICF rule: every board ends with the queen either pocketed +
+      // covered by one side, or awarded to opponent if the other side
+      // cleared without pocketing it. There is no "no queen" outcome.
+      if (queenHolder === null) {
+        queenRequiredToast = true;
+        window.setTimeout(() => { queenRequiredToast = false; }, 2500);
+        return;
+      }
+      // Snapshot the completed board. `set` is 0-indexed for the
+      // current set within the match.
+      const entry: BoardEntry = {
+        set: sideA.sets + sideB.sets,
+        board,
+        breakSide: currentBreak,
+        queen: queenHolder,
+        pointsA: sideA.points - pointsAtBoardStart.a,
+        pointsB: sideB.points - pointsAtBoardStart.b,
+        endedAt: Date.now(),
+      };
+      boardLog = [...boardLog, entry];
+      // Fresh board: flip break (real carrom rules), clear queen, and
+      // capture the current cumulative points as the next board's
+      // starting basis so pointsA/pointsB deltas stay correct.
+      board = next;
+      currentBreak = currentBreak === 'a' ? 'b' : 'a';
+      queenHolder = null;
+      pointsAtBoardStart = { a: sideA.points, b: sideB.points };
+      return;
+    }
+
+    if (delta < 0) {
+      // BOARD-1: pop the last snapshot, restore its break + reset
+      // queen (the previous board is back "in progress"). We don't
+      // touch points — they're cumulative and correct wherever the
+      // scoreboard is at.
+      board = next;
+      if (boardLog.length > 0) {
+        const popped = boardLog[boardLog.length - 1];
+        boardLog = boardLog.slice(0, -1);
+        currentBreak = popped.breakSide;
+        pointsAtBoardStart = {
+          a: sideA.points - popped.pointsA,
+          b: sideB.points - popped.pointsB,
+        };
+      }
       queenHolder = null;
     }
   }
@@ -476,6 +622,30 @@
       recordFinishedMatch(null);
       return;
     }
+    // Capture the current in-progress board if it has any points +
+    // a queen holder. This handles the common flow where the umpire
+    // taps End after the last board without hitting BOARD+1 first.
+    const currentBoardHasScore =
+      sideA.points > pointsAtBoardStart.a || sideB.points > pointsAtBoardStart.b;
+    if (currentBoardHasScore) {
+      if (queenHolder === null) {
+        // Real carrom: no board can end without a queen. Block End
+        // with the same toast that adjustBoard(+1) uses.
+        queenRequiredToast = true;
+        window.setTimeout(() => { queenRequiredToast = false; }, 2500);
+        return;
+      }
+      const entry: BoardEntry = {
+        set: sideA.sets + sideB.sets,
+        board,
+        breakSide: currentBreak,
+        queen: queenHolder,
+        pointsA: sideA.points - pointsAtBoardStart.a,
+        pointsB: sideB.points - pointsAtBoardStart.b,
+        endedAt: Date.now(),
+      };
+      boardLog = [...boardLog, entry];
+    }
     let winner: 'a' | 'b' | null = null;
     let awardExtraSet = false;
     if (sideA.sets > sideB.sets) {
@@ -515,6 +685,10 @@
    * shape parity).
    */
   function recordFinishedMatch(winner: 'a' | 'b' | null): void {
+    // Practice IS archived (as mode='practice') so the umpire can see
+    // their drill history. Retention is shorter than versus matches
+    // (3 months vs 1 year) — handled by the client-side sweep on
+    // lobby load. See history.ts sweepOldMatches().
     try {
       const key = matchStateKey(cfg.mode, cfg.playerA, cfg.playerB);
       const identity = loadMatchIdentity(key);
@@ -543,8 +717,13 @@
             format: cfg.format,
           },
           notes: { a: sideA.note, b: sideB.note },
+          ...(cfg.tournament ? { tournament: cfg.tournament } : {}),
           startedAt,
           endedAt: Date.now(),
+          ...(boardLog.length > 0 ? { boardLog: [...boardLog] } : {}),
+          ...(isPractice && practiceBoards.length > 0
+            ? { practiceBoards: practiceBoards.map((row) => [...row]) }
+            : {}),
         },
       );
       // Clear the handoff so a "same names again" match after this one
@@ -590,12 +769,14 @@
     sideB.sets = 0;
     sideA.points = 0;
     sideB.points = 0;
-    board = 0;
+    board = 1;
     matchResult = null;
     colourA = 'a';
     colourB = 'b';
     currentBreak = 'a';
     queenHolder = null;
+    boardLog = [];
+    pointsAtBoardStart = { a: 0, b: 0 };
     if (isPractice) {
       practiceBoards = blankMatrix(cfg.bestOf, cfg.maxBoards);
       practiceSetIdx = 0;
@@ -1133,6 +1314,18 @@
     </div>
   {/if}
 
+  {#if queenRequiredToast}
+    <!--
+      Small non-blocking toast that appears when the umpire taps
+      BOARD+1 without a queen holder marked. Real-carrom rule: every
+      board ends with the queen either pocketed or awarded. The toast
+      auto-dismisses after 2.5s.
+    -->
+    <div class="queen-toast" role="status" aria-live="polite">
+      Mark queen before ending board
+    </div>
+  {/if}
+
   {#if confirmReset}
     <div class="dialog" role="dialog" aria-modal="true">
       <div class="dialog-card exit">
@@ -1181,6 +1374,33 @@
   @media (orientation: portrait) and (max-width: 900px) {
     .rotate-hint { display: flex; }
   }
+
+  /* Queen-required toast: shown when the umpire taps BOARD+1 without
+     marking the queen holder on the current board. Non-blocking,
+     auto-dismisses after 2.5s. Sits centred near the top so it doesn't
+     hide the score digits or the footer buttons. */
+  .queen-toast {
+    position: fixed;
+    top: max(0.75rem, env(safe-area-inset-top));
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 300;
+    padding: 0.55rem 1.1rem;
+    background: linear-gradient(135deg, #3a2a10, #2a1e0a);
+    border: 1px solid rgba(255, 213, 74, 0.6);
+    color: var(--accent);
+    font-weight: 700;
+    font-size: 0.85rem;
+    letter-spacing: 0.02em;
+    border-radius: 0.6rem;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+    animation: queenToastIn 0.2s ease-out;
+  }
+  @keyframes queenToastIn {
+    from { opacity: 0; transform: translate(-50%, -0.4rem); }
+    to   { opacity: 1; transform: translate(-50%, 0); }
+  }
+
   .rotate-card {
     display: flex;
     flex-direction: column;
@@ -1630,6 +1850,12 @@
     touch-action: none;
     -webkit-tap-highlight-color: transparent;
     overflow: hidden;
+    /* Enable container queries on each column so the DSEG7 digits
+       inside can scale to the actual column width — not just the
+       viewport height. Without this, wide-short windows produce a
+       POINTS digit that overflows its coloured pill (see beta bug
+       report from 2026-08-08). */
+    container-type: inline-size;
   }
   .col:active { transform: scale(0.97); background: rgba(255,255,255,0.06); }
   .col:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -1638,12 +1864,21 @@
     font-family: 'DSEG7 Classic', 'Courier New', ui-monospace, monospace;
     font-weight: 700;
     line-height: 1;
-    font-size: clamp(2.5rem, 16vh, 6rem);
+    /* Scale to whichever is smaller: 16vh (short windows) or
+       ~55% of the column width (narrow columns). Prevents single-
+       digit values (SET / BOARD) from overflowing when the parent
+       column becomes very narrow, and stays vh-driven on typical
+       phone-in-portrait windows. */
+    font-size: min(clamp(2.5rem, 16vh, 6rem), 55cqi);
     font-variant-numeric: tabular-nums;
     letter-spacing: 0.03em;
   }
-  /* POINTS is the audience's focal point — make it dominate the panel. */
-  .digit.big { font-size: clamp(4rem, 32vh, 12rem); }
+  /* POINTS is the audience's focal point — make it dominate the
+     panel. Cap by container width via 45cqi (a 2-glyph "00" needs
+     about 2× glyph-width plus gap, and DSEG7 glyphs are ~50% of
+     their em box). This is what prevents the digit spilling past
+     the coloured pill on wide-short windows. */
+  .digit.big { font-size: min(clamp(4rem, 32vh, 12rem), 45cqi); }
   .col.tone-a .digit { color: var(--side-a); text-shadow: 0 0 12px rgba(79,195,247,0.35); }
   .col.tone-b .digit { color: var(--side-b); text-shadow: 0 0 12px rgba(255,138,101,0.35); }
   .mid .digit { color: var(--accent); text-shadow: 0 0 12px rgba(255,213,74,0.35); }

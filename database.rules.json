@@ -29,7 +29,7 @@
     "matches": {
       ".read": true,
       "$matchId": {
-        ".write": "!data.exists() && newData.exists()",
+        ".write": "(!data.exists() && newData.exists()) || (data.exists() && !newData.exists() && ((data.child('mode').val() == 'practice' && data.child('endedAt').val() < now - 7776000000) || (data.child('mode').val() != 'practice' && !data.child('tournament').exists() && data.child('endedAt').val() < now - 7776000000) || (data.child('mode').val() != 'practice' && data.child('tournament').exists() && data.child('endedAt').val() < now - 31536000000)))",
         ".validate": "newData.hasChildren(['mode', 'startedAt', 'endedAt']) && newData.child('mode').isString() && (newData.child('mode').val() == 'singles' || newData.child('mode').val() == 'doubles' || newData.child('mode').val() == 'practice') && newData.child('startedAt').isNumber() && newData.child('endedAt').isNumber() && newData.child('endedAt').val() <= now && newData.child('endedAt').val() > now - 300000 && newData.child('endedAt').val() >= newData.child('startedAt').val()",
         "mode":       { ".validate": "newData.isString()" },
         "playerAId":  { ".validate": "newData.isString() && newData.val().length <= 80" },
@@ -42,6 +42,22 @@
         "notes":      { ".validate": "newData.hasChildren()" },
         "cfg":        { ".validate": "newData.hasChildren()" },
         "result":     { ".validate": "newData.hasChildren()" },
+        "boardLog":   { ".validate": "newData.hasChildren()" },
+        "practiceBoards": { ".validate": "newData.hasChildren()" },
+        "tournament": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 60" },
+        "$other":     { ".validate": false }
+      }
+    },
+
+    "tournaments": {
+      ".read": true,
+      ".indexOn": ["lastActive"],
+      "$key": {
+        ".write": "$key.length >= 1 && $key.length <= 60 && newData.exists()",
+        ".validate": "newData.hasChildren(['name', 'createdAt', 'lastActive']) && newData.child('name').isString() && newData.child('name').val().length >= 1 && newData.child('name').val().length <= 60 && newData.child('createdAt').isNumber() && newData.child('lastActive').isNumber() && newData.child('lastActive').val() <= now && newData.child('lastActive').val() > now - 300000",
+        "name":       { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 60" },
+        "createdAt":  { ".validate": "newData.isNumber()" },
+        "lastActive": { ".validate": "newData.isNumber()" },
         "$other":     { ".validate": false }
       }
     },

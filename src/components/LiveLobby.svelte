@@ -23,6 +23,7 @@
   import {
     loadHistory,
     playerName,
+    sweepOldMatches,
     type MatchRecord,
   } from '../lib/history';
   import { subscribePlayers, subscribeStore } from '../lib/players';
@@ -41,6 +42,72 @@
   let matches = $state<MatchRecord[]>([]);
   let now = $state(Date.now());
   let identityTick = $state(0);
+
+  // Collapsed tournament groups, per tab. Persisted in localStorage as
+  // an explicit override map: bucket key → true/false where the value
+  // is the user's *intentional* state. Buckets not in the map fall
+  // back to the tab's default (see DEFAULT_COLLAPSED).
+  //
+  // Why an explicit-override map instead of "just a Set of collapsed
+  // buckets"? History has a lot of buckets and the useful default is
+  // "everything folded — open what you care about". If we stored only
+  // "collapsed" flags, an unfolded group would look identical to a
+  // never-seen one, so the default couldn't be "collapsed" without
+  // fighting the user's expand click. This shape distinguishes:
+  //   "user opened it"      → override = false
+  //   "user closed it"      → override = true
+  //   "never touched"       → not in map → use DEFAULT_COLLAPSED[tab]
+  const COLLAPSED_KEY = 'carromscore:lobby-collapsed-v2';
+  const DEFAULT_COLLAPSED: Record<Tab, boolean> = {
+    live: false,     // Live: default open — few groups, want them visible
+    history: true,   // History: default folded — many groups, low visual weight
+  };
+  let groupOverride = $state<Map<string, boolean>>(loadOverride());
+
+  function loadOverride(): Map<string, boolean> {
+    try {
+      const raw = localStorage.getItem(COLLAPSED_KEY);
+      if (!raw) return new Map();
+      const obj = JSON.parse(raw);
+      if (!obj || typeof obj !== 'object') return new Map();
+      const out = new Map<string, boolean>();
+      for (const [k, v] of Object.entries(obj)) {
+        if (typeof k === 'string' && typeof v === 'boolean') out.set(k, v);
+      }
+      return out;
+    } catch {
+      return new Map();
+    }
+  }
+
+  function persistOverride(): void {
+    try {
+      const obj: Record<string, boolean> = {};
+      for (const [k, v] of groupOverride) obj[k] = v;
+      localStorage.setItem(COLLAPSED_KEY, JSON.stringify(obj));
+    } catch {
+      // quota exceeded / disabled — overrides stay in-memory only
+    }
+  }
+
+  function toggleGroup(tabName: Tab, bucket: string): void {
+    const key = `${tabName}::${bucket}`;
+    // Flip against the currently-effective state (default or override),
+    // then record the flipped value as the user's intent.
+    const now = isCollapsed(tabName, bucket);
+    groupOverride.set(key, !now);
+    // Reassign so Svelte's fine-grained reactivity fires — Map
+    // mutations alone don't trigger $state updates.
+    groupOverride = new Map(groupOverride);
+    persistOverride();
+  }
+
+  function isCollapsed(tabName: Tab, bucket: string): boolean {
+    const key = `${tabName}::${bucket}`;
+    const override = groupOverride.get(key);
+    if (typeof override === 'boolean') return override;
+    return DEFAULT_COLLAPSED[tabName];
+  }
 
   // Popup can render either a LobbyEntry (live tab) or a MatchRecord
   // (history tab). We normalise both into a LiveRecord-shaped object
@@ -85,6 +152,10 @@
     // canonical names. Cheap to subscribe here — the store lives in
     // memory and shares across all mounted components.
     void subscribePlayers();
+    // Best-effort sweep of >1-year-old match records. Fire-and-forget
+    // — no UI, no blocking on failure. Piggybacks on lobby loads so
+    // we don't need scheduled infra.
+    void sweepOldMatches();
     const unsubStore = subscribeStore(() => (identityTick += 1));
 
     const nowTick = window.setInterval(() => (now = Date.now()), 30_000);
@@ -197,6 +268,37 @@
       .sort((a, b) => b.updatedAt - a.updatedAt),
   );
 
+  // Tournament bucket label. Blank tag → "Default" bucket. Same
+  // logic is applied on live entries + archived matches so cards
+  // group consistently across tabs.
+  const DEFAULT_BUCKET = 'Default';
+  function bucketOfLive(e: LobbyEntry): string {
+    return (e.meta.tournament ?? '').trim() || DEFAULT_BUCKET;
+  }
+  function bucketOfMatch(m: MatchRecord): string {
+    return (m.tournament ?? '').trim() || DEFAULT_BUCKET;
+  }
+
+  /**
+   * Group an ordered list of items by their tournament bucket,
+   * preserving the incoming order within each bucket. Result is a
+   * list of `[bucketName, items]` pairs, ordered by the buckets'
+   * most-recent activity (first appearance in the pre-sorted list).
+   */
+  function groupByTournament<T>(items: T[], bucketOf: (x: T) => string): Array<[string, T[]]> {
+    const seen = new Map<string, T[]>();
+    for (const item of items) {
+      const b = bucketOf(item);
+      const arr = seen.get(b) ?? [];
+      arr.push(item);
+      seen.set(b, arr);
+    }
+    return Array.from(seen.entries());
+  }
+
+  const liveGroups = $derived(groupByTournament(live, bucketOfLive));
+  const historyGroups = $derived(groupByTournament(matches, bucketOfMatch));
+
   function sideNameLive(e: LobbyEntry, side: 'a' | 'b'): string {
     const m = e.meta;
     if (m.mode === 'doubles') {
@@ -267,6 +369,10 @@
         currentBreak: null,
         queenHolder: null,
         matchResult: m.result?.winner ?? null,
+        ...(m.boardLog && m.boardLog.length > 0 ? { boardLog: m.boardLog } : {}),
+        ...(m.practiceBoards && m.practiceBoards.length > 0
+          ? { practiceBoards: m.practiceBoards }
+          : {}),
       },
     };
   }
@@ -290,6 +396,16 @@
       : openPopup.source === 'live'
         ? modeLabelLive(openPopup.entry)
         : modeLabelMatch(openPopup.match),
+  );
+  // Tournament tag on the popup header. Empty when the record is
+  // untagged (Default bucket) — no point echoing "Default" in the
+  // header where the section header already made that clear.
+  const popupTournament = $derived(
+    openPopup === null
+      ? ''
+      : openPopup.source === 'live'
+        ? (openPopup.entry.meta.tournament ?? '').trim()
+        : (openPopup.match.tournament ?? '').trim(),
   );
 
   // In overlay mode, find the target entry from the live subscription
@@ -358,30 +474,51 @@
         <p class="empty-sub">Every match started in Carromscore appears here automatically while it's being played. Come back when someone's on the board.</p>
       </div>
     {:else}
-      <ul class="grid">
-        {#each live as e (e.mid)}
-          {@const s = e.liveState}
-          <li>
-            <button type="button" class="card card-live" onclick={() => openEntry(e)}>
-              <div class="card-hdr">
-                <span class="card-badge">
-                  <span class="dot" aria-hidden="true"></span>
-                  LIVE
-                </span>
-                <span class="card-mode">{modeLabelLive(e)}</span>
-                <span class="card-meta">{relTime(e.updatedAt)}</span>
-              </div>
+      {#each liveGroups as [bucket, entriesInBucket] (bucket)}
+        {@const folded = isCollapsed('live', bucket)}
+        <section class="tour-group" class:folded>
+          <button
+            type="button"
+            class="tour-hdr"
+            aria-expanded={!folded}
+            onclick={() => toggleGroup('live', bucket)}
+          >
+            <span class="tour-caret" class:tour-caret-folded={folded} aria-hidden="true">▾</span>
+            <span class="tour-name">{bucket}</span>
+            <span class="tour-count">{entriesInBucket.length}</span>
+          </button>
+          {#if !folded}
+          <ul class="grid">
+            {#each entriesInBucket as e (e.mid)}
+              {@const s = e.liveState}
+              <li>
+                <button type="button" class="card card-live" onclick={() => openEntry(e)}>
+                  <div class="card-hdr">
+                    <span class="card-badge">
+                      <span class="dot" aria-hidden="true"></span>
+                      LIVE
+                    </span>
+                    <span class="card-mode">{modeLabelLive(e)}</span>
+                    <span class="card-meta">{relTime(e.updatedAt)}</span>
+                  </div>
 
               <div class="card-teams">
-                <span class="team-block team-a">
-                  <span class="team-name">{sideNameLive(e, 'a')}</span>
-                  {#if s.currentBreak === 'a'}<span class="brk">BREAK</span>{/if}
-                </span>
-                <span class="team-vs">vs</span>
-                <span class="team-block team-b">
-                  <span class="team-name">{sideNameLive(e, 'b')}</span>
-                  {#if s.currentBreak === 'b'}<span class="brk">BREAK</span>{/if}
-                </span>
+                {#if e.meta.mode === 'practice'}
+                  <!-- Practice: solo drill, side B doesn't exist. -->
+                  <span class="team-block team-a" style="grid-column: 1 / -1">
+                    <span class="team-name">{sideNameLive(e, 'a')}</span>
+                  </span>
+                {:else}
+                  <span class="team-block team-a">
+                    <span class="team-name">{sideNameLive(e, 'a')}</span>
+                    {#if s.currentBreak === 'a'}<span class="brk">BREAK</span>{/if}
+                  </span>
+                  <span class="team-vs">vs</span>
+                  <span class="team-block team-b">
+                    <span class="team-name">{sideNameLive(e, 'b')}</span>
+                    {#if s.currentBreak === 'b'}<span class="brk">BREAK</span>{/if}
+                  </span>
+                {/if}
               </div>
 
               <div class="card-scores">
@@ -399,16 +536,29 @@
                     <span class="score-val">{s.board}</span>
                   </span>
                 {:else}
+                  <!--
+                    Practice: sideA.points isn't meaningful (real data
+                    lives in the practiceBoards matrix). Show only
+                    board number + a Solo Drill label so lobby cards
+                    read consistently without inventing numbers.
+                  -->
                   <span class="score-block">
-                    <span class="score-lbl">MISSES</span>
-                    <span class="score-val">{s.sideA.points}</span>
+                    <span class="score-lbl">BOARD</span>
+                    <span class="score-val">{s.board}</span>
+                  </span>
+                  <span class="score-block">
+                    <span class="score-lbl">MODE</span>
+                    <span class="score-val" style="font-size: 0.85rem">Solo drill</span>
                   </span>
                 {/if}
               </div>
-            </button>
-          </li>
-        {/each}
-      </ul>
+                </button>
+              </li>
+            {/each}
+          </ul>
+          {/if}
+        </section>
+      {/each}
     {/if}
   {:else}
     <!-- History tab -->
@@ -420,21 +570,39 @@
         <p class="empty-sub">Every match you complete lands here so you can look back at scores, opponents, and who won.</p>
       </div>
     {:else}
-      <ul class="grid">
-        {#each matches as m (m.id)}
-          {@const r = m.result}
-          {@const winner = r?.winner}
-          <li>
-            <button
-              type="button"
-              class="card card-ended"
-              class:has-winner={!!winner}
-              class:winner-a={winner === 'a'}
-              class:winner-b={winner === 'b'}
-              onclick={() => openMatch(m)}
-            >
+      {#each historyGroups as [bucket, matchesInBucket] (bucket)}
+        {@const folded = isCollapsed('history', bucket)}
+        <section class="tour-group" class:folded>
+          <button
+            type="button"
+            class="tour-hdr"
+            aria-expanded={!folded}
+            onclick={() => toggleGroup('history', bucket)}
+          >
+            <span class="tour-caret" class:tour-caret-folded={folded} aria-hidden="true">▾</span>
+            <span class="tour-name">{bucket}</span>
+            <span class="tour-count">{matchesInBucket.length}</span>
+          </button>
+          {#if !folded}
+          <ul class="grid">
+            {#each matchesInBucket as m (m.id)}
+              {@const r = m.result}
+              {@const winner = r?.winner}
+              <li>
+                <button
+                  type="button"
+                  class="card card-ended"
+                  class:has-winner={!!winner}
+                  class:winner-a={winner === 'a'}
+                  class:winner-b={winner === 'b'}
+                  onclick={() => openMatch(m)}
+                >
               <div class="card-hdr">
-                <span class="card-badge card-badge-ended">Ended</span>
+                {#if m.mode === 'practice'}
+                  <span class="card-badge card-badge-practice">Practice</span>
+                {:else}
+                  <span class="card-badge card-badge-ended">Ended</span>
+                {/if}
                 <span class="card-mode">{modeLabelMatch(m)}</span>
                 <span class="card-meta">{relTime(m.endedAt)}</span>
               </div>
@@ -486,10 +654,13 @@
                   </span>
                 </div>
               {/if}
-            </button>
-          </li>
-        {/each}
-      </ul>
+                </button>
+              </li>
+            {/each}
+          </ul>
+          {/if}
+        </section>
+      {/each}
     {/if}
   {/if}
 </main>
@@ -500,7 +671,7 @@
       <header class="sheet-hdr">
         <span class="sheet-title">
           {#if popupIsEnded}Ended · {:else}<span class="sheet-live"><span class="dot" aria-hidden="true"></span>LIVE · </span>{/if}
-          {popupMode}
+          {popupMode}{#if popupTournament} · <span class="sheet-tour">{popupTournament}</span>{/if}
         </span>
         <div class="sheet-actions">
           {#if openPopup?.source === 'live'}
@@ -617,6 +788,14 @@
   :global(.overlay-wrap .pips) {
     padding: 0.2rem 0 0 !important;
   }
+  /* Overlay is the broadcast strip, not the deep-dive. Hide the
+     board-by-board scorecard AND the practice matrix so they don't
+     push the scoreboard off-screen. Broadcast viewers can find the
+     details in the /live/?mid=xxx popup. */
+  :global(.overlay-wrap .scorecard),
+  :global(.overlay-wrap .practice-recap) {
+    display: none !important;
+  }
 
   main {
     max-width: 800px;
@@ -721,17 +900,107 @@
   .empty strong { color: var(--fg, #f5f5f5); font-weight: 700; }
   .empty-sub { max-width: 22rem; margin-left: auto; margin-right: auto; }
 
+  /* Tournament section wrapper. Each group gets a soft-bordered
+     panel so multi-tournament lobbies read as distinct buckets,
+     not one long list. Header is clickable to collapse — the
+     folded state persists across reloads via localStorage. */
+  .tour-group {
+    margin: 0 0 1rem;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 0.75rem;
+    background: rgba(255,255,255,0.015);
+    overflow: hidden;
+  }
+  .tour-group:last-of-type { margin-bottom: 0; }
+  .tour-group.folded {
+    background: rgba(255,255,255,0.03);
+  }
+  .tour-hdr {
+    /* Reset button defaults — this is a full-width row-header. */
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: 0.6rem;
+    margin: 0;
+    padding: 0.6rem 0.85rem;
+    background: transparent;
+    border: none;
+    color: rgba(255,255,255,0.72);
+    font: inherit;
+    font-size: 0.85rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.12s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .tour-hdr:hover { background: rgba(255,255,255,0.04); }
+  .tour-hdr:focus-visible {
+    outline: 2px solid var(--accent, #ffd54f);
+    outline-offset: -2px;
+  }
+  .tour-caret {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.6rem;
+    height: 1.6rem;
+    border-radius: 0.4rem;
+    background: rgba(255,213,74,0.14);
+    color: var(--accent, #ffd54f);
+    font-size: 1.1rem;
+    line-height: 1;
+    flex: 0 0 auto;
+    transition: transform 0.18s ease, background 0.12s;
+  }
+  .tour-caret-folded {
+    transform: rotate(-90deg);
+  }
+  .tour-hdr:hover .tour-caret {
+    background: rgba(255,213,74,0.22);
+  }
+  .tour-name { flex: 1 1 auto; }
+  .tour-count {
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: rgba(255,255,255,0.6);
+    background: rgba(255,255,255,0.08);
+    padding: 0.1rem 0.5rem;
+    border-radius: 999px;
+    letter-spacing: 0.02em;
+    flex: 0 0 auto;
+  }
+  /* Grid inside a group gets its own inner padding so cards don't
+     hug the section border. */
+  .tour-group .grid {
+    padding: 0 0.6rem 0.75rem;
+  }
+
+  /* Responsive grid: 1 col on phones, 2 on wider phones/tablets,
+     3 on landscape/desktop, 4 on very wide monitors so a tournament
+     scoreboard on a laptop shows more matches at a glance. */
   .grid {
     list-style: none;
     padding: 0;
     margin: 0;
     display: grid;
     grid-template-columns: 1fr;
-    gap: 0.7rem;
+    gap: 0.75rem;
     align-items: stretch;
   }
-  @media (min-width: 640px) {
+  @media (min-width: 560px) {
     .grid { grid-template-columns: 1fr 1fr; }
+    main { max-width: 1200px; }
+  }
+  @media (min-width: 900px) {
+    .grid { grid-template-columns: repeat(3, 1fr); }
+    main { max-width: 1400px; }
+  }
+  @media (min-width: 1200px) {
+    .grid { grid-template-columns: repeat(4, 1fr); }
+    main { max-width: 1600px; }
   }
   .grid > li { display: flex; }
 
@@ -742,7 +1011,11 @@
     text-align: left;
     padding: 0.9rem 1rem;
     background: #141414;
-    border: 1px solid #262626;
+    /* Slightly stronger card border so the cards feel like distinct
+       objects on a dark page (previous #262626 washed into the bg
+       almost invisibly). Still restrained — full-brightness borders
+       compete with the winner-gold accent. */
+    border: 1px solid rgba(255, 255, 255, 0.09);
     border-radius: 0.8rem;
     text-decoration: none;
     color: inherit;
@@ -789,6 +1062,13 @@
     background: rgba(255, 255, 255, 0.05);
     border-color: rgba(255, 255, 255, 0.1);
   }
+  /* Distinct amber tint for finished Practice sessions so users can
+     tell them apart from vs-match cards at a glance. */
+  .card-badge-practice {
+    color: var(--accent, #ffd54a);
+    background: rgba(255, 213, 74, 0.08);
+    border-color: rgba(255, 213, 74, 0.35);
+  }
   .card-mode {
     color: var(--muted, #9aa0a6);
     font-size: 0.7rem;
@@ -830,20 +1110,17 @@
   }
   .team-a .team-name { color: var(--side-a, #4fc3f7); }
   .team-b .team-name { color: var(--side-b, #ff8a65); }
-  /* Medal treatment for ended matches — winner = gold, loser = silver.
-     Reuses the language of the End-match popup (which uses gold +
-     silver pills) and reserves the side colours (cyan/coral) for
-     live matches where they still mean "side of the table".
-     Only applies when a winner is declared (the .has-winner class,
-     set from the template) — otherwise both sides keep their side
-     colour so a truly tied match doesn't get an artificial silver
-     loser. */
+  /* Medal treatment for ended cards — winner = gold, loser = plain
+     white (not "silver-dim", which read as punishing). Reserves the
+     side colours (cyan/coral) for live matches where they still mean
+     "side of the table". Only applies when a winner is declared;
+     truly tied matches (no `.has-winner`) keep their side colours. */
   .card-ended.has-winner .team-block.winner .team-name {
     color: var(--accent, #ffd54a);
     filter: brightness(1.05);
   }
   .card-ended.has-winner .team-block:not(.winner) .team-name {
-    color: #c0c5cc;
+    color: var(--fg, #f5f5f5);
   }
   .crown { font-size: 0.9rem; }
   .team-vs {
@@ -899,22 +1176,28 @@
      took the gold. Fully-tied matches (no winner class) keep the
      cyan/coral side colours since neither side "won". */
   .card-ended.winner-a .digit-a { color: var(--accent, #ffd54a); }
-  .card-ended.winner-a .digit-b { color: #c0c5cc; }
-  .card-ended.winner-b .digit-a { color: #c0c5cc; }
+  .card-ended.winner-a .digit-b { color: var(--fg, #f5f5f5); }
+  .card-ended.winner-b .digit-a { color: var(--fg, #f5f5f5); }
   .card-ended.winner-b .digit-b { color: var(--accent, #ffd54a); }
 
-  /* Centred popup */
+  /* Centred popup. Sits at viewport centre with a mild margin from
+     each edge. Constrained by explicit max-width AND max-height so
+     it never reaches the screen edge on any device. On landscape or
+     wide screens the max-width caps it at 560px; on portrait phones
+     the calc respects safe-area insets so the popup stays inside
+     the notch / rounded corners. */
   dialog.sheet {
     padding: 0;
     border: none;
-    max-width: 560px;
-    width: calc(100vw - 2rem);
+    margin: auto;
     background: transparent;
     color: inherit;
+    box-sizing: border-box;
+    width: min(560px, calc(100vw - 2rem - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px)));
+    max-width: 100%;
     max-height: min(90dvh, 44rem);
-    top: 50%;
-    transform: translateY(-50%);
-    inset-inline: 0;
+    position: fixed;
+    inset: 0;
   }
   dialog.sheet::backdrop {
     background: rgba(0, 0, 0, 0.65);
@@ -973,6 +1256,12 @@
     border-radius: 50%;
     background: #ef5350;
     animation: pulse 1.6s ease-in-out infinite;
+  }
+  .sheet-tour {
+    color: var(--gold, #ffd54f);
+    letter-spacing: 0.02em;
+    text-transform: none;
+    font-weight: 600;
   }
   .sheet-actions {
     display: flex;

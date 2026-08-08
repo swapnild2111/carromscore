@@ -24,6 +24,13 @@
   } from '../lib/history';
   import { newMid } from '../lib/live-sync';
   import {
+    createOrTouchTournament,
+    rankTournaments,
+    subscribeStore as subscribeTournamentsStore,
+    subscribeTournaments,
+    type Tournament,
+  } from '../lib/tournaments';
+  import {
     APP_VERSION,
     fetchLatestRelease,
     isNewerVersion,
@@ -82,6 +89,26 @@
     void subscribePlayers();
     return unsub;
   });
+
+  // Tournament store: same subscribe pattern as players. Fires the
+  // reactivity trigger below when a remote update arrives.
+  let tournamentTick = $state(0);
+  $effect(() => {
+    const unsub = subscribeTournamentsStore(() => (tournamentTick += 1));
+    void subscribeTournaments();
+    return unsub;
+  });
+
+  let showTournamentPicker = $state(false);
+  function tournamentSuggestions(q: string): Tournament[] {
+    // Read the tick so Svelte re-derives on remote updates.
+    void tournamentTick;
+    return rankTournaments(q, 8);
+  }
+  function pickTournament(name: string): void {
+    cfg.tournament = name;
+    showTournamentPicker = false;
+  }
 
   function setMode(m: Mode) {
     const wasPractice = cfg.mode === 'practice';
@@ -213,16 +240,23 @@
     } catch {
       // ignore
     }
-    // Every non-practice match broadcasts live to /live/{mid}. The
-    // slug rides the URL to the score screen so a mid-match refresh
-    // preserves the broadcast. Practice (solo drill) never gets a
-    // mid — there's no meaningful spectator use case for it.
-    if (cfg.mode !== 'practice') {
-      cfg.live = true;
-      cfg.mid = newMid();
+    // Every match — including Practice — broadcasts live to
+     // /live/{mid}. The slug rides the URL to the score screen so a
+     // mid-match refresh preserves the broadcast. Practice players
+     // often stream online play too, so they need overlay URLs.
+    cfg.live = true;
+    cfg.mid = newMid();
+    // Practice never carries a tournament tag; force clear so a
+    // stale value doesn't ride the URL. For singles/doubles, trim
+    // and register the tournament (create-if-new bumps lastActive).
+    if (cfg.mode === 'practice') {
+      cfg.tournament = '';
     } else {
-      cfg.live = false;
-      cfg.mid = '';
+      const trimmed = cfg.tournament.trim();
+      cfg.tournament = trimmed;
+      if (trimmed) {
+        createOrTouchTournament(trimmed);
+      }
     }
     // Clear any stale identity handoff from a previous match with these
     // same names, then persist the fresh resolutions + start timestamp
@@ -468,6 +502,44 @@
   </fieldset>
 
 
+  <!--
+    Tournament / event input. Free-text; auto-suggested from the
+    Firebase-backed tournaments store. Blank = untagged (grouped as
+    "Default" in the lobby). Sits just above player names because
+    it's the highest-level context ("which event are we playing?").
+    Hidden in Practice mode — a solo drill doesn't sit inside a
+    tournament in any meaningful way.
+  -->
+  {#if cfg.mode !== 'practice'}
+  <label class="tournament-input">
+    <span>Tournament <em class="hint-inline">(optional)</em></span>
+    <input
+      type="text"
+      autocomplete="off"
+      placeholder="Event name — Silver Cup 2026, Sunday Club Night, …"
+      value={cfg.tournament}
+      oninput={(e) => (cfg.tournament = (e.currentTarget as HTMLInputElement).value)}
+      onfocus={() => (showTournamentPicker = true)}
+      onblur={() => setTimeout(() => (showTournamentPicker = false), 200)}
+      maxlength="60"
+    />
+    {#if showTournamentPicker}
+      {@const suggestions = tournamentSuggestions(cfg.tournament)}
+      {#if suggestions.length > 0}
+        <ul class="suggest">
+          {#each suggestions as t (t.key)}
+            <li>
+              <button type="button" onclick={() => pickTournament(t.name)}>
+                <span class="pname">{t.name}</span>
+              </button>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    {/if}
+  </label>
+  {/if}
+
   {#if cfg.mode === 'singles'}
     <div class="player-row">
       {@render picker('Player A', 'playerA')}
@@ -555,22 +627,31 @@
   {/if}
 
   <!--
-    Footer: quiet meta strip. Live moved to the hero top-right for
-    prominence; only version + copyright + Feedback (the "small
-    ask", not a primary action) live here.
+    Footer: two rows so the useful links (How to use, Feedback) sit
+    on top and don't get lost in the meta strip. Row 2 is quiet:
+    version + copyright, low contrast.
   -->
-  <p class="foot-meta">
-    <span class="foot-ver">v{APP_VERSION}</span>
-    <span class="foot-sep" aria-hidden="true">·</span>
-    © 2026 Swapnil Deshpande
-    <span class="foot-sep" aria-hidden="true">·</span>
-    <a
-      href="#feedback"
-      class="foot-link"
-      onclick={openFeedback}
-      aria-label="Send feedback about Carromscore"
-    >Feedback ⇗</a>
-  </p>
+  <div class="foot-block">
+    <p class="foot-links">
+      <a
+        href={`${base}help/`}
+        class="foot-link"
+        aria-label="How to use Carromscore"
+      >How to use ⇗</a>
+      <span class="foot-sep" aria-hidden="true">·</span>
+      <a
+        href="#feedback"
+        class="foot-link"
+        onclick={openFeedback}
+        aria-label="Send feedback about Carromscore"
+      >Feedback ⇗</a>
+    </p>
+    <p class="foot-meta">
+      <span class="foot-ver">v{APP_VERSION}</span>
+      <span class="foot-sep" aria-hidden="true">·</span>
+      © 2026 Swapnil Deshpande
+    </p>
+  </div>
 </form>
 
 {#if showFeedbackPopup}
@@ -788,11 +869,24 @@
     font-size: 0.75rem;
   }
 
-  label.picker, .note-input, .row3 label {
+  label.picker, .note-input, .row3 label, .tournament-input {
     display: flex;
     flex-direction: column;
     gap: 0.35rem;
     position: relative;
+  }
+  /* Tournament input keeps its own spacing so it feels like a
+     high-level context row, distinct from the player rows below. */
+  .tournament-input {
+    margin: 0.5rem 0 0;
+  }
+  .tournament-input .hint-inline {
+    color: var(--muted);
+    font-style: normal;
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 0.7rem;
+    margin-left: 0.3rem;
   }
   label > span {
     color: var(--muted);
@@ -1021,6 +1115,25 @@
     align-items: center;
     gap: 0.5rem;
     margin: 1rem 0 0.35rem;
+    font-size: 0.85rem;
+    flex-wrap: wrap;
+  }
+  /* Two-row footer wrapper. Row 1 = actionable links (How to use,
+     Feedback); row 2 = meta (version + copyright). Keeps both rows
+     centred, with the meta row noticeably quieter than the links. */
+  .foot-block {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.35rem;
+    margin: 0.5rem 0 0;
+  }
+  .foot-links {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 0.35rem;
+    margin: 0;
     font-size: 0.85rem;
     flex-wrap: wrap;
   }

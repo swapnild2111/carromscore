@@ -42,6 +42,15 @@ export type MatchConfig = {
   // sync (they still hit Firebase for identity + history at match end).
   live: boolean;
   mid: string;
+  /**
+   * Tournament / event name. Free-text at setup, auto-suggested from
+   * prior entries. Empty string means "no tournament" → the app
+   * treats it as bucket "Default". Retention differs by tag:
+   *   - filled tournament: 1 year (matches you care about)
+   *   - blank / "Default": 3 months (casual play)
+   * Practice mode is always 3-month regardless of tag.
+   */
+  tournament: string;
 };
 
 export const DEFAULT_CONFIG: MatchConfig = {
@@ -58,6 +67,7 @@ export const DEFAULT_CONFIG: MatchConfig = {
   maxBoards: 8,
   live: false,
   mid: '',
+  tournament: '',
 };
 
 export function formatPreset(format: Format): Partial<MatchConfig> {
@@ -96,6 +106,7 @@ const QUERY_KEYS: (keyof MatchConfig)[] = [
   'maxBoards',
   'live',
   'mid',
+  'tournament',
 ];
 
 export function encodeConfig(cfg: MatchConfig): string {
@@ -152,6 +163,12 @@ export function decodeConfig(query: URLSearchParams): MatchConfig {
   out.live = query.get('live') === 'true';
   const midParam = query.get('mid') ?? '';
   if (/^[a-z0-9]{4,12}$/i.test(midParam)) out.mid = midParam;
+
+  // Tournament / event name. Free-text, trimmed and length-capped to
+  // 60 chars to match the RTDB validator. Blank stays blank (→
+  // grouped as "Default" in the lobby).
+  const tour = (query.get('tournament') ?? '').trim().slice(0, 60);
+  if (tour) out.tournament = tour;
 
   return out;
 }
