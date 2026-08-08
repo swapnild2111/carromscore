@@ -475,7 +475,7 @@
     {/if}
     <label>
       <span>
-        {cfg.mode === 'practice' ? 'Boards per set' : 'Max boards'}
+        {cfg.mode === 'practice' ? 'Boards per set' : 'Boards'}
         {#if cfg.mode !== 'practice'}<em class="hint-inline">(0 = ∞)</em>{/if}
       </span>
       <input type="number" min={cfg.mode === 'practice' ? 1 : 0} step="1" bind:value={cfg.maxBoards} />
@@ -739,7 +739,7 @@
   legend {
     padding: 0;
     margin-bottom: 0.5rem;
-    color: var(--muted);
+    color: var(--fg);
     text-transform: uppercase;
     letter-spacing: 0.08em;
     font-size: 0.75rem;
@@ -817,7 +817,7 @@
   }
   fieldset.rules label:focus-within { border-color: var(--accent); }
   fieldset.rules label > span {
-    color: var(--muted);
+    color: var(--fg);
     font-size: 0.7rem;
     text-transform: uppercase;
     letter-spacing: 0.08em;
@@ -889,7 +889,7 @@
     margin-left: 0.3rem;
   }
   label > span {
-    color: var(--muted);
+    color: var(--fg);
     font-size: 0.75rem;
     text-transform: uppercase;
     letter-spacing: 0.08em;
