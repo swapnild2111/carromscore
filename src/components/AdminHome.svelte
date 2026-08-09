@@ -23,13 +23,14 @@
   import AdminLiveCleanup from './AdminLiveCleanup.svelte';
   import AdminHistoryCleanup from './AdminHistoryCleanup.svelte';
   import AdminAuditLog from './AdminAuditLog.svelte';
+  import AdminRoles from './AdminRoles.svelte';
 
-  type Tab = 'players' | 'tournaments' | 'live' | 'history' | 'audit';
+  type Tab = 'players' | 'tournaments' | 'live' | 'history' | 'roles' | 'audit';
 
   const base: string = import.meta.env.BASE_URL;
   let user = $state<AuthUser | null>(null);
   let role = $state<Role | null>(null);
-  let tab = $state<Tab>('players');
+  let tab = $state<Tab>('roles');
   // roleLoaded tracks whether the /adminRoles subscription has
   // resolved at least once. Without it we'd flash "access denied"
   // for a super-admin during the ~200ms Firebase auth rehydrate.
@@ -96,8 +97,23 @@
       {/if}
     </div>
   {:else}
-    <!-- Super-admin view: full tab bar. -->
+    <!--
+      Super-admin view: full tab bar.
+      Order: identity/access first (Roles), then curated data
+      (Players, Tournaments), then cleanup (Live, History), then
+      the audit trail. Rationale: an admin arriving here usually
+      wants to grant or revoke access first; data curation and
+      cleanup are less-frequent operations.
+    -->
     <div class="tabs" role="tablist" aria-label="Admin sections">
+      <button
+        type="button"
+        role="tab"
+        class="tab"
+        class:tab-active={tab === 'roles'}
+        aria-selected={tab === 'roles'}
+        onclick={() => (tab = 'roles')}
+      >Roles</button>
       <button
         type="button"
         role="tab"
@@ -149,6 +165,8 @@
         <AdminLiveCleanup />
       {:else if tab === 'history'}
         <AdminHistoryCleanup />
+      {:else if tab === 'roles'}
+        <AdminRoles />
       {:else if tab === 'audit'}
         <AdminAuditLog />
       {/if}

@@ -24,6 +24,7 @@
     subscribeCurrentUserRole,
     type Role,
   } from '../lib/roles';
+  import { upsertOwnUserMirror } from '../lib/users';
 
   interface Props {
     signedInOnly?: boolean;
@@ -87,6 +88,11 @@
       // read gated by an env var match) and idempotent — the rule
       // itself refuses once a super already exists.
       if (u?.uid) void bootstrapSuperIfNeeded(u.uid);
+      // Mirror the auth user into /users/{uid} so the admin panel
+      // can render display names + emails alongside UIDs, and so
+      // the maintainer can invite by email (email→UID resolution
+      // is done client-side by scanning /users for a match).
+      if (u) void upsertOwnUserMirror(u);
     });
     const unsubRole = subscribeCurrentUserRole((r) => (role = r));
     return () => {

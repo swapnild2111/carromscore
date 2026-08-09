@@ -163,6 +163,31 @@ export async function bootstrapSuperIfNeeded(uid: string): Promise<boolean> {
   }
 }
 
+/**
+ * Admin-only: one-shot load of every `/adminRoles/{uid}` entry.
+ * Returned as a plain map keyed by UID. Fine to call from the
+ * admin panel; not a subscription — callers reload manually.
+ */
+export async function loadAllAdminRoles(): Promise<Record<string, 'super'>> {
+  try {
+    const [{ firebaseApp }, { getDatabase, ref, get }] = await Promise.all([
+      import('./firebase'),
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    const snap = await get(ref(db, 'adminRoles'));
+    const raw = snap.val() as Record<string, unknown> | null;
+    if (!raw) return {};
+    const out: Record<string, 'super'> = {};
+    for (const [uid, val] of Object.entries(raw)) {
+      if (val === 'super') out[uid] = 'super';
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
 /** Test hook — reset state between assertions. */
 export function _resetForTests(): void {
   activeUid = null;

@@ -531,6 +531,42 @@ export async function loadOrganisers(key: string): Promise<string[]> {
   }
 }
 
+/**
+ * Admin-only: fetch every organiser across every tournament in one
+ * read. Returned as a nested map: uid → { tournamentKey → true }.
+ * Handy for the roles-management tab which groups by UID rather
+ * than by tournament.
+ *
+ * Requires super-admin auth per the /tournaments/$key/organisers
+ * read rule (auth != null); non-super users get an empty map
+ * silently.
+ */
+export async function loadAllOrganisers(): Promise<Record<string, Record<string, true>>> {
+  try {
+    const [{ firebaseApp }, { getDatabase, ref, get }] = await Promise.all([
+      import('./firebase'),
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    const snap = await get(ref(db, 'tournaments'));
+    const raw = snap.val() as Record<string, Record<string, unknown>> | null;
+    if (!raw) return {};
+    const out: Record<string, Record<string, true>> = {};
+    for (const [key, val] of Object.entries(raw)) {
+      const organisers = (val?.organisers as Record<string, unknown> | undefined) ?? null;
+      if (!organisers) continue;
+      for (const [uid, v] of Object.entries(organisers)) {
+        if (v !== true) continue;
+        if (!out[uid]) out[uid] = {};
+        out[uid][key] = true;
+      }
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
 /** Test hook — reset store between assertions. */
 export function _resetForTests(): void {
   memoryStore = [];
