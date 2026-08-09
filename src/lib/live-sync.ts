@@ -1,3 +1,5 @@
+import { currentUser } from './auth';
+
 /**
  * Live broadcast — one-way sync of a match's live state from an
  * umpire's device (publisher) to any number of spectator devices
@@ -147,8 +149,13 @@ export async function publishLive(
     if (meta.noteA) metaClean.noteA = meta.noteA;
     if (meta.noteB) metaClean.noteB = meta.noteB;
     if (meta.tournament) metaClean.tournament = meta.tournament;
+    // Stamp `createdBy` when signed in. Anonymous stays anonymous —
+    // field absent. RTDB validator on live/$mid/createdBy accepts a
+    // string ≤ 64 chars (rules updated 2026-08-09).
+    const createdBy = currentUser()?.uid;
     await set(ref(db, `live/${mid}`), {
       ...(matchId ? { matchId } : {}),
+      ...(createdBy ? { createdBy } : {}),
       updatedAt: Date.now(),
       meta: metaClean,
       liveState,

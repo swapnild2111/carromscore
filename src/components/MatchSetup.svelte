@@ -36,6 +36,13 @@
     isNewerVersion,
     type ReleaseInfo,
   } from '../lib/version';
+  import { signIn, signOut, subscribeAuth, type AuthUser } from '../lib/auth';
+  import {
+    bootstrapSuperIfNeeded,
+    setCurrentUidForRoles,
+    subscribeCurrentUserRole,
+    type Role,
+  } from '../lib/roles';
 
   const base: string = import.meta.env.BASE_URL;
 
@@ -98,6 +105,52 @@
     void subscribeTournaments();
     return unsub;
   });
+
+  // Auth + role state for the footer "Admin" link.
+  // Casual users never see the sign-in chip on this page — only a
+  // low-key text link in the footer. The link's behaviour depends on
+  // auth state:
+  //   signed out  → clicking triggers Google sign-in
+  //   super-admin → clicking navigates to /admin/
+  //   signed in but not admin → shows a "not authorised" dialog with
+  //   a Sign out action, so an accidental sign-in has a graceful exit.
+  let authUser = $state<AuthUser | null>(null);
+  let role = $state<Role | null>(null);
+  let showNotAuthorisedDialog = $state(false);
+  $effect(() => {
+    const unsubAuth = subscribeAuth((u) => {
+      authUser = u;
+      setCurrentUidForRoles(u?.uid ?? null);
+      if (u?.uid) void bootstrapSuperIfNeeded(u.uid);
+    });
+    const unsubRole = subscribeCurrentUserRole((r) => (role = r));
+    return () => {
+      unsubAuth();
+      unsubRole();
+    };
+  });
+
+  function onAdminLinkClick(e: Event) {
+    e.preventDefault();
+    if (!authUser) {
+      void signIn();
+      return;
+    }
+    if (role?.isSuper) {
+      window.location.href = `${base}admin/`;
+      return;
+    }
+    // Signed in but no super role → show not-authorised dialog so
+    // the user knows what happened and can sign out.
+    showNotAuthorisedDialog = true;
+  }
+  function closeNotAuthorised() {
+    showNotAuthorisedDialog = false;
+  }
+  function signOutFromNotAuthorised() {
+    showNotAuthorisedDialog = false;
+    void signOut();
+  }
 
   let showTournamentPicker = $state(false);
   function tournamentSuggestions(q: string): Tournament[] {
@@ -645,6 +698,23 @@
         onclick={openFeedback}
         aria-label="Send feedback about Carromscore"
       >Feedback ⇗</a>
+      <span class="foot-sep" aria-hidden="true">·</span>
+      <!--
+        Admin entry point. Discreet on purpose — casual users notice
+        "How to use" and "Feedback" first. This is the ONLY visible
+        surface that hints at admin on the home page; the sign-in
+        chip lives in the lobby header, not here.
+      -->
+      <a
+        href="#admin"
+        class="foot-link"
+        onclick={onAdminLinkClick}
+        aria-label={authUser
+          ? role?.isSuper
+            ? 'Open admin panel'
+            : 'Signed in — check admin access'
+          : 'Sign in as admin or tournament organiser'}
+      >{authUser ? (role?.isSuper ? 'Admin ⇗' : 'Signed in') : 'Admin'}</a>
     </p>
     <p class="foot-meta">
       <span class="foot-ver">v{APP_VERSION}</span>
@@ -653,6 +723,44 @@
     </p>
   </div>
 </form>
+
+{#if showNotAuthorisedDialog}
+  <!--
+    Fires when a signed-in user without super role taps "Signed in"
+    in the footer. Explains the state and gives them a way out
+    (sign out) — otherwise they'd be stuck wondering why they can't
+    reach /admin/.
+  -->
+  <div
+    class="dialog"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="na-title"
+    onclick={(e) => { if (e.target === e.currentTarget) closeNotAuthorised(); }}
+  >
+    <div class="dialog-card fb-card">
+      <h2 id="na-title">Not an admin</h2>
+      <p class="fb-intro">
+        You're signed in as <strong>{authUser?.email || authUser?.displayName}</strong>,
+        but this account isn't a Carromscore admin.
+      </p>
+      <p class="fb-intro">
+        Tournament organisers gain edit access to their event's records
+        via the admin. If you should have access, share your UID with
+        the person who granted your role.
+      </p>
+      {#if authUser?.uid}
+        <p class="fb-intro" style="user-select: text; -webkit-user-select: text; font-family: monospace; font-size: 0.75rem; background: rgba(255,255,255,0.05); padding: 0.4rem 0.55rem; border-radius: 0.4rem;">
+          {authUser.uid}
+        </p>
+      {/if}
+      <div class="dialog-actions">
+        <button class="cancel" onclick={closeNotAuthorised}>Close</button>
+        <button class="signout-btn" onclick={signOutFromNotAuthorised}>Sign out</button>
+      </div>
+    </div>
+  </div>
+{/if}
 
 {#if showFeedbackPopup}
   <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="fb-title">
@@ -1302,6 +1410,21 @@
     border: 1px solid #333;
     cursor: pointer;
     font-family: inherit;
+  }
+  .dialog-actions .signout-btn {
+    flex: 1;
+    padding: 0.6rem 1rem;
+    font-weight: 700;
+    font-size: 0.95rem;
+    border-radius: 999px;
+    background: rgba(239, 83, 80, 0.15);
+    color: var(--danger, #ef5350);
+    border: 1px solid rgba(239, 83, 80, 0.5);
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .dialog-actions .signout-btn:hover {
+    background: rgba(239, 83, 80, 0.25);
   }
 
   @media (max-width: 520px) {

@@ -30,6 +30,7 @@ import {
   loadAll,
   type Player,
 } from './players';
+import { currentUser } from './auth';
 
 /**
  * The full identity block passed from ScoreBoard's endMatch() to
@@ -129,6 +130,11 @@ export async function finishMatch(
   createdBy?: string,
 ): Promise<string | null> {
   const isPractice = result.mode === 'practice';
+  // Stamp `createdBy` with the signed-in user's uid when the caller
+  // doesn't override. Anonymous stays anonymous (field simply absent —
+  // RTDB validator accepts the omission). Added 2026-08-09 to prepare
+  // the ground for admin edit permissions.
+  const finalCreatedBy = createdBy ?? currentUser()?.uid;
 
   const playerAId = resolvePlayerId(identity.aName, identity.aResolvedId);
   const playerA2Id = isPractice
@@ -185,7 +191,7 @@ export async function finishMatch(
       : {}),
     startedAt: result.startedAt,
     endedAt: result.endedAt,
-    ...(createdBy ? { createdBy } : {}),
+    ...(finalCreatedBy ? { createdBy: finalCreatedBy } : {}),
   };
 
   try {

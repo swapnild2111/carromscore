@@ -29,6 +29,7 @@
   import { subscribePlayers, subscribeStore } from '../lib/players';
   import { APP_VERSION } from '../lib/version';
   import LiveScoreboardView from './LiveScoreboardView.svelte';
+  import SignInButton from './SignInButton.svelte';
 
   const base: string = import.meta.env.BASE_URL;
   const STALE_WINDOW_MS = 4 * 60 * 60 * 1000;
@@ -435,6 +436,7 @@
   <header class="hdr">
     <a class="back" href={base}>← Back</a>
     <h1>Live matches</h1>
+    <SignInButton />
     <span class="ver" aria-label="Carromscore version">v{APP_VERSION}</span>
   </header>
 

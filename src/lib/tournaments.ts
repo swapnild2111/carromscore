@@ -1,3 +1,5 @@
+import { currentUser } from './auth';
+
 /**
  * Tournament / event tag store. Mirrors the players.ts pattern:
  *   - Firebase RTDB `/tournaments/{key}` is the source of truth
@@ -17,6 +19,13 @@ export type Tournament = {
   name: string;            // canonical display name (what the user typed)
   createdAt: number;
   lastActive: number;      // touched on every match Start referencing it
+  /**
+   * Firebase auth uid of the account that created this record. Absent
+   * when the tournament was created anonymously (default v2.0 flow).
+   * Preserved verbatim on subsequent anonymous touches — see
+   * writeTournamentToFirebase.
+   */
+  createdBy?: string;
 };
 
 /**
@@ -91,9 +100,19 @@ export function createOrTouchTournament(name: string): Tournament | null {
   if (!key) return null;
   const now = Date.now();
   const existing = memoryStore.find((t) => t.key === key);
+  // Stamp `createdBy` only on the fresh-creation path. Subsequent
+  // touches on an existing record must not overwrite the original
+  // creator — that field is the record's provenance.
+  const creator = currentUser()?.uid;
   const record: Tournament = existing
     ? { ...existing, name: trimmed, lastActive: now }
-    : { key, name: trimmed, createdAt: now, lastActive: now };
+    : {
+        key,
+        name: trimmed,
+        createdAt: now,
+        lastActive: now,
+        ...(creator ? { createdBy: creator } : {}),
+      };
   if (existing) {
     Object.assign(existing, { name: trimmed, lastActive: now });
   } else {
@@ -140,6 +159,7 @@ function mergeRemote(raw: Record<string, unknown>): void {
     if (!name) continue;
     const createdAt = typeof v.createdAt === 'number' ? v.createdAt : 0;
     const lastActive = typeof v.lastActive === 'number' ? v.lastActive : 0;
+    const createdBy = typeof v.createdBy === 'string' ? v.createdBy : undefined;
     const existing = memoryStore.find((t) => t.key === key);
     if (existing) {
       existing.name = name;
@@ -147,8 +167,15 @@ function mergeRemote(raw: Record<string, unknown>): void {
       // Take the newer lastActive between what we have and what
       // arrived, so a stale local touch doesn't demote a fresher one.
       existing.lastActive = Math.max(existing.lastActive, lastActive);
+      if (createdBy && !existing.createdBy) existing.createdBy = createdBy;
     } else {
-      memoryStore.push({ key, name, createdAt, lastActive });
+      memoryStore.push({
+        key,
+        name,
+        createdAt,
+        lastActive,
+        ...(createdBy ? { createdBy } : {}),
+      });
     }
   }
   notify();
@@ -163,11 +190,14 @@ async function writeTournamentToFirebase(t: Tournament): Promise<void> {
     const db = getDatabase(firebaseApp());
     // `update` merges — if the record already exists we just bump
     // lastActive + refresh name (in case of typo correction), without
-    // touching createdAt.
+    // touching createdAt. `createdBy` is only present on the local
+    // record when we just created it, so we forward it conditionally
+    // to avoid clobbering an existing record's creator.
     await update(ref(db, `tournaments/${t.key}`), {
       name: t.name,
       lastActive: t.lastActive,
       createdAt: t.createdAt,
+      ...(t.createdBy ? { createdBy: t.createdBy } : {}),
     });
   } catch {
     // Silent — local record persists.

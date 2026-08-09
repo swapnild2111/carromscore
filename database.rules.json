@@ -58,7 +58,23 @@
         "name":       { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 60" },
         "createdAt":  { ".validate": "newData.isNumber()" },
         "lastActive": { ".validate": "newData.isNumber()" },
+        "createdBy":  { ".validate": "newData.isString() && newData.val().length <= 64" },
+        "organisers": {
+          ".read": "auth != null",
+          "$uid": {
+            ".write": "auth != null && root.child('adminRoles').child(auth.uid).val() == 'super'",
+            ".validate": "newData.isBoolean() && newData.val() == true && $uid.length >= 1 && $uid.length <= 64"
+          }
+        },
         "$other":     { ".validate": false }
+      }
+    },
+
+    "adminRoles": {
+      ".read": "auth != null",
+      "$uid": {
+        ".write": "auth != null && ((root.child('adminRoles').child(auth.uid).val() == 'super') || (!root.child('adminRoles').exists() && auth.uid == $uid))",
+        ".validate": "newData.isString() && newData.val() == 'super' && $uid.length >= 1 && $uid.length <= 64"
       }
     },
 
@@ -71,6 +87,7 @@
         "updatedAt": { ".validate": "newData.isNumber()" },
         "meta":      { ".validate": "newData.hasChildren()" },
         "liveState": { ".validate": "newData.hasChildren()" },
+        "createdBy": { ".validate": "newData.isString() && newData.val().length <= 64" },
         "$other":    { ".validate": false }
       }
     }

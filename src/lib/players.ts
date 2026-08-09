@@ -1,3 +1,5 @@
+import { currentUser } from './auth';
+
 /**
  * Player identity + alias system.
  *
@@ -265,12 +267,15 @@ export function createPlayer(canonicalName: string, createdBy?: string): Player 
     (p) => normalize(p.canonicalName) === norm,
   );
   if (existing) return existing;
+  // Stamp `createdBy` with the signed-in user's uid when the caller
+  // doesn't override. Anonymous stays anonymous — field simply absent.
+  const finalCreatedBy = createdBy ?? currentUser()?.uid;
   const p: Player = {
     id: playerIdFor(canonicalName),
     canonicalName: canonicalName.trim(),
     aliases: {},
     createdAt: Date.now(),
-    ...(createdBy ? { createdBy } : {}),
+    ...(finalCreatedBy ? { createdBy: finalCreatedBy } : {}),
   };
   memoryStore.push(p);
   notify();
