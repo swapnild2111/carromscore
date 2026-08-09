@@ -348,6 +348,188 @@ export async function loadHistory(): Promise<MatchRecord[]> {
 }
 
 /**
+ * Fields of a match record that admin edits may change. Excludes:
+ *   - `id` (identity, not payload)
+ *   - `mode`, `startedAt` (structural, editing them is out of scope)
+ *   - `createdBy` (provenance, never rewritten by admin)
+ * Includes:
+ *   - Result scalars (final points, sets, board count, winner)
+ *   - `notes` (side A / B notes)
+ *   - `tournament` (organiser cannot change it; super can — the rule
+ *     enforces this. Passing `undefined` here removes the tag.)
+ *   - `boardLog` (per-board rows). Practice matches would edit
+ *     `practiceBoards` instead — not exposed in this patch since the
+ *     Prem/Yash-class bug we're solving is versus-mode scoring, not
+ *     solo drill misses.
+ *   - `endedAt` — deliberately preserved on the record (retention
+ *     ages the record correctly). Not part of the patch shape.
+ */
+export type MatchPatch = {
+  result?: {
+    winner?: 'a' | 'b' | null;
+    finalPointsA?: number;
+    finalPointsB?: number;
+    setsA?: number;
+    setsB?: number;
+    boardCount?: number;
+  };
+  notes?: { a?: string; b?: string };
+  tournament?: string | null;
+  boardLog?: Array<{
+    set: number;
+    board: number;
+    breakSide: 'a' | 'b';
+    queen: 'a' | 'b';
+    pointsA: number;
+    pointsB: number;
+    endedAt: number;
+  }>;
+};
+
+export type WriteOutcome = { ok: true } | { ok: false; error: string };
+
+/**
+ * Admin-only: apply a patch to an existing match record. The caller
+ * (MatchEditModal) is responsible for confirming the user has rights;
+ * the RTDB rule at `/matches/$id` is what actually enforces it — an
+ * unauthorised update will fail with a permission-denied error, which
+ * this helper surfaces via the returned WriteOutcome so the modal
+ * can display it inline.
+ *
+ * Preserves `endedAt` verbatim so retention still ages the record
+ * correctly. Preserves `createdBy` and `startedAt`. Fetches current
+ * record first, merges the patch, writes back with `set()`.
+ *
+ * Silent-on-failure convention doesn't apply here — the caller (an
+ * admin) needs to know the write failed. This is the intentional
+ * deviation from the rest of the module.
+ */
+/**
+ * Merge patched fields onto an existing match record. Pure — no I/O.
+ * Extracted from updateMatch so each field's normalisation lives in
+ * its own helper and the outer function stays readable.
+ */
+function applyMatchPatch(
+  existing: Record<string, unknown>,
+  patch: MatchPatch,
+): Record<string, unknown> {
+  const next: Record<string, unknown> = { ...existing };
+  if (patch.result) {
+    const prev = (existing.result as Record<string, unknown>) ?? {};
+    next.result = { ...prev, ...patch.result };
+  }
+  if (patch.notes) {
+    next.notes = mergeNotes(existing.notes, patch.notes);
+  }
+  applyTournamentPatch(next, patch.tournament);
+  if (patch.boardLog) {
+    applyBoardLogPatch(next, patch.boardLog);
+  }
+  return next;
+}
+
+function mergeNotes(
+  prev: unknown,
+  patch: NonNullable<MatchPatch['notes']>,
+): Record<string, unknown> {
+  const base = (prev as Record<string, unknown>) ?? {};
+  return {
+    ...base,
+    ...(patch.a !== undefined ? { a: patch.a.slice(0, 40) } : {}),
+    ...(patch.b !== undefined ? { b: patch.b.slice(0, 40) } : {}),
+  };
+}
+
+function applyTournamentPatch(
+  next: Record<string, unknown>,
+  tournament: MatchPatch['tournament'],
+): void {
+  if (tournament === null || tournament === '') {
+    // Explicit clearing — remove the field entirely so the retention
+    // sweep classifies the match as untagged (3-month TTL).
+    delete next.tournament;
+    return;
+  }
+  if (typeof tournament === 'string') {
+    next.tournament = tournament.trim().slice(0, 60);
+  }
+}
+
+function applyBoardLogPatch(
+  next: Record<string, unknown>,
+  rows: NonNullable<MatchPatch['boardLog']>,
+): void {
+  // Trim to sensible bounds; skip malformed rows entirely.
+  const cleaned = rows
+    .filter((e) => e && typeof e === 'object')
+    .map((e) => ({
+      set: Number(e.set) || 0,
+      board: Number(e.board) || 0,
+      breakSide: e.breakSide === 'b' ? 'b' : 'a',
+      queen: e.queen === 'b' ? 'b' : 'a',
+      pointsA: Math.max(0, Number(e.pointsA) || 0),
+      pointsB: Math.max(0, Number(e.pointsB) || 0),
+      endedAt: Number(e.endedAt) || Date.now(),
+    }));
+  if (cleaned.length === 0) {
+    delete next.boardLog;
+  } else {
+    next.boardLog = cleaned;
+  }
+}
+
+export async function updateMatch(
+  matchId: string,
+  patch: MatchPatch,
+): Promise<WriteOutcome> {
+  if (!matchId) return { ok: false, error: 'Missing match id' };
+  try {
+    const [{ firebaseApp }, { getDatabase, ref, get, set }] = await Promise.all([
+      import('./firebase'),
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    const path = `matches/${matchId}`;
+    const snap = await get(ref(db, path));
+    const existing = snap.val() as Record<string, unknown> | null;
+    if (!existing) return { ok: false, error: 'Match not found' };
+
+    const next = applyMatchPatch(existing, patch);
+    await set(ref(db, path), next);
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg || 'Write failed' };
+  }
+}
+
+/**
+ * Admin-only: delete a match record. Same silent-off convention as
+ * updateMatch — the returned WriteOutcome carries the failure reason
+ * so the admin modal can render it.
+ *
+ * NOTE: deleting a match does NOT touch any related `/live/{mid}`
+ * broadcast record (those age out on their own). Callers who also
+ * want to remove a stuck live record should call `deleteLive(mid)`
+ * separately.
+ */
+export async function deleteMatch(matchId: string): Promise<WriteOutcome> {
+  if (!matchId) return { ok: false, error: 'Missing match id' };
+  try {
+    const [{ firebaseApp }, { getDatabase, ref, remove }] = await Promise.all([
+      import('./firebase'),
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    await remove(ref(db, `matches/${matchId}`));
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg || 'Delete failed' };
+  }
+}
+
+/**
  * Look up a player's display name by id. Returns a friendly fallback
  * if the identity store hasn't yet loaded the player — better than
  * showing the raw kebab-slug.

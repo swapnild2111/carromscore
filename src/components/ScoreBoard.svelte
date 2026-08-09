@@ -25,6 +25,9 @@
     type LiveRecord,
   } from '../lib/live-sync';
   import LiveScoreboardView from './LiveScoreboardView.svelte';
+  import MatchEditModal from './MatchEditModal.svelte';
+  import { subscribeCurrentUserRole, type Role } from '../lib/roles';
+  import type { MatchRecord } from '../lib/history';
 
   type Side = { name: string; note: string; sets: number; points: number };
   /*
@@ -210,6 +213,13 @@
     // tapping End. Firebase honours this server-side once the
     // WebSocket drops. Practice mode has no mid, so this is a no-op.
     if (cfg.live && cfg.mid) void armLiveCleanup(cfg.mid);
+
+    // Role subscription — so the end-recap can render a "Fix this
+    // match" link for signed-in admins. The subscription lives for
+    // the lifetime of the score screen; cleanup happens on
+    // component unmount via the onMount return handler.
+    unsubRole = subscribeCurrentUserRole((r) => (role = r));
+
     // currentBreak stays null until the organiser marks board 0's breaker;
     // hydrate below can restore a live value if we're resuming a match.
 
@@ -269,6 +279,7 @@
       document.removeEventListener('fullscreenchange', onFullscreenChange);
       releaseWakeLock();
       releaseLandscape();
+      unsubRole?.();
     };
   });
 
@@ -684,6 +695,79 @@
    * button and outside-click-to-dismiss.
    */
   let showScorecardPopup = $state(false);
+  /**
+   * Set once finishMatch resolves to a Firebase match id. Enables the
+   * "Fix this match" link on the end-recap for signed-in admins —
+   * before this is set, the record doesn't yet exist in /matches, so
+   * editing has nothing to write to. Cleared on Reset / Close.
+   */
+  let archivedMatchId = $state<string | null>(null);
+  /** True while the admin edit modal is open on the just-ended match. */
+  let showEditModal = $state(false);
+  /** Current user's role; drives visibility of the "Fix this match" link. */
+  let role = $state<Role | null>(null);
+  let unsubRole: (() => void) | null = null;
+
+  /**
+   * Synthesise a MatchRecord snapshot for the edit modal from the
+   * current match state, keyed on the archived match id. Called at
+   * modal-open time; not reactive — the modal owns its own edit
+   * buffer from that point on.
+   */
+  function buildMatchRecordForEdit(): MatchRecord | null {
+    if (!archivedMatchId) return null;
+    return {
+      id: archivedMatchId,
+      mode: cfg.mode,
+      notes: { a: sideA.note, b: sideB.note },
+      cfg: {
+        bestOf: cfg.bestOf,
+        maxBoards: cfg.maxBoards,
+        pointsTarget: cfg.pointsTarget,
+        format: cfg.format,
+      },
+      result: {
+        winner: matchResult,
+        finalPointsA: sideA.points,
+        finalPointsB: sideB.points,
+        setsA: sideA.sets,
+        setsB: sideB.sets,
+        boardCount: board,
+      },
+      ...(boardLog.length > 0
+        ? {
+            boardLog: boardLog.map((e) => ({
+              set: e.set,
+              board: e.board,
+              breakSide: e.breakSide,
+              queen: e.queen,
+              pointsA: e.pointsA,
+              pointsB: e.pointsB,
+              endedAt: e.endedAt,
+            })),
+          }
+        : {}),
+      ...(cfg.tournament ? { tournament: cfg.tournament } : {}),
+    };
+  }
+
+  /** True when the current user can edit the just-archived match. */
+  const canEditArchived = $derived(() => {
+    if (!archivedMatchId || !role) return false;
+    if (role.isSuper) return true;
+    const tour = (cfg.tournament ?? '').trim();
+    if (!tour) return false;
+    const key = tour
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '')
+      .replace(/[^a-z0-9\s-]/g, ' ')
+      .replace(/\s+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 60);
+    return role.organiserOf.has(key);
+  });
   // Fixed array of spark indices for the fireworks each-loop.
   const SPARK_INDICES = Array.from({ length: 20 }, (_, i) => i);
   function endMatch() {
@@ -813,7 +897,11 @@
         if (matchId === null) {
           archiveFailedToast = true;
           window.setTimeout(() => { archiveFailedToast = false; }, 6000);
+          return;
         }
+        // Successful archive — remember the id so the end-recap
+        // "Fix this match" link can hand it to the edit modal.
+        archivedMatchId = matchId;
       });
       // Clear the handoff so a "same names again" match after this one
       // doesn't accidentally reuse the same startedAt / resolutions.
@@ -1414,8 +1502,41 @@
           aria-label="Close scorecard"
         >✕</button>
         <LiveScoreboardView record={scorecardRecord} />
+        {#if canEditArchived()}
+          <!--
+            Admin-only "Fix this match" link. Appears once the record
+            has been archived to /matches (archivedMatchId != null)
+            AND the current user is authorised. Opens the shared
+            edit modal in-place.
+          -->
+          <div class="scorecard-admin">
+            <button
+              type="button"
+              class="fix-btn"
+              onclick={() => (showEditModal = true)}
+            >✎ Fix this match</button>
+          </div>
+        {/if}
       </div>
     </div>
+  {/if}
+
+  {#if showEditModal && archivedMatchId}
+    {@const record = buildMatchRecordForEdit()}
+    {#if record}
+      <MatchEditModal
+        {record}
+        isSuper={!!role?.isSuper}
+        onClose={() => (showEditModal = false)}
+        onSaved={() => {
+          showEditModal = false;
+          // After a successful admin edit, close the scorecard popup
+          // too so the umpire returns to the main board — reopening
+          // the recap would show stale locally-cached data.
+          showScorecardPopup = false;
+        }}
+      />
+    {/if}
   {/if}
 
   {#if showPracticePopup}
@@ -2255,6 +2376,34 @@
     overflow-y: auto;
     padding: 0.9rem 0.9rem 1rem;
     text-align: left;
+  }
+  /* "Fix this match" admin surface at the bottom of the scorecard
+     modal. Only rendered for authorised users (super OR organiser
+     of the match's tournament). Kept muted so it doesn't compete
+     with the recap table. */
+  .scorecard-admin {
+    margin-top: 0.9rem;
+    padding-top: 0.9rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    display: flex;
+    justify-content: flex-end;
+  }
+  .fix-btn {
+    background: rgba(255, 213, 74, 0.14);
+    color: var(--accent);
+    border: 1px solid rgba(255, 213, 74, 0.45);
+    border-radius: 999px;
+    padding: 0.45rem 0.95rem;
+    font-weight: 700;
+    font-size: 0.82rem;
+    letter-spacing: 0.02em;
+    cursor: pointer;
+    font-family: inherit;
+    transition: background 0.12s, border-color 0.12s;
+  }
+  .fix-btn:hover {
+    background: rgba(255, 213, 74, 0.24);
+    border-color: rgba(255, 213, 74, 0.7);
   }
   .dialog-card h2 {
     margin: 0 0 0.5rem;

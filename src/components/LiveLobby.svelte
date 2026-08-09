@@ -30,6 +30,8 @@
   import { APP_VERSION } from '../lib/version';
   import LiveScoreboardView from './LiveScoreboardView.svelte';
   import SignInButton from './SignInButton.svelte';
+  import MatchEditModal from './MatchEditModal.svelte';
+  import { subscribeCurrentUserRole, type Role } from '../lib/roles';
 
   const base: string = import.meta.env.BASE_URL;
   const STALE_WINDOW_MS = 4 * 60 * 60 * 1000;
@@ -160,12 +162,67 @@
     const unsubStore = subscribeStore(() => (identityTick += 1));
 
     const nowTick = window.setInterval(() => (now = Date.now()), 30_000);
+    // Role subscription — SignInButton owns the auth ↔ roles wiring
+    // via setCurrentUidForRoles(); here we just read the resulting
+    // stream so we can decide whether to render the edit affordance
+    // on each card. Role is null when logged out or before the
+    // subscription rehydrates.
+    const unsubRole = subscribeCurrentUserRole((r) => (role = r));
     return () => {
       unsub?.();
       unsubStore();
+      unsubRole();
       window.clearInterval(nowTick);
     };
   });
+
+  // Role reactive state + edit-modal open target.
+  let role = $state<Role | null>(null);
+  let editing = $state<MatchRecord | null>(null);
+
+  /**
+   * Compute whether the current user is authorised to edit a record
+   * (super OR organiser of the record's tournament). Kept close to
+   * the call sites so the predicate stays easy to audit. This is
+   * UI-only — the RTDB rule at /matches/$id is the actual enforcement.
+   */
+  function canEditMatch(m: MatchRecord): boolean {
+    if (!role) return false;
+    if (role.isSuper) return true;
+    const tour = (m.tournament ?? '').trim();
+    if (!tour) return false;
+    // Tournament KEYS are the normalised form. But records store the
+    // display name in `m.tournament` (as written by
+    // finishMatch → tournament.trim().slice(0,60)). We need to look
+    // up the key. Cheapest: normalise here inline (mirrors
+    // tournaments.ts normalizeKey), no cross-module import.
+    const key = tour
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '')
+      .replace(/[^a-z0-9\s-]/g, ' ')
+      .replace(/\s+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 60);
+    return role.organiserOf.has(key);
+  }
+
+  function openEdit(m: MatchRecord, e: Event) {
+    // Cards are big <button> elements that also open the popup on
+    // click. Stop the event so opening the pencil doesn't also
+    // open the popup underneath.
+    e.stopPropagation();
+    editing = m;
+  }
+  function closeEdit() {
+    editing = null;
+  }
+  function afterSaved() {
+    // Refresh History from Firebase so the modal's changes show.
+    // Cheap — RTDB caches locally.
+    void loadHistory().then((m) => (matches = m));
+  }
 
   // Load History on tab switch (once). Reloads on tab-switch-back
   // are cheap — Firebase caches the read.
@@ -590,7 +647,24 @@
             {#each matchesInBucket as m (m.id)}
               {@const r = m.result}
               {@const winner = r?.winner}
-              <li>
+              {@const editable = canEditMatch(m)}
+              <li class="card-li">
+                {#if editable}
+                  <!--
+                    Pencil sits absolutely-positioned in the card's
+                    top-right corner. Sibling of the main card button
+                    (nesting buttons is invalid HTML) with a higher
+                    z-index so the click reaches it first. Only
+                    renders when the current user is authorised to
+                    edit this record.
+                  -->
+                  <button
+                    type="button"
+                    class="card-edit"
+                    onclick={(e) => openEdit(m, e)}
+                    aria-label="Edit match"
+                  >✎</button>
+                {/if}
                 <button
                   type="button"
                   class="card card-ended"
@@ -705,6 +779,22 @@
     </div>
   {/if}
 </dialog>
+
+{#if editing}
+  <!--
+    Admin edit modal. Sibling of the recap dialog so it can stack on
+    top when needed. Visible only after the pencil affordance is
+    clicked — which itself only renders for authorised users. The
+    modal calls `updateMatch` / `deleteMatch` and reports success
+    via the callback so we can refresh the list.
+  -->
+  <MatchEditModal
+    record={editing}
+    isSuper={!!role?.isSuper}
+    onClose={closeEdit}
+    onSaved={afterSaved}
+  />
+{/if}
 {/if}
 
 <style>
@@ -1005,6 +1095,41 @@
     main { max-width: 1600px; }
   }
   .grid > li { display: flex; }
+  /* `.card-li` positions the pencil affordance absolutely against
+     the list item, so it lands in the card's top-right corner
+     regardless of card content height. Only present on cards that
+     render an edit affordance (guarded in the template). */
+  .card-li {
+    position: relative;
+  }
+  .card-edit {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    z-index: 3;
+    width: 1.9rem;
+    height: 1.9rem;
+    padding: 0;
+    background: rgba(255, 213, 74, 0.14);
+    border: 1px solid rgba(255, 213, 74, 0.45);
+    color: var(--accent, #ffd54a);
+    border-radius: 0.5rem;
+    font-size: 0.95rem;
+    line-height: 1;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    -webkit-tap-highlight-color: transparent;
+    transition: background 0.12s, border-color 0.12s, transform 0.08s;
+  }
+  .card-edit:hover {
+    background: rgba(255, 213, 74, 0.24);
+    border-color: rgba(255, 213, 74, 0.7);
+  }
+  .card-edit:active {
+    transform: scale(0.94);
+  }
 
   .card {
     display: flex;
