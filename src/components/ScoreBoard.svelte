@@ -18,7 +18,13 @@
     clearMatchIdentity,
   } from '../lib/history';
   import { subscribePlayers } from '../lib/players';
-  import { armLiveCleanup, publishLive, type LivePayload } from '../lib/live-sync';
+  import {
+    armLiveCleanup,
+    publishLive,
+    type LivePayload,
+    type LiveRecord,
+  } from '../lib/live-sync';
+  import LiveScoreboardView from './LiveScoreboardView.svelte';
 
   type Side = { name: string; note: string; sets: number; points: number };
   /*
@@ -37,7 +43,21 @@
   // 1-indexed: `board` is the currently-being-played board. Match
   // starts on board 1 (you're already playing when the score screen
   // mounts). boardLog.length = boards completed so far.
-  let board = $state(1);
+  /**
+   * Boards *completed* in the current match. Starts at 0 — that's
+   * how a paper scorecard reads before the first board has finished.
+   * Increments when BOARD+1 fires (snapshot of the just-finished
+   * board goes into boardLog with `board: board + 1` — i.e. 1-indexed
+   * so rows in the archive match "Board 1", "Board 2", … as
+   * players speak of them).
+   *
+   * Historical note: v2.0-beta shipped this as 1-indexed to match
+   * DB shape, but tournament testers (Prem + Yash, 2026-08-08) said
+   * that reads as "board 1 is already done"; changed back to 0 to
+   * match paper convention while keeping the archived board numbers
+   * 1-indexed via the +1 at snapshot time.
+   */
+  let board = $state(0);
 
   /*
    * BREAK indicator: which side breaks (assigned once at match start).
@@ -92,6 +112,26 @@
   let boardLog = $state<BoardEntry[]>([]);
   let pointsAtBoardStart = $state<{ a: number; b: number }>({ a: 0, b: 0 });
   let queenRequiredToast = $state(false);
+  /**
+   * Fires when the umpire taps BOARD+1 after a side has already
+   * reached pointsTarget in the current set. Added 2026-08-09
+   * after Prem/Yash's test session recorded a phantom 9th board on
+   * a bo1-to-20 match — they hit 20 on board 8 and a stray tap
+   * opened row 9. Toast points the umpire at SET+1 or End.
+   */
+  let setDecidedToast = $state(false);
+  /**
+   * Set to true when finishMatch() failed to reach Firebase (network
+   * dead, rules denied). Surfaces as a small non-blocking toast so
+   * the umpire knows the archive attempt failed rather than
+   * silently thinking History captured it. Auto-dismisses.
+   *
+   * Added 2026-08-09 after Prem/Yash's testing found a match that
+   * played to completion but never appeared in History — the write
+   * had failed silently because the RTDB rules hadn't been
+   * re-published yet.
+   */
+  let archiveFailedToast = $state(false);
 
   /*
    * Practice mode: solo drill. Player runs N sets × M boards and records
@@ -441,7 +481,8 @@
         }
         const entry: BoardEntry = {
           set: sideA.sets + sideB.sets,
-          board,
+          // Snapshot rows are 1-indexed (see comment on `board` state).
+          board: board + 1,
           breakSide: currentBreak,
           queen: queenHolder,
           pointsA: sideA.points - pointsAtBoardStart.a,
@@ -449,6 +490,10 @@
           endedAt: Date.now(),
         };
         boardLog = [...boardLog, entry];
+        // Advance `board` to reflect the just-captured entry so the
+        // count stored on match archive matches boardLog.length —
+        // the same reason endMatch() advances after its own snapshot.
+        board = board + 1;
       }
     }
 
@@ -471,9 +516,10 @@
     if (anotherSetRemains) {
       sideA.points = 0;
       sideB.points = 0;
-      // Board counter resets to 1 for the new set. boardLog persists
-      // across sets — each entry carries `set` so consumers can group.
-      board = 1;
+      // Board counter resets to 0 (no board completed yet in the new
+      // set). boardLog persists across sets — each entry carries `set`
+      // so consumers can group.
+      board = 0;
       queenHolder = null;
       pointsAtBoardStart = { a: 0, b: 0 };
       // First-break rotates every set: the player who did NOT open
@@ -509,6 +555,21 @@
       // ICF rule: every board ends with the queen either pocketed +
       // covered by one side, or awarded to opponent if the other side
       // cleared without pocketing it. There is no "no queen" outcome.
+
+      // Set already has a winner (a side reached pointsTarget). BOARD+1
+      // would start a phantom extra board that will land in the recap
+      // as an unwanted extra row — this is what happened with
+      // Prem/Yash 08-09 test: they hit 20 on board 8, then a stray
+      // BOARD+1 tap opened a phantom board 9. Block with a toast so
+      // the umpire taps SET+1 (or End) instead.
+      const setDecided =
+        sideA.points >= cfg.pointsTarget || sideB.points >= cfg.pointsTarget;
+      if (setDecided) {
+        setDecidedToast = true;
+        window.setTimeout(() => { setDecidedToast = false; }, 3000);
+        return;
+      }
+
       if (queenHolder === null) {
         queenRequiredToast = true;
         window.setTimeout(() => { queenRequiredToast = false; }, 2500);
@@ -518,7 +579,10 @@
       // current set within the match.
       const entry: BoardEntry = {
         set: sideA.sets + sideB.sets,
-        board,
+        // `board` state = completed-board count (0 at fresh start).
+        // Snapshot rows are 1-indexed for archival correctness —
+        // "Board 1" is the first row a paper scorecard writes.
+        board: board + 1,
         breakSide: currentBreak,
         queen: queenHolder,
         pointsA: sideA.points - pointsAtBoardStart.a,
@@ -613,6 +677,13 @@
    * wins; if still tied, no winner (organiser resolves via manual bump).
    */
   let showWinnerPopup = $state(false);
+  /**
+   * Opens after the Champion popup's "View scorecard" button. Renders
+   * the full board-by-board recap (same LiveScoreboardView the /live/
+   * lobby uses for History cards) in a modal with a top-right close
+   * button and outside-click-to-dismiss.
+   */
+  let showScorecardPopup = $state(false);
   // Fixed array of spark indices for the fireworks each-loop.
   const SPARK_INDICES = Array.from({ length: 20 }, (_, i) => i);
   function endMatch() {
@@ -637,7 +708,10 @@
       }
       const entry: BoardEntry = {
         set: sideA.sets + sideB.sets,
-        board,
+        // `board` state = completed-board count (0 at fresh start).
+        // Snapshot rows are 1-indexed for archival correctness —
+        // "Board 1" is the first row a paper scorecard writes.
+        board: board + 1,
         breakSide: currentBreak,
         queen: queenHolder,
         pointsA: sideA.points - pointsAtBoardStart.a,
@@ -645,6 +719,12 @@
         endedAt: Date.now(),
       };
       boardLog = [...boardLog, entry];
+      // Advance `board` to include this just-captured entry, so the
+      // `boardCount` we send to finishMatch matches boardLog.length.
+      // Without this, the archive record undercounts by 1 whenever
+      // End auto-captured a running board, and the recap trim on
+      // the History side would then drop that same entry.
+      board = board + 1;
     }
     let winner: 'a' | 'b' | null = null;
     let awardExtraSet = false;
@@ -693,7 +773,7 @@
       const key = matchStateKey(cfg.mode, cfg.playerA, cfg.playerB);
       const identity = loadMatchIdentity(key);
       const startedAt = loadMatchStart(key) ?? Date.now();
-      void finishMatch(
+      finishMatch(
         {
           aName: cfg.playerA,
           aResolvedId: identity.aResolvedId,
@@ -725,7 +805,16 @@
             ? { practiceBoards: practiceBoards.map((row) => [...row]) }
             : {}),
         },
-      );
+      ).then((matchId) => {
+        // finishMatch resolves to null when the RTDB write failed
+        // (network dead, rules denied, package failed to load).
+        // Surface the failure so the umpire can retry — silent
+        // failure is what caused Prem/Yash's #3 to vanish.
+        if (matchId === null) {
+          archiveFailedToast = true;
+          window.setTimeout(() => { archiveFailedToast = false; }, 6000);
+        }
+      });
       // Clear the handoff so a "same names again" match after this one
       // doesn't accidentally reuse the same startedAt / resolutions.
       clearMatchIdentity(key);
@@ -769,7 +858,7 @@
     sideB.sets = 0;
     sideA.points = 0;
     sideB.points = 0;
-    board = 1;
+    board = 0;
     matchResult = null;
     colourA = 'a';
     colourB = 'b';
@@ -1040,18 +1129,20 @@
            class:decided={matchResult !== null}
            class:gold={matchResult === 'a'}
            class:silver={matchResult === 'b'}>
-        {#if matchResult === 'a'}
-          <span class="medal" aria-label="First place">
-            <span class="medal-icon" aria-hidden="true">🥇</span>
-            <span class="medal-label">1ST</span>
-          </span>
-        {:else if matchResult === 'b'}
-          <span class="medal" aria-label="Second place">
-            <span class="medal-icon" aria-hidden="true">🥈</span>
-            <span class="medal-label">2ND</span>
-          </span>
-        {/if}
-        <span class="hn-name">{sideA.name}</span>
+        <span class="hn-row">
+          {#if matchResult === 'a'}
+            <span class="medal" aria-label="First place">
+              <span class="medal-icon" aria-hidden="true">🥇</span>
+              <span class="medal-label">1ST</span>
+            </span>
+          {:else if matchResult === 'b'}
+            <span class="medal" aria-label="Second place">
+              <span class="medal-icon" aria-hidden="true">🥈</span>
+              <span class="medal-label">2ND</span>
+            </span>
+          {/if}
+          <span class="hn-name">{sideA.name}</span>
+        </span>
         {#if sideA.note}<span class="hn-note">{sideA.note}</span>{/if}
       </div>
       {#if currentBreak === 'a'}
@@ -1128,19 +1219,21 @@
            class:decided={matchResult !== null}
            class:gold={matchResult === 'b'}
            class:silver={matchResult === 'a'}>
-        <span class="hn-name">{sideB.name}</span>
+        <span class="hn-row">
+          <span class="hn-name">{sideB.name}</span>
+          {#if matchResult === 'b'}
+            <span class="medal" aria-label="First place">
+              <span class="medal-icon" aria-hidden="true">🥇</span>
+              <span class="medal-label">1ST</span>
+            </span>
+          {:else if matchResult === 'a'}
+            <span class="medal" aria-label="Second place">
+              <span class="medal-icon" aria-hidden="true">🥈</span>
+              <span class="medal-label">2ND</span>
+            </span>
+          {/if}
+        </span>
         {#if sideB.note}<span class="hn-note">{sideB.note}</span>{/if}
-        {#if matchResult === 'b'}
-          <span class="medal" aria-label="First place">
-            <span class="medal-icon" aria-hidden="true">🥇</span>
-            <span class="medal-label">1ST</span>
-          </span>
-        {:else if matchResult === 'a'}
-          <span class="medal" aria-label="Second place">
-            <span class="medal-icon" aria-hidden="true">🥈</span>
-            <span class="medal-label">2ND</span>
-          </span>
-        {/if}
       </div>
     </div>
   </header>
@@ -1234,18 +1327,28 @@
   </div>
 
   {#if showWinnerPopup && matchResult}
-    <div class="dialog winner-dialog" role="dialog" aria-modal="true">
-      <!--
-        Fireworks: 20 particles arranged around the popup, each animating
-        outward on its own delay + colour. Purely decorative, dismissible
-        by tap. inert on aria — the button below carries all the a11y.
-      -->
+    <!--
+      Winner popup. Outside-click closes; the "View scorecard" button
+      dismisses this AND opens the board-by-board recap popup below.
+    -->
+    <div
+      class="dialog winner-dialog"
+      role="dialog"
+      aria-modal="true"
+      onclick={(e) => { if (e.target === e.currentTarget) showWinnerPopup = false; }}
+    >
       <div class="fireworks" aria-hidden="true">
         {#each SPARK_INDICES as i (i)}
           <span class="spark spark-{i % 8}" style="--n: {i}"></span>
         {/each}
       </div>
       <div class="dialog-card champion">
+        <button
+          type="button"
+          class="dialog-close"
+          onclick={() => (showWinnerPopup = false)}
+          aria-label="Close"
+        >✕</button>
         <div class="champ-trophy" aria-hidden="true">🏆</div>
         <div class="champ-label">CHAMPION</div>
         <div class="champ-name">{matchResult === 'a' ? sideA.name : sideB.name}</div>
@@ -1254,9 +1357,63 @@
           <span class="champ-sep">·</span>
           Final board <strong>{pad2(sideA.points)}–{pad2(sideB.points)}</strong>
         </div>
-        <button class="confirm-big" onclick={() => (showWinnerPopup = false)}>
-          Show scoreboard
+        <button
+          class="confirm-big"
+          onclick={() => { showWinnerPopup = false; showScorecardPopup = true; }}
+        >
+          View scorecard
         </button>
+      </div>
+    </div>
+  {/if}
+
+  {#if showScorecardPopup && matchResult}
+    <!--
+      Board-by-board recap after End. Same LiveScoreboardView the /live/
+      lobby uses for History cards — mounted in-page against a
+      synthesised LiveRecord built from current match state. Outside-
+      click closes; top-right ✕ closes too.
+    -->
+    {@const scorecardRecord = {
+      matchId: '',
+      updatedAt: Date.now(),
+      meta: {
+        mode: cfg.mode,
+        playerA: cfg.playerA,
+        playerA2: cfg.playerA2,
+        playerB: cfg.playerB,
+        playerB2: cfg.playerB2,
+        noteA: cfg.noteA,
+        noteB: cfg.noteB,
+        bestOf: cfg.bestOf,
+        pointsTarget: cfg.pointsTarget,
+        maxBoards: cfg.maxBoards,
+        ...(cfg.tournament ? { tournament: cfg.tournament } : {}),
+      },
+      liveState: {
+        sideA: { points: sideA.points, sets: sideA.sets },
+        sideB: { points: sideB.points, sets: sideB.sets },
+        board,
+        currentBreak: null,
+        queenHolder: null,
+        matchResult,
+        ...(boardLog.length > 0 ? { boardLog } : {}),
+      },
+    } as LiveRecord}
+    <div
+      class="dialog scorecard-dialog"
+      role="dialog"
+      aria-modal="true"
+      onclick={(e) => { if (e.target === e.currentTarget) showScorecardPopup = false; }}
+    >
+      <div class="dialog-card scorecard-card">
+        <button
+          type="button"
+          class="dialog-close"
+          onclick={() => (showScorecardPopup = false)}
+          aria-label="Close scorecard"
+        >✕</button>
+        <LiveScoreboardView record={scorecardRecord} />
       </div>
     </div>
   {/if}
@@ -1323,6 +1480,30 @@
     -->
     <div class="queen-toast" role="status" aria-live="polite">
       Mark queen before ending board
+    </div>
+  {/if}
+
+  {#if setDecidedToast}
+    <!--
+      Surfaced when BOARD+1 is tapped after a side has reached
+      pointsTarget. Set is over — the next tap should be SET+1
+      (start next set) or End (finalise match). This prevents the
+      phantom-9th-board bug from Prem/Yash's 08-08 test.
+    -->
+    <div class="queen-toast" role="status" aria-live="polite">
+      Set decided — tap SET+1 or End
+    </div>
+  {/if}
+
+  {#if archiveFailedToast}
+    <!--
+      Surfaced when the Firebase write of the finished match failed
+      (rules denied, network dead). The umpire needs to know this so
+      they don't assume History captured it. Sits 6s so it's readable
+      but doesn't linger.
+    -->
+    <div class="queen-toast archive-toast" role="status" aria-live="polite">
+      Match archive failed — score visible on this device only
     </div>
   {/if}
 
@@ -1396,6 +1577,11 @@
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
     animation: queenToastIn 0.2s ease-out;
   }
+  .queen-toast.archive-toast {
+    background: linear-gradient(135deg, #3a1010, #2a0a0a);
+    border-color: rgba(239, 83, 80, 0.6);
+    color: #ef8985;
+  }
   @keyframes queenToastIn {
     from { opacity: 0; transform: translate(-50%, -0.4rem); }
     to   { opacity: 1; transform: translate(-50%, 0); }
@@ -1432,9 +1618,13 @@
   }
   .head-name {
     display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-    font-size: clamp(0.9rem, 2.2vw, 1.15rem);
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.15rem;
+    /* Larger pill so player names read from across the room —
+       tested at Prem-vs-Yash match 2026-08-08, phones sitting on the
+       carrom rail. Was clamp(0.9,2.2vw,1.15rem). */
+    font-size: clamp(1.15rem, 3.4vw, 1.7rem);
     font-weight: 800;
     letter-spacing: 0.06em;
     text-transform: uppercase;
@@ -1443,29 +1633,47 @@
        the pill (not the chips) gives up space first. */
     flex: 1 1 auto;
     min-width: 0;
-    padding: 0.3rem 0.75rem;
-    border-radius: 0.5rem;
+    padding: 0.35rem 0.85rem 0.4rem;
+    border-radius: 0.6rem;
     color: #0b0b0b;
     box-shadow: 0 2px 8px rgba(0,0,0,0.35);
   }
+  /* Top row of the pill: [medal?] [name]  (side A) or [name] [medal?]
+     (side B). Keeps medal inline with the name; note stacks below. */
+  .head-name .hn-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    min-width: 0;
+    max-width: 100%;
+  }
+  .head-b.head-name .hn-row { justify-content: flex-end; }
   .head-name .hn-name {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     min-width: 0;
+    line-height: 1.05;
   }
+  /* Country / region / club chip. Sits below the player name so the
+     name has the full width to itself and won't be squeezed by the
+     tag. Testers on 2026-08-09 said the inline layout hid short
+     names on narrow phones. */
   .head-name .hn-note {
-    font-size: 0.7em;
+    font-size: 0.62em;
     font-weight: 700;
     letter-spacing: 0.06em;
     opacity: 0.75;
-    padding: 0.05rem 0.4rem;
-    border-radius: 0.35rem;
+    padding: 0.02rem 0.35rem;
+    border-radius: 0.3rem;
     background: rgba(0,0,0,0.18);
     flex-shrink: 0;
+    line-height: 1.15;
   }
   .head-a { text-align: left;  justify-self: start; }
   .head-b { text-align: right; justify-self: end; }
+  /* Right-side pill mirrors: name + note stack right-aligned. */
+  .head-b.head-name { align-items: flex-end; }
   .head-name.tone-a { background: var(--side-a); }
   .head-name.tone-b { background: var(--side-b); }
 
@@ -1864,21 +2072,22 @@
     font-family: 'DSEG7 Classic', 'Courier New', ui-monospace, monospace;
     font-weight: 700;
     line-height: 1;
-    /* Scale to whichever is smaller: 16vh (short windows) or
-       ~55% of the column width (narrow columns). Prevents single-
-       digit values (SET / BOARD) from overflowing when the parent
-       column becomes very narrow, and stays vh-driven on typical
-       phone-in-portrait windows. */
-    font-size: min(clamp(2.5rem, 16vh, 6rem), 55cqi);
+    /* Scale to whichever is smaller: viewport-height or ~70% of the
+       column width (narrow columns). Prevents single-digit values
+       (SET / BOARD) from overflowing when the parent column becomes
+       very narrow, and stays vh-driven on typical phone-in-portrait
+       windows. */
+    font-size: min(clamp(2.8rem, 20vh, 7rem), 70cqi);
     font-variant-numeric: tabular-nums;
     letter-spacing: 0.03em;
   }
   /* POINTS is the audience's focal point — make it dominate the
-     panel. Cap by container width via 45cqi (a 2-glyph "00" needs
+     panel. Cap by container width via 55cqi (a 2-glyph "00" needs
      about 2× glyph-width plus gap, and DSEG7 glyphs are ~50% of
      their em box). This is what prevents the digit spilling past
-     the coloured pill on wide-short windows. */
-  .digit.big { font-size: min(clamp(4rem, 32vh, 12rem), 45cqi); }
+     the coloured pill on wide-short windows, while still filling
+     the column on typical portrait phone windows. */
+  .digit.big { font-size: min(clamp(4.5rem, 38vh, 14rem), 55cqi); }
   .col.tone-a .digit { color: var(--side-a); text-shadow: 0 0 12px rgba(79,195,247,0.35); }
   .col.tone-b .digit { color: var(--side-b); text-shadow: 0 0 12px rgba(255,138,101,0.35); }
   .mid .digit { color: var(--accent); text-shadow: 0 0 12px rgba(255,213,74,0.35); }
@@ -2004,8 +2213,49 @@
     max-width: 22rem;
     width: 100%;
     text-align: center;
+    position: relative;
   }
   .dialog-card.exit { border-color: var(--danger); }
+
+  /* Top-right close for dialogs that need it (winner popup +
+     scorecard recap). Matches the /live/ lobby's popup close. */
+  .dialog-close {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    z-index: 2;
+    width: 2rem;
+    height: 2rem;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.12);
+    color: var(--fg);
+    border-radius: 999px;
+    font-size: 0.95rem;
+    line-height: 1;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background 0.12s, border-color 0.12s;
+  }
+  .dialog-close:hover {
+    background: rgba(255,255,255,0.12);
+    border-color: rgba(255,255,255,0.24);
+  }
+
+  /* Scorecard modal — wider than the confirmation dialogs so the
+     recap table has room to breathe. Vertical scroll on tall
+     content (multi-set matches). */
+  .scorecard-dialog { padding: 0.75rem; }
+  .scorecard-card {
+    max-width: 42rem;
+    width: 100%;
+    max-height: 90dvh;
+    overflow-y: auto;
+    padding: 0.9rem 0.9rem 1rem;
+    text-align: left;
+  }
   .dialog-card h2 {
     margin: 0 0 0.5rem;
     font-size: 1.2rem;

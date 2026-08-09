@@ -62,7 +62,22 @@
     winner: 'a' | 'b' | 'tie' | null;
   };
   const setGroups = $derived<SetGroup[]>(() => {
-    const log = state.boardLog ?? [];
+    const rawLog = state.boardLog ?? [];
+    // Trim overshoot: a very small number of legacy records
+    // (pre-2026-08-09 fix) captured a phantom last board when the
+    // umpire tapped BOARD+1 after a set was already decided. The
+    // finished-match record's `boardCount` is authoritative; if the
+    // stored boardLog exceeds it, drop the tail so the recap reads
+    // the same number as the match's board counter. Live records
+    // (still-in-flight) have no matchResult so we leave those
+    // untrimmed — the boardLog is the source of truth in flight.
+    const capped =
+      state.matchResult !== null &&
+      typeof state.board === 'number' &&
+      rawLog.length > state.board
+        ? rawLog.slice(0, state.board)
+        : rawLog;
+    const log = capped;
     if (log.length === 0) return [];
     const bySet = new Map<number, BoardEntry[]>();
     for (const entry of log) {
