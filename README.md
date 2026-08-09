@@ -17,11 +17,12 @@
 </p>
 
 **A free live scoreboard for carrom matches** — for players at the
-board, for organisers running club nights, and for anyone streaming a
-tournament to YouTube or Facebook.
+board, for organisers running club nights and tournaments, and for
+anyone streaming to YouTube or Facebook.
 
-Runs on your phone, tablet, laptop, or projector. No accounts, no ads,
-no cloud, no subscription. Same code on every device.
+Runs on your phone, tablet, laptop, or projector. Casual scoring stays
+anonymous — no accounts required. Sign in only if you want to run a
+tournament as an organiser. Same code on every device.
 
 <p align="center">
   <img src="docs/screenshots/04-score-midset.png" alt="Carromscore mid-match: cyan and coral player pills, big 7-segment digits, gold BREAK chip" width="800" />
@@ -41,18 +42,35 @@ That's it. No account. No download from an app store.
 
 - 🎯 **[Keeping the score](./docs/features/keeping-the-score.md)** —
   tap a digit to add a point, swipe to fix a mistake. Big high-contrast
-  numbers for camera legibility.
+  numbers for camera legibility. BOARD starts at 0 and advances only
+  when you tap; queen marker guards BOARD +1 so no board goes past
+  half-scored.
 - 🎱 **[Break and queen indicators](./docs/features/break-and-queen.md)** —
-  a small chip shows who's breaking and a red carrom coin shows who
-  has the queen. Never lose track mid-match.
+  a small chip shows who's breaking; a coloured queen coin shows who
+  pocketed it. Never lose track mid-match.
 - 🏓 **[Practice mode](./docs/features/practice-mode.md)** — solo drill
   format. Track missed shots per board, get a full recap at the end.
-  Lower total = better session.
+  Lower total = better session. Broadcasts to Live like versus matches.
+- 🏷️ **Tournament tag** — tag a match with an event name and every
+  match sharing that tag groups together in the lobby. Auto-suggests
+  from your prior tags. Tagged versus matches keep for a year;
+  untagged matches and practice runs keep for 3 months.
+- 📡 **Live broadcast + spectator URL** — toggle "Live" on setup and
+  every state change publishes to a shareable URL. Friends and family
+  open the URL on any phone; the score updates within a second of
+  every tap.
 - 📺 **[Broadcast overlay](./docs/features/broadcast-overlay.md)** —
   point OBS or Prism at a URL and get a transparent scoreboard strip
   live-composited over your camera feed.
+- 📜 **Now Playing + History lobby** — one place to browse ongoing
+  broadcasts and every match you've ever finished. Grouped by
+  tournament tag, collapsible, searchable.
+- 🛠️ **Admin panel for organisers** — signed-in super-admins get a
+  full `/admin/` surface (Players, Tournaments, Live cleanup, History
+  cleanup, Audit log). Tournament organisers get inline ✎ edit
+  affordances on their event's matches.
 - 🔗 **[Share URL](./docs/features/share-url.md)** — one-tap copy of
-  the overlay URL for streaming, popup with instructions.
+  spectator + OBS overlay URLs from the score screen.
 
 Everything else — landscape lock, wake lock, offline play, mid-match
 refresh restoration — just works.
@@ -60,7 +78,8 @@ refresh restoration — just works.
 ## How to use it
 
 **Set up the match.** Pick Singles, Doubles, or Practice. Enter
-players and where they represent. Tap Start match.
+players and where they represent. Optionally tag the match with a
+tournament name. Tap Start match.
 
 <p align="center">
   <img src="docs/screenshots/01-setup-blank.png" alt="Blank setup screen" width="320" />
@@ -69,34 +88,56 @@ players and where they represent. Tap Start match.
 </p>
 
 **Score the match.** Tap a digit for +1. Swipe left for +1, swipe
-right for −1. That's the whole gesture set. Nothing auto-completes —
-you decide when a set is over, when a board is over, when the match
-is over.
+right for −1. That's the whole gesture set. Mark the queen holder by
+tapping the coin above their pill — BOARD +1 requires the queen to
+be marked (or "no queen" confirmed) before it'll advance.
 
 <p align="center">
-  <img src="docs/screenshots/03-score-fresh.png" alt="Fresh score screen, ready to play" width="800" />
+  <img src="docs/screenshots/03-score-fresh.png" alt="Fresh score screen at 0-0-0" width="800" />
 </p>
 
-**End the match.** Tap the 🏁 End button. Fireworks popup, then the
-winner's pill turns gold and the loser's turns silver.
+**End the match.** Tap the 🏁 End button. Recap dialog shows the
+paper-scorecard matrix with per-board queen decoration. Winner medals
+lock onto the pills. Scoring inputs freeze — a toast reminds you to
+use Reset if you actually want to start over.
 
 <p align="center">
-  <img src="docs/screenshots/06-end-match-popup.png" alt="Fireworks popup: CHAMPION" width="800" />
+  <img src="docs/screenshots/06-end-match-popup.png" alt="End-match recap: paper-scorecard matrix" width="800" />
 </p>
 
-For the full walkthrough, see
+For the full walkthrough, open the in-app **How to use** page (footer
+link on the home screen) or read
 [Keeping the score](./docs/features/keeping-the-score.md).
 
 ## Streaming a match
 
-Point OBS or Prism at the overlay URL for a live transparent scoreboard
-composited over your camera feed:
+Toggle "Live" on setup, then paste the overlay URL from the score
+screen's Share popup into OBS or Prism as a Browser Source. Both
+URLs — spectator (full read-only scoreboard) and OBS (transparent
+strip) — update within ~1 s of every tap on the umpire's device.
 
 <p align="center">
   <img src="docs/screenshots/13-overlay-bare.png" alt="Broadcast overlay strip" width="900" />
 </p>
 
 Full guide: [Broadcast overlay](./docs/features/broadcast-overlay.md).
+
+## Running a tournament
+
+Sign in with Google via the **Admin** link in the home footer. If
+you're already an authorised organiser, matches tagged to your
+tournament(s) show a ✎ pencil in the lobby History tab — tap to fix
+scores, correct board-log entries, or delete a bad match. To become
+an organiser, share your Firebase UID with a super-admin (visible in
+the "not authorised" dialog on first sign-in) and they'll assign you
+to your tournament.
+
+The super-admin (Carromscore's maintainer) has a full `/admin/`
+surface with Roles, Players, Tournaments, Live cleanup, History
+cleanup, and an audit log covering every administrative write. See
+[docs/admin.md](./docs/admin.md) for the maintainer guide and
+[docs/admin-verification.md](./docs/admin-verification.md) for the
+E2E verification checklist.
 
 ## Credits
 
@@ -109,10 +150,11 @@ Each entry links to its Wikipedia source — see
   — content licensed CC-BY-SA. Only player names and article URLs are
   used.
 
-Beyond the seed, every name you type at match setup is remembered on
-your own device (in the browser's local storage) so the picker
-autocompletes your regular playing partners next time. Those names
-never leave your device.
+Beyond the seed, every name you type at match setup is written to a
+shared Firebase-backed player roster so a second match with the same
+person picks the right identity. The typed name creates a Player
+record on match end (never on typing, so setup-time typos don't
+pollute the roster).
 
 ## Developing Carromscore
 
@@ -132,13 +174,12 @@ welcome.
 - 💬 [Start a GitHub Discussion](https://github.com/swapnild2111/carromscore/discussions/new?category=general)
 - 🐞 GitHub Issues: <https://github.com/swapnild2111/carromscore/issues>
 
-Inside the app, the setup screen has a **Feedback ⇗** link next to
-the version pill. It opens a popup with Copy / Open in Gmail / Use my
-mail app / Start a GitHub Discussion — see
-[Contact](./docs/contact.md) for details.
+Inside the app, the home screen footer has a **Feedback ⇗** link. It
+opens a popup with Copy / Open in Gmail / Use my mail app / Start a
+GitHub Discussion — see [Contact](./docs/contact.md) for details.
 
 <p align="center">
-  <img src="docs/screenshots/16-feedback-popup.png" alt="Send feedback popup on the setup screen" width="360" />
+  <img src="docs/screenshots/16-feedback-popup.png" alt="Send feedback popup on the home screen" width="360" />
 </p>
 
 ## License

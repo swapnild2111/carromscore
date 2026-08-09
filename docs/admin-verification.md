@@ -33,6 +33,8 @@ roles, or admin helpers. Applies to `/carromscore/beta/`.
 - [ ] Dropdown shows SUPER badge next to your name.
 - [ ] Dropdown includes "Open admin panel ⇗" link (super only) and
   "Sign out".
+- [ ] `/users/{yourUid}` in RTDB has `email` + `displayName` fields
+  (written on every sign-in by `upsertOwnUserMirror`).
 - [ ] Sign out returns the pill to "Admin" state.
 
 ## Lobby (signed in as super)
@@ -51,31 +53,60 @@ roles, or admin helpers. Applies to `/carromscore/beta/`.
   now match the edit.
 - [ ] Delete → type-DELETE confirm → row removed from list.
 
+## /admin/ Roles
+
+- [ ] Roles tab is the first tab.
+- [ ] Type an email that hasn't signed in → "No user with that
+  email — ask them to sign in once, then try again."
+- [ ] Type an email that has signed in + pick a tournament chip →
+  Add → organiser row appears with display name + email + tournament
+  chip.
+- [ ] Add super role via email → super row appears in the Supers
+  list with display name + email.
+- [ ] Remove buttons work; audit log records both actions.
+
 ## /admin/ Players
 
 - [ ] Search filters the list.
+- [ ] Add player → new row appears at the top.
 - [ ] Rename → new name persists, playerId stays the same.
 - [ ] Merge → picks a duplicate, requires type-MERGE confirm, then
   every match that referenced the duplicate now shows the canonical
   player in the History tab.
+- [ ] Multi-select 3 rows → **Delete selected** → type-DELETE
+  confirm → all three rows gone.
 
 ## /admin/ Tournaments
 
+- [ ] Add tournament → new row appears; picker in setup screen
+  offers it as an autocomplete option.
 - [ ] Rename in-place (case-only change) → history cards reflect
   the new casing.
 - [ ] Rename with a different key → children move to the new key,
   old key gone from the list.
-- [ ] Manage organisers → add a UID from another Google account →
-  from that other account, that account can now edit matches
-  tagged to this tournament.
 - [ ] Delete → type-DELETE confirm → tournament gone. Child
   matches show under "Default" bucket in the lobby, still visible.
+- [ ] Multi-select 2 rows → **Delete selected** → both gone.
 
 ## /admin/ Live cleanup
 
 - [ ] Only shows records with no updates in 4+h, or no
   matchResult for 2+h.
 - [ ] Delete → record disappears; History unaffected.
+- [ ] Multi-select → **Delete selected** → all removed atomically.
+- [ ] Passive auto-sweep: any signed-in super's `/admin/` visit
+  triggers `sweepStaleLive` which batch-deletes up to 50 stuck
+  records >4h old. Verify by seeding a stale record with
+  `updatedAt = now-5h`, opening `/admin/`, and confirming it's
+  gone from `/live/`. Audit log has a `live.sweep` entry.
+
+## /admin/ History cleanup
+
+- [ ] Flat list of every archived match; search by player /
+  tournament / mid works.
+- [ ] Delete a single match → row gone; audit-logged.
+- [ ] Multi-select 5 rows → **Delete selected** → type-DELETE
+  confirm → all 5 gone; audit log has 5 `match.delete` entries.
 
 ## /admin/ Audit log
 

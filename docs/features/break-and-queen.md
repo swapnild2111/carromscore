@@ -1,9 +1,9 @@
 # Break and queen indicators
 
 Two small chips next to each player's pill on the score screen tell you
-who's breaking and who has the queen. Both were added in v1.8.0 based on
-feedback that "I forget who's breaking mid-match" and "did I remember to
-credit the queen to whoever pocketed it?"
+who's breaking and who has the queen. Both exist to answer "I forget
+who's breaking mid-match" and "did I remember to credit the queen to
+whoever pocketed it?"
 
 <p align="center">
   <img src="../screenshots/04-score-midset.png" alt="Break chip next to Swapnil, grey coins on both sides" width="720" />
@@ -49,6 +49,24 @@ tap the red coin.
 
 Real carrom always has *one* queen. That's why only one coin is ever red
 at a time; the other side's coin stays grey.
+
+## The queen guard on BOARD +1
+
+To prevent a common umpire mistake — advancing the board while forgetting
+to credit the queen — **BOARD +1 is blocked until the queen state is
+resolved for the current board**. Two ways to resolve it:
+
+1. **Tap a coin** to mark whichever player pocketed the queen (red), or
+2. **Confirm "no queen this board"** via the small dialog that appears
+   when you tap BOARD +1 with both coins grey.
+
+Once the umpire commits to one of those, BOARD +1 goes through. In the
+end-of-match recap, whichever side pocketed the queen picks up a small
+**+Q** suffix next to their Coins column for that board — so a board
+where side A scored 4 coins plus the queen reads as `4 +Q` (Score = 7).
+
+Boards without a queen simply have no +Q in the recap. The information
+is captured but never inferred.
 
 ## When the queen resets
 
