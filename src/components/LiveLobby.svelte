@@ -115,7 +115,14 @@
   // Popup can render either a LobbyEntry (live tab) or a MatchRecord
   // (history tab). We normalise both into a LiveRecord-shaped object
   // for LiveScoreboardView to consume.
-  type PopupKind = { source: 'live'; entry: LobbyEntry } | { source: 'match'; match: MatchRecord };
+  //
+  // Historically the History-tab variant captured the MatchRecord
+  // object directly. That broke after admin edits — an edit reloads
+  // `matches` from Firebase, but the captured object still pointed
+  // at the stale array entry, so the popup showed pre-edit data
+  // while the card showed post-edit. Now we hold only the id and
+  // resolve against the current `matches` array at render time.
+  type PopupKind = { source: 'live'; entry: LobbyEntry } | { source: 'match'; matchId: string };
   let openPopup = $state<PopupKind | null>(null);
   let dialog: HTMLDialogElement | null = $state(null);
   // Deep-link support: /live/?mid=xxx auto-opens the popup for that
@@ -300,7 +307,7 @@
     copiedKind = null;
   }
   function openMatch(match: MatchRecord) {
-    openPopup = { source: 'match', match };
+    openPopup = { source: 'match', matchId: match.id };
   }
   function closePopup() {
     openPopup = null;
@@ -435,12 +442,28 @@
     };
   }
 
+  /**
+   * Resolve the MatchRecord for the currently-open History-tab
+   * popup, or null if none / not History. Re-derives whenever the
+   * `matches` array is replaced (e.g. after an admin edit reload),
+   * so the popup stays in sync with the underlying data. If the
+   * matching record has since been deleted from Firebase, returns
+   * null and the popup effectively empties.
+   */
+  const openMatchRecord = $derived(
+    openPopup?.source === 'match'
+      ? matches.find((m) => m.id === openPopup.matchId) ?? null
+      : null,
+  );
+
   const popupRecord = $derived(
     openPopup === null
       ? null
       : openPopup.source === 'live'
         ? openPopup.entry
-        : matchAsLiveRecord(openPopup.match),
+        : openMatchRecord
+          ? matchAsLiveRecord(openMatchRecord)
+          : null,
   );
   const popupIsEnded = $derived(
     openPopup === null
@@ -453,7 +476,9 @@
       ? ''
       : openPopup.source === 'live'
         ? modeLabelLive(openPopup.entry)
-        : modeLabelMatch(openPopup.match),
+        : openMatchRecord
+          ? modeLabelMatch(openMatchRecord)
+          : '',
   );
   // Tournament tag on the popup header. Empty when the record is
   // untagged (Default bucket) — no point echoing "Default" in the
@@ -463,7 +488,7 @@
       ? ''
       : openPopup.source === 'live'
         ? (openPopup.entry.meta.tournament ?? '').trim()
-        : (openPopup.match.tournament ?? '').trim(),
+        : (openMatchRecord?.tournament ?? '').trim(),
   );
 
   // In overlay mode, find the target entry from the live subscription
@@ -1096,15 +1121,17 @@
   }
   .grid > li { display: flex; }
   /* `.card-li` positions the pencil affordance absolutely against
-     the list item, so it lands in the card's top-right corner
-     regardless of card content height. Only present on cards that
-     render an edit affordance (guarded in the template). */
+     the list item, so it lands in the card's bottom-right corner
+     regardless of card content height. Bottom-right chosen because
+     top-right is already occupied by the relative-time meta pill.
+     Only present on cards that render an edit affordance (guarded
+     in the template). */
   .card-li {
     position: relative;
   }
   .card-edit {
     position: absolute;
-    top: 0.5rem;
+    bottom: 0.5rem;
     right: 0.5rem;
     z-index: 3;
     width: 1.9rem;

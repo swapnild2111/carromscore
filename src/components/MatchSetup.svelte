@@ -107,16 +107,22 @@
   });
 
   // Auth + role state for the footer "Admin" link.
-  // Casual users never see the sign-in chip on this page — only a
-  // low-key text link in the footer. The link's behaviour depends on
-  // auth state:
-  //   signed out  → clicking triggers Google sign-in
-  //   super-admin → clicking navigates to /admin/
-  //   signed in but not admin → shows a "not authorised" dialog with
-  //   a Sign out action, so an accidental sign-in has a graceful exit.
+  //
+  // The link label stays a stable "Admin" regardless of auth state
+  // (no flicker as the auth + role subscriptions rehydrate). Tapping
+  // it does one of two things:
+  //   signed out → open Google sign-in
+  //   signed in  → open an info dialog showing who the user is,
+  //                what their role is, and either (a) a link to the
+  //                admin panel when Phase 4 lands, or (b) a "Coming
+  //                soon" note today. Sign-out lives here too.
+  //
+  // We deliberately DON'T hard-link to `${base}admin/` yet — that
+  // route doesn't exist until Phase 4 ships, and users hitting a 404
+  // is worse than showing a friendly "not built yet" note.
   let authUser = $state<AuthUser | null>(null);
   let role = $state<Role | null>(null);
-  let showNotAuthorisedDialog = $state(false);
+  let showAdminDialog = $state(false);
   $effect(() => {
     const unsubAuth = subscribeAuth((u) => {
       authUser = u;
@@ -136,19 +142,15 @@
       void signIn();
       return;
     }
-    if (role?.isSuper) {
-      window.location.href = `${base}admin/`;
-      return;
-    }
-    // Signed in but no super role → show not-authorised dialog so
-    // the user knows what happened and can sign out.
-    showNotAuthorisedDialog = true;
+    // Signed in — open the info dialog. It handles super, organiser,
+    // and no-role cases with the same shell.
+    showAdminDialog = true;
   }
-  function closeNotAuthorised() {
-    showNotAuthorisedDialog = false;
+  function closeAdminDialog() {
+    showAdminDialog = false;
   }
-  function signOutFromNotAuthorised() {
-    showNotAuthorisedDialog = false;
+  function signOutFromAdminDialog() {
+    showAdminDialog = false;
     void signOut();
   }
 
@@ -710,11 +712,9 @@
         class="foot-link"
         onclick={onAdminLinkClick}
         aria-label={authUser
-          ? role?.isSuper
-            ? 'Open admin panel'
-            : 'Signed in — check admin access'
+          ? 'Show admin details'
           : 'Sign in as admin or tournament organiser'}
-      >{authUser ? (role?.isSuper ? 'Admin ⇗' : 'Signed in') : 'Admin'}</a>
+      >Admin</a>
     </p>
     <p class="foot-meta">
       <span class="foot-ver">v{APP_VERSION}</span>
@@ -724,39 +724,65 @@
   </div>
 </form>
 
-{#if showNotAuthorisedDialog}
+{#if showAdminDialog}
   <!--
-    Fires when a signed-in user without super role taps "Signed in"
-    in the footer. Explains the state and gives them a way out
-    (sign out) — otherwise they'd be stuck wondering why they can't
-    reach /admin/.
+    Info dialog opened from the "Admin" footer link when a user is
+    signed in. Shows their auth identity + role, an entry point to
+    the admin panel when it exists, and a sign-out action. Same
+    dialog handles super / organiser / no-role cases so the flow
+    is stable.
   -->
   <div
     class="dialog"
     role="dialog"
     aria-modal="true"
-    aria-labelledby="na-title"
-    onclick={(e) => { if (e.target === e.currentTarget) closeNotAuthorised(); }}
+    aria-labelledby="admin-dialog-title"
+    onclick={(e) => { if (e.target === e.currentTarget) closeAdminDialog(); }}
   >
     <div class="dialog-card fb-card">
-      <h2 id="na-title">Not an admin</h2>
+      <h2 id="admin-dialog-title">
+        Admin
+        {#if role?.isSuper}
+          <span class="admin-role admin-role-super">SUPER</span>
+        {:else if role && role.organiserOf.size > 0}
+          <span class="admin-role admin-role-organiser">ORGANISER · {role.organiserOf.size}</span>
+        {/if}
+      </h2>
       <p class="fb-intro">
-        You're signed in as <strong>{authUser?.email || authUser?.displayName}</strong>,
-        but this account isn't a Carromscore admin.
+        Signed in as <strong>{authUser?.displayName || authUser?.email}</strong>{#if authUser?.email && authUser?.displayName}
+          <br /><span style="color: var(--muted); font-size: 0.85em;">{authUser.email}</span>
+        {/if}
       </p>
-      <p class="fb-intro">
-        Tournament organisers gain edit access to their event's records
-        via the admin. If you should have access, share your UID with
-        the person who granted your role.
-      </p>
-      {#if authUser?.uid}
+      {#if role?.isSuper}
+        <p class="fb-intro">
+          You have full admin access. Match records show a ✎ pencil in
+          the lobby — tap to edit scores, board log, or delete. A
+          dedicated admin page (players, tournaments, live cleanup)
+          is coming soon.
+        </p>
+      {:else if role && role.organiserOf.size > 0}
+        <p class="fb-intro">
+          You can edit match records tagged to your tournament(s).
+          Look for a ✎ pencil on the matching cards in the History
+          tab of the lobby.
+        </p>
+      {:else if role}
+        <p class="fb-intro">
+          You're signed in but no admin role is attached to this
+          account. Share your UID with a super-admin if you need
+          organiser access.
+        </p>
+      {:else}
+        <p class="fb-intro">Loading role…</p>
+      {/if}
+      {#if authUser?.uid && (!role || (!role.isSuper && role.organiserOf.size === 0))}
         <p class="fb-intro" style="user-select: text; -webkit-user-select: text; font-family: monospace; font-size: 0.75rem; background: rgba(255,255,255,0.05); padding: 0.4rem 0.55rem; border-radius: 0.4rem;">
           {authUser.uid}
         </p>
       {/if}
       <div class="dialog-actions">
-        <button class="cancel" onclick={closeNotAuthorised}>Close</button>
-        <button class="signout-btn" onclick={signOutFromNotAuthorised}>Sign out</button>
+        <button class="cancel" onclick={closeAdminDialog}>Close</button>
+        <button class="signout-btn" onclick={signOutFromAdminDialog}>Sign out</button>
       </div>
     </div>
   </div>
@@ -1425,6 +1451,32 @@
   }
   .dialog-actions .signout-btn:hover {
     background: rgba(239, 83, 80, 0.25);
+  }
+
+  /* Role badges inside the admin info dialog header. Mirrors the
+     account-menu treatment in SignInButton so the same visual
+     language stretches across both surfaces. */
+  .admin-role {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.1rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.65rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    font-weight: 800;
+    margin-left: 0.5rem;
+    vertical-align: middle;
+  }
+  .admin-role-super {
+    background: rgba(255, 213, 74, 0.18);
+    color: var(--accent, #ffd54a);
+    border: 1px solid rgba(255, 213, 74, 0.5);
+  }
+  .admin-role-organiser {
+    background: rgba(79, 195, 247, 0.18);
+    color: var(--side-a, #4fc3f7);
+    border: 1px solid rgba(79, 195, 247, 0.5);
   }
 
   @media (max-width: 520px) {
