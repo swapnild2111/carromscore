@@ -19,6 +19,7 @@
     loadAll,
     subscribeStore,
     subscribeTournaments,
+    createOrTouchTournament,
     renameTournament,
     deleteTournament,
     deleteTournaments,
@@ -42,6 +43,10 @@
   let banner = $state<{ kind: 'ok' | 'err'; message: string } | null>(null);
   /** Selected tournament keys for bulk delete. */
   let selected = $state<Set<string>>(new Set());
+  /** Add-new-tournament dialog state. Kept as a simple string + open
+   *  flag; validation happens on save. */
+  let addingOpen = $state(false);
+  let addingName = $state('');
 
   onMount(() => {
     void subscribeTournaments();
@@ -178,6 +183,32 @@
     const all = list();
     return all.length > 0 && all.every((t) => selected.has(t.key));
   });
+
+  function openAdd() {
+    addingOpen = true;
+    addingName = '';
+  }
+  function closeAdd() {
+    addingOpen = false;
+    addingName = '';
+  }
+  async function saveAdd() {
+    const trimmed = addingName.trim();
+    if (!trimmed) return;
+    saving = true;
+    // createOrTouchTournament returns the record or null (only on
+    // empty / unslug-able names, which we already guarded). It writes
+    // to Firebase fire-and-forget; the /tournaments subscription
+    // will pick up the new record within a tick.
+    const rec = createOrTouchTournament(trimmed);
+    saving = false;
+    if (!rec) {
+      flash('err', 'Name must include at least one letter or digit');
+      return;
+    }
+    flash('ok', `"${rec.name}" added`);
+    closeAdd();
+  }
 </script>
 
 <section class="tourns">
@@ -194,6 +225,15 @@
     onConfirmDelete={performBulkDelete}
     onClearSelection={clearSelection}
   />
+
+  <div class="topbar">
+    <button
+      type="button"
+      class="btn btn-primary"
+      onclick={openAdd}
+      disabled={saving}
+    >+ Add tournament</button>
+  </div>
 
   {#if list().length === 0}
     <p class="empty">No tournaments yet.</p>
@@ -339,6 +379,48 @@
       </div>
     </div>
   {/if}
+
+  {#if addingOpen}
+    <!--
+      Add-tournament dialog. Free-text name (max 60 chars); the
+      tournament's key is derived server-side by normalizeKey().
+      Doesn't require a match to be tagged — an organiser can be
+      pre-assigned to an empty tournament and matches can start
+      flowing in later via the setup screen.
+    -->
+    <div
+      class="dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="add-tourn-title"
+      onclick={(e) => { if (e.target === e.currentTarget) closeAdd(); }}
+    >
+      <div class="dialog-card dialog-card-wide">
+        <h3 id="add-tourn-title">Add tournament</h3>
+        <p>
+          Tournaments are the top-level bucket for grouping matches.
+          After saving, organisers can be assigned via the Organisers
+          button on the row.
+        </p>
+        <input
+          type="text"
+          bind:value={addingName}
+          placeholder="Tournament name"
+          aria-label="Tournament name"
+          maxlength="60"
+        />
+        <div class="dialog-actions">
+          <button type="button" class="btn" onclick={closeAdd} disabled={saving}>Cancel</button>
+          <button
+            type="button"
+            class="btn btn-primary"
+            onclick={saveAdd}
+            disabled={saving || !addingName.trim()}
+          >{saving ? 'Adding…' : 'Add'}</button>
+        </div>
+      </div>
+    </div>
+  {/if}
 </section>
 
 <style>
@@ -359,6 +441,14 @@
   }
 
   .empty { color: var(--muted); text-align: center; padding: 1.5rem; }
+
+  /* Create-record button lives up top so it stays visible when the
+     list is long and the bulk-action bar is sticky above. */
+  .topbar {
+    display: flex;
+    justify-content: flex-end;
+    padding: 0 0.25rem;
+  }
 
   /* Bulk-select header + row checkbox, matching AdminLiveCleanup. */
   .select-hdr {

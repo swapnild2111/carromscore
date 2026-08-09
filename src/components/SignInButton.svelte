@@ -376,6 +376,9 @@
     border-radius: 0.4rem;
     cursor: pointer;
     transition: background 0.1s;
+    /* Strip the default anchor underline for the "Open admin panel"
+       link. Menu items are styled as pills, not typographic links. */
+    text-decoration: none;
   }
   .dropdown-item:hover {
     background: rgba(255, 255, 255, 0.06);

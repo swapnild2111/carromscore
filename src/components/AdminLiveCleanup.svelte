@@ -20,6 +20,7 @@
     subscribeAllLive,
     deleteLive,
     deleteLiveMany,
+    sweepStaleLive,
     type LobbyEntry,
   } from '../lib/live-sync';
   import AdminBulkBar from './AdminBulkBar.svelte';
@@ -41,6 +42,10 @@
   let selected = $state<Set<string>>(new Set());
 
   onMount(() => {
+    // Best-effort passive sweep of stuck /live/{mid} records
+    // (updatedAt older than 4h). Fires once on mount, silent-on-
+    // failure. The subscription below will then re-fetch cleanly.
+    void sweepStaleLive();
     let unsub: (() => void) | null = null;
     void subscribeAllLive((e) => (entries = e)).then((fn) => {
       unsub = fn;

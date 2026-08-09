@@ -19,7 +19,7 @@
    *   RTDB caches locally.
    */
   import { onMount } from 'svelte';
-  import { subscribeAllLive, type LobbyEntry } from '../lib/live-sync';
+  import { subscribeAllLive, sweepStaleLive, type LobbyEntry } from '../lib/live-sync';
   import {
     loadHistory,
     playerName,
@@ -166,6 +166,10 @@
     // — no UI, no blocking on failure. Piggybacks on lobby loads so
     // we don't need scheduled infra.
     void sweepOldMatches();
+    // Same idea for stuck /live/{mid} records (updatedAt older than
+    // 4h). Killing zombie live records here keeps the Now Playing
+    // list honest for casual viewers who never visit /admin/.
+    void sweepStaleLive();
     const unsubStore = subscribeStore(() => (identityTick += 1));
 
     const nowTick = window.setInterval(() => (now = Date.now()), 30_000);

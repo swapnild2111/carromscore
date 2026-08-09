@@ -15,6 +15,8 @@
     loadAll,
     subscribePlayers,
     subscribeStore,
+    createPlayer,
+    isPlausibleName,
     updatePlayerName,
     deletePlayer,
     deletePlayers,
@@ -36,6 +38,9 @@
   let banner = $state<{ kind: 'ok' | 'err'; message: string } | null>(null);
   /** Selected player IDs for bulk delete. Merge is one-at-a-time. */
   let selected = $state<Set<string>>(new Set());
+  /** Add-new-player dialog state. */
+  let addingOpen = $state(false);
+  let addingName = $state('');
 
   onMount(() => {
     void subscribePlayers();
@@ -176,6 +181,37 @@
     const rows = filtered();
     return rows.length > 0 && rows.every((p) => selected.has(p.id));
   });
+
+  function openAdd() {
+    addingOpen = true;
+    addingName = '';
+  }
+  function closeAdd() {
+    addingOpen = false;
+    addingName = '';
+  }
+  function saveAdd() {
+    const trimmed = addingName.trim();
+    if (!trimmed) return;
+    if (!isPlausibleName(trimmed)) {
+      flash('err', 'Name is too short or not plausible');
+      return;
+    }
+    saving = true;
+    try {
+      // createPlayer is synchronous locally + fires the Firebase
+      // write in the background. Idempotent — if a normalised
+      // duplicate already exists we get that one back.
+      const p = createPlayer(trimmed);
+      saving = false;
+      flash('ok', `"${p.canonicalName}" added`);
+      closeAdd();
+    } catch (err) {
+      saving = false;
+      const msg = err instanceof Error ? err.message : String(err);
+      flash('err', msg || 'Add failed');
+    }
+  }
 </script>
 
 <section class="players">
@@ -192,6 +228,15 @@
     onConfirmDelete={performBulkDelete}
     onClearSelection={clearSelection}
   />
+
+  <div class="topbar">
+    <button
+      type="button"
+      class="btn btn-primary"
+      onclick={openAdd}
+      disabled={saving}
+    >+ Add player</button>
+  </div>
 
   <div class="controls">
     <input
@@ -336,6 +381,49 @@
       </div>
     </div>
   {/if}
+
+  {#if addingOpen}
+    <!--
+      Add-player dialog. Free-text name; createPlayer's
+      isPlausibleName guard rejects single-char / clearly-garbage
+      inputs (2-char minimum with at least one letter). Duplicate-
+      by-normalized-name lookups are handled inside createPlayer so
+      the returned record may be pre-existing (fine — the "Added"
+      banner is honest either way; the roster stays deduplicated).
+    -->
+    <div
+      class="dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="add-player-title"
+      onclick={(e) => { if (e.target === e.currentTarget) closeAdd(); }}
+    >
+      <div class="dialog-card dialog-card-wide">
+        <h3 id="add-player-title">Add player</h3>
+        <p>
+          Adds a player to the shared roster. Names are typically
+          created automatically when a match ends; use this only if
+          you need to pre-seed a player before their first game.
+        </p>
+        <input
+          type="text"
+          bind:value={addingName}
+          placeholder="Full name"
+          aria-label="Player name"
+          maxlength="60"
+        />
+        <div class="dialog-actions">
+          <button type="button" class="btn" onclick={closeAdd} disabled={saving}>Cancel</button>
+          <button
+            type="button"
+            class="btn btn-primary"
+            onclick={saveAdd}
+            disabled={saving || !addingName.trim()}
+          >{saving ? 'Adding…' : 'Add'}</button>
+        </div>
+      </div>
+    </div>
+  {/if}
 </section>
 
 <style>
@@ -383,6 +471,15 @@
   }
 
   .empty { color: var(--muted); text-align: center; padding: 1.5rem; }
+
+  /* Create-record button lives up top so it stays visible even
+     when the list is scrolled and the sticky bulk-bar covers the
+     upper edge. Right-aligned for parity with AdminTournaments. */
+  .topbar {
+    display: flex;
+    justify-content: flex-end;
+    padding: 0 0.25rem;
+  }
 
   /* Bulk-select header + row checkbox, matching AdminLiveCleanup /
      AdminTournaments so the three admin lists behave identically. */

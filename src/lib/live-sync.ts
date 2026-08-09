@@ -372,3 +372,58 @@ export async function deleteLiveMany(mids: string[]): Promise<LiveBulkOutcome> {
     ...(firstError ? { error: firstError } : {}),
   };
 }
+
+/**
+ * Best-effort sweep of stuck `/live/{mid}` records. Any record that
+ * hasn't been updated in `maxAgeMs` (default 4h) is removed. Same
+ * shape as sweepOldMatches on /matches — no scheduled infra, no
+ * Blaze tier; the sweep piggybacks on the admin panel load.
+ *
+ * A record with matchResult === null but a recent updatedAt is
+ * NOT swept: the umpire is still broadcasting, the browser just
+ * hasn't paused for 4h. The 4h window is intentionally generous —
+ * a real long-format tournament match can take that long, and we'd
+ * rather leak a stuck record than kill a legit broadcast.
+ *
+ * Anonymous delete is permitted by the rule (`/live/{mid}/.write`
+ * is public — kept that way so armLiveCleanup's onDisconnect can
+ * fire without auth). Silent-on-failure; a failed sweep just
+ * leaves the records for the next opportunity.
+ */
+const LIVE_STALE_WINDOW_MS = 4 * 60 * 60 * 1000;
+let liveSweepInFlight = false;
+
+export async function sweepStaleLive(
+  maxAgeMs = LIVE_STALE_WINDOW_MS,
+): Promise<number> {
+  if (liveSweepInFlight) return 0;
+  liveSweepInFlight = true;
+  try {
+    const [{ firebaseApp }, { getDatabase, ref, get, remove }] = await Promise.all([
+      import('./firebase'),
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    const snap = await get(ref(db, 'live'));
+    const val = snap.val() as Record<string, { updatedAt?: number }> | null;
+    if (!val) return 0;
+    const cutoff = Date.now() - maxAgeMs;
+    const stale: string[] = [];
+    for (const [mid, r] of Object.entries(val)) {
+      if (!r || typeof r !== 'object') continue;
+      const upd = typeof r.updatedAt === 'number' ? r.updatedAt : 0;
+      if (upd > 0 && upd < cutoff) stale.push(mid);
+    }
+    // Cap the batch so a huge backlog on first-ever sweep doesn't
+    // stall the caller — the next admin load will finish the rest.
+    const batch = stale.slice(0, 50);
+    await Promise.all(
+      batch.map((mid) => remove(ref(db, `live/${mid}`)).catch(() => {})),
+    );
+    return batch.length;
+  } catch {
+    return 0;
+  } finally {
+    liveSweepInFlight = false;
+  }
+}
