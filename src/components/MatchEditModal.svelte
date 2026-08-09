@@ -45,12 +45,24 @@
 
   // Local edit state, seeded from the incoming record. All fields
   // clamp on input; validation happens on Save.
+  //
+  // The scoring model has two layers:
+  //   - `rows` (boardLog): per-board coin deltas + queen + break
+  //   - `finalPointsA/B`, `boardCount`: top-level summary
+  //
+  // These MUST stay consistent — the recap table sums boardLog to
+  // show per-board totals, while the header DSEG7 shows finalPoints.
+  // Historically both were editable independently and admins could
+  // (accidentally) create a mismatch: edit the header but leave the
+  // rows, and the popup would show 16 up top and 7 in the table.
+  //
+  // Now the source of truth is `rows`. `finalPointsA/B` and
+  // `boardCount` are DERIVED from row sums and shown read-only, so
+  // admins have exactly one place to fix a score. `setsA/B` and
+  // `winner` stay editable — those aren't summable from boardLog.
   const initial = record.result ?? {};
   let setsA = $state<number>(Number(initial.setsA ?? 0));
   let setsB = $state<number>(Number(initial.setsB ?? 0));
-  let finalPointsA = $state<number>(Number(initial.finalPointsA ?? 0));
-  let finalPointsB = $state<number>(Number(initial.finalPointsB ?? 0));
-  let boardCount = $state<number>(Number(initial.boardCount ?? 0));
   let winner = $state<'a' | 'b' | ''>(
     initial.winner === 'a' || initial.winner === 'b' ? initial.winner : '',
   );
@@ -68,6 +80,22 @@
       endedAt: e.endedAt,
     })),
   );
+
+  /**
+   * Derived per-side coin totals. `pointsA/B` in a boardLog row is
+   * the coins pocketed that board (excluding the queen bonus — the
+   * queen adds 3 separately). Match scoring counts coins + queen;
+   * to compute displayed "final points", we add 3 per row where
+   * that side holds the queen. Mirrors ScoreBoard's live tally
+   * pattern.
+   */
+  const finalPointsA = $derived(
+    rows.reduce((sum, r) => sum + r.pointsA + (r.queen === 'a' ? 3 : 0), 0),
+  );
+  const finalPointsB = $derived(
+    rows.reduce((sum, r) => sum + r.pointsB + (r.queen === 'b' ? 3 : 0), 0),
+  );
+  const boardCount = $derived(rows.length);
 
   let saving = $state(false);
   let deletingConfirm = $state(false);
@@ -112,9 +140,13 @@
       result: {
         setsA: Math.max(0, Math.floor(setsA)),
         setsB: Math.max(0, Math.floor(setsB)),
-        finalPointsA: Math.max(0, Math.floor(finalPointsA)),
-        finalPointsB: Math.max(0, Math.floor(finalPointsB)),
-        boardCount: Math.max(0, Math.floor(boardCount)),
+        // finalPointsA/B and boardCount are derived from `rows`, so
+        // they're always in sync with the boardLog we're about to
+        // write. Clamps aren't needed — the derivation itself
+        // guarantees non-negative integers.
+        finalPointsA,
+        finalPointsB,
+        boardCount,
         winner: winner === '' ? null : winner,
       },
       notes: { a: noteA, b: noteB },
@@ -179,16 +211,25 @@
           <input type="number" min="0" max="9" bind:value={setsB} />
         </label>
         <label>
-          <span>Final points A</span>
-          <input type="number" min="0" bind:value={finalPointsA} />
+          <span>
+            Final points A
+            <em class="hint">(computed)</em>
+          </span>
+          <div class="computed-cell">{finalPointsA}</div>
         </label>
         <label>
-          <span>Final points B</span>
-          <input type="number" min="0" bind:value={finalPointsB} />
+          <span>
+            Final points B
+            <em class="hint">(computed)</em>
+          </span>
+          <div class="computed-cell">{finalPointsB}</div>
         </label>
         <label>
-          <span>Board count</span>
-          <input type="number" min="0" bind:value={boardCount} />
+          <span>
+            Board count
+            <em class="hint">(computed)</em>
+          </span>
+          <div class="computed-cell">{boardCount}</div>
         </label>
         <label>
           <span>Winner</span>
@@ -199,6 +240,11 @@
           </select>
         </label>
       </div>
+      <p class="hint-block">
+        Points and board count are computed from the board log below.
+        To change a score, edit the corresponding board's Pts A / Pts B /
+        queen holder — the totals update automatically.
+      </p>
 
       <div class="grid2 grid-notes">
         <label>
@@ -471,6 +517,34 @@
   input:read-only {
     opacity: 0.65;
     cursor: not-allowed;
+  }
+
+  /* Non-editable derived cell — same visual weight as an input so
+     the grid stays aligned, but explicitly styled to look like a
+     value display, not an entry field. Used for finalPoints and
+     boardCount, which are computed from the board log. */
+  .computed-cell {
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--fg, #f5f5f5);
+    border: 1px dashed rgba(255, 213, 74, 0.25);
+    border-radius: 0.45rem;
+    padding: 0.5rem 0.65rem;
+    font: inherit;
+    font-size: 1rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    min-width: 0;
+    font-variant-numeric: tabular-nums;
+  }
+  .hint-block {
+    margin: 0.6rem 0 0;
+    color: var(--muted, #9aa0a6);
+    font-size: 0.78rem;
+    line-height: 1.5;
+    padding: 0.5rem 0.65rem;
+    background: rgba(255, 213, 74, 0.06);
+    border-left: 2px solid rgba(255, 213, 74, 0.4);
+    border-radius: 0 0.3rem 0.3rem 0;
   }
 
   .tourn-input {
