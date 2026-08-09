@@ -82,19 +82,20 @@
   );
 
   /**
-   * Derived per-side coin totals. `pointsA/B` in a boardLog row is
-   * the coins pocketed that board (excluding the queen bonus — the
-   * queen adds 3 separately). Match scoring counts coins + queen;
-   * to compute displayed "final points", we add 3 per row where
-   * that side holds the queen. Mirrors ScoreBoard's live tally
-   * pattern.
+   * Derived per-side final points. In the storage convention (see
+   * ScoreBoard.svelte's snapshot writes), each row's `pointsA/B` is
+   * the per-board delta of the cumulative sideA/B.points as tracked
+   * during play — which ALREADY includes the queen bonus when that
+   * side pocketed the queen. So the running total is simply the
+   * sum of row.pointsA (no `+3` correction; that would double-count).
+   *
+   * The popup recap (LiveScoreboardView) DISPLAYS these differently:
+   * it shows "coins" (= pointsA - 3 when queen === 'a') plus a
+   * separate "+Q" badge. That's presentation, not storage — the
+   * stored number stays the total.
    */
-  const finalPointsA = $derived(
-    rows.reduce((sum, r) => sum + r.pointsA + (r.queen === 'a' ? 3 : 0), 0),
-  );
-  const finalPointsB = $derived(
-    rows.reduce((sum, r) => sum + r.pointsB + (r.queen === 'b' ? 3 : 0), 0),
-  );
+  const finalPointsA = $derived(rows.reduce((sum, r) => sum + r.pointsA, 0));
+  const finalPointsB = $derived(rows.reduce((sum, r) => sum + r.pointsB, 0));
   const boardCount = $derived(rows.length);
 
   let saving = $state(false);
@@ -242,8 +243,11 @@
       </div>
       <p class="hint-block">
         Points and board count are computed from the board log below.
-        To change a score, edit the corresponding board's Pts A / Pts B /
-        queen holder — the totals update automatically.
+        <strong>Pts A / Pts B</strong> is the total that side scored on
+        that board — coins + 3 if they pocketed the queen. So a board
+        where side A got 4 coins and the queen is stored as
+        <strong>Pts A = 7, Queen = A</strong>. Edit the rows and the
+        totals reconcile automatically.
       </p>
 
       <div class="grid2 grid-notes">
