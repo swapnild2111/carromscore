@@ -135,6 +135,13 @@ export async function signIn(): Promise<void> {
     try {
       await signInWithPopup(auth, provider);
     } catch (popupErr: unknown) {
+      // TEMP DIAGNOSTIC (2026-08-09): the beta rollout shows the
+      // popup opening and immediately closing with no user-visible
+      // error. Log the error code so we can see whether this is a
+      // known-fallback case (auth/popup-blocked) or something else
+      // like auth/unauthorized-domain that we should surface. Revert
+      // to silent after root cause is fixed.
+      console.error('[carromscore] signInWithPopup failed:', popupErr);
       // Known error codes that indicate the popup couldn't open —
       // fall back to redirect flow. Everything else (user closed the
       // dialog, network) is a legitimate cancel and we don't retry.
@@ -149,13 +156,13 @@ export async function signIn(): Promise<void> {
       if (shouldFallback) {
         try {
           await signInWithRedirect(auth, provider);
-        } catch {
-          // Redirect failed too — give up silently.
+        } catch (redirectErr) {
+          console.error('[carromscore] signInWithRedirect failed:', redirectErr);
         }
       }
     }
-  } catch {
-    // Bundle failed to load. Silent — sign-in button just does nothing.
+  } catch (loadErr) {
+    console.error('[carromscore] auth bundle failed to load:', loadErr);
   }
 }
 
