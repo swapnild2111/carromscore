@@ -17,14 +17,20 @@
    */
   import { onMount } from 'svelte';
   import { signIn, signOut, subscribeAuth, type AuthUser } from '../lib/auth';
-  import { bootstrapSuperIfNeeded, setCurrentUidForRoles } from '../lib/roles';
+  import {
+    bootstrapSuperIfNeeded,
+    setCurrentUidForRoles,
+    subscribeCurrentUserRole,
+    type Role,
+  } from '../lib/roles';
 
   let user = $state<AuthUser | null>(null);
+  let role = $state<Role | null>(null);
   let menuOpen = $state(false);
   let uidCopied = $state(false);
 
   onMount(() => {
-    const unsub = subscribeAuth((u) => {
+    const unsubAuth = subscribeAuth((u) => {
       user = u;
       setCurrentUidForRoles(u?.uid ?? null);
       // Try the bootstrap door on every sign-in. It's cheap (one RTDB
@@ -32,7 +38,11 @@
       // itself refuses once a super already exists.
       if (u?.uid) void bootstrapSuperIfNeeded(u.uid);
     });
-    return unsub;
+    const unsubRole = subscribeCurrentUserRole((r) => (role = r));
+    return () => {
+      unsubAuth();
+      unsubRole();
+    };
   });
 
   function onSignIn() {
@@ -93,7 +103,13 @@
     <div class="menu-backdrop" onclick={closeMenu} role="presentation">
       <div class="menu" role="menu">
         <div class="menu-hdr">
-          <div class="menu-name">{user.displayName || 'Signed in'}</div>
+          <div class="menu-name">
+            {user.displayName || 'Signed in'}
+            {#if role?.isSuper}<span class="role-badge role-super">SUPER</span>{/if}
+            {#if role && !role.isSuper && role.organiserOf.size > 0}
+              <span class="role-badge role-organiser">ORGANISER · {role.organiserOf.size}</span>
+            {/if}
+          </div>
           {#if user.email}<div class="menu-email">{user.email}</div>{/if}
         </div>
         <button type="button" class="menu-item" onclick={copyUid} role="menuitem">
@@ -224,9 +240,34 @@
     color: var(--fg, #f5f5f5);
     font-weight: 700;
     font-size: 0.9rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+  }
+  /* Role indicator — quick visual proof that /adminRoles read fired.
+     'SUPER' for the maintainer; 'ORGANISER · N' for tournament
+     organisers (N = number of events they organise). Absent for
+     signed-in-but-no-role users. */
+  .role-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.05rem 0.4rem;
+    border-radius: 999px;
+    font-size: 0.65rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    font-weight: 800;
+  }
+  .role-super {
+    background: rgba(255, 213, 74, 0.18);
+    color: var(--accent, #ffd54a);
+    border: 1px solid rgba(255, 213, 74, 0.5);
+  }
+  .role-organiser {
+    background: rgba(79, 195, 247, 0.18);
+    color: var(--side-a, #4fc3f7);
+    border: 1px solid rgba(79, 195, 247, 0.5);
   }
   .menu-email {
     color: var(--muted, #9aa0a6);
