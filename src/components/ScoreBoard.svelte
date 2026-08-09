@@ -124,6 +124,13 @@
    */
   let setDecidedToast = $state(false);
   /**
+   * Fires when a positive-delta scoring input (POINTS+, BOARD+,
+   * SET+, queen tap) is attempted after endMatch has locked the
+   * match. Prevents accidental scoring on a decided record.
+   * Negative deltas remain enabled so real mistakes can be undone.
+   */
+  let matchDecidedToast = $state(false);
+  /**
    * Set to true when finishMatch() failed to reach Firebase (network
    * dead, rules denied). Surfaces as a small non-blocking toast so
    * the umpire knows the archive attempt failed rather than
@@ -466,13 +473,40 @@
     return base;
   });
 
+  /**
+   * True once the match is fully decided — endMatch() has run,
+   * matchResult is set. All positive-delta scoring inputs freeze in
+   * this state to prevent stray taps from adding phantom scoring to
+   * a match that's over. BOARD-1 / SET- / POINTS- (negative deltas)
+   * remain enabled so mistakes can still be undone. See
+   * matchDecidedToast for the user-facing feedback.
+   */
+  function isMatchDecided(): boolean {
+    return matchResult !== null;
+  }
+
   function adjustPoints(side: 'a' | 'b', delta: number) {
     void tryLockLandscape();
+    // Post-endMatch lockout: don't accept positive deltas. Negatives
+    // are still allowed as an undo — an umpire realising a stray tap
+    // after End can back out without a full reset.
+    if (isMatchDecided() && delta > 0) {
+      matchDecidedToast = true;
+      window.setTimeout(() => { matchDecidedToast = false; }, 2500);
+      return;
+    }
     const s = side === 'a' ? sideA : sideB;
     s.points = Math.min(cfg.pointsTarget, Math.max(0, s.points + delta));
   }
   function adjustSets(side: 'a' | 'b', delta: number) {
     void tryLockLandscape();
+    // Post-endMatch lockout on positive deltas. SET-1 still works
+    // as an undo path (mirrors adjustBoard / adjustPoints).
+    if (isMatchDecided() && delta > 0) {
+      matchDecidedToast = true;
+      window.setTimeout(() => { matchDecidedToast = false; }, 2500);
+      return;
+    }
     // Before the SET+ handler could reset points/board/queen for the
     // new set, we need to snapshot the running (in-progress) board so
     // it lands in the boardLog — otherwise the last board of every
@@ -549,6 +583,14 @@
   }
   function adjustBoard(delta: number) {
     void tryLockLandscape();
+    // Post-endMatch lockout on positive deltas. BOARD-1 still works
+    // so an accidental BOARD+1 during a decided match can be popped
+    // (adjustBoard's own delta<0 branch handles the boardLog pop).
+    if (isMatchDecided() && delta > 0) {
+      matchDecidedToast = true;
+      window.setTimeout(() => { matchDecidedToast = false; }, 2500);
+      return;
+    }
     const next = board + delta;
     if (next < 0) return;
     if (next > boardCap()) return;
@@ -652,6 +694,16 @@
    *     ownership (this coin turns red, the other returns to grey).
    */
   function tapCoin(side: SideId) {
+    // Match already decided — freeze queen marking. This prevents a
+    // stray coin tap after End from repainting the recap. The lock
+    // applies to both new-queen assignment and transfer; return-to-
+    // table (untick) is treated the same — after End the record is
+    // canonical and shouldn't shift under an accidental tap.
+    if (isMatchDecided()) {
+      matchDecidedToast = true;
+      window.setTimeout(() => { matchDecidedToast = false; }, 2500);
+      return;
+    }
     if (queenHolder === side) {
       queenHolder = null;
     } else {
@@ -1613,6 +1665,18 @@
     -->
     <div class="queen-toast" role="status" aria-live="polite">
       Set decided — tap SET+1 or End
+    </div>
+  {/if}
+
+  {#if matchDecidedToast}
+    <!--
+      Surfaced when any positive-delta scoring input (POINTS+, BOARD+,
+      SET+, tapCoin) is attempted after endMatch has decided the
+      result. Prevents stray taps from adding phantom scoring after
+      the match is closed. Negative deltas remain enabled as an undo.
+    -->
+    <div class="queen-toast" role="status" aria-live="polite">
+      Match ended — score is locked. Use Reset to start over.
     </div>
   {/if}
 
