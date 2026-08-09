@@ -21,9 +21,10 @@
   import AdminPlayers from './AdminPlayers.svelte';
   import AdminTournaments from './AdminTournaments.svelte';
   import AdminLiveCleanup from './AdminLiveCleanup.svelte';
+  import AdminHistoryCleanup from './AdminHistoryCleanup.svelte';
   import AdminAuditLog from './AdminAuditLog.svelte';
 
-  type Tab = 'players' | 'tournaments' | 'live' | 'audit';
+  type Tab = 'players' | 'tournaments' | 'live' | 'history' | 'audit';
 
   const base: string = import.meta.env.BASE_URL;
   let user = $state<AuthUser | null>(null);
@@ -125,6 +126,14 @@
         type="button"
         role="tab"
         class="tab"
+        class:tab-active={tab === 'history'}
+        aria-selected={tab === 'history'}
+        onclick={() => (tab = 'history')}
+      >History cleanup</button>
+      <button
+        type="button"
+        role="tab"
+        class="tab"
         class:tab-active={tab === 'audit'}
         aria-selected={tab === 'audit'}
         onclick={() => (tab = 'audit')}
@@ -138,6 +147,8 @@
         <AdminTournaments />
       {:else if tab === 'live'}
         <AdminLiveCleanup />
+      {:else if tab === 'history'}
+        <AdminHistoryCleanup />
       {:else if tab === 'audit'}
         <AdminAuditLog />
       {/if}

@@ -401,6 +401,49 @@ export async function deleteTournament(key: string): Promise<TournamentWriteOutc
   }
 }
 
+/** Rolled-up counts for a bulk delete + the first failure message. */
+export type TournamentBulkOutcome = {
+  ok: boolean;
+  deleted: number;
+  failed: number;
+  error?: string;
+};
+
+/**
+ * Admin-only: bulk-delete a set of tournaments. Each removal is
+ * individually audited (see deleteTournament). Child matches keep
+ * their tag string but fall to the "Default" bucket in the lobby
+ * — same semantics as the singular helper, times N.
+ *
+ * Batches through Promise.all in groups of 25 to avoid fanning
+ * out too aggressively against RTDB.
+ */
+export async function deleteTournaments(keys: string[]): Promise<TournamentBulkOutcome> {
+  const clean = keys.filter((k) => typeof k === 'string' && k.length > 0);
+  if (clean.length === 0) return { ok: true, deleted: 0, failed: 0 };
+  const BATCH_SIZE = 25;
+  let deleted = 0;
+  let failed = 0;
+  let firstError: string | undefined;
+  for (let i = 0; i < clean.length; i += BATCH_SIZE) {
+    const slice = clean.slice(i, i + BATCH_SIZE);
+    const results = await Promise.all(slice.map((k) => deleteTournament(k)));
+    for (const r of results) {
+      if (r.ok) deleted += 1;
+      else {
+        failed += 1;
+        if (!firstError) firstError = r.error;
+      }
+    }
+  }
+  return {
+    ok: failed === 0,
+    deleted,
+    failed,
+    ...(firstError ? { error: firstError } : {}),
+  };
+}
+
 /**
  * Admin-only: add a user as an organiser on this tournament. The
  * UID must be a real Firebase auth UID (max 64 chars). Idempotent —

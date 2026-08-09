@@ -552,6 +552,52 @@ export async function deleteMatch(matchId: string): Promise<WriteOutcome> {
 }
 
 /**
+ * Result of a bulk delete: how many items were deleted, how many
+ * failed, and the first error (if any) so the UI can surface it
+ * without spamming per-row failures.
+ */
+export type BulkOutcome = {
+  ok: boolean;
+  deleted: number;
+  failed: number;
+  error?: string;
+};
+
+/**
+ * Admin-only: bulk-delete a set of match records. Each match is
+ * removed individually so per-record audit entries are preserved
+ * (a super-admin often wants to see "who deleted match X" later);
+ * this trades atomicity for auditability, which is the right call
+ * for a rare admin operation. Batches through Promise.all in
+ * groups of 25 so we don't fan out too aggressively against RTDB.
+ */
+export async function deleteMatches(matchIds: string[]): Promise<BulkOutcome> {
+  const clean = matchIds.filter((id) => typeof id === 'string' && id.length > 0);
+  if (clean.length === 0) return { ok: true, deleted: 0, failed: 0 };
+  const BATCH_SIZE = 25;
+  let deleted = 0;
+  let failed = 0;
+  let firstError: string | undefined;
+  for (let i = 0; i < clean.length; i += BATCH_SIZE) {
+    const slice = clean.slice(i, i + BATCH_SIZE);
+    const results = await Promise.all(slice.map((id) => deleteMatch(id)));
+    for (const r of results) {
+      if (r.ok) deleted += 1;
+      else {
+        failed += 1;
+        if (!firstError) firstError = r.error;
+      }
+    }
+  }
+  return {
+    ok: failed === 0,
+    deleted,
+    failed,
+    ...(firstError ? { error: firstError } : {}),
+  };
+}
+
+/**
  * Look up a player's display name by id. Returns a friendly fallback
  * if the identity store hasn't yet loaded the player — better than
  * showing the raw kebab-slug.

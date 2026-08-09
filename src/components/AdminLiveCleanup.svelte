@@ -16,7 +16,13 @@
    * inspection. To browse live matches, use the lobby.
    */
   import { onMount } from 'svelte';
-  import { subscribeAllLive, deleteLive, type LobbyEntry } from '../lib/live-sync';
+  import {
+    subscribeAllLive,
+    deleteLive,
+    deleteLiveMany,
+    type LobbyEntry,
+  } from '../lib/live-sync';
+  import AdminBulkBar from './AdminBulkBar.svelte';
 
   const STALE_WINDOW_MS = 4 * 60 * 60 * 1000;
 
@@ -25,6 +31,14 @@
   let saving = $state(false);
   let banner = $state<{ kind: 'ok' | 'err'; message: string } | null>(null);
   let confirmMid = $state<string | null>(null);
+  /**
+   * Selected midss for bulk delete. Kept as a Set for O(1)
+   * membership tests as the list re-renders on every subscribeAllLive
+   * push (~ every few seconds). Selection is preserved across
+   * re-renders because we reassign the Set (Svelte 5 reactivity
+   * requires a new reference).
+   */
+  let selected = $state<Set<string>>(new Set());
 
   onMount(() => {
     let unsub: (() => void) | null = null;
@@ -80,6 +94,42 @@
       flash('err', outcome.error);
     }
   }
+
+  function toggleSel(mid: string) {
+    if (selected.has(mid)) selected.delete(mid);
+    else selected.add(mid);
+    selected = new Set(selected);
+  }
+  function toggleSelectAll() {
+    if (stuck.every((e) => selected.has(e.mid))) {
+      selected = new Set();
+    } else {
+      selected = new Set(stuck.map((e) => e.mid));
+    }
+  }
+  function clearSelection() {
+    selected = new Set();
+  }
+  async function performBulkDelete() {
+    const mids = [...selected];
+    if (mids.length === 0) return;
+    saving = true;
+    const outcome = await deleteLiveMany(mids);
+    saving = false;
+    if (outcome.ok) {
+      flash('ok', `${outcome.deleted} live record${outcome.deleted === 1 ? '' : 's'} deleted`);
+    } else {
+      flash(
+        'err',
+        `${outcome.deleted} deleted, ${outcome.failed} failed${outcome.error ? ` — ${outcome.error}` : ''}`,
+      );
+    }
+    selected = new Set();
+  }
+
+  const allSelected = $derived(
+    stuck.length > 0 && stuck.every((e) => selected.has(e.mid)),
+  );
 </script>
 
 <section class="live">
@@ -95,12 +145,39 @@
     browse those in the lobby.
   </p>
 
+  <AdminBulkBar
+    count={selected.size}
+    itemLabel="live record"
+    saving={saving}
+    onConfirmDelete={performBulkDelete}
+    onClearSelection={clearSelection}
+  />
+
   {#if stuck.length === 0}
     <p class="empty">Nothing to clean up.</p>
   {:else}
+    <div class="select-hdr">
+      <label class="sel-all">
+        <input
+          type="checkbox"
+          checked={allSelected}
+          onchange={toggleSelectAll}
+          aria-label={allSelected ? 'Deselect all' : 'Select all'}
+        />
+        Select all
+      </label>
+    </div>
     <ul class="list">
       {#each stuck as e (e.mid)}
-        <li class="row">
+        <li class="row" class:row-selected={selected.has(e.mid)}>
+          <label class="row-check">
+            <input
+              type="checkbox"
+              checked={selected.has(e.mid)}
+              onchange={() => toggleSel(e.mid)}
+              aria-label={`Select ${e.mid}`}
+            />
+          </label>
           <div class="row-name">
             <div class="row-title">
               <span class="mid">{e.mid}</span>
@@ -175,6 +252,40 @@
   }
   .empty { color: var(--muted); text-align: center; padding: 1.5rem; }
 
+  /* Select-all header sits just above the row list. Compact so it
+     doesn't compete with the bulk-action bar on top. */
+  .select-hdr {
+    display: flex;
+    justify-content: flex-start;
+    padding: 0.25rem 0.5rem;
+  }
+  .sel-all {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--muted, #9aa0a6);
+    font-size: 0.8rem;
+    cursor: pointer;
+  }
+  .sel-all input {
+    width: 1.05rem;
+    height: 1.05rem;
+    accent-color: var(--accent, #ffd54a);
+    cursor: pointer;
+  }
+  .row-check {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.15rem;
+    cursor: pointer;
+  }
+  .row-check input {
+    width: 1.05rem;
+    height: 1.05rem;
+    accent-color: var(--accent, #ffd54a);
+    cursor: pointer;
+  }
+
   .list {
     list-style: none;
     padding: 0;
@@ -191,6 +302,11 @@
     background: rgba(255, 255, 255, 0.02);
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 0.5rem;
+    transition: background 0.12s, border-color 0.12s;
+  }
+  .row-selected {
+    background: rgba(255, 213, 74, 0.06);
+    border-color: rgba(255, 213, 74, 0.4);
   }
   .row-name { flex: 1; min-width: 0; }
   .row-title {

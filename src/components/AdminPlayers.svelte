@@ -17,9 +17,11 @@
     subscribeStore,
     updatePlayerName,
     deletePlayer,
+    deletePlayers,
     mergePlayers,
     type Player,
   } from '../lib/players';
+  import AdminBulkBar from './AdminBulkBar.svelte';
 
   let tick = $state(0);
   let query = $state('');
@@ -32,6 +34,8 @@
   let mergeConfirmText = $state('');
   let saving = $state(false);
   let banner = $state<{ kind: 'ok' | 'err'; message: string } | null>(null);
+  /** Selected player IDs for bulk delete. Merge is one-at-a-time. */
+  let selected = $state<Set<string>>(new Set());
 
   onMount(() => {
     void subscribePlayers();
@@ -133,6 +137,45 @@
     if (!mergeCanonicalId) return [];
     return loadAll().filter((p) => p.id !== mergeCanonicalId).slice(0, 50);
   });
+
+  function toggleSel(id: string) {
+    if (selected.has(id)) selected.delete(id);
+    else selected.add(id);
+    selected = new Set(selected);
+  }
+  function toggleSelectAll() {
+    const rows = filtered();
+    if (rows.length > 0 && rows.every((p) => selected.has(p.id))) {
+      selected = new Set();
+    } else {
+      selected = new Set(rows.map((p) => p.id));
+    }
+  }
+  function clearSelection() {
+    selected = new Set();
+  }
+  async function performBulkDelete() {
+    const ids = [...selected];
+    if (ids.length === 0) return;
+    saving = true;
+    const outcome = await deletePlayers(ids);
+    saving = false;
+    if (outcome.ok) {
+      flash('ok', `${outcome.deleted} player${outcome.deleted === 1 ? '' : 's'} deleted`);
+    } else {
+      flash(
+        'err',
+        `${outcome.deleted} deleted, ${outcome.failed} failed${outcome.error ? ` — ${outcome.error}` : ''}`,
+      );
+    }
+    selected = new Set();
+  }
+
+  const allSelected = $derived(() => {
+    void tick;
+    const rows = filtered();
+    return rows.length > 0 && rows.every((p) => selected.has(p.id));
+  });
 </script>
 
 <section class="players">
@@ -141,6 +184,14 @@
       {banner.message}
     </div>
   {/if}
+
+  <AdminBulkBar
+    count={selected.size}
+    itemLabel="player"
+    saving={saving}
+    onConfirmDelete={performBulkDelete}
+    onClearSelection={clearSelection}
+  />
 
   <div class="controls">
     <input
@@ -157,9 +208,28 @@
       {query ? 'No players match that search.' : 'No players yet.'}
     </p>
   {:else}
+    <div class="select-hdr">
+      <label class="sel-all">
+        <input
+          type="checkbox"
+          checked={allSelected()}
+          onchange={toggleSelectAll}
+          aria-label={allSelected() ? 'Deselect all' : 'Select all visible'}
+        />
+        Select all
+      </label>
+    </div>
     <ul class="list">
       {#each filtered() as p (p.id)}
-        <li class="row">
+        <li class="row" class:row-selected={selected.has(p.id)}>
+          <label class="row-check">
+            <input
+              type="checkbox"
+              checked={selected.has(p.id)}
+              onchange={() => toggleSel(p.id)}
+              aria-label={`Select ${p.canonicalName}`}
+            />
+          </label>
           {#if renamingId === p.id}
             <div class="row-edit">
               <input
@@ -314,6 +384,44 @@
 
   .empty { color: var(--muted); text-align: center; padding: 1.5rem; }
 
+  /* Bulk-select header + row checkbox, matching AdminLiveCleanup /
+     AdminTournaments so the three admin lists behave identically. */
+  .select-hdr {
+    display: flex;
+    justify-content: flex-start;
+    padding: 0.25rem 0.5rem;
+  }
+  .sel-all {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--muted, #9aa0a6);
+    font-size: 0.8rem;
+    cursor: pointer;
+  }
+  .sel-all input {
+    width: 1.05rem;
+    height: 1.05rem;
+    accent-color: var(--accent, #ffd54a);
+    cursor: pointer;
+  }
+  .row-check {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.15rem;
+    cursor: pointer;
+  }
+  .row-check input {
+    width: 1.05rem;
+    height: 1.05rem;
+    accent-color: var(--accent, #ffd54a);
+    cursor: pointer;
+  }
+  .row-selected {
+    background: rgba(255, 213, 74, 0.06) !important;
+    border-color: rgba(255, 213, 74, 0.4) !important;
+  }
+
   .list {
     list-style: none;
     padding: 0;
@@ -327,6 +435,7 @@
     align-items: center;
     gap: 0.75rem;
     padding: 0.6rem 0.75rem;
+    transition: background 0.12s, border-color 0.12s;
     background: rgba(255, 255, 255, 0.02);
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 0.5rem;

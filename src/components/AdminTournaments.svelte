@@ -21,11 +21,13 @@
     subscribeTournaments,
     renameTournament,
     deleteTournament,
+    deleteTournaments,
     addOrganiser,
     removeOrganiser,
     loadOrganisers,
     type Tournament,
   } from '../lib/tournaments';
+  import AdminBulkBar from './AdminBulkBar.svelte';
 
   let tick = $state(0);
   let renamingKey = $state<string | null>(null);
@@ -38,6 +40,8 @@
   let addUidValue = $state('');
   let saving = $state(false);
   let banner = $state<{ kind: 'ok' | 'err'; message: string } | null>(null);
+  /** Selected tournament keys for bulk delete. */
+  let selected = $state<Set<string>>(new Set());
 
   onMount(() => {
     void subscribeTournaments();
@@ -132,6 +136,48 @@
       flash('err', outcome.error);
     }
   }
+
+  function toggleSel(key: string) {
+    if (selected.has(key)) selected.delete(key);
+    else selected.add(key);
+    selected = new Set(selected);
+  }
+  function toggleSelectAll() {
+    const all = list();
+    if (all.length > 0 && all.every((t) => selected.has(t.key))) {
+      selected = new Set();
+    } else {
+      selected = new Set(all.map((t) => t.key));
+    }
+  }
+  function clearSelection() {
+    selected = new Set();
+  }
+  async function performBulkDelete() {
+    const keys = [...selected];
+    if (keys.length === 0) return;
+    saving = true;
+    const outcome = await deleteTournaments(keys);
+    saving = false;
+    if (outcome.ok) {
+      flash(
+        'ok',
+        `${outcome.deleted} tournament${outcome.deleted === 1 ? '' : 's'} deleted`,
+      );
+    } else {
+      flash(
+        'err',
+        `${outcome.deleted} deleted, ${outcome.failed} failed${outcome.error ? ` — ${outcome.error}` : ''}`,
+      );
+    }
+    selected = new Set();
+  }
+
+  const allSelected = $derived(() => {
+    void tick;
+    const all = list();
+    return all.length > 0 && all.every((t) => selected.has(t.key));
+  });
 </script>
 
 <section class="tourns">
@@ -141,12 +187,39 @@
     </div>
   {/if}
 
+  <AdminBulkBar
+    count={selected.size}
+    itemLabel="tournament"
+    saving={saving}
+    onConfirmDelete={performBulkDelete}
+    onClearSelection={clearSelection}
+  />
+
   {#if list().length === 0}
     <p class="empty">No tournaments yet.</p>
   {:else}
+    <div class="select-hdr">
+      <label class="sel-all">
+        <input
+          type="checkbox"
+          checked={allSelected()}
+          onchange={toggleSelectAll}
+          aria-label={allSelected() ? 'Deselect all' : 'Select all'}
+        />
+        Select all
+      </label>
+    </div>
     <ul class="list">
       {#each list() as t (t.key)}
-        <li class="row">
+        <li class="row" class:row-selected={selected.has(t.key)}>
+          <label class="row-check">
+            <input
+              type="checkbox"
+              checked={selected.has(t.key)}
+              onchange={() => toggleSel(t.key)}
+              aria-label={`Select ${t.name}`}
+            />
+          </label>
           {#if renamingKey === t.key}
             <div class="row-edit">
               <input
@@ -287,6 +360,43 @@
 
   .empty { color: var(--muted); text-align: center; padding: 1.5rem; }
 
+  /* Bulk-select header + row checkbox, matching AdminLiveCleanup. */
+  .select-hdr {
+    display: flex;
+    justify-content: flex-start;
+    padding: 0.25rem 0.5rem;
+  }
+  .sel-all {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--muted, #9aa0a6);
+    font-size: 0.8rem;
+    cursor: pointer;
+  }
+  .sel-all input {
+    width: 1.05rem;
+    height: 1.05rem;
+    accent-color: var(--accent, #ffd54a);
+    cursor: pointer;
+  }
+  .row-check {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.15rem;
+    cursor: pointer;
+  }
+  .row-check input {
+    width: 1.05rem;
+    height: 1.05rem;
+    accent-color: var(--accent, #ffd54a);
+    cursor: pointer;
+  }
+  .row-selected {
+    background: rgba(255, 213, 74, 0.06) !important;
+    border-color: rgba(255, 213, 74, 0.4) !important;
+  }
+
   .list {
     list-style: none;
     padding: 0;
@@ -303,6 +413,7 @@
     background: rgba(255, 255, 255, 0.02);
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 0.5rem;
+    transition: background 0.12s, border-color 0.12s;
   }
   .row-name { flex: 1; min-width: 0; }
   .row-name-text {
