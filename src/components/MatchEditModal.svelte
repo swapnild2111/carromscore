@@ -23,7 +23,13 @@
    * ages the record correctly, and provenance stays with the original
    * creator.
    */
-  import { updateMatch, deleteMatch, type MatchPatch, type MatchRecord } from '../lib/history';
+  import {
+    updateMatch,
+    deleteMatch,
+    playerName,
+    type MatchPatch,
+    type MatchRecord,
+  } from '../lib/history';
 
   type BoardRow = {
     set: number;
@@ -61,6 +67,40 @@
   // admins have exactly one place to fix a score. `setsA/B` and
   // `winner` stay editable — those aren't summable from boardLog.
   const initial = record.result ?? {};
+
+  /**
+   * Human-readable per-side names for the modal. We prefer actual
+   * player names over "A" / "B" so admins fixing a match don't have
+   * to translate in their head — a doubles match especially reads
+   * much better as "Prem & Yash" vs "A".
+   *
+   * Doubles unions the two teammates with an ampersand, matching
+   * LiveLobby.sideNameMatch and the recap header shape. Falls back
+   * to "Side A" / "Side B" if identity lookup produces nothing —
+   * shouldn't happen for a well-formed record, but the fallback
+   * keeps the UI readable during identity-store rehydration.
+   */
+  function computeSideName(side: 'a' | 'b'): string {
+    if (record.mode === 'doubles') {
+      const p1 = playerName(side === 'a' ? record.playerAId : record.playerBId);
+      const p2 = playerName(side === 'a' ? record.playerA2Id : record.playerB2Id);
+      return p1 && p2 ? `${p1} & ${p2}` : p1 || p2 || (side === 'a' ? 'Team A' : 'Team B');
+    }
+    return (
+      playerName(side === 'a' ? record.playerAId : record.playerBId) ||
+      (side === 'a' ? 'Side A' : 'Side B')
+    );
+  }
+  const nameA = computeSideName('a');
+  const nameB = computeSideName('b');
+  /**
+   * Compact per-column heading. Full player name in the top scalars
+   * block; heading in the tight board-log table uses first-word only
+   * so the column doesn't force horizontal scroll on phones.
+   */
+  const shortA = nameA.split(/[\s&]/)[0] || 'A';
+  const shortB = nameB.split(/[\s&]/)[0] || 'B';
+
   let setsA = $state<number>(Number(initial.setsA ?? 0));
   let setsB = $state<number>(Number(initial.setsB ?? 0));
   let winner = $state<'a' | 'b' | ''>(
@@ -204,23 +244,23 @@
     <section class="section">
       <div class="grid2">
         <label>
-          <span>Sets A</span>
+          <span>Sets — {nameA}</span>
           <input type="number" min="0" max="9" bind:value={setsA} />
         </label>
         <label>
-          <span>Sets B</span>
+          <span>Sets — {nameB}</span>
           <input type="number" min="0" max="9" bind:value={setsB} />
         </label>
         <label>
           <span>
-            Final points A
+            Final points — {nameA}
             <em class="hint">(computed)</em>
           </span>
           <div class="computed-cell">{finalPointsA}</div>
         </label>
         <label>
           <span>
-            Final points B
+            Final points — {nameB}
             <em class="hint">(computed)</em>
           </span>
           <div class="computed-cell">{finalPointsB}</div>
@@ -236,28 +276,28 @@
           <span>Winner</span>
           <select bind:value={winner}>
             <option value="">(no winner)</option>
-            <option value="a">Side A</option>
-            <option value="b">Side B</option>
+            <option value="a">{nameA}</option>
+            <option value="b">{nameB}</option>
           </select>
         </label>
       </div>
       <p class="hint-block">
         Points and board count are computed from the board log below.
-        <strong>Pts A / Pts B</strong> is the total that side scored on
-        that board — coins + 3 if they pocketed the queen. So a board
-        where side A got 4 coins and the queen is stored as
-        <strong>Pts A = 7, Queen = A</strong>. Edit the rows and the
-        totals reconcile automatically.
+        <strong>{shortA}</strong> / <strong>{shortB}</strong> is the
+        total that side scored on that board — coins + 3 if they
+        pocketed the queen. So a board where {nameA} got 4 coins and
+        the queen is stored as <strong>{shortA} = 7, Queen = {shortA}</strong>.
+        Edit the rows and the totals reconcile automatically.
       </p>
 
       <div class="grid2 grid-notes">
         <label>
-          <span>Note A</span>
-          <input type="text" maxlength="40" bind:value={noteA} />
+          <span>Represents — {nameA}</span>
+          <input type="text" maxlength="40" bind:value={noteA} placeholder="Country, club…" />
         </label>
         <label>
-          <span>Note B</span>
-          <input type="text" maxlength="40" bind:value={noteB} />
+          <span>Represents — {nameB}</span>
+          <input type="text" maxlength="40" bind:value={noteB} placeholder="Country, club…" />
         </label>
       </div>
 
@@ -290,24 +330,24 @@
             <span>Board</span>
             <span>Break</span>
             <span>Queen</span>
-            <span>Pts A</span>
-            <span>Pts B</span>
+            <span title={nameA}>{shortA}</span>
+            <span title={nameB}>{shortB}</span>
             <span></span>
           </div>
           {#each rows as row, i (i)}
             <div class="rowtable-row">
               <input type="number" min="0" max="9" bind:value={row.set} />
               <input type="number" min="0" max="99" bind:value={row.board} />
-              <select bind:value={row.breakSide}>
-                <option value="a">A</option>
-                <option value="b">B</option>
+              <select bind:value={row.breakSide} aria-label="Break side">
+                <option value="a">{shortA}</option>
+                <option value="b">{shortB}</option>
               </select>
-              <select bind:value={row.queen}>
-                <option value="a">A</option>
-                <option value="b">B</option>
+              <select bind:value={row.queen} aria-label="Queen holder">
+                <option value="a">{shortA}</option>
+                <option value="b">{shortB}</option>
               </select>
-              <input type="number" min="0" bind:value={row.pointsA} />
-              <input type="number" min="0" bind:value={row.pointsB} />
+              <input type="number" min="0" bind:value={row.pointsA} aria-label={`Points for ${nameA}`} />
+              <input type="number" min="0" bind:value={row.pointsB} aria-label={`Points for ${nameB}`} />
               <button
                 type="button"
                 class="row-del"
@@ -567,13 +607,30 @@
     display: flex;
     flex-direction: column;
     gap: 0.35rem;
+    width: 100%;
   }
+  /*
+   * Row grid — fractional units so the table fills whatever width
+   * the modal has. Set / Board / Delete are fixed narrow columns
+   * (single-digit content); Break + Queen selects need enough
+   * room for the name text + native dropdown arrow (roughly 6rem
+   * min on iOS Safari). Pts columns flex to take the remainder.
+   * On narrow phones the grid gracefully shrinks via minmax().
+   */
   .rowtable-hdr,
   .rowtable-row {
     display: grid;
-    grid-template-columns: 3rem 3.4rem 2.6rem 2.6rem 4rem 4rem 2rem;
+    grid-template-columns:
+      minmax(2.3rem, 0.55fr)
+      minmax(2.6rem, 0.6fr)
+      minmax(4.5rem, 1fr)
+      minmax(4.5rem, 1fr)
+      minmax(3.2rem, 1fr)
+      minmax(3.2rem, 1fr)
+      2rem;
     gap: 0.35rem;
     align-items: center;
+    width: 100%;
   }
   .rowtable-hdr {
     color: var(--muted, #9aa0a6);
@@ -582,11 +639,23 @@
     letter-spacing: 0.06em;
     font-weight: 700;
     padding: 0 0.2rem;
+    /* Header cells for name-based columns can be long — allow
+       wrapping so they don't push the layout wide. */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .rowtable-hdr > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .rowtable-row input,
   .rowtable-row select {
     padding: 0.35rem 0.45rem;
     font-size: 0.85rem;
+    width: 100%;
+    min-width: 0;
   }
   .row-del {
     background: transparent;
@@ -605,11 +674,28 @@
   .row-del:hover {
     background: rgba(239, 83, 80, 0.15);
   }
-  @media (max-width: 640px) {
+  @media (max-width: 480px) {
+    /* Very narrow phones: shrink font + drop the select-option
+       min-width so we don't force horizontal scroll. Native
+       selects will truncate the option label but the dropdown
+       still shows the full text when opened. */
     .rowtable-hdr,
     .rowtable-row {
-      grid-template-columns: 2.5rem 2.8rem 2.4rem 2.4rem 3.2rem 3.2rem 1.9rem;
+      grid-template-columns:
+        minmax(2rem, 0.5fr)
+        minmax(2.3rem, 0.55fr)
+        minmax(3.4rem, 0.9fr)
+        minmax(3.4rem, 0.9fr)
+        minmax(2.8rem, 1fr)
+        minmax(2.8rem, 1fr)
+        1.8rem;
       font-size: 0.7rem;
+      gap: 0.25rem;
+    }
+    .rowtable-row input,
+    .rowtable-row select {
+      padding: 0.3rem 0.35rem;
+      font-size: 0.78rem;
     }
   }
 

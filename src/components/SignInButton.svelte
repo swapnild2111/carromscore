@@ -3,17 +3,18 @@
    * Compact sign-in pill. Two visual states:
    *   - Signed out → "Sign in" pill; tap opens the Google popup.
    *   - Signed in  → avatar + display name pill; tap opens a menu
-   *     with "Sign out" and a "Show UID" affordance so organisers
-   *     can copy their UID to share with the super-admin.
+   *     with role badge + Sign out.
    *
-   * Mounted only where admins operate (lobby header, per plan). NOT
-   * mounted on the home page — that would prompt casual users. The
-   * home page uses a discreet "Admin" text link in its footer instead.
+   * Props:
+   *   signedInOnly — when true, renders NOTHING while signed out.
+   *     Used on /live/ so casual visitors aren't prompted to sign
+   *     in there. Sign-in lives exclusively on the home footer's
+   *     "Admin" link.
    *
-   * Owns the auth ↔ roles wiring: subscribes to `auth` and pushes the
-   * current uid into `roles` so admin controls throughout the app
-   * light up as soon as auth resolves. Also runs the one-time
-   * bootstrap self-promotion check on first sign-in.
+   * Also owns the auth ↔ roles wiring: subscribes to `auth` and
+   * pushes the current uid into `roles` so admin controls light up
+   * as soon as auth resolves. Bootstrap self-promotion fires on
+   * first sign-in.
    */
   import { onMount } from 'svelte';
   import { signIn, signOut, subscribeAuth, type AuthUser } from '../lib/auth';
@@ -24,10 +25,54 @@
     type Role,
   } from '../lib/roles';
 
+  interface Props {
+    signedInOnly?: boolean;
+    /** Text on the signed-out pill. Defaults to "Sign in". Home
+     *  footer overrides to "Admin" so the affordance reads as an
+     *  admin entry point on first paint, not a sign-in prompt. */
+    signedOutLabel?: string;
+    /** When true, the account dropdown opens upward (menu sits ABOVE
+     *  the pill). Used on the home footer, which is at the bottom of
+     *  the viewport — a downward menu would clip below the fold.
+     *  Default false: menu drops downward as usual (lobby header). */
+    dropUp?: boolean;
+  }
+  const {
+    signedInOnly = false,
+    signedOutLabel = 'Sign in',
+    dropUp = false,
+  }: Props = $props();
+
   let user = $state<AuthUser | null>(null);
   let role = $state<Role | null>(null);
   let menuOpen = $state(false);
-  let uidCopied = $state(false);
+
+  /**
+   * Svelte action: fires a callback when a click happens outside the
+   * element the action is attached to, or when Escape is pressed.
+   * Used to close the account dropdown without a full-screen
+   * backdrop overlay.
+   */
+  function onOutsideClick(node: HTMLElement, callback: () => void) {
+    function onDoc(e: MouseEvent) {
+      if (!node.contains(e.target as Node)) callback();
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') callback();
+    }
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return {
+      destroy() {
+        document.removeEventListener('mousedown', onDoc);
+        document.removeEventListener('keydown', onKey);
+      },
+    };
+  }
+
+  function onDropdownKey(e: KeyboardEvent) {
+    if (e.key === 'Escape') menuOpen = false;
+  }
 
   onMount(() => {
     const unsubAuth = subscribeAuth((u) => {
@@ -52,75 +97,83 @@
     menuOpen = false;
     void signOut();
   }
-  async function copyUid() {
-    if (!user) return;
-    try {
-      await navigator.clipboard.writeText(user.uid);
-      uidCopied = true;
-      window.setTimeout(() => {
-        uidCopied = false;
-      }, 1500);
-    } catch {
-      // Clipboard denied. Users can long-press to select+copy manually.
-    }
-  }
 
-  function closeMenu(e: MouseEvent) {
-    if (e.target === e.currentTarget) menuOpen = false;
-  }
 </script>
 
 {#if !user}
-  <button
-    type="button"
-    class="signin-pill"
-    onclick={onSignIn}
-    aria-label="Sign in with Google"
-  >
-    <span class="g" aria-hidden="true">G</span>
-    <span>Sign in</span>
-  </button>
+  {#if !signedInOnly}
+    <button
+      type="button"
+      class="signin-pill"
+      onclick={onSignIn}
+      aria-label={`${signedOutLabel} — Sign in with Google`}
+    >
+      <span class="g" aria-hidden="true">G</span>
+      <span>{signedOutLabel}</span>
+    </button>
+  {/if}
 {:else}
-  <button
-    type="button"
-    class="user-pill"
-    onclick={() => (menuOpen = !menuOpen)}
-    aria-label="Account menu"
-    aria-expanded={menuOpen}
-  >
-    {#if user.photoURL}
-      <img class="avatar" src={user.photoURL} alt="" width="20" height="20" />
-    {:else}
-      <span class="avatar avatar-fallback" aria-hidden="true">
-        {(user.displayName || user.email || '?').charAt(0).toUpperCase()}
-      </span>
-    {/if}
-    <span class="user-name">{user.displayName || user.email}</span>
-    <span class="chev" aria-hidden="true">▾</span>
-  </button>
+  <!--
+    Signed-in avatar pill + inline dropdown. The dropdown is a
+    sibling anchored via a shared `.user-pill-wrap` positioner so
+    the menu sits directly under the pill (no full-screen backdrop
+    popup — testers found that heavy for a two-item menu). Outside
+    click / Escape closes.
+  -->
+  <div class="user-pill-wrap" use:onOutsideClick={() => (menuOpen = false)}>
+    <button
+      type="button"
+      class="user-pill"
+      onclick={() => (menuOpen = !menuOpen)}
+      aria-label="Account menu"
+      aria-expanded={menuOpen}
+      aria-haspopup="menu"
+    >
+      {#if user.photoURL}
+        <img class="avatar" src={user.photoURL} alt="" width="20" height="20" />
+      {:else}
+        <span class="avatar avatar-fallback" aria-hidden="true">
+          {(user.displayName || user.email || '?').charAt(0).toUpperCase()}
+        </span>
+      {/if}
+      <span class="user-name">{user.displayName || user.email}</span>
+      <!--
+        Chevron points toward the direction the menu will open, so
+        the affordance is honest before it opens: ▾ when the menu
+        drops below, ▴ when it opens upward (footer variant). On
+        open, both rotate 180° to invert. Keeps hint + reality in
+        sync.
+      -->
+      <span
+        class="chev"
+        class:chev-open={menuOpen}
+        aria-hidden="true"
+      >{dropUp ? '▴' : '▾'}</span>
+    </button>
 
-  {#if menuOpen}
-    <div class="menu-backdrop" onclick={closeMenu} role="presentation">
-      <div class="menu" role="menu">
-        <div class="menu-hdr">
-          <div class="menu-name">
+    {#if menuOpen}
+      <div
+        class="dropdown"
+        class:dropdown-up={dropUp}
+        role="menu"
+        onkeydown={onDropdownKey}
+      >
+        <div class="dropdown-hdr">
+          <div class="dropdown-name">
             {user.displayName || 'Signed in'}
             {#if role?.isSuper}<span class="role-badge role-super">SUPER</span>{/if}
             {#if role && !role.isSuper && role.organiserOf.size > 0}
               <span class="role-badge role-organiser">ORGANISER · {role.organiserOf.size}</span>
             {/if}
           </div>
-          {#if user.email}<div class="menu-email">{user.email}</div>{/if}
+          {#if user.email}<div class="dropdown-email">{user.email}</div>{/if}
         </div>
-        <button type="button" class="menu-item" onclick={copyUid} role="menuitem">
-          {uidCopied ? '✓ UID copied' : 'Copy UID'}
-        </button>
-        <button type="button" class="menu-item menu-item-danger" onclick={onSignOut} role="menuitem">
+        <button type="button" class="dropdown-item dropdown-item-danger" onclick={onSignOut} role="menuitem">
           Sign out
         </button>
       </div>
-    </div>
-  {/if}
+    {/if}
+  </div>
 {/if}
 
 <style>
@@ -208,38 +261,52 @@
   .chev {
     font-size: 0.65rem;
     opacity: 0.7;
+    transition: transform 0.14s;
+  }
+  .chev-open {
+    transform: rotate(180deg);
   }
 
-  /* Menu overlay — fixed so it always centres over the viewport
-     regardless of where the pill was tapped from. */
-  .menu-backdrop {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.4);
-    display: flex;
-    align-items: flex-start;
-    justify-content: center;
-    padding: 4rem 1rem 1rem;
-    z-index: 250;
+  /* Positioner + dropdown. `.user-pill-wrap` is relative-positioned
+     so the dropdown can absolute-position underneath the pill.
+     Anchored right (not left) so the pill's rightmost edge stays
+     the reference — a long user name shifts the pill left, and we
+     want the dropdown to still fit inside the viewport. */
+  .user-pill-wrap {
+    position: relative;
+    display: inline-flex;
   }
-  .menu {
+  .dropdown {
+    position: absolute;
+    top: calc(100% + 0.4rem);
+    right: 0;
+    z-index: 250;
+    min-width: 12rem;
+    max-width: 18rem;
     background: #141414;
     border: 1px solid rgba(255, 213, 74, 0.35);
-    border-radius: 0.75rem;
-    padding: 0.6rem;
-    min-width: 15rem;
-    max-width: 22rem;
+    border-radius: 0.65rem;
+    padding: 0.5rem;
     box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
   }
-  .menu-hdr {
-    padding: 0.4rem 0.55rem 0.7rem;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-    margin-bottom: 0.35rem;
+  /* Upward variant: dropdown sits ABOVE the pill instead of below.
+     Used on the home footer where the pill is close to the viewport
+     bottom — a downward menu would clip. `bottom` anchors from the
+     pill's top edge; shadow flips so it still reads as elevated. */
+  .dropdown.dropdown-up {
+    top: auto;
+    bottom: calc(100% + 0.4rem);
+    box-shadow: 0 -12px 32px rgba(0, 0, 0, 0.5);
   }
-  .menu-name {
+  .dropdown-hdr {
+    padding: 0.35rem 0.5rem 0.55rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    margin-bottom: 0.3rem;
+  }
+  .dropdown-name {
     color: var(--fg, #f5f5f5);
     font-weight: 700;
-    font-size: 0.9rem;
+    font-size: 0.88rem;
     display: flex;
     align-items: center;
     gap: 0.4rem;
@@ -254,7 +321,7 @@
     align-items: center;
     padding: 0.05rem 0.4rem;
     border-radius: 999px;
-    font-size: 0.65rem;
+    font-size: 0.62rem;
     letter-spacing: 0.04em;
     text-transform: uppercase;
     font-weight: 800;
@@ -269,18 +336,18 @@
     color: var(--side-a, #4fc3f7);
     border: 1px solid rgba(79, 195, 247, 0.5);
   }
-  .menu-email {
+  .dropdown-email {
     color: var(--muted, #9aa0a6);
-    font-size: 0.75rem;
+    font-size: 0.72rem;
     margin-top: 0.15rem;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .menu-item {
+  .dropdown-item {
     display: block;
     width: 100%;
-    padding: 0.55rem 0.6rem;
+    padding: 0.5rem 0.55rem;
     background: transparent;
     border: none;
     color: var(--fg, #f5f5f5);
@@ -292,13 +359,13 @@
     cursor: pointer;
     transition: background 0.1s;
   }
-  .menu-item:hover {
+  .dropdown-item:hover {
     background: rgba(255, 255, 255, 0.06);
   }
-  .menu-item-danger {
+  .dropdown-item-danger {
     color: var(--danger, #ef5350);
   }
-  .menu-item-danger:hover {
+  .dropdown-item-danger:hover {
     background: rgba(239, 83, 80, 0.1);
   }
 </style>

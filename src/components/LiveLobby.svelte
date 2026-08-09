@@ -518,7 +518,13 @@
   <header class="hdr">
     <a class="back" href={base}>← Back</a>
     <h1>Live matches</h1>
-    <SignInButton />
+    <!--
+      SignInButton mounted in `signedInOnly` mode: renders the avatar +
+      menu ONLY when a user is already signed in. Anonymous visitors
+      see no sign-in prompt on the lobby — sign-in lives on the home
+      footer, which is the single-entry design goal.
+    -->
+    <SignInButton signedInOnly />
     <span class="ver" aria-label="Carromscore version">v{APP_VERSION}</span>
   </header>
 

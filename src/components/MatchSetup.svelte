@@ -36,13 +36,7 @@
     isNewerVersion,
     type ReleaseInfo,
   } from '../lib/version';
-  import { signIn, signOut, subscribeAuth, type AuthUser } from '../lib/auth';
-  import {
-    bootstrapSuperIfNeeded,
-    setCurrentUidForRoles,
-    subscribeCurrentUserRole,
-    type Role,
-  } from '../lib/roles';
+  import SignInButton from './SignInButton.svelte';
 
   const base: string = import.meta.env.BASE_URL;
 
@@ -106,53 +100,11 @@
     return unsub;
   });
 
-  // Auth + role state for the footer "Admin" link.
-  //
-  // The link label stays a stable "Admin" regardless of auth state
-  // (no flicker as the auth + role subscriptions rehydrate). Tapping
-  // it does one of two things:
-  //   signed out → open Google sign-in
-  //   signed in  → open an info dialog showing who the user is,
-  //                what their role is, and either (a) a link to the
-  //                admin panel when Phase 4 lands, or (b) a "Coming
-  //                soon" note today. Sign-out lives here too.
-  //
-  // We deliberately DON'T hard-link to `${base}admin/` yet — that
-  // route doesn't exist until Phase 4 ships, and users hitting a 404
-  // is worse than showing a friendly "not built yet" note.
-  let authUser = $state<AuthUser | null>(null);
-  let role = $state<Role | null>(null);
-  let showAdminDialog = $state(false);
-  $effect(() => {
-    const unsubAuth = subscribeAuth((u) => {
-      authUser = u;
-      setCurrentUidForRoles(u?.uid ?? null);
-      if (u?.uid) void bootstrapSuperIfNeeded(u.uid);
-    });
-    const unsubRole = subscribeCurrentUserRole((r) => (role = r));
-    return () => {
-      unsubAuth();
-      unsubRole();
-    };
-  });
-
-  function onAdminLinkClick(e: Event) {
-    e.preventDefault();
-    if (!authUser) {
-      void signIn();
-      return;
-    }
-    // Signed in — open the info dialog. It handles super, organiser,
-    // and no-role cases with the same shell.
-    showAdminDialog = true;
-  }
-  function closeAdminDialog() {
-    showAdminDialog = false;
-  }
-  function signOutFromAdminDialog() {
-    showAdminDialog = false;
-    void signOut();
-  }
+  // Footer "Admin" affordance is now a <SignInButton signedOutLabel="Admin" />
+  // in the template — it owns its own auth + role subscription, so no
+  // per-page state is needed here. Signed-out: pill reads "Admin";
+  // tap opens Google sign-in. Signed-in: pill becomes avatar + name,
+  // tap opens an inline dropdown with the role badge + Sign out.
 
   let showTournamentPicker = $state(false);
   function tournamentSuggestions(q: string): Tournament[] {
@@ -687,7 +639,12 @@
     version + copyright, low contrast.
   -->
   <div class="foot-block">
-    <p class="foot-links">
+    <!--
+      Row 1 uses <div> not <p> because SignInButton renders a <button>
+      / <div> block, and <button> nested inside a <p> is invalid HTML
+      (browsers auto-close the <p> and the layout breaks).
+    -->
+    <div class="foot-links">
       <a
         href={`${base}help/`}
         class="foot-link"
@@ -702,20 +659,15 @@
       >Feedback ⇗</a>
       <span class="foot-sep" aria-hidden="true">·</span>
       <!--
-        Admin entry point. Discreet on purpose — casual users notice
-        "How to use" and "Feedback" first. This is the ONLY visible
-        surface that hints at admin on the home page; the sign-in
-        chip lives in the lobby header, not here.
+        Admin entry point. Same SignInButton component the lobby
+        uses. Signed-out: renders as an "Admin" pill; tap opens
+        Google sign-in. Signed-in: becomes the avatar + name pill,
+        tap opens an inline dropdown with role + Sign out.
+        `dropUp` because the footer sits at the bottom of the page
+        — a downward dropdown would clip below the fold.
       -->
-      <a
-        href="#admin"
-        class="foot-link"
-        onclick={onAdminLinkClick}
-        aria-label={authUser
-          ? 'Show admin details'
-          : 'Sign in as admin or tournament organiser'}
-      >Admin</a>
-    </p>
+      <SignInButton signedOutLabel="Admin" dropUp />
+    </div>
     <p class="foot-meta">
       <span class="foot-ver">v{APP_VERSION}</span>
       <span class="foot-sep" aria-hidden="true">·</span>
@@ -723,70 +675,6 @@
     </p>
   </div>
 </form>
-
-{#if showAdminDialog}
-  <!--
-    Info dialog opened from the "Admin" footer link when a user is
-    signed in. Shows their auth identity + role, an entry point to
-    the admin panel when it exists, and a sign-out action. Same
-    dialog handles super / organiser / no-role cases so the flow
-    is stable.
-  -->
-  <div
-    class="dialog"
-    role="dialog"
-    aria-modal="true"
-    aria-labelledby="admin-dialog-title"
-    onclick={(e) => { if (e.target === e.currentTarget) closeAdminDialog(); }}
-  >
-    <div class="dialog-card fb-card">
-      <h2 id="admin-dialog-title">
-        Admin
-        {#if role?.isSuper}
-          <span class="admin-role admin-role-super">SUPER</span>
-        {:else if role && role.organiserOf.size > 0}
-          <span class="admin-role admin-role-organiser">ORGANISER · {role.organiserOf.size}</span>
-        {/if}
-      </h2>
-      <p class="fb-intro">
-        Signed in as <strong>{authUser?.displayName || authUser?.email}</strong>{#if authUser?.email && authUser?.displayName}
-          <br /><span style="color: var(--muted); font-size: 0.85em;">{authUser.email}</span>
-        {/if}
-      </p>
-      {#if role?.isSuper}
-        <p class="fb-intro">
-          You have full admin access. Match records show a ✎ pencil in
-          the lobby — tap to edit scores, board log, or delete. A
-          dedicated admin page (players, tournaments, live cleanup)
-          is coming soon.
-        </p>
-      {:else if role && role.organiserOf.size > 0}
-        <p class="fb-intro">
-          You can edit match records tagged to your tournament(s).
-          Look for a ✎ pencil on the matching cards in the History
-          tab of the lobby.
-        </p>
-      {:else if role}
-        <p class="fb-intro">
-          You're signed in but no admin role is attached to this
-          account. Share your UID with a super-admin if you need
-          organiser access.
-        </p>
-      {:else}
-        <p class="fb-intro">Loading role…</p>
-      {/if}
-      {#if authUser?.uid && (!role || (!role.isSuper && role.organiserOf.size === 0))}
-        <p class="fb-intro" style="user-select: text; -webkit-user-select: text; font-family: monospace; font-size: 0.75rem; background: rgba(255,255,255,0.05); padding: 0.4rem 0.55rem; border-radius: 0.4rem;">
-          {authUser.uid}
-        </p>
-      {/if}
-      <div class="dialog-actions">
-        <button class="cancel" onclick={closeAdminDialog}>Close</button>
-        <button class="signout-btn" onclick={signOutFromAdminDialog}>Sign out</button>
-      </div>
-    </div>
-  </div>
-{/if}
 
 {#if showFeedbackPopup}
   <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="fb-title">
@@ -1437,48 +1325,6 @@
     cursor: pointer;
     font-family: inherit;
   }
-  .dialog-actions .signout-btn {
-    flex: 1;
-    padding: 0.6rem 1rem;
-    font-weight: 700;
-    font-size: 0.95rem;
-    border-radius: 999px;
-    background: rgba(239, 83, 80, 0.15);
-    color: var(--danger, #ef5350);
-    border: 1px solid rgba(239, 83, 80, 0.5);
-    cursor: pointer;
-    font-family: inherit;
-  }
-  .dialog-actions .signout-btn:hover {
-    background: rgba(239, 83, 80, 0.25);
-  }
-
-  /* Role badges inside the admin info dialog header. Mirrors the
-     account-menu treatment in SignInButton so the same visual
-     language stretches across both surfaces. */
-  .admin-role {
-    display: inline-flex;
-    align-items: center;
-    padding: 0.1rem 0.5rem;
-    border-radius: 999px;
-    font-size: 0.65rem;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    font-weight: 800;
-    margin-left: 0.5rem;
-    vertical-align: middle;
-  }
-  .admin-role-super {
-    background: rgba(255, 213, 74, 0.18);
-    color: var(--accent, #ffd54a);
-    border: 1px solid rgba(255, 213, 74, 0.5);
-  }
-  .admin-role-organiser {
-    background: rgba(79, 195, 247, 0.18);
-    color: var(--side-a, #4fc3f7);
-    border: 1px solid rgba(79, 195, 247, 0.5);
-  }
-
   @media (max-width: 520px) {
     fieldset { grid-template-columns: 1fr; }
     fieldset.fmt-mode { grid-template-columns: 1fr 1fr 1fr; }
