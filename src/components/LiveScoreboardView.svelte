@@ -108,89 +108,61 @@
 <div class="wrap" class:wrap-practice={meta.mode === 'practice'}>
 {#if meta.mode === 'practice'}
   <!--
-    Practice mode has two layers:
-      - `practice-hdr` + `practice-board` : overlay-friendly strip
-        that mirrors the singles/doubles visual language (single
-        name pill + DSEG7 digits for SET / BOARD / MISSES). This
-        is what OBS composites over the camera feed.
-      - `practice-details` : the full per-set × per-board matrix,
-        useful in the spectator popup for a deep dive. Hidden in
-        overlay mode via the LiveLobby-scoped .overlay-wrap CSS.
-    Grand-total misses is what a viewer wants to see live — a
-    high number means the drill is going poorly; low means the
-    player's dialling in. Board + set contextualise where in the
-    session they are.
+    Practice popup + overlay: one row per configured set, one box
+    per configured board within the row. Each box uses the same
+    dark-tile + DSEG7 visual language as the singles/doubles
+    scoreboard so the same overlay compositing CSS
+    (transparent tile, backdrop-blur, digit clamp) applies
+    without a mode-specific carve-out.
+
+    No active-cell highlight, no filled-vs-pending accent — the
+    boxes are boring by design; the numbers do the talking.
+
+    Set count = `meta.bestOf`; boards per set = `meta.maxBoards`.
+    `state.practiceBoards` provides miss values; missing cells
+    read as 0.
   -->
-  {@const boards = state.practiceBoards ?? []}
-  {@const grandTotal = boards.reduce(
-    (s, row) => s + row.reduce((r, v) => r + (v ?? 0), 0),
-    0,
-  )}
-  {@const currentSet = Math.max(1, state.board)}
+  {@const rawBoards = state.practiceBoards ?? []}
+  {@const setCount = Math.max(1, meta.bestOf ?? 1)}
+  {@const boardsPerSet = Math.max(1, meta.maxBoards ?? 1)}
+  {@const setTotalOf = (sIdx) =>
+    (rawBoards[sIdx] ?? []).reduce((s, v) => s + (v ?? 0), 0)}
 
   <header class="hdr practice-hdr">
     <div class="pill pill-a solo-pill">
       <span class="name">
         <span class="practice-badge" aria-label="Solo practice">SOLO</span>
-        {sideName('a')}
+        {sideName('a')}{#if sideNote('a')}<span class="solo-note">{sideNote('a')}</span>{/if}
       </span>
-      {#if sideNote('a')}<span class="note">{sideNote('a')}</span>{/if}
     </div>
   </header>
 
-  <section class="board practice-board">
-    <div class="col col-set">
-      <div class="lbl">SET</div>
-      <div class="digit digit-a">{currentSet}</div>
-    </div>
-    <div class="col col-board">
-      <div class="lbl">BOARD</div>
-      <div class="digit digit-mid">{state.board}</div>
-    </div>
-    <div class="col col-points">
-      <div class="lbl">MISSES</div>
-      <div class="digit digit-a">{pad2(grandTotal)}</div>
-    </div>
-  </section>
-
-  <div class="practice-view practice-details">
-    {#if boards.length > 0}
-      {@const cols = Math.max(...boards.map((row) => row.length), 0)}
-      {@const setTotal = (i) => (boards[i] ?? []).reduce((s, v) => s + (v ?? 0), 0)}
-      <div class="practice-scroll">
-        <table class="practice-table">
-          <thead>
-            <tr>
-              <th class="pt-set-h">SET</th>
-              {#each Array.from({ length: cols }, (_, i) => i) as bIdx (bIdx)}
-                <th>B{bIdx + 1}</th>
-              {/each}
-              <th class="pt-total-h">TOTAL</th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each boards as row, sIdx (sIdx)}
-              <tr class:pt-current={sIdx + 1 === state.board}>
-                <td class="pt-set">{sIdx + 1}</td>
-                {#each Array.from({ length: cols }, (_, i) => i) as bIdx (bIdx)}
-                  <td class="pt-cell">{row[bIdx] ?? 0}</td>
-                {/each}
-                <td class="pt-total">{setTotal(sIdx)}</td>
-              </tr>
-            {/each}
-          </tbody>
-          <tfoot>
-            <tr>
-              <td class="pt-grand-lbl" colspan={cols + 1}>Total missed</td>
-              <td class="pt-grand">{grandTotal}</td>
-            </tr>
-          </tfoot>
-        </table>
+  <section class="practice-rows" aria-label="Practice progress">
+    {#each Array.from({ length: setCount }, (_, i) => i) as sIdx (sIdx)}
+      <div class="prow">
+        <div class="prow-label">SET {sIdx + 1}</div>
+        <div class="prow-cells">
+          {#each Array.from({ length: boardsPerSet }, (_, i) => i) as bIdx (bIdx)}
+            {@const v = rawBoards[sIdx]?.[bIdx] ?? 0}
+            <!--
+              No B1/B2/… label above the digit: position within the
+              row already communicates the board number, and stacking
+              a label on top just adds noise to the overlay strip.
+              TOTAL still keeps its label since its role isn't
+              inferable from position alone.
+            -->
+            <div class="prow-cell col" aria-label={`Board ${bIdx + 1}`}>
+              <div class="digit digit-a">{v}</div>
+            </div>
+          {/each}
+        </div>
+        <div class="prow-total col">
+          <div class="lbl">TOTAL</div>
+          <div class="digit digit-mid">{setTotalOf(sIdx)}</div>
+        </div>
       </div>
-    {:else}
-      <p class="practice-empty">Warming up… no misses recorded yet.</p>
-    {/if}
-  </div>
+    {/each}
+  </section>
 {:else}
   <header class="hdr">
     <div
@@ -415,16 +387,6 @@
     padding: 0.25rem 0 0.75rem;
   }
 
-  /* Practice (solo drill) view: mirrors the umpire's own End-of-
-     Practice recap dialog. Player name + per-set × per-board table.
-     No DSEG7 digits, no side B. Fits inside the popup width; long
-     matches (many boards or sets) can scroll horizontally via
-     .practice-scroll. */
-  .practice-view {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-  }
   /*
    * Practice header: reuses the `.pill` / `.hdr` conventions from
    * the singles branch so overlay compositing rules apply
@@ -438,26 +400,39 @@
     padding: 0.2rem 0 0.5rem;
   }
   .practice-hdr .pill.solo-pill {
-    /* Wider than a per-side pill (no vs. mid column) so the name has
-       room to breathe. Cap at 32rem so it stays readable in overlay.
-       Overrides pill-a's `1fr auto` grid so the name spans full
-       width and centres — there's no accessories column in solo. */
-    max-width: 32rem;
+    /* Wider than a per-side pill (no vs. mid column) so the name +
+       country tag fit inline. Cap at 44rem so it stays readable in
+       overlay. Overrides pill-a's `1fr auto` grid so the name spans
+       full width and centres — there's no accessories column. */
+    max-width: 44rem;
     width: 100%;
     grid-template-columns: 1fr;
-    grid-template-areas: 'name' 'note';
+    grid-template-areas: 'name';
   }
   .practice-hdr .pill.solo-pill .name {
     text-align: center;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
   }
-  .practice-hdr .pill.solo-pill .note {
-    text-align: center;
+  /* Country/region tag placed INLINE with the name (solo has room
+     for both on one row — versus mode stacks them because two pills
+     compete for width). */
+  .solo-note {
+    color: var(--muted, #9aa0a6);
+    font-size: 0.75em;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    padding: 0.05rem 0.4rem;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 0.3rem;
   }
   .practice-badge {
     display: inline-flex;
     align-items: center;
     padding: 0.05rem 0.4rem;
-    margin-right: 0.4rem;
     background: rgba(79, 195, 247, 0.16);
     color: var(--side-a, #4fc3f7);
     border: 1px solid rgba(79, 195, 247, 0.4);
@@ -468,98 +443,72 @@
     font-weight: 800;
     vertical-align: middle;
   }
+
   /*
-   * 3-column DSEG7 strip for practice: SET · BOARD · MISSES. Reuses
-   * .board / .col / .digit tokens from the singles branch so overlay
-   * compositing overrides (background tile, compact padding, digit
-   * clamp) apply for free.
+   * Practice rows: one row per configured set, each row a strip
+   * of DSEG7 tiles for B1..Bn plus a TOTAL tile at the end.
+   * Boxes reuse `.col` (the singles/doubles tile class) directly
+   * so the tile background, borders, DSEG7 font, and overlay-
+   * mode CSS overrides (transparent + blur) all apply for free.
+   *
+   * Grid: [SET label | flex tile strip | TOTAL tile]. Tile strip
+   * uses auto-fit / minmax so 4-, 6-, 8-board setups all fit
+   * across a reasonable overlay width without horizontal scroll.
    */
-  .practice-board {
-    grid-template-columns: 1fr 1.2fr 1fr;
+  .practice-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 0.25rem 0 0.5rem;
+  }
+  .prow {
+    display: grid;
+    grid-template-columns: 3rem 1fr 3.4rem;
+    gap: 0.5rem;
+    align-items: stretch;
+  }
+  .prow-label {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--muted, #9aa0a6);
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .prow-cells {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(2.6rem, 1fr));
+    gap: 0.4rem;
+  }
+  /* Each `.prow-cell` inherits `.col` styling from the singles
+     branch (dark tile, centred content, DSEG7 digit). Override
+     digit font-size so cells sized for many-per-row don't blow
+     out; the singles clamp is designed for one big digit per pill. */
+  .prow-cell .digit {
+    font-size: clamp(1rem, 3vw, 1.4rem) !important;
+  }
+  .prow-total .digit {
+    font-size: clamp(1.1rem, 3.2vw, 1.5rem) !important;
+    color: var(--accent, #ffd54a);
+  }
+  .prow-total .lbl {
+    font-size: 0.55rem;
+    margin-bottom: 0.1rem;
+  }
+  @media (max-width: 520px) {
+    .prow {
+      grid-template-columns: 2.5rem 1fr 3rem;
+      gap: 0.35rem;
+    }
+    .prow-cells {
+      grid-template-columns: repeat(auto-fit, minmax(2.1rem, 1fr));
+      gap: 0.3rem;
+    }
+    .prow-label { font-size: 0.62rem; }
   }
 
-  .practice-scroll {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    background: #101010;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 0.5rem;
-  }
-  .practice-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-variant-numeric: tabular-nums;
-    font-size: 0.9rem;
-    min-width: 20rem;
-  }
-  .practice-table th,
-  .practice-table td {
-    padding: 0.45rem 0.5rem;
-    text-align: center;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-    border-right: 1px solid rgba(255, 255, 255, 0.04);
-  }
-  .practice-table th:last-child,
-  .practice-table td:last-child { border-right: none; }
-  .practice-table thead th {
-    background: #161616;
-    color: var(--muted, #9aa0a6);
-    font-size: 0.62rem;
-    text-transform: uppercase;
-    letter-spacing: 0.09em;
-    font-weight: 700;
-    padding: 0.3rem 0.5rem;
-  }
-  .practice-table .pt-set-h { color: var(--accent, #ffd54a); }
-  .practice-table .pt-total-h { color: var(--fg, #f5f5f5); }
-  .practice-table .pt-set {
-    color: var(--accent, #ffd54a);
-    font-weight: 800;
-    background: #0a0a0a;
-    width: 2.5rem;
-  }
-  .practice-table .pt-cell {
-    color: var(--side-a, #4fc3f7);
-    font-weight: 600;
-  }
-  .practice-table .pt-total {
-    color: var(--fg, #f5f5f5);
-    font-weight: 800;
-    background: #141414;
-  }
-  .practice-table tr.pt-current td {
-    background: rgba(255, 213, 74, 0.05);
-  }
-  .practice-table tr.pt-current td.pt-set {
-    background: rgba(255, 213, 74, 0.15);
-  }
-  .practice-table tfoot td {
-    background: rgba(255, 213, 74, 0.06);
-    border-top: 1px solid rgba(255, 213, 74, 0.35);
-    border-bottom: none;
-  }
-  .practice-table .pt-grand-lbl {
-    color: var(--muted, #9aa0a6);
-    font-size: 0.62rem;
-    text-transform: uppercase;
-    letter-spacing: 0.09em;
-    font-weight: 700;
-    text-align: right;
-    padding-right: 0.85rem;
-  }
-  .practice-table .pt-grand {
-    color: var(--accent, #ffd54a);
-    font-weight: 800;
-    font-size: 1rem;
-  }
-
-  .practice-empty {
-    text-align: center;
-    color: var(--muted, #9aa0a6);
-    font-size: 0.85rem;
-    padding: 1.5rem 0.5rem;
-    margin: 0;
-  }
   /* Pills use a 2-row CSS grid so `note` (country/region) tucks neatly
      under the name while BREAK + queen coin ride on the name's row.
 

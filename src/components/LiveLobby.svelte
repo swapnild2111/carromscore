@@ -912,16 +912,13 @@
     padding: 0.2rem 0 0 !important;
   }
   /* Overlay is the broadcast strip, not the deep-dive. Hide the
-     board-by-board scorecard, the practice details matrix, and the
-     legacy practice-recap class so they don't push the scoreboard
-     off-screen. Broadcast viewers can find the details in the
-     /live/?mid=xxx popup instead. */
-  :global(.overlay-wrap .scorecard),
-  :global(.overlay-wrap .practice-details),
-  :global(.overlay-wrap .practice-recap) {
+     board-by-board versus scorecard so it doesn't push the strip
+     off-screen. Broadcast viewers can find the full recap in the
+     /live/?mid=xxx popup instead. Practice mode's per-set rows
+     already fit compactly, so they render in overlay unchanged. */
+  :global(.overlay-wrap .scorecard) {
     display: none !important;
   }
-
   main {
     max-width: 800px;
     margin: 0 auto;
