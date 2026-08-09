@@ -108,22 +108,55 @@
 <div class="wrap" class:wrap-practice={meta.mode === 'practice'}>
 {#if meta.mode === 'practice'}
   <!--
-    Practice (solo drill): same shape as the umpire's own End-of-
-    Practice recap dialog. Compact table with player name at top,
-    per-set × per-board misses grid, TOTAL column per row, and a
-    grand-total footer. No big DSEG7 digits, no side B, no misleading
-    "BOARD" digit that's really a set index.
+    Practice mode has two layers:
+      - `practice-hdr` + `practice-board` : overlay-friendly strip
+        that mirrors the singles/doubles visual language (single
+        name pill + DSEG7 digits for SET / BOARD / MISSES). This
+        is what OBS composites over the camera feed.
+      - `practice-details` : the full per-set × per-board matrix,
+        useful in the spectator popup for a deep dive. Hidden in
+        overlay mode via the LiveLobby-scoped .overlay-wrap CSS.
+    Grand-total misses is what a viewer wants to see live — a
+    high number means the drill is going poorly; low means the
+    player's dialling in. Board + set contextualise where in the
+    session they are.
   -->
-  <div class="practice-view">
-    <div class="practice-name">
-      <span class="name-text">{sideName('a')}</span>
-      {#if sideNote('a')}<span class="name-note">{sideNote('a')}</span>{/if}
+  {@const boards = state.practiceBoards ?? []}
+  {@const grandTotal = boards.reduce(
+    (s, row) => s + row.reduce((r, v) => r + (v ?? 0), 0),
+    0,
+  )}
+  {@const currentSet = Math.max(1, state.board)}
+
+  <header class="hdr practice-hdr">
+    <div class="pill pill-a solo-pill">
+      <span class="name">
+        <span class="practice-badge" aria-label="Solo practice">SOLO</span>
+        {sideName('a')}
+      </span>
+      {#if sideNote('a')}<span class="note">{sideNote('a')}</span>{/if}
     </div>
-    {#if state.practiceBoards && state.practiceBoards.length > 0}
-      {@const boards = state.practiceBoards}
+  </header>
+
+  <section class="board practice-board">
+    <div class="col col-set">
+      <div class="lbl">SET</div>
+      <div class="digit digit-a">{currentSet}</div>
+    </div>
+    <div class="col col-board">
+      <div class="lbl">BOARD</div>
+      <div class="digit digit-mid">{state.board}</div>
+    </div>
+    <div class="col col-points">
+      <div class="lbl">MISSES</div>
+      <div class="digit digit-a">{pad2(grandTotal)}</div>
+    </div>
+  </section>
+
+  <div class="practice-view practice-details">
+    {#if boards.length > 0}
       {@const cols = Math.max(...boards.map((row) => row.length), 0)}
       {@const setTotal = (i) => (boards[i] ?? []).reduce((s, v) => s + (v ?? 0), 0)}
-      {@const grandTotal = boards.reduce((s, row) => s + row.reduce((r, v) => r + (v ?? 0), 0), 0)}
       <div class="practice-scroll">
         <table class="practice-table">
           <thead>
@@ -392,26 +425,57 @@
     flex-direction: column;
     gap: 0.5rem;
   }
-  .practice-name {
+  /*
+   * Practice header: reuses the `.pill` / `.hdr` conventions from
+   * the singles branch so overlay compositing rules apply
+   * automatically. Only one pill (solo player), stretched full-width
+   * on wide viewports for visual balance with the singles two-pill
+   * layout.
+   */
+  .practice-hdr {
     display: flex;
-    flex-direction: column;
-    gap: 0.15rem;
-    padding: 0.55rem 0.85rem;
-    background: #141414;
-    border: 1.5px solid rgba(79, 195, 247, 0.6);
-    border-radius: 0.7rem;
+    justify-content: center;
+    padding: 0.2rem 0 0.5rem;
   }
-  .practice-name .name-text {
-    font-weight: 700;
-    font-size: 1.05rem;
+  .practice-hdr .pill.solo-pill {
+    /* Wider than a per-side pill (no vs. mid column) so the name has
+       room to breathe. Cap at 32rem so it stays readable in overlay.
+       Overrides pill-a's `1fr auto` grid so the name spans full
+       width and centres — there's no accessories column in solo. */
+    max-width: 32rem;
+    width: 100%;
+    grid-template-columns: 1fr;
+    grid-template-areas: 'name' 'note';
+  }
+  .practice-hdr .pill.solo-pill .name {
+    text-align: center;
+  }
+  .practice-hdr .pill.solo-pill .note {
+    text-align: center;
+  }
+  .practice-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.05rem 0.4rem;
+    margin-right: 0.4rem;
+    background: rgba(79, 195, 247, 0.16);
     color: var(--side-a, #4fc3f7);
-    line-height: 1.15;
-    overflow-wrap: anywhere;
+    border: 1px solid rgba(79, 195, 247, 0.4);
+    border-radius: 999px;
+    font-size: 0.6rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    font-weight: 800;
+    vertical-align: middle;
   }
-  .practice-name .name-note {
-    color: var(--muted, #9aa0a6);
-    font-size: 0.72rem;
-    line-height: 1.1;
+  /*
+   * 3-column DSEG7 strip for practice: SET · BOARD · MISSES. Reuses
+   * .board / .col / .digit tokens from the singles branch so overlay
+   * compositing overrides (background tile, compact padding, digit
+   * clamp) apply for free.
+   */
+  .practice-board {
+    grid-template-columns: 1fr 1.2fr 1fr;
   }
 
   .practice-scroll {
