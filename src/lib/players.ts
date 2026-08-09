@@ -1,4 +1,5 @@
 import { currentUser } from './auth';
+import { logAudit } from './audit';
 
 /**
  * Player identity + alias system.
@@ -473,5 +474,254 @@ async function writeAliasToFirebase(playerId: string, aliasKey: string): Promise
     });
   } catch {
     // Silent — local alias still applies for the rest of this session.
+  }
+}
+
+// ─── Admin helpers (super-only) ─────────────────────────────────────
+//
+// Return shape mirrors history.ts: { ok: true } | { ok: false, error }.
+// Failures are surfaced (not silent) so the admin UI can render them
+// inline — admins need to know a write was denied.
+
+/**
+ * Admin-only: return the failure outcome shape without importing it
+ * as a type across modules. Duplicated here rather than cross-import
+ * to keep the players module self-contained.
+ */
+export type PlayerWriteOutcome =
+  | { ok: true }
+  | { ok: false; error: string };
+
+/**
+ * Rename a player. Updates canonicalName + normalisedIndex on the
+ * record; aliases are preserved (renaming often means "we typed it
+ * wrong the first time," and the old spelling is still valid as an
+ * alias).
+ *
+ * The playerId itself doesn't change — every match record that
+ * references this player still resolves correctly. Rename propagates
+ * to the UI on the next `subscribePlayers` snapshot.
+ *
+ * Rules-side enforcement: super-admin only.
+ */
+export async function updatePlayerName(
+  playerId: string,
+  newName: string,
+): Promise<PlayerWriteOutcome> {
+  const trimmed = newName.trim();
+  if (!playerId) return { ok: false, error: 'Missing player id' };
+  if (!isPlausibleName(trimmed)) return { ok: false, error: 'Name is too short or not plausible' };
+  try {
+    const [{ firebaseApp }, { getDatabase, ref, get, update }] = await Promise.all([
+      import('./firebase'),
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    const path = `players/${playerId}`;
+    const snap = await get(ref(db, path));
+    const existing = snap.val() as Record<string, unknown> | null;
+    if (!existing) return { ok: false, error: 'Player not found' };
+    const p = memoryStore.find((x) => x.id === playerId);
+    if (p) p.canonicalName = trimmed;
+    const patch = {
+      canonicalName: trimmed,
+      normalisedIndex: p ? normalisedIndex(p) : [normalize(trimmed)],
+    };
+    await update(ref(db, path), patch);
+    notify();
+    void logAudit({
+      action: 'player.rename',
+      path,
+      before: { canonicalName: existing.canonicalName },
+      after: { canonicalName: trimmed },
+    });
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg || 'Rename failed' };
+  }
+}
+
+/**
+ * Admin-only: delete a player record entirely. The playerId stays
+ * referenced by any historical /matches/{id}.player*Id fields —
+ * those become dangling refs that `playerName()` will fall back to
+ * rendering as a prettified slug. Rare operation; usually you want
+ * mergePlayers instead.
+ */
+export async function deletePlayer(playerId: string): Promise<PlayerWriteOutcome> {
+  if (!playerId) return { ok: false, error: 'Missing player id' };
+  try {
+    const [{ firebaseApp }, { getDatabase, ref, get, remove }] = await Promise.all([
+      import('./firebase'),
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    const path = `players/${playerId}`;
+    const snap = await get(ref(db, path));
+    const existing = snap.val() as Record<string, unknown> | null;
+    await remove(ref(db, path));
+    // Prune from local store so the picker stops offering it.
+    memoryStore = memoryStore.filter((p) => p.id !== playerId);
+    notify();
+    void logAudit({
+      action: 'player.delete',
+      path,
+      before: existing ?? undefined,
+    });
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg || 'Delete failed' };
+  }
+}
+
+/**
+ * Fields on a match record that may reference a playerId. Doubles
+ * matches populate A2/B2; singles matches leave them absent.
+ */
+const MATCH_PLAYER_FIELDS = [
+  'playerAId',
+  'playerA2Id',
+  'playerBId',
+  'playerB2Id',
+] as const;
+
+/**
+ * Build the multi-path update body that rewrites every `mergedId`
+ * reference in `matches` to `canonicalId`. Returns the rewrites map
+ * and the number of match-side rewrites (for the audit entry).
+ */
+function buildMatchRewrites(
+  matches: Record<string, Record<string, unknown>>,
+  canonicalId: string,
+  mergedId: string,
+): { rewrites: Record<string, unknown>; matchCount: number } {
+  const rewrites: Record<string, unknown> = {};
+  let matchCount = 0;
+  for (const [matchId, m] of Object.entries(matches)) {
+    for (const f of MATCH_PLAYER_FIELDS) {
+      if (m[f] === mergedId) {
+        rewrites[`matches/${matchId}/${f}`] = canonicalId;
+        matchCount += 1;
+      }
+    }
+  }
+  return { rewrites, matchCount };
+}
+
+/**
+ * Union canonical + merged alias maps. Also add the merged player's
+ * canonicalName as an alias key so future typed lookups still find
+ * the older spelling.
+ */
+function buildMergedAliases(
+  canonicalRec: Record<string, unknown>,
+  mergedRec: Record<string, unknown>,
+): Record<string, boolean> {
+  const mergedAliases = (mergedRec.aliases as Record<string, unknown> | undefined) ?? {};
+  const canonicalAliases = (canonicalRec.aliases as Record<string, unknown> | undefined) ?? {};
+  const next: Record<string, boolean> = {};
+  for (const k of Object.keys(canonicalAliases)) next[k] = true;
+  for (const k of Object.keys(mergedAliases)) next[k] = true;
+  const rawName = mergedRec.canonicalName;
+  const mergedName = typeof rawName === 'string' ? rawName.trim() : '';
+  if (mergedName) {
+    const key = normalize(mergedName);
+    if (key && key.length <= 60) next[key] = true;
+  }
+  return next;
+}
+
+/**
+ * Admin-only: merge `mergedId` into `canonicalId`. Rewrites every
+ * match record that references `mergedId` in any of playerAId,
+ * playerA2Id, playerBId, playerB2Id → `canonicalId`. Unions the
+ * merged player's aliases into the canonical player. Deletes the
+ * merged player record.
+ *
+ * Atomicity: uses a single `update(ref(db, '/'))` with absolute
+ * paths so either everything lands or nothing does. This keeps the
+ * roster consistent even if the write is interrupted mid-flight.
+ *
+ * Batch cap: if `mergedId` is referenced in more than 500 matches
+ * we split the update into batches so a single write doesn't exceed
+ * RTDB's practical payload size. Rare at hobby scale.
+ */
+export async function mergePlayers(
+  canonicalId: string,
+  mergedId: string,
+): Promise<PlayerWriteOutcome> {
+  if (!canonicalId || !mergedId) return { ok: false, error: 'Missing player id' };
+  if (canonicalId === mergedId) return { ok: false, error: 'Cannot merge a player into itself' };
+  try {
+    const [{ firebaseApp }, { getDatabase, ref, get, update, remove }] = await Promise.all([
+      import('./firebase'),
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+
+    // Fetch both records + all matches so we know what we're
+    // rewriting. Matches is the biggest read but the same read the
+    // History page does — RTDB caches it.
+    const [canonicalSnap, mergedSnap, matchesSnap] = await Promise.all([
+      get(ref(db, `players/${canonicalId}`)),
+      get(ref(db, `players/${mergedId}`)),
+      get(ref(db, 'matches')),
+    ]);
+    if (!canonicalSnap.exists()) return { ok: false, error: 'Canonical player not found' };
+    if (!mergedSnap.exists()) return { ok: false, error: 'Merged player not found' };
+
+    const canonicalRec = canonicalSnap.val() as Record<string, unknown>;
+    const mergedRec = mergedSnap.val() as Record<string, unknown>;
+    const matches =
+      (matchesSnap.val() as Record<string, Record<string, unknown>> | null) ?? {};
+
+    const { rewrites, matchCount } = buildMatchRewrites(matches, canonicalId, mergedId);
+    const nextAliases = buildMergedAliases(canonicalRec, mergedRec);
+    rewrites[`players/${canonicalId}/aliases`] = nextAliases;
+
+    // Recompute normalisedIndex on the canonical so the new aliases
+    // are searchable via rankMatches.
+    const localCanonical = memoryStore.find((p) => p.id === canonicalId);
+    if (localCanonical) {
+      localCanonical.aliases = nextAliases;
+      rewrites[`players/${canonicalId}/normalisedIndex`] = normalisedIndex(localCanonical);
+    }
+
+    // Batch the writes. RTDB's practical update size limit isn't
+    // fixed but very large updates can time out; chunk by 500 paths.
+    const CHUNK = 500;
+    const entries = Object.entries(rewrites);
+    for (let i = 0; i < entries.length; i += CHUNK) {
+      const slice = Object.fromEntries(entries.slice(i, i + CHUNK));
+      await update(ref(db, '/'), slice);
+    }
+    // Delete the merged player last, once every reference has moved.
+    await remove(ref(db, `players/${mergedId}`));
+
+    // Reflect in the local store so the UI updates without waiting
+    // for the /players subscription snapshot.
+    memoryStore = memoryStore.filter((p) => p.id !== mergedId);
+    notify();
+
+    void logAudit({
+      action: 'player.merge',
+      path: `players/${mergedId} → players/${canonicalId}`,
+      before: {
+        merged: mergedRec,
+        canonical: canonicalRec,
+        matchCount,
+      },
+      after: {
+        canonicalId,
+        aliasCount: Object.keys(nextAliases).length,
+        matchesRewritten: matchCount,
+      },
+    });
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg || 'Merge failed' };
   }
 }

@@ -1,4 +1,5 @@
 import { currentUser } from './auth';
+import { logAudit } from './audit';
 
 /**
  * Live broadcast — one-way sync of a match's live state from an
@@ -291,5 +292,43 @@ export async function subscribeAllLive(
     return unsub;
   } catch {
     return () => {};
+  }
+}
+
+// ─── Admin helpers (super-only) ─────────────────────────────────────
+
+export type LiveWriteOutcome =
+  | { ok: true }
+  | { ok: false; error: string };
+
+/**
+ * Admin-only: delete a stuck live record. Used by the /admin/ Live
+ * cleanup tab to kill records where the umpire closed the browser
+ * without hitting End, and the onDisconnect handler didn't fire
+ * (e.g. force-quit, connectivity blip). Anonymous delete is also
+ * permitted by the rule as the ephemeral fallback for
+ * armLiveCleanup, but this admin path is explicit + audited.
+ */
+export async function deleteLive(mid: string): Promise<LiveWriteOutcome> {
+  if (!mid) return { ok: false, error: 'Missing mid' };
+  try {
+    const [{ firebaseApp }, { getDatabase, ref, get, remove }] = await Promise.all([
+      import('./firebase'),
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    const path = `live/${mid}`;
+    const snap = await get(ref(db, path));
+    const existing = snap.val() as Record<string, unknown> | null;
+    await remove(ref(db, path));
+    void logAudit({
+      action: 'live.delete',
+      path,
+      before: existing ?? undefined,
+    });
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg || 'Delete failed' };
   }
 }

@@ -43,6 +43,11 @@
     dropUp = false,
   }: Props = $props();
 
+  /** Resolved at component load; used to build the /admin/ link.
+   *  Kept module-level (not reactive) — the base URL doesn't change
+   *  during a session and Astro inlines it at build time. */
+  const adminBase: string = import.meta.env.BASE_URL;
+
   let user = $state<AuthUser | null>(null);
   let role = $state<Role | null>(null);
   let menuOpen = $state(false);
@@ -168,6 +173,19 @@
           </div>
           {#if user.email}<div class="dropdown-email">{user.email}</div>{/if}
         </div>
+        {#if role?.isSuper}
+          <!--
+            Super-admin gets a link to the global /admin/ page.
+            Anchor uses import.meta.env.BASE_URL so it works at both
+            /carromscore/admin/ and /carromscore/beta/admin/.
+          -->
+          <a
+            class="dropdown-item"
+            href={`${adminBase}admin/`}
+            role="menuitem"
+            onclick={() => (menuOpen = false)}
+          >Open admin panel ⇗</a>
+        {/if}
         <button type="button" class="dropdown-item dropdown-item-danger" onclick={onSignOut} role="menuitem">
           Sign out
         </button>

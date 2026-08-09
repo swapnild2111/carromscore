@@ -81,7 +81,7 @@
     "live": {
       ".read": true,
       "$mid": {
-        ".write": "$mid.length >= 4 && $mid.length <= 12 && newData.exists()",
+        ".write": "$mid.length >= 4 && $mid.length <= 12",
         ".validate": "newData.hasChildren(['updatedAt', 'liveState']) && newData.child('updatedAt').isNumber() && newData.child('updatedAt').val() <= now && newData.child('updatedAt').val() > now - 60000",
         "matchId":   { ".validate": "newData.isString()" },
         "updatedAt": { ".validate": "newData.isNumber()" },
@@ -89,6 +89,23 @@
         "liveState": { ".validate": "newData.hasChildren()" },
         "createdBy": { ".validate": "newData.isString() && newData.val().length <= 64" },
         "$other":    { ".validate": false }
+      }
+    },
+
+    "audit": {
+      ".read": "auth != null && root.child('adminRoles').child(auth.uid).val() == 'super'",
+      ".indexOn": ["when", "who"],
+      "$id": {
+        ".write": "auth != null && !data.exists() && newData.exists()",
+        ".validate": "newData.hasChildren(['who', 'when', 'action', 'path']) && newData.child('who').isString() && newData.child('who').val() == auth.uid && newData.child('when').isNumber() && newData.child('when').val() <= now && newData.child('when').val() > now - 60000 && newData.child('action').isString() && newData.child('action').val().length <= 40 && newData.child('path').isString() && newData.child('path').val().length <= 200",
+        "who":      { ".validate": "newData.isString() && newData.val().length <= 64" },
+        "whoEmail": { ".validate": "newData.isString() && newData.val().length <= 128" },
+        "when":     { ".validate": "newData.isNumber()" },
+        "action":   { ".validate": "newData.isString() && newData.val().length <= 40" },
+        "path":     { ".validate": "newData.isString() && newData.val().length <= 200" },
+        "before":   { ".validate": true },
+        "after":    { ".validate": true },
+        "$other":   { ".validate": false }
       }
     }
   }

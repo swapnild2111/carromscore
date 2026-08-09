@@ -31,6 +31,7 @@ import {
   type Player,
 } from './players';
 import { currentUser } from './auth';
+import { logAudit } from './audit';
 
 /**
  * The full identity block passed from ScoreBoard's endMatch() to
@@ -496,6 +497,16 @@ export async function updateMatch(
 
     const next = applyMatchPatch(existing, patch);
     await set(ref(db, path), next);
+    // Mutate-then-audit: the record has been persisted successfully,
+    // so we log the diff for the /admin/ Audit tab. Silent-on-failure
+    // inside logAudit — a rare write failure produces a console.warn
+    // but doesn't roll back the mutation.
+    void logAudit({
+      action: 'match.update',
+      path,
+      before: existing,
+      after: next,
+    });
     return { ok: true };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -516,12 +527,23 @@ export async function updateMatch(
 export async function deleteMatch(matchId: string): Promise<WriteOutcome> {
   if (!matchId) return { ok: false, error: 'Missing match id' };
   try {
-    const [{ firebaseApp }, { getDatabase, ref, remove }] = await Promise.all([
+    const [{ firebaseApp }, { getDatabase, ref, get, remove }] = await Promise.all([
       import('./firebase'),
       import('firebase/database'),
     ]);
     const db = getDatabase(firebaseApp());
-    await remove(ref(db, `matches/${matchId}`));
+    const path = `matches/${matchId}`;
+    // Snapshot the current record BEFORE deleting so the audit entry
+    // carries the record shape (useful when someone asks "what did
+    // that Silver Cup match look like?" months later).
+    const snap = await get(ref(db, path));
+    const existing = snap.val() as Record<string, unknown> | null;
+    await remove(ref(db, path));
+    void logAudit({
+      action: 'match.delete',
+      path,
+      before: existing ?? undefined,
+    });
     return { ok: true };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
