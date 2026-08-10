@@ -480,6 +480,10 @@
     font-weight: 700;
     letter-spacing: 0.06em;
     text-transform: uppercase;
+    /* Compact chip-style so the SET label reads as a row-label, not
+       a digit cell. Distinct from the tile background of the cells. */
+    background: transparent;
+    border-radius: 0.4rem;
   }
   .prow-cells {
     display: grid;

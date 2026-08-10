@@ -965,16 +965,29 @@
     max-width: 1600px;
     width: 100%;
     margin: 0 auto;
-    padding: 0.35rem 0.6rem 0.5rem;
+    /* Right padding reserves a safe-zone (~200px on 1080p) for stream-
+       software watermarks — Prism Live's brand stamp, OBS/Twitch/YouTube
+       recording indicators — that sit in the bottom-right corner. The
+       overlay's final cells (TOTAL for practice, side-B pill for versus)
+       stopped short of the watermark instead of being obscured by it. */
+    padding: 0.35rem 12rem 0.5rem 0.6rem;
+  }
+  @media (max-width: 520px) {
+    .overlay-wrap {
+      /* Watermarks scale down proportionally on smaller streams;
+         180px on 1920px = 10rem on 520px. Also reduce so mobile
+         viewers don't lose too much horizontal real estate. */
+      padding: 0.35rem 4rem 0.5rem 0.6rem;
+    }
   }
   /* Compact overrides for LiveScoreboardView when rendered inside
      .overlay-wrap. `:global` because the child component's styles are
      scoped and we can't otherwise reach them. */
   :global(.overlay-wrap .pill) {
-    padding: 0.35rem 0.55rem !important;
-    background: rgba(15, 15, 15, 0.75) !important;
-    backdrop-filter: blur(4px);
-    -webkit-backdrop-filter: blur(4px);
+    padding: 0.45rem 0.75rem !important;
+    background: rgba(10, 10, 10, 0.92) !important;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
   }
   :global(.overlay-wrap .name) {
     font-size: 1.5rem !important;
@@ -1005,13 +1018,41 @@
     padding: 0.15rem 0 !important;
   }
   :global(.overlay-wrap .col) {
-    background: rgba(15, 15, 15, 0.75) !important;
-    backdrop-filter: blur(4px);
-    -webkit-backdrop-filter: blur(4px);
-    padding: 0.3rem 0.2rem !important;
+    /* Nearly opaque so the DSEG7 digit reads on any camera
+       background. Was 0.75 originally — viewers on Prism's browser
+       source reported the tint blended into the carrom-table wood
+       and the digits looked flat. Backdrop-blur is still there as
+       a belt-and-braces measure for cameras where the wood grain
+       is high-contrast. */
+    background: rgba(10, 10, 10, 0.92) !important;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    padding: 0.6rem 0.4rem !important;
+    border: 1px solid rgba(255, 255, 255, 0.08);
   }
   :global(.overlay-wrap .digit) {
     font-size: clamp(1.4rem, 4vw, 2.4rem) !important;
+  }
+  /* Practice overlay: viewers reported the digits were unreadable
+     on phone-sized viewer windows. Bump every practice cell's digit
+     with a wider clamp range so it dominates the strip on any canvas
+     size. Text-shadow provides an outline that reads even when the
+     tile background is defeated by an unusually bright feed. */
+  :global(.overlay-wrap .prow-cell .digit) {
+    /* 3rem floor for tiny viewer windows, 8vw scaling for mid-size,
+       6rem cap for high-DPI broadcast canvases. On 1920px stream
+       8vw ≈ 154px; the cap prevents runaway growth. */
+    font-size: clamp(3rem, 8vw, 6rem) !important;
+    line-height: 1 !important;
+    text-shadow: 0 0 6px rgba(0, 0, 0, 0.9), 0 2px 4px rgba(0, 0, 0, 0.9) !important;
+  }
+  :global(.overlay-wrap .prow-total .digit) {
+    font-size: clamp(3.4rem, 8.5vw, 6.6rem) !important;
+    line-height: 1 !important;
+    text-shadow: 0 0 6px rgba(0, 0, 0, 0.9), 0 2px 4px rgba(0, 0, 0, 0.9) !important;
+  }
+  :global(.overlay-wrap .prow-label) {
+    font-size: clamp(0.75rem, 1.4vw, 1rem) !important;
   }
   :global(.overlay-wrap .lbl) {
     font-size: 0.55rem !important;
