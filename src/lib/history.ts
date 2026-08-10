@@ -55,7 +55,7 @@ export type MatchIdentityInput = {
  */
 export type MatchResultInput = {
   mode: 'singles' | 'doubles' | 'practice';
-  winner: 'a' | 'b' | null;
+  winner: 'a' | 'b' | 'draw' | null;
   sideA: { points: number; sets: number };
   sideB: { points: number; sets: number };
   board: number;
@@ -233,7 +233,7 @@ export type MatchRecord = {
     format?: string;
   };
   result?: {
-    winner?: 'a' | 'b' | null;
+    winner?: 'a' | 'b' | 'draw' | null;
     finalPointsA?: number;
     finalPointsB?: number;
     setsA?: number;
@@ -255,6 +255,14 @@ export type MatchRecord = {
    * the lobby, and gets the shorter (3-month) retention.
    */
   tournament?: string;
+  /**
+   * Firebase Auth uid of whichever signed-in user recorded the match
+   * (via finishMatch). Absent on records written anonymously or
+   * before the auth-stamping was added. Used to gate the "Delete
+   * this match" affordance on /live/ — only the creator sees it,
+   * and only the creator's write passes the RTDB rule.
+   */
+  createdBy?: string;
   startedAt?: number;
   endedAt?: number;
 };
@@ -367,7 +375,7 @@ export async function loadHistory(): Promise<MatchRecord[]> {
  */
 export type MatchPatch = {
   result?: {
-    winner?: 'a' | 'b' | null;
+    winner?: 'a' | 'b' | 'draw' | null;
     finalPointsA?: number;
     finalPointsB?: number;
     setsA?: number;
@@ -541,6 +549,42 @@ export async function deleteMatch(matchId: string): Promise<WriteOutcome> {
     await remove(ref(db, path));
     void logAudit({
       action: 'match.delete',
+      path,
+      before: existing ?? undefined,
+    });
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg || 'Delete failed' };
+  }
+}
+
+/**
+ * User-scoped: delete a match the signed-in caller created themselves.
+ * Same wire shape as `deleteMatch` but the audit action is
+ * `match.self_delete` so the log clearly distinguishes user-initiated
+ * removals from admin/organiser sweeps.
+ *
+ * Ownership is enforced by the RTDB rule at /matches/$id/.write —
+ * this helper is a UI convenience for the "Delete this match" button
+ * on the /live/ lobby's match sheet. If the caller isn't the owner
+ * (or isn't signed in at all), the RTDB write returns a
+ * permission-denied error and we surface it as a failed WriteOutcome.
+ */
+export async function selfDeleteMatch(matchId: string): Promise<WriteOutcome> {
+  if (!matchId) return { ok: false, error: 'Missing match id' };
+  try {
+    const [{ firebaseApp }, { getDatabase, ref, get, remove }] = await Promise.all([
+      import('./firebase'),
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    const path = `matches/${matchId}`;
+    const snap = await get(ref(db, path));
+    const existing = snap.val() as Record<string, unknown> | null;
+    await remove(ref(db, path));
+    void logAudit({
+      action: 'match.self_delete',
       path,
       before: existing ?? undefined,
     });

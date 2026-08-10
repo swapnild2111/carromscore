@@ -24,6 +24,7 @@ import { currentUser } from './auth';
 export type AuditAction =
   | 'match.update'
   | 'match.delete'
+  | 'match.self_delete'
   | 'player.rename'
   | 'player.merge'
   | 'player.delete'

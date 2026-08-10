@@ -23,6 +23,7 @@
   import {
     loadHistory,
     playerName,
+    selfDeleteMatch,
     sweepOldMatches,
     type MatchRecord,
   } from '../lib/history';
@@ -32,6 +33,7 @@
   import SignInButton from './SignInButton.svelte';
   import MatchEditModal from './MatchEditModal.svelte';
   import { subscribeCurrentUserRole, type Role } from '../lib/roles';
+  import { currentUser } from '../lib/auth';
 
   const base: string = import.meta.env.BASE_URL;
   const STALE_WINDOW_MS = 4 * 60 * 60 * 1000;
@@ -219,6 +221,55 @@
     return role.organiserOf.has(key);
   }
 
+  /**
+   * Whether the currently-signed-in user can self-delete this record.
+   * Independent of the admin edit predicate — a super or organiser
+   * uses the ✎ pencil; everyone else only sees "Delete this match"
+   * if they were the caller who wrote `createdBy` on the record.
+   * UI convenience — the RTDB rule is the enforcement layer.
+   */
+  function canSelfDelete(m: MatchRecord | null): boolean {
+    if (!m) return false;
+    if (canEditMatch(m)) return false; // admin uses the pencil affordance
+    const uid = currentUser()?.uid;
+    if (!uid) return false;
+    return m.createdBy === uid;
+  }
+
+  // Self-delete UI state. Kept close to the sheet-dialog markup below.
+  // `selfDeleteConfirm` toggles the inline confirmation input; the
+  // submit is gated on the user typing DELETE exactly.
+  let selfDeleteConfirm = $state(false);
+  let selfDeleteInput = $state('');
+  let selfDeleteBusy = $state(false);
+  let selfDeleteError = $state<string | null>(null);
+  function resetSelfDeleteState() {
+    selfDeleteConfirm = false;
+    selfDeleteInput = '';
+    selfDeleteBusy = false;
+    selfDeleteError = null;
+  }
+  async function commitSelfDelete(matchId: string) {
+    if (selfDeleteInput.trim().toUpperCase() !== 'DELETE') {
+      selfDeleteError = 'Type DELETE to confirm.';
+      return;
+    }
+    selfDeleteBusy = true;
+    selfDeleteError = null;
+    const outcome = await selfDeleteMatch(matchId);
+    selfDeleteBusy = false;
+    if (!outcome.ok) {
+      selfDeleteError = outcome.error ?? 'Delete failed.';
+      return;
+    }
+    // Success → close the sheet, drop the record from local state,
+    // then reload History from Firebase to reconcile.
+    resetSelfDeleteState();
+    openPopup = null;
+    matches = matches.filter((m) => m.id !== matchId);
+    void loadHistory().then((m) => (matches = m));
+  }
+
   function openEdit(m: MatchRecord, e: Event) {
     // Cards are big <button> elements that also open the popup on
     // click. Stop the event so opening the pencil doesn't also
@@ -315,6 +366,7 @@
   }
   function closePopup() {
     openPopup = null;
+    resetSelfDeleteState();
   }
 
   function onDialogClick(e: MouseEvent) {
@@ -810,6 +862,52 @@
       </header>
       <div class="sheet-body">
         <LiveScoreboardView record={popupRecord} />
+        {#if openPopup?.source === 'match' && canSelfDelete(openMatchRecord)}
+          {@const rec = openMatchRecord}
+          {#if rec}
+            <div class="self-delete-zone">
+              {#if !selfDeleteConfirm}
+                <button
+                  type="button"
+                  class="self-delete-btn"
+                  onclick={() => (selfDeleteConfirm = true)}
+                >
+                  <span aria-hidden="true">🗑</span> Delete this match
+                </button>
+                <p class="self-delete-hint">You recorded this match. Removing it takes it out of History for everyone.</p>
+              {:else}
+                <p class="self-delete-prompt">Type <strong>DELETE</strong> to confirm removal. This can't be undone.</p>
+                <div class="self-delete-form">
+                  <input
+                    type="text"
+                    class="self-delete-input"
+                    bind:value={selfDeleteInput}
+                    placeholder="DELETE"
+                    aria-label="Type DELETE to confirm"
+                    autocomplete="off"
+                    autocapitalize="characters"
+                    disabled={selfDeleteBusy}
+                  />
+                  <button
+                    type="button"
+                    class="self-delete-cancel"
+                    onclick={resetSelfDeleteState}
+                    disabled={selfDeleteBusy}
+                  >Cancel</button>
+                  <button
+                    type="button"
+                    class="self-delete-confirm"
+                    onclick={() => commitSelfDelete(rec.id)}
+                    disabled={selfDeleteBusy || selfDeleteInput.trim().toUpperCase() !== 'DELETE'}
+                  >{selfDeleteBusy ? 'Deleting…' : 'Delete'}</button>
+                </div>
+                {#if selfDeleteError}
+                  <p class="self-delete-error">{selfDeleteError}</p>
+                {/if}
+              {/if}
+            </div>
+          {/if}
+        {/if}
       </div>
     </div>
   {/if}
@@ -1466,6 +1564,106 @@
     transition: background 0.15s, border-color 0.15s;
   }
   .sheet-close:hover { background: #1a1a1a; border-color: #333; }
+
+  /* Self-delete zone at the bottom of the match sheet — muted so it
+     doesn't distract from the recap, but reachable when the caller
+     recognises "this is my match, I want to remove it". */
+  .self-delete-zone {
+    margin-top: 1.5rem;
+    padding: 0.9rem 1rem 1rem;
+    border-top: 1px solid #1f1f1f;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+  .self-delete-btn {
+    align-self: flex-start;
+    background: transparent;
+    border: 1px solid rgba(239, 83, 80, 0.35);
+    color: rgba(239, 83, 80, 0.9);
+    padding: 0.4rem 0.85rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    cursor: pointer;
+    font-family: inherit;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+  }
+  .self-delete-btn:hover {
+    background: rgba(239, 83, 80, 0.08);
+    border-color: rgba(239, 83, 80, 0.7);
+    color: var(--danger, #ef5350);
+  }
+  .self-delete-hint {
+    margin: 0;
+    color: var(--muted, #9aa0a6);
+    font-size: 0.7rem;
+    line-height: 1.4;
+  }
+  .self-delete-prompt {
+    margin: 0;
+    color: var(--fg, #f5f5f5);
+    font-size: 0.8rem;
+    line-height: 1.4;
+  }
+  .self-delete-prompt strong { color: var(--danger, #ef5350); letter-spacing: 0.06em; }
+  .self-delete-form {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+  .self-delete-input {
+    flex: 1 1 8rem;
+    min-width: 8rem;
+    background: #0f0f0f;
+    border: 1px solid #262626;
+    color: var(--fg, #f5f5f5);
+    padding: 0.45rem 0.7rem;
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 0.85rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .self-delete-input:focus {
+    outline: none;
+    border-color: rgba(239, 83, 80, 0.6);
+  }
+  .self-delete-cancel,
+  .self-delete-confirm {
+    padding: 0.45rem 0.85rem;
+    border-radius: 6px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+    font-family: inherit;
+    border: 1px solid;
+    transition: opacity 0.15s;
+  }
+  .self-delete-cancel {
+    background: transparent;
+    border-color: #262626;
+    color: var(--fg, #f5f5f5);
+  }
+  .self-delete-cancel:hover { background: #1a1a1a; }
+  .self-delete-confirm {
+    background: rgba(239, 83, 80, 0.9);
+    border-color: rgba(239, 83, 80, 0.9);
+    color: #0b0b0b;
+  }
+  .self-delete-confirm:hover { background: var(--danger, #ef5350); }
+  .self-delete-confirm:disabled,
+  .self-delete-cancel:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+  .self-delete-error {
+    margin: 0.1rem 0 0;
+    color: var(--danger, #ef5350);
+    font-size: 0.75rem;
+  }
 
   @keyframes pulse {
     0%, 100% { opacity: 1; }

@@ -24,6 +24,20 @@ Anyone signed in but without either role gets a "not an admin"
 dialog when they tap the Admin link. Anonymous users see no admin
 surface at all.
 
+### Self-service for signed-in users
+
+Any signed-in user (no role required) can **self-delete a match they
+recorded themselves**. `finishMatch` stamps `createdBy: auth.uid` on
+every archived record when the caller is signed in, and the RTDB
+rule on `/matches/$id/.write` includes a
+`data.child('createdBy').val() == auth.uid` branch. In the /live/
+lobby's match sheet, users see a small "Delete this match" affordance
+on their own records only. Requires typing DELETE to confirm.
+
+Self-editing is **not** supported — score disputes still go through
+organisers. Matches recorded before the user signed in have no
+`createdBy` and are not self-deletable.
+
 Rules are the enforcement layer: `database.rules.json` — every
 mutation rule checks the role. UI gating is UX only.
 
@@ -118,12 +132,20 @@ Merge is the most valuable admin action — use it whenever you spot
   "Default" bucket. Retention shortens from 1 year → 3 months for
   those matches.
 
-### Live cleanup (`/admin/` → Live cleanup tab)
+### Live matches (`/admin/` → Live matches tab)
 
-- Lists `/live/{mid}` records that look stuck: no updates in 4+
-  hours, or no `matchResult` for 2+ hours.
+- Lists every `/live/{mid}` record in Firebase. Filter chips at the
+  top switch between:
+  - **All** — every live record (active broadcasts + stuck ones).
+  - **Stuck only** — records with no updates in 4+ hours, or no
+    `matchResult` for 2+ hours. The pre-v2.0 default view, retained
+    as a filter option.
+- Each row is tagged either **LIVE** (active, recent updates) or
+  **stuck** so admins can distinguish at a glance.
 - **Delete** / **Bulk delete** — multi-select rows, then delete
-  all at once. `/matches` is unaffected.
+  all at once. Only the ephemeral `/live/{mid}` record is removed;
+  the archived `/matches` record (if the umpire tapped End) is
+  unaffected. To delete archives, use History cleanup.
 - **Auto-sweep:** in addition to manual cleanup, any signed-in
   admin's page load triggers a passive sweep that batch-deletes
   up to 50 stuck records older than 4h. Cheap; runs silently. See
