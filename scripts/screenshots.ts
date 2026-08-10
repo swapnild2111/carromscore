@@ -60,6 +60,11 @@ async function main() {
   await p1.locator('input[placeholder="Country, state, club…"]').first().fill(NOTE_A);
   await p1.locator('input[placeholder="Type a name…"]').nth(1).fill(PLAYER_B);
   await p1.locator('input[placeholder="Country, state, club…"]').nth(1).fill(NOTE_B);
+  // v2: fill the Tournament tag field too
+  const tournamentInput = p1.locator('label.tournament-input input');
+  if (await tournamentInput.count()) {
+    await tournamentInput.fill('Silver Cup 2026');
+  }
   await p1.locator('body').click({ position: { x: 10, y: 10 }, force: true });  // dismiss any suggestion
   await p1.waitForTimeout(200);
   await p1.screenshot({ path: `${OUT}/02-setup-filled.png` });
@@ -102,37 +107,87 @@ async function main() {
           await new Promise((r) => setTimeout(r, 4));
         }
       };
-      await tap('.col.side-a.pts', 12);
-      await tap('.col.side-b.pts', 8);
-      await tap('.col.mid.brd', 4);
+      // v2: BOARD is 0-indexed. Complete two boards by advancing BOARD +1
+      // twice, marking a queen holder before each advance (guard requires it).
+      // Then leave the third board mid-play: A 12, B 8, queen on A.
+      // Queen coin uses onclick (not use:swipeAdjust like the score columns),
+      // so it needs a real .click() — dispatched PointerEvents are ignored.
+      const tapCoin = async () => {
+        const c = document.querySelector('.head-side .coin-btn');
+        if (c && !c.classList.contains('coin-red')) {
+          c.click();
+          await new Promise((r) => setTimeout(r, 40));
+        }
+      };
+      // Board 1 → mark queen → BOARD +1
+      await tap('.col.side-a.pts', 4);
+      await tap('.col.side-b.pts', 3);
+      await tapCoin();
+      await tap('.col.mid.brd', 1);
+      // Board 2 → mark queen → BOARD +1
+      await tap('.col.side-a.pts', 5);
+      await tap('.col.side-b.pts', 2);
+      await tapCoin();
+      await tap('.col.mid.brd', 1);
+      // Board 3 mid-play: A 12 (already at 9, add 3), B 8 (already at 5, add 3), queen on A.
+      await tap('.col.side-a.pts', 3);
+      await tap('.col.side-b.pts', 3);
+      await tapCoin();
     })();
   `;
-  // Simulate a mid-set: A 12, B 8, board 4.
+  // Simulate a mid-set: A 12, B 8, queen on A, 2 boards done + one in progress.
   await p2.evaluate(BUMP_SCRIPT);
   await p2.waitForTimeout(200);
   await p2.screenshot({ path: `${OUT}/04-score-midset.png` });
   console.log('04-score-midset.png');
 
-  // Push side A from 12 to 22 to fire the queen-lockout ticker.
+  // 05: queen-guard toast. Return queen to table (both coins grey), then
+  // add fresh points and tap BOARD +1 — the app blocks with the guard toast.
   await p2.evaluate(`
     (async () => {
-      const btn = document.querySelector('.col.side-a.pts');
-      for (let i = 0; i < 10; i += 1) {
-        btn.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, isPrimary: true, clientX: 0, clientY: 0 }));
-        btn.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, isPrimary: true, clientX: 0, clientY: 0 }));
-        await new Promise((r) => setTimeout(r, 4));
+      // Un-toggle the currently-red coin so queen is null.
+      const red = document.querySelector('.head-side .coin-btn.coin-red');
+      if (red) {
+        red.click();
+        await new Promise((r) => setTimeout(r, 40));
       }
+      // Add a couple of fresh points so pointsAtBoardStart < current, otherwise
+      // BOARD +1 would simply skip the guard (no in-progress score to snapshot).
+      const bumpPoints = (sel, n) => {
+        const btn = document.querySelector(sel);
+        for (let i = 0; i < n; i += 1) {
+          btn.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, isPrimary: true, clientX: 0, clientY: 0 }));
+          btn.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, isPrimary: true, clientX: 0, clientY: 0 }));
+        }
+      };
+      bumpPoints('.col.side-a.pts', 2);
+      bumpPoints('.col.side-b.pts', 1);
+      await new Promise((r) => setTimeout(r, 60));
+      // Fire BOARD +1 — guard should surface the toast.
+      const brd = document.querySelector('.col.mid.brd');
+      brd.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, isPrimary: true, clientX: 0, clientY: 0 }));
+      brd.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, isPrimary: true, clientX: 0, clientY: 0 }));
     })();
   `);
-  await p2.waitForTimeout(200);
+  await p2.waitForTimeout(300);
   await p2.screenshot({ path: `${OUT}/05-score-queen-lockout.png` });
   console.log('05-score-queen-lockout.png');
 
-  // End match → fireworks popup. Sequence matters: bumping SET zeroes both
-  // POINTS (adjustSets resets so the next set starts fresh), so we bump
-  // sets FIRST, then bump points to a realistic decider score. That gives
-  // the popup a meaningful "Final board 25-18".
-  await p2.evaluate(`
+  // End match → recap popup. Fresh score-screen context so p2's accumulated
+  // state (from shots 04/05) doesn't fight the guards. v2 requires a queen
+  // holder before every SET+ / BOARD+ boundary that has fresh points, and
+  // blocks positive deltas once matchResult is set. So we replay the whole
+  // sequence marking queen before each boundary.
+  await tv.close();
+  const tvEnd = await browser.newContext({
+    viewport: LANDSCAPE,
+    deviceScaleFactor: 2,
+    reducedMotion: 'reduce',
+  });
+  const p2e = await tvEnd.newPage();
+  await p2e.goto(SCORE_URL, { waitUntil: 'networkidle' });
+  await p2e.waitForTimeout(400);
+  await p2e.evaluate(`
     (async () => {
       const tap = async (sel, n) => {
         const btn = document.querySelector(sel);
@@ -142,26 +197,45 @@ async function main() {
           await new Promise((r) => setTimeout(r, 4));
         }
       };
-      // Simulate 2-1 in sets, then a decider set that ended 25-18.
-      await tap('.col.side-a.set', 2);
+      const tapQueen = async () => {
+        const c = document.querySelector('.head-side .coin-btn');
+        if (c && !c.classList.contains('coin-red')) {
+          c.click();
+          await new Promise((r) => setTimeout(r, 40));
+        }
+      };
+      // Set 1 (A wins 25-15): 3 boards, then SET+1 A.
+      await tap('.col.side-a.pts', 8); await tap('.col.side-b.pts', 5); await tapQueen(); await tap('.col.mid.brd', 1);
+      await tap('.col.side-a.pts', 9); await tap('.col.side-b.pts', 5); await tapQueen(); await tap('.col.mid.brd', 1);
+      await tap('.col.side-a.pts', 8); await tap('.col.side-b.pts', 5); await tapQueen();
+      await tap('.col.side-a.set', 1);
+      // Set 2 (B wins 25-20): 3 boards, then SET+1 B.
+      await tap('.col.side-a.pts', 7); await tap('.col.side-b.pts', 8); await tapQueen(); await tap('.col.mid.brd', 1);
+      await tap('.col.side-a.pts', 6); await tap('.col.side-b.pts', 9); await tapQueen(); await tap('.col.mid.brd', 1);
+      await tap('.col.side-a.pts', 7); await tap('.col.side-b.pts', 8); await tapQueen();
       await tap('.col.side-b.set', 1);
-      await tap('.col.side-a.pts', 25);
-      await tap('.col.side-b.pts', 18);
-      await tap('.col.mid.brd', 7);
+      // Set 3 (decider — A ahead 25-18 mid-board when End is tapped).
+      await tap('.col.side-a.pts', 9); await tap('.col.side-b.pts', 6); await tapQueen(); await tap('.col.mid.brd', 1);
+      await tap('.col.side-a.pts', 8); await tap('.col.side-b.pts', 7); await tapQueen(); await tap('.col.mid.brd', 1);
+      await tap('.col.side-a.pts', 8); await tap('.col.side-b.pts', 5); await tapQueen();
     })();
   `);
-  await p2.locator('.foot-btn.endm').click({ force: true });
-  await p2.waitForTimeout(400);
-  await p2.screenshot({ path: `${OUT}/06-end-match-popup.png` });
+  await p2e.waitForTimeout(200);
+  await p2e.locator('.foot-btn.endm').click({ force: true });
+  await p2e.waitForTimeout(400);
+  // v2 flow: End → winner dialog first. Click "View scorecard" → scorecard.
+  await p2e.locator('.winner-dialog .confirm-big').click({ force: true });
+  await p2e.waitForTimeout(400);
+  await p2e.screenshot({ path: `${OUT}/06-end-match-popup.png` });
   console.log('06-end-match-popup.png');
 
-  // Dismiss the popup → show the twin-medal treatment on the name pills.
-  await p2.locator('.confirm-big').click({ force: true });
-  await p2.waitForTimeout(200);
-  await p2.screenshot({ path: `${OUT}/07-end-match-medals.png` });
+  // Close the scorecard popup → show the twin-medal treatment on the name pills.
+  await p2e.locator('.scorecard-dialog .dialog-close').click({ force: true });
+  await p2e.waitForTimeout(300);
+  await p2e.screenshot({ path: `${OUT}/07-end-match-medals.png` });
   console.log('07-end-match-medals.png');
 
-  await tv.close();
+  await tvEnd.close();
 
   /*
    * Practice mode shots. Solo drill flow: setup → single-set scoreboard
@@ -274,22 +348,12 @@ async function main() {
   await tv3.close();
 
   /*
-   * 12 Share URL popup. Score screen (singles), tap Share URL button.
-   * Shows both URL rows (overlay ready, live spectator coming soon).
+   * 12 Share popup. In v2 the two share buttons (spectator + OBS) live
+   * on the /live/ lobby match-sheet dialog, not the score screen. That
+   * needs a live Firebase record to open. Skipping headless capture —
+   * keep the existing 12-share-popup.png committed to the repo.
    */
-  const tv4 = await browser.newContext({
-    viewport: LANDSCAPE,
-    deviceScaleFactor: 2,
-    reducedMotion: 'reduce',
-  });
-  const p6 = await tv4.newPage();
-  await p6.goto(SCORE_URL, { waitUntil: 'networkidle' });
-  await p6.waitForTimeout(400);
-  await p6.locator('.foot-btn.share').click({ force: true });
-  await p6.waitForTimeout(300);
-  await p6.screenshot({ path: `${OUT}/12-share-popup.png` });
-  console.log('12-share-popup.png');
-  await tv4.close();
+  console.log('12-share-popup.png (skipped — needs live match; existing PNG kept)');
 
   /*
    * 13 Overlay bare (1920×1080 broadcast canvas). Mid-match state seeded
@@ -362,6 +426,89 @@ async function main() {
   await p7.screenshot({ path: `${OUT}/15-overlay-endgame.png` });
   console.log('15-overlay-endgame.png');
   await stream.close();
+
+  /*
+   * 16 Feedback popup on the home footer. Portrait phone.
+   */
+  const phoneFb = await browser.newContext({
+    ...devices['Pixel 7'],
+    viewport: PORTRAIT,
+    reducedMotion: 'reduce',
+  });
+  const p8 = await phoneFb.newPage();
+  await p8.goto(BASE + '/', { waitUntil: 'networkidle' });
+  await p8.waitForTimeout(400);
+  await p8.locator('a.foot-link', { hasText: 'Feedback' }).click({ force: true });
+  await p8.waitForTimeout(300);
+  await p8.screenshot({ path: `${OUT}/16-feedback-popup.png` });
+  console.log('16-feedback-popup.png');
+  await phoneFb.close();
+
+  /*
+   * 32 Practice overlay lives inside LiveScoreboardView on the /live/?mid=…
+   * spectator URL — the /score/?view=overlay path just shows a "no live
+   * overlay" placeholder for practice. Capture requires a live Firebase
+   * record, so we skip it and let the file be captured manually from a
+   * running match later.
+   */
+  console.log('32-practice-overlay.png (skipped — needs live match)');
+
+  /*
+   * 33 Match-end lockout: after End is fired, tapping POINTS+ shows a toast.
+   * Landscape score screen.
+   */
+  const lockoutCtx = await browser.newContext({
+    viewport: LANDSCAPE,
+    deviceScaleFactor: 2,
+    reducedMotion: 'reduce',
+  });
+  const p10 = await lockoutCtx.newPage();
+  await p10.goto(SCORE_URL, { waitUntil: 'networkidle' });
+  await p10.waitForTimeout(400);
+  // Drive to a decided match and tap End. Real click() for the coin
+  // (onclick handler), PointerEvents for score columns (swipeAdjust).
+  await p10.evaluate(`
+    (async () => {
+      const tap = async (sel, n) => {
+        const btn = document.querySelector(sel);
+        for (let i = 0; i < n; i += 1) {
+          btn.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, isPrimary: true, clientX: 0, clientY: 0 }));
+          btn.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, isPrimary: true, clientX: 0, clientY: 0 }));
+          await new Promise((r) => setTimeout(r, 4));
+        }
+      };
+      const tapQueen = async () => {
+        const c = document.querySelector('.head-side .coin-btn');
+        if (c && !c.classList.contains('coin-red')) {
+          c.click();
+          await new Promise((r) => setTimeout(r, 40));
+        }
+      };
+      // Set 1 (A wins): 2 boards, then SET+1 A.
+      await tap('.col.side-a.pts', 12); await tap('.col.side-b.pts', 8); await tapQueen(); await tap('.col.mid.brd', 1);
+      await tap('.col.side-a.pts', 13); await tap('.col.side-b.pts', 8); await tapQueen();
+      await tap('.col.side-a.set', 1);
+      // Set 2 (A wins again — 2-0 sweep): 2 boards + queen for the running one.
+      await tap('.col.side-a.pts', 14); await tap('.col.side-b.pts', 9); await tapQueen(); await tap('.col.mid.brd', 1);
+      await tap('.col.side-a.pts', 11); await tap('.col.side-b.pts', 9); await tapQueen();
+    })();
+  `);
+  await p10.locator('.foot-btn.endm').click({ force: true });
+  await p10.waitForTimeout(400);
+  // Dismiss winner dialog via its close ✕
+  const winnerClose = p10.locator('.winner-dialog .dialog-close');
+  if (await winnerClose.count()) await winnerClose.click({ force: true });
+  await p10.waitForTimeout(200);
+  // Also close scorecard if it appeared
+  const scorecardClose = p10.locator('.scorecard-dialog .dialog-close');
+  if (await scorecardClose.count()) await scorecardClose.click({ force: true });
+  await p10.waitForTimeout(200);
+  // Tap POINTS+ to trigger the lockout toast
+  await p10.locator('.col.side-a.pts').click({ force: true });
+  await p10.waitForTimeout(300);
+  await p10.screenshot({ path: `${OUT}/33-match-end-lockout.png` });
+  console.log('33-match-end-lockout.png');
+  await lockoutCtx.close();
 
   await browser.close();
   console.log(`Wrote screenshots to ${OUT}`);
