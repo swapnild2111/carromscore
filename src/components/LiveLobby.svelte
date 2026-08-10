@@ -772,6 +772,13 @@
               </div>
 
               {#if m.mode === 'practice'}
+                {@const rows = m.practiceBoards ?? []}
+                {@const totalMisses = rows.reduce(
+                  (s, row) => s + (row ?? []).reduce((a, v) => a + (v ?? 0), 0),
+                  0,
+                )}
+                {@const boardsPerSet = m.cfg?.maxBoards ?? (rows[0]?.length ?? 0)}
+                {@const totalBoards = rows.length * boardsPerSet}
                 <div class="card-teams">
                   <span class="team-block team-a" style="flex:1">
                     <span class="team-name">{sideNameMatch(m, 'a')}</span>
@@ -780,11 +787,11 @@
                 <div class="card-scores">
                   <span class="score-block">
                     <span class="score-lbl">MISSES</span>
-                    <span class="score-val">{r?.finalPointsA ?? 0}</span>
+                    <span class="score-val">{totalMisses}</span>
                   </span>
                   <span class="score-block">
                     <span class="score-lbl">BOARDS</span>
-                    <span class="score-val">{r?.boardCount ?? 0}</span>
+                    <span class="score-val">{totalBoards}</span>
                   </span>
                 </div>
               {:else}
@@ -1053,6 +1060,20 @@
   }
   :global(.overlay-wrap .prow-label) {
     font-size: clamp(0.75rem, 1.4vw, 1rem) !important;
+  }
+  /* Solo-pill name: the versus-overlay bumps .name to 1.5rem which
+     is right for narrow per-side pills. Solo has the whole strip
+     width to fill, so 1.5rem there reads as overwhelming. Cap this
+     one back to overlay-appropriate weight, distinct from the
+     digit-cell scale. */
+  :global(.overlay-wrap .solo-pill .name) {
+    font-size: clamp(1rem, 2vw, 1.6rem) !important;
+  }
+  :global(.overlay-wrap .practice-badge) {
+    font-size: clamp(0.7rem, 1.2vw, 1rem) !important;
+  }
+  :global(.overlay-wrap .solo-note) {
+    font-size: clamp(0.7rem, 1.2vw, 1rem) !important;
   }
   :global(.overlay-wrap .lbl) {
     font-size: 0.55rem !important;
