@@ -39,6 +39,7 @@
         "startedAt":  { ".validate": "newData.isNumber()" },
         "endedAt":    { ".validate": "newData.isNumber()" },
         "createdBy":  { ".validate": "newData.isString() && newData.val().length <= 64" },
+        "createdByName": { ".validate": "newData.isString() && newData.val().length <= 80" },
         "notes":      { ".validate": "newData.hasChildren()" },
         "cfg":        { ".validate": "newData.hasChildren()" },
         "result":     { ".validate": "newData.hasChildren()" },

@@ -20,6 +20,7 @@
   import { subscribePlayers } from '../lib/players';
   import {
     armLiveCleanup,
+    deleteLive,
     publishLive,
     type LivePayload,
     type LiveRecord,
@@ -27,6 +28,7 @@
   import LiveScoreboardView from './LiveScoreboardView.svelte';
   import MatchEditModal from './MatchEditModal.svelte';
   import { subscribeCurrentUserRole, type Role } from '../lib/roles';
+  import { subscribeAuth } from '../lib/auth';
   import type { MatchRecord } from '../lib/history';
 
   type Side = { name: string; note: string; sets: number; points: number };
@@ -226,6 +228,14 @@
     // the lifetime of the score screen; cleanup happens on
     // component unmount via the onMount return handler.
     unsubRole = subscribeCurrentUserRole((r) => (role = r));
+    // Auth subscription — force initialisation of the auth cache so
+    // finishMatch() can stamp `createdBy` when we End. Without this,
+    // the score screen never subscribes anywhere else and
+    // currentUser() stays null through the whole match, so the
+    // archive record ships without ownership metadata (which then
+    // prevents self-delete on the /live/ lobby). No local state
+    // needed — subscribeAuth's side effect is what we're after.
+    unsubAuth = subscribeAuth(() => { /* cache populated by side effect */ });
 
     // currentBreak stays null until the organiser marks board 0's breaker;
     // hydrate below can restore a live value if we're resuming a match.
@@ -287,6 +297,7 @@
       releaseWakeLock();
       releaseLandscape();
       unsubRole?.();
+      unsubAuth?.();
     };
   });
 
@@ -759,6 +770,7 @@
   /** Current user's role; drives visibility of the "Fix this match" link. */
   let role = $state<Role | null>(null);
   let unsubRole: (() => void) | null = null;
+  let unsubAuth: (() => void) | null = null;
 
   /**
    * Synthesise a MatchRecord snapshot for the edit modal from the
@@ -823,10 +835,15 @@
   // Fixed array of spark indices for the fireworks each-loop.
   const SPARK_INDICES = Array.from({ length: 20 }, (_, i) => i);
   function endMatch() {
-    // Practice: no winner. Just surface the matrix.
+    // Practice: no winner concept. Surface the recap matrix + archive
+    // to /matches. Explicitly delete the /live/{mid} record so the
+    // lobby stops showing this run under "Now Playing" — versus
+    // matches move out via the matchResult filter, but practice has
+    // no matchResult to set, so we clear the broadcast slot directly.
     if (isPractice) {
       showPracticePopup = true;
       recordFinishedMatch(null);
+      if (cfg.live && cfg.mid) void deleteLive(cfg.mid);
       return;
     }
     // Capture the current in-progress board if it has any points +
@@ -878,10 +895,14 @@
       winner = 'b';
       awardExtraSet = true;
     } else {
-      // Fully tied — sets AND points equal. Record as a draw. No
-      // awardExtraSet: nobody wins the decider set. Both pills get
-      // the muted "DRAW" chip after the winner popup is dismissed.
+      // Fully tied — sets AND points equal. Record as a draw and
+      // credit the decider set to BOTH sides so the header reads
+      // "SETS 1–1" honestly (a set actually was played, it just
+      // ended level). Without this, the recap table shows SET 1
+      // played but the SETS column stays 0–0, which reads as broken.
       winner = 'draw';
+      sideA.sets = Math.min(cfg.bestOf, sideA.sets + 1);
+      sideB.sets = Math.min(cfg.bestOf, sideB.sets + 1);
     }
     if (awardExtraSet && (winner === 'a' || winner === 'b')) {
       const s = winner === 'a' ? sideA : sideB;
@@ -904,7 +925,7 @@
    * (never yet read by finishMatch — passed for future practice-record
    * shape parity).
    */
-  function recordFinishedMatch(winner: 'a' | 'b' | null): void {
+  function recordFinishedMatch(winner: 'a' | 'b' | 'draw' | null): void {
     // Practice IS archived (as mode='practice') so the umpire can see
     // their drill history. Retention is shorter than versus matches
     // (3 months vs 1 year) — handled by the client-side sweep on
@@ -1013,8 +1034,6 @@
     if (isPractice) {
       practiceBoards = blankMatrix(cfg.bestOf, cfg.maxBoards);
       practiceSetIdx = 0;
-      // Scroll the boards row back to B1–4 too.
-      jumpToBoardPage(0);
     }
   }
   let confirmReset = $state(false);
@@ -1186,14 +1205,17 @@
         <div class="prow-label pset-num">{practiceSetIdx + 1}</div>
       </div>
 
-      <!-- Scrollable middle track: N cells (one per board) laid out at
-           the width of exactly PRACTICE_BOARDS_VISIBLE, so a phone shows
-           4 at once and the rest scroll into view. -->
+      <!-- Middle track: all N cells (one per board) render inline.
+           The scroll container is retained as a defensive fallback
+           for very-many-boards sets on narrow phones — CSS `--visible`
+           is set to the board count so the container aims to fit
+           everything; horizontal overflow only kicks in when the
+           viewport can't hold the row. -->
       <div
         class="pscroll"
         bind:this={practiceScrollerEl}
         onscroll={onPracticeScroll}
-        style="--visible: {Math.min(PRACTICE_BOARDS_VISIBLE, cfg.maxBoards)}; --board-count: {cfg.maxBoards};"
+        style="--visible: {cfg.maxBoards}; --board-count: {cfg.maxBoards};"
       >
         <div class="pscroll-head">
           {#each Array.from({ length: cfg.maxBoards }, (_, i) => i) as boardIdx (boardIdx)}
@@ -1222,28 +1244,19 @@
       </div>
     </div>
 
-    {#if practiceBoardPageCount > 1}
-      <div class="practice-board-chips">
-        {#each Array.from({ length: practiceBoardPageCount }, (_, i) => i) as pIdx (pIdx)}
-          {@const from = pIdx * PRACTICE_BOARDS_VISIBLE + 1}
-          {@const to = Math.min(cfg.maxBoards, (pIdx + 1) * PRACTICE_BOARDS_VISIBLE)}
-          <button
-            type="button"
-            class="pchip"
-            class:pchip-current={pIdx === practiceCurrentBoardPage}
-            onclick={() => jumpToBoardPage(pIdx)}
-            aria-label="Show boards {from} to {to}"
-          >B{from === to ? from : `${from}–${to}`}</button>
-        {/each}
-      </div>
-    {/if}
+    <!-- Solo practice: every board of the current set renders inline;
+         no board-page chips. The scroll container still allows
+         horizontal overflow for very-many-boards sets, and sets
+         remain the paginated unit via the arrows below. -->
+
+
 
     {#if cfg.bestOf > 1}
       <div class="practice-pager">
         <button
           type="button"
           class="foot-btn practice-pager-btn"
-          onclick={() => { practiceSetIdx = Math.max(0, practiceSetIdx - 1); jumpToBoardPage(0); }}
+          onclick={() => { practiceSetIdx = Math.max(0, practiceSetIdx - 1); }}
           disabled={practiceSetIdx === 0}
           aria-label="Previous set"
         >
@@ -1257,7 +1270,7 @@
         <button
           type="button"
           class="foot-btn practice-pager-btn"
-          onclick={() => { practiceSetIdx = Math.min(cfg.bestOf - 1, practiceSetIdx + 1); jumpToBoardPage(0); }}
+          onclick={() => { practiceSetIdx = Math.min(cfg.bestOf - 1, practiceSetIdx + 1); }}
           disabled={practiceSetIdx === cfg.bestOf - 1}
           aria-label="Next set"
         >

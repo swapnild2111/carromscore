@@ -47,6 +47,46 @@ export function currentUser(): AuthUser | null {
 }
 
 /**
+ * True once the auth SDK has initialised (redirect result consumed,
+ * first onAuthStateChanged fired). Callers that need to distinguish
+ * "still loading" from "actually anonymous" can await
+ * `awaitAuthReady()` — useful at write sites like `finishMatch` where
+ * getting `createdBy` right matters more than the tiny wait.
+ */
+let authReadyResolved = false;
+let authReadyPromise: Promise<void> | null = null;
+let authReadyResolve: (() => void) | null = null;
+function markAuthReady(): void {
+  if (authReadyResolved) return;
+  authReadyResolved = true;
+  authReadyResolve?.();
+  authReadyResolve = null;
+}
+
+/**
+ * Resolves once the auth subscription has emitted its first value
+ * (either a user or null). Kicks off the subscription lazily if
+ * nobody else has yet. Caps the wait at `timeoutMs` (default 1500ms)
+ * so a slow / dead network never blocks the caller.
+ */
+export function awaitAuthReady(timeoutMs = 1500): Promise<void> {
+  if (authReadyResolved) return Promise.resolve();
+  if (!subscriptionInitialised) {
+    subscriptionInitialised = true;
+    void initSubscription();
+  }
+  if (!authReadyPromise) {
+    authReadyPromise = new Promise((resolve) => {
+      authReadyResolve = resolve;
+    });
+  }
+  return Promise.race([
+    authReadyPromise,
+    new Promise<void>((resolve) => window.setTimeout(resolve, timeoutMs)),
+  ]);
+}
+
+/**
  * Register a callback to receive auth state updates. Fires
  * synchronously once with the currently-cached user (so subscribers
  * do not have to render a "logged out" flash while the SDK settles),
@@ -99,6 +139,7 @@ async function initSubscription(): Promise<void> {
       if (redirect?.user) {
         cachedUser = toAuthUser(redirect.user);
         notify();
+        markAuthReady();
       }
     } catch {
       // Redirect flow failed — fall through; anonymous stays anonymous.
@@ -106,10 +147,12 @@ async function initSubscription(): Promise<void> {
     onAuthStateChanged(auth, (u) => {
       cachedUser = toAuthUser(u);
       notify();
+      markAuthReady();
     });
   } catch {
     // firebase/auth failed to load (bundle missing, network dead).
     // Subscribers stay on null; casual anonymous flow works unchanged.
+    markAuthReady();
   }
 }
 

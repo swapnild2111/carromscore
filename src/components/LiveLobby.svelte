@@ -223,14 +223,15 @@
 
   /**
    * Whether the currently-signed-in user can self-delete this record.
-   * Independent of the admin edit predicate — a super or organiser
-   * uses the ✎ pencil; everyone else only sees "Delete this match"
-   * if they were the caller who wrote `createdBy` on the record.
-   * UI convenience — the RTDB rule is the enforcement layer.
+   * True whenever the record was written by this uid — independent of
+   * admin/organiser status. Super/organiser also see the ✎ pencil
+   * (for score edits), but the self-delete affordance is an equally
+   * available shortcut for "this is my match, wipe it" that skips
+   * the edit modal entirely. UI convenience — the RTDB rule at
+   * /matches/$id/.write is the enforcement layer.
    */
   function canSelfDelete(m: MatchRecord | null): boolean {
     if (!m) return false;
-    if (canEditMatch(m)) return false; // admin uses the pencil affordance
     const uid = currentUser()?.uid;
     if (!uid) return false;
     return m.createdBy === uid;
@@ -862,9 +863,17 @@
       </header>
       <div class="sheet-body">
         <LiveScoreboardView record={popupRecord} />
-        {#if openPopup?.source === 'match' && canSelfDelete(openMatchRecord)}
+        {#if openPopup?.source === 'match'}
           {@const rec = openMatchRecord}
           {#if rec}
+            {@const uid = currentUser()?.uid}
+            {@const owns = !!uid && rec.createdBy === uid}
+            {#if rec.createdBy}
+              <p class="recorded-by">
+                Recorded by <strong>{rec.createdByName || 'a signed-in player'}</strong>
+              </p>
+            {/if}
+            {#if owns}
             <div class="self-delete-zone">
               {#if !selfDeleteConfirm}
                 <button
@@ -906,6 +915,7 @@
                 {/if}
               {/if}
             </div>
+            {/if}
           {/if}
         {/if}
       </div>
@@ -1564,6 +1574,21 @@
     transition: background 0.15s, border-color 0.15s;
   }
   .sheet-close:hover { background: #1a1a1a; border-color: #333; }
+
+  /* Small attribution line above the self-delete area. Only visible
+     when the record carries a createdBy uid. displayName is the write-
+     time Google profile name (denormalised onto the match record),
+     never the email — /users is super-read only. */
+  .recorded-by {
+    margin: 1rem 0 0;
+    font-size: 0.75rem;
+    color: var(--muted, #9aa0a6);
+    text-align: right;
+  }
+  .recorded-by strong {
+    color: var(--fg, #f5f5f5);
+    font-weight: 600;
+  }
 
   /* Self-delete zone at the bottom of the match sheet — muted so it
      doesn't distract from the recap, but reachable when the caller

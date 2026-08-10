@@ -135,7 +135,24 @@ export async function finishMatch(
   // doesn't override. Anonymous stays anonymous (field simply absent —
   // RTDB validator accepts the omission). Added 2026-08-09 to prepare
   // the ground for admin edit permissions.
+  //
+  // Await the auth cache in case the umpire tapped End before the
+  // Firebase auth chunk finished hydrating on this tab. Bounded wait
+  // (see awaitAuthReady) so a dead network never blocks the archive.
+  // Without this, a fresh page load + immediate End writes the record
+  // with createdBy: undefined, breaking self-delete for the caller.
+  const { awaitAuthReady } = await import('./auth');
+  if (!createdBy) await awaitAuthReady();
   const finalCreatedBy = createdBy ?? currentUser()?.uid;
+  // Denormalise the caller's display name onto the record too, so the
+  // recap can attribute "Recorded by …" without needing to read /users
+  // (which is super-read only) or exposing raw emails. Empty string
+  // when the Google profile has no name — recap falls back to a
+  // generic label. Historical records keep the name at write time,
+  // which is the correct semantic (records reflect the moment).
+  const finalCreatedByName = finalCreatedBy
+    ? (currentUser()?.displayName ?? '').slice(0, 80)
+    : '';
 
   const playerAId = resolvePlayerId(identity.aName, identity.aResolvedId);
   const playerA2Id = isPractice
@@ -193,6 +210,7 @@ export async function finishMatch(
     startedAt: result.startedAt,
     endedAt: result.endedAt,
     ...(finalCreatedBy ? { createdBy: finalCreatedBy } : {}),
+    ...(finalCreatedByName ? { createdByName: finalCreatedByName } : {}),
   };
 
   try {
@@ -263,6 +281,15 @@ export type MatchRecord = {
    * and only the creator's write passes the RTDB rule.
    */
   createdBy?: string;
+  /**
+   * Denormalised Google display name of the caller at write time.
+   * Kept alongside `createdBy` so the recap can attribute the record
+   * without needing to read /users (super-read only) or exposing
+   * raw emails. Historical records keep the write-time name — a
+   * later profile rename doesn't rewrite past matches, which is
+   * the correct archival semantic.
+   */
+  createdByName?: string;
   startedAt?: number;
   endedAt?: number;
 };
