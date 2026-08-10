@@ -197,7 +197,7 @@
    * bestOf. When the match is decided we stop advancing.
    */
   const currentSet = $derived(Math.min(cfg.bestOf, sideA.sets + sideB.sets + 1));
-  let matchResult = $state<'a' | 'b' | null>(null);
+  let matchResult = $state<'a' | 'b' | 'draw' | null>(null);
   let confirmExit = $state(false);
   let isPortrait = $state(false);
   let storageKey = $state<string | null>(null);
@@ -247,7 +247,7 @@
         if (typeof s?.board === 'number') board = s.board;
         if (s?.currentBreak === 'a' || s?.currentBreak === 'b') currentBreak = s.currentBreak;
         if (s?.queenHolder === 'a' || s?.queenHolder === 'b' || s?.queenHolder === null) queenHolder = s.queenHolder;
-        if (s?.matchResult === 'a' || s?.matchResult === 'b' || s?.matchResult === null) matchResult = s.matchResult;
+        if (s?.matchResult === 'a' || s?.matchResult === 'b' || s?.matchResult === 'draw' || s?.matchResult === null) matchResult = s.matchResult;
         if (Array.isArray(s?.boardLog)) boardLog = s.boardLog as BoardEntry[];
         if (typeof s?.pointsAtBoardStart?.a === 'number' && typeof s?.pointsAtBoardStart?.b === 'number') {
           pointsAtBoardStart = s.pointsAtBoardStart;
@@ -862,7 +862,7 @@
       // the History side would then drop that same entry.
       board = board + 1;
     }
-    let winner: 'a' | 'b' | null = null;
+    let winner: 'a' | 'b' | 'draw' | null = null;
     let awardExtraSet = false;
     if (sideA.sets > sideB.sets) {
       winner = 'a';
@@ -877,9 +877,13 @@
     } else if (sideB.points > sideA.points) {
       winner = 'b';
       awardExtraSet = true;
+    } else {
+      // Fully tied — sets AND points equal. Record as a draw. No
+      // awardExtraSet: nobody wins the decider set. Both pills get
+      // the muted "DRAW" chip after the winner popup is dismissed.
+      winner = 'draw';
     }
-    if (!winner) return; // fully tied — organiser must adjust manually first
-    if (awardExtraSet) {
+    if (awardExtraSet && (winner === 'a' || winner === 'b')) {
       const s = winner === 'a' ? sideA : sideB;
       s.sets = Math.min(cfg.bestOf, s.sets + 1);
     }
@@ -1268,7 +1272,8 @@
       <div class="head-name head-a tone-{colourA}"
            class:decided={matchResult !== null}
            class:gold={matchResult === 'a'}
-           class:silver={matchResult === 'b'}>
+           class:silver={matchResult === 'b'}
+           class:draw={matchResult === 'draw'}>
         <span class="hn-row">
           {#if matchResult === 'a'}
             <span class="medal" aria-label="First place">
@@ -1279,6 +1284,11 @@
             <span class="medal" aria-label="Second place">
               <span class="medal-icon" aria-hidden="true">🥈</span>
               <span class="medal-label">2ND</span>
+            </span>
+          {:else if matchResult === 'draw'}
+            <span class="medal" aria-label="Draw">
+              <span class="medal-icon" aria-hidden="true">🤝</span>
+              <span class="medal-label">DRAW</span>
             </span>
           {/if}
           <span class="hn-name">{sideA.name}</span>
@@ -1358,7 +1368,8 @@
       <div class="head-name head-b tone-{colourB}"
            class:decided={matchResult !== null}
            class:gold={matchResult === 'b'}
-           class:silver={matchResult === 'a'}>
+           class:silver={matchResult === 'a'}
+           class:draw={matchResult === 'draw'}>
         <span class="hn-row">
           <span class="hn-name">{sideB.name}</span>
           {#if matchResult === 'b'}
@@ -1370,6 +1381,11 @@
             <span class="medal" aria-label="Second place">
               <span class="medal-icon" aria-hidden="true">🥈</span>
               <span class="medal-label">2ND</span>
+            </span>
+          {:else if matchResult === 'draw'}
+            <span class="medal" aria-label="Draw">
+              <span class="medal-icon" aria-hidden="true">🤝</span>
+              <span class="medal-label">DRAW</span>
             </span>
           {/if}
         </span>
@@ -1435,7 +1451,13 @@
   {/if}
 
   <div class="foot">
-    {#if matchResult}
+    {#if matchResult === 'draw'}
+      <span class="winner">
+        <span class="winner-dot"></span>
+        <strong>Match tied</strong>
+        {sideA.sets}–{sideB.sets} · {pad2(sideA.points)}–{pad2(sideB.points)}
+      </span>
+    {:else if matchResult}
       <span class="winner">
         <span class="winner-dot"></span>
         <strong>{matchResult === 'a' ? sideA.name : sideB.name}</strong>
@@ -1457,7 +1479,7 @@
       <button type="button" class="foot-btn reset" onclick={requestReset} disabled={!hasProgress} aria-label="Reset scores">
         <span class="foot-ico" aria-hidden="true">↻</span><span class="foot-lbl">Reset</span>
       </button>
-      <button type="button" class="foot-btn endm" onclick={endMatch} disabled={!isPractice && (sideA.sets === sideB.sets && sideA.points === sideB.points)} aria-label="End match">
+      <button type="button" class="foot-btn endm" onclick={endMatch} aria-label="End match">
         <span class="foot-ico" aria-hidden="true">🏁</span><span class="foot-lbl">End</span>
       </button>
       <button type="button" class="foot-btn close" onclick={requestExit} aria-label="Close match">
@@ -1477,21 +1499,29 @@
       aria-modal="true"
       onclick={(e) => { if (e.target === e.currentTarget) showWinnerPopup = false; }}
     >
-      <div class="fireworks" aria-hidden="true">
-        {#each SPARK_INDICES as i (i)}
-          <span class="spark spark-{i % 8}" style="--n: {i}"></span>
-        {/each}
-      </div>
-      <div class="dialog-card champion">
+      {#if matchResult !== 'draw'}
+        <div class="fireworks" aria-hidden="true">
+          {#each SPARK_INDICES as i (i)}
+            <span class="spark spark-{i % 8}" style="--n: {i}"></span>
+          {/each}
+        </div>
+      {/if}
+      <div class="dialog-card champion" class:draw={matchResult === 'draw'}>
         <button
           type="button"
           class="dialog-close"
           onclick={() => (showWinnerPopup = false)}
           aria-label="Close"
         >✕</button>
-        <div class="champ-trophy" aria-hidden="true">🏆</div>
-        <div class="champ-label">CHAMPION</div>
-        <div class="champ-name">{matchResult === 'a' ? sideA.name : sideB.name}</div>
+        {#if matchResult === 'draw'}
+          <div class="champ-trophy" aria-hidden="true">🤝</div>
+          <div class="champ-label">DRAW</div>
+          <div class="champ-name">{sideA.name} · {sideB.name}</div>
+        {:else}
+          <div class="champ-trophy" aria-hidden="true">🏆</div>
+          <div class="champ-label">CHAMPION</div>
+          <div class="champ-name">{matchResult === 'a' ? sideA.name : sideB.name}</div>
+        {/if}
         <div class="champ-score">
           Sets <strong>{sideA.sets}–{sideB.sets}</strong>
           <span class="champ-sep">·</span>
@@ -2013,6 +2043,19 @@
     --chip-bg: rgba(0, 0, 0, 0.28);
     --chip-text: #eef4f7;
   }
+  /* Draw: warm muted bronze tone. Applied to BOTH pills (draws
+     have no winner, both sides get the same treatment) so the
+     header still reads visually distinct from a live match. */
+  .head-name.decided.draw {
+    --pill-c1: #d4b489;
+    --pill-c2: #b09068;
+    --pill-c3: #7a5f42;
+    --pill-text: #1f1610;
+    --pill-ring: #c9a56f;
+    --pill-glow: rgba(201, 165, 111, 0.4);
+    --chip-bg: rgba(0, 0, 0, 0.3);
+    --chip-text: #fff2df;
+  }
 
   /* Shared pill structure. Applied identically to both variants. */
   .head-name.decided {
@@ -2511,6 +2554,18 @@
     z-index: 2;
     overflow: hidden;
   }
+  /* Draw variant of the dialog: muted bronze border, no gold glow.
+     ::before shine sweep is neutralised so the card reads calm
+     rather than celebratory. */
+  .winner-dialog .dialog-card.champion.draw {
+    border-color: #c9a56f;
+    box-shadow:
+      0 0 0 1px rgba(201, 165, 111, 0.35),
+      0 0 40px rgba(201, 165, 111, 0.2),
+      0 12px 40px rgba(0, 0, 0, 0.6);
+  }
+  .winner-dialog .dialog-card.champion.draw::before { display: none; }
+  .winner-dialog .dialog-card.champion.draw .champ-label { color: #d4b489; }
   .winner-dialog .dialog-card.champion::before {
     /* Diagonal shine sweep across the card, once every few seconds. */
     content: '';

@@ -50,7 +50,7 @@ export type LivePayload = {
   board: number;
   currentBreak: 'a' | 'b' | null;
   queenHolder: 'a' | 'b' | null;
-  matchResult: 'a' | 'b' | null;
+  matchResult: 'a' | 'b' | 'draw' | null;
   boardLog?: BoardLogEntry[];
   practiceBoards?: number[][];
 };

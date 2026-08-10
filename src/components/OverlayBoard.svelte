@@ -30,7 +30,7 @@
   let board = $state(0);
   let currentBreak = $state<Side | null>(null);
   let queenHolder = $state<Side | null>(null);
-  let matchResult = $state<Side | null>(null);
+  let matchResult = $state<Side | 'draw' | null>(null);
 
   const currentSet = $derived(Math.min(cfg.bestOf, sideA.sets + sideB.sets + 1));
 
@@ -75,7 +75,7 @@
         if (s?.queenHolder === 'a' || s?.queenHolder === 'b' || s?.queenHolder === null) {
           queenHolder = s.queenHolder;
         }
-        if (s?.matchResult === 'a' || s?.matchResult === 'b' || s?.matchResult === null) {
+        if (s?.matchResult === 'a' || s?.matchResult === 'b' || s?.matchResult === 'draw' || s?.matchResult === null) {
           matchResult = s.matchResult;
         }
       } catch {
@@ -120,7 +120,8 @@
           <div class="name-pill tone-a"
                class:decided={matchResult !== null}
                class:gold={matchResult === 'a'}
-               class:silver={matchResult === 'b'}>
+               class:silver={matchResult === 'b'}
+               class:draw={matchResult === 'draw'}>
             {#if matchResult === 'a'}
               <span class="medal" aria-label="First place">
                 <span class="medal-icon" aria-hidden="true">🥇</span>
@@ -130,6 +131,11 @@
               <span class="medal" aria-label="Second place">
                 <span class="medal-icon" aria-hidden="true">🥈</span>
                 <span class="medal-label">2ND</span>
+              </span>
+            {:else if matchResult === 'draw'}
+              <span class="medal" aria-label="Draw">
+                <span class="medal-icon" aria-hidden="true">🤝</span>
+                <span class="medal-label">DRAW</span>
               </span>
             {/if}
             <span class="name-txt">{sideA.name}</span>
@@ -194,7 +200,8 @@
           <div class="name-pill tone-b"
                class:decided={matchResult !== null}
                class:gold={matchResult === 'b'}
-               class:silver={matchResult === 'a'}>
+               class:silver={matchResult === 'a'}
+               class:draw={matchResult === 'draw'}>
             <span class="name-txt">{sideB.name}</span>
             {#if sideB.note}<span class="name-note">{sideB.note}</span>{/if}
             {#if matchResult === 'b'}
@@ -206,6 +213,11 @@
               <span class="medal" aria-label="Second place">
                 <span class="medal-icon" aria-hidden="true">🥈</span>
                 <span class="medal-label">2ND</span>
+              </span>
+            {:else if matchResult === 'draw'}
+              <span class="medal" aria-label="Draw">
+                <span class="medal-icon" aria-hidden="true">🤝</span>
+                <span class="medal-label">DRAW</span>
               </span>
             {/if}
           </div>
@@ -345,6 +357,17 @@
     --pill-glow: rgba(209, 218, 224, 0.45);
     --chip-bg: rgba(0, 0, 0, 0.28);
     --chip-text: #eef4f7;
+  }
+  /* Draw: muted warm bronze applied to both pills. */
+  .name-pill.decided.draw {
+    --pill-c1: #d4b489;
+    --pill-c2: #b09068;
+    --pill-c3: #7a5f42;
+    --pill-text: #1f1610;
+    --pill-ring: #c9a56f;
+    --pill-glow: rgba(201, 165, 111, 0.4);
+    --chip-bg: rgba(0, 0, 0, 0.3);
+    --chip-text: #fff2df;
   }
   .name-pill.decided::after {
     content: '';

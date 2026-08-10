@@ -169,9 +169,11 @@
       class="pill pill-a"
       class:gold={state.matchResult === 'a'}
       class:silver={state.matchResult === 'b'}
+      class:draw={state.matchResult === 'draw'}
     >
       <span class="name">
         {#if state.matchResult === 'a'}<span class="trophy" aria-label="Winner">🏆</span>{/if}
+        {#if state.matchResult === 'draw'}<span class="trophy" aria-label="Draw">🤝</span>{/if}
         {sideName('a')}
       </span>
       <span class="accs">
@@ -194,6 +196,7 @@
       class="pill pill-b"
       class:gold={state.matchResult === 'b'}
       class:silver={state.matchResult === 'a'}
+      class:draw={state.matchResult === 'draw'}
     >
       <!-- Pill B: accessories first in DOM so grid `auto 1fr` puts them
            on the LEFT (outer edge, far from vs). Coin comes before
@@ -211,6 +214,7 @@
       </span>
       <span class="name">
         {#if state.matchResult === 'b'}<span class="trophy" aria-label="Winner">🏆</span>{/if}
+        {#if state.matchResult === 'draw'}<span class="trophy" aria-label="Draw">🤝</span>{/if}
         {sideName('b')}
       </span>
       {#if sideNote('b')}<span class="note">{sideNote('b')}</span>{/if}
@@ -625,6 +629,20 @@
     background: linear-gradient(135deg, #171717 0%, #101010 100%);
   }
   .pill.silver .name { color: var(--fg, #f5f5f5); }
+
+  /* Draw pill — muted bronze treatment. Both sides get it (no winner,
+     no loser) so the header reads as "match concluded, tied" rather
+     than mistaking either side for the champion. */
+  .pill.draw {
+    border-color: rgba(201, 165, 111, 0.55);
+    background: linear-gradient(135deg, #2b241a 0%, #17130e 100%);
+    box-shadow:
+      0 0 0 1px rgba(201, 165, 111, 0.3),
+      0 0 20px rgba(201, 165, 111, 0.15),
+      inset 0 1px 0 rgba(255, 220, 170, 0.08);
+  }
+  .pill.draw .name { color: #d4b489; }
+  .pill.draw .trophy { filter: drop-shadow(0 0 4px rgba(201, 165, 111, 0.5)); }
 
   /* Score-digit medal treatment: winner side digits shine gold.
      Loser side stays plain white (not dimmed) so the score is still
