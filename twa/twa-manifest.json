@@ -21,8 +21,8 @@
     "path": "./android.keystore",
     "alias": "android"
   },
-  "appVersionName": "1.8.0",
-  "appVersionCode": 22,
+  "appVersionName": "2.0.0",
+  "appVersionCode": 23,
   "shortcuts": [],
   "generatorApp": "bubblewrap-cli",
   "webManifestUrl": "https://swapnild2111.github.io/carromscore/manifest.webmanifest",
