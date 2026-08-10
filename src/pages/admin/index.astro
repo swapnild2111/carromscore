@@ -1,0 +1,7 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import AdminHome from '../../components/AdminHome.svelte';
+---
+<BaseLayout title="Carromscore — admin">
+  <AdminHome client:only="svelte" />
+</BaseLayout>

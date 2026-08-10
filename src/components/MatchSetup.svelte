@@ -9,11 +9,34 @@
   } from '../lib/match';
   import { loadKnownPlayers, rememberPlayers } from '../lib/known-players';
   import {
+    seedFromRows as seedPlayerIdentity,
+    subscribePlayers,
+    subscribeStore,
+    rankMatches,
+    addAlias,
+    loadAll as loadAllPlayers,
+    type PlayerMatch,
+  } from '../lib/players';
+  import {
+    saveMatchIdentity,
+    saveMatchStart,
+    clearMatchIdentity,
+  } from '../lib/history';
+  import { newMid } from '../lib/live-sync';
+  import {
+    createOrTouchTournament,
+    rankTournaments,
+    subscribeStore as subscribeTournamentsStore,
+    subscribeTournaments,
+    type Tournament,
+  } from '../lib/tournaments';
+  import {
     APP_VERSION,
     fetchLatestRelease,
     isNewerVersion,
     type ReleaseInfo,
   } from '../lib/version';
+  import SignInButton from './SignInButton.svelte';
 
   const base: string = import.meta.env.BASE_URL;
 
@@ -46,6 +69,9 @@
       .then((r) => (r.ok ? r.json() : []))
       .then((rows: PlayerRow[]) => {
         seedPlayers = rows;
+        // Feed the same seed into the identity store so the fuzzy-match
+        // ranker has something to work with even before Firebase syncs.
+        seedPlayerIdentity(rows);
       })
       .catch(() => {
         seedPlayers = [];
@@ -54,6 +80,42 @@
         loadingPlayers = false;
       });
   });
+
+  // Identity store: subscribe to Firebase-backed /players and bump a
+  // reactivity trigger whenever the store changes. This is how the
+  // ranker (which reads from module-level state) triggers re-render.
+  let identityTick = $state(0);
+  $effect(() => {
+    const unsub = subscribeStore(() => (identityTick += 1));
+    void subscribePlayers();
+    return unsub;
+  });
+
+  // Tournament store: same subscribe pattern as players. Fires the
+  // reactivity trigger below when a remote update arrives.
+  let tournamentTick = $state(0);
+  $effect(() => {
+    const unsub = subscribeTournamentsStore(() => (tournamentTick += 1));
+    void subscribeTournaments();
+    return unsub;
+  });
+
+  // Footer "Admin" affordance is now a <SignInButton signedOutLabel="Admin" />
+  // in the template — it owns its own auth + role subscription, so no
+  // per-page state is needed here. Signed-out: pill reads "Admin";
+  // tap opens Google sign-in. Signed-in: pill becomes avatar + name,
+  // tap opens an inline dropdown with the role badge + Sign out.
+
+  let showTournamentPicker = $state(false);
+  function tournamentSuggestions(q: string): Tournament[] {
+    // Read the tick so Svelte re-derives on remote updates.
+    void tournamentTick;
+    return rankTournaments(q, 8);
+  }
+  function pickTournament(name: string): void {
+    cfg.tournament = name;
+    showTournamentPicker = false;
+  }
 
   function setMode(m: Mode) {
     const wasPractice = cfg.mode === 'practice';
@@ -94,9 +156,74 @@
   // Which picker's suggestions are currently visible (by key).
   let openPicker = $state<string | null>(null);
 
-  function pick(key: keyof MatchConfig, name: string) {
-    (cfg[key] as string) = name;
+  // ─── Player identity resolution ───────────────────────────────────────
+  // Which Firebase playerId each input field currently resolves to (or
+  // null if the typed name hasn't been matched to an existing player,
+  // which means "create a new player when the match is saved").
+  //
+  // Keyed by the four possible name-input MatchConfig fields.
+  let resolvedPlayerIds = $state<Record<string, string | null>>({
+    playerA: null,
+    playerA2: null,
+    playerB: null,
+    playerB2: null,
+  });
+
+  /**
+   * Top ranker hit for a given typed name — recomputed reactively via
+   * identityTick + the raw text. Returns null on empty input, on no
+   * matches, or on rank 'prefix' (which is handled by the existing
+   * dropdown UI, not the confirm chip).
+   */
+  function topHit(text: string): PlayerMatch | null {
+    // Read the tick so the derivation depends on it — Svelte's reactivity
+    // then re-runs this on every subscribeStore() notify.
+    void identityTick;
+    const q = text.trim();
+    if (!q) return null;
+    const hits = rankMatches(loadAllPlayers(), q, 1);
+    const h = hits[0];
+    if (!h) return null;
+    if (h.rank === 'prefix') return null;
+    return h;
+  }
+
+  /**
+   * On text change: clear the resolved id (user is editing) and, if the
+   * new text is an exact-normalised match, auto-resolve to that player.
+   * Fuzzy hits do NOT auto-resolve — the user has to tap the chip.
+   */
+  function onNameInput(key: keyof MatchConfig, text: string): void {
+    (cfg[key] as string) = text;
+    const h = topHit(text);
+    if (h && h.rank === 'exact') {
+      resolvedPlayerIds[key as string] = h.player.id;
+    } else {
+      resolvedPlayerIds[key as string] = null;
+    }
+  }
+
+  /**
+   * Handler for the gold confirm chip: user has confirmed that their
+   * typed string is an alias of the suggested player. Add the alias in
+   * the identity store (which mirrors to Firebase) and mark this input
+   * field as resolved.
+   */
+  function confirmAlias(key: keyof MatchConfig, hit: PlayerMatch, typed: string): void {
+    addAlias(hit.player.id, typed);
+    resolvedPlayerIds[key as string] = hit.player.id;
+  }
+
+  function pick(key: keyof MatchConfig, row: PlayerRow) {
+    (cfg[key] as string) = row.name;
     openPicker = null;
+    // If the picked row corresponds to an identity-store player, resolve
+    // to that id. Otherwise clear — a new player record will be created
+    // when the match ends.
+    const q = row.name.trim();
+    const hits = rankMatches(loadAllPlayers(), q, 1);
+    const h = hits[0];
+    resolvedPlayerIds[key as string] = h && h.rank === 'exact' ? h.player.id : null;
   }
 
   let canStart = $derived(() => {
@@ -114,11 +241,41 @@
   function start(e: Event) {
     e.preventDefault();
     if (!canStart()) return;
+    const key = matchStateKey(cfg.mode, cfg.playerA, cfg.playerB);
     try {
-      localStorage.removeItem(matchStateKey(cfg.mode, cfg.playerA, cfg.playerB));
+      localStorage.removeItem(key);
     } catch {
       // ignore
     }
+    // Every match — including Practice — broadcasts live to
+     // /live/{mid}. The slug rides the URL to the score screen so a
+     // mid-match refresh preserves the broadcast. Practice players
+     // often stream online play too, so they need overlay URLs.
+    cfg.live = true;
+    cfg.mid = newMid();
+    // Practice never carries a tournament tag; force clear so a
+    // stale value doesn't ride the URL. For singles/doubles, trim
+    // and register the tournament (create-if-new bumps lastActive).
+    if (cfg.mode === 'practice') {
+      cfg.tournament = '';
+    } else {
+      const trimmed = cfg.tournament.trim();
+      cfg.tournament = trimmed;
+      if (trimmed) {
+        createOrTouchTournament(trimmed);
+      }
+    }
+    // Clear any stale identity handoff from a previous match with these
+    // same names, then persist the fresh resolutions + start timestamp
+    // so the score screen can pass them into finishMatch() on End.
+    clearMatchIdentity(key);
+    saveMatchIdentity(key, {
+      aResolvedId: resolvedPlayerIds.playerA,
+      a2ResolvedId: resolvedPlayerIds.playerA2,
+      bResolvedId: resolvedPlayerIds.playerB,
+      b2ResolvedId: resolvedPlayerIds.playerB2,
+    });
+    saveMatchStart(key, Date.now());
     // Remember these names in the per-device roster so the picker
     // autocompletes them next time. Practice mode contributes only
     // playerA; Doubles contributes all four.
@@ -247,27 +404,50 @@
 </script>
 
 {#snippet picker(label: string, key: keyof MatchConfig)}
+  {@const typed = (cfg[key] as string)}
+  {@const suggestions = suggest(typed)}
+  {@const dropdownVisible = openPicker === key && suggestions.length > 0}
+  {@const hit = topHit(typed)}
   <label class="picker">
     <span>{label}</span>
     <input
       type="text"
       autocomplete="off"
       placeholder="Type a name…"
-      value={cfg[key] as string}
-      oninput={(e) => ((cfg[key] as string) = (e.currentTarget as HTMLInputElement).value)}
+      value={typed}
+      oninput={(e) => onNameInput(key, (e.currentTarget as HTMLInputElement).value)}
       onfocus={() => (openPicker = key)}
       onblur={() => setTimeout(() => { if (openPicker === key) openPicker = null; }, 200)}
     />
-    {#if openPicker === key && suggest(cfg[key] as string).length > 0}
+    {#if dropdownVisible}
       <ul class="suggest">
-        {#each suggest(cfg[key] as string) as p (p.name + p.source)}
+        {#each suggestions as p (p.name + p.source)}
           <li>
-            <button type="button" onclick={() => pick(key, p.name)}>
+            <button type="button" onclick={() => pick(key, p)}>
               <span class="pname">{p.name}</span>
             </button>
           </li>
         {/each}
       </ul>
+    {/if}
+
+    <!--
+      Identity chip: only renders for fuzzy hits — the case where the
+      typed text differs from the suggested canonical name. Exact
+      matches auto-resolve silently (input value already IS the
+      canonical name; no chip needed). Prefix hits are handled by the
+      substring dropdown above. Hidden while the dropdown is open to
+      avoid double-signalling.
+    -->
+    {#if hit && hit.rank === 'fuzzy' && !dropdownVisible}
+      <button
+        type="button"
+        class="id-chip id-chip-suggest"
+        onmousedown={(e) => e.preventDefault()}
+        onclick={() => confirmAlias(key, hit, typed)}
+      >
+        Same as <strong>{hit.player.canonicalName}</strong>? Tap to link.
+      </button>
     {/if}
   </label>
 {/snippet}
@@ -302,7 +482,7 @@
     {/if}
     <label>
       <span>
-        {cfg.mode === 'practice' ? 'Boards per set' : 'Max boards'}
+        {cfg.mode === 'practice' ? 'Boards per set' : 'Boards'}
         {#if cfg.mode !== 'practice'}<em class="hint-inline">(0 = ∞)</em>{/if}
       </span>
       <input type="number" min={cfg.mode === 'practice' ? 1 : 0} step="1" bind:value={cfg.maxBoards} />
@@ -327,6 +507,45 @@
       <span class="opt-meta">Solo drill</span>
     </label>
   </fieldset>
+
+
+  <!--
+    Tournament / event input. Free-text; auto-suggested from the
+    Firebase-backed tournaments store. Blank = untagged (grouped as
+    "Default" in the lobby). Sits just above player names because
+    it's the highest-level context ("which event are we playing?").
+    Hidden in Practice mode — a solo drill doesn't sit inside a
+    tournament in any meaningful way.
+  -->
+  {#if cfg.mode !== 'practice'}
+  <label class="tournament-input">
+    <span>Tournament <em class="hint-inline">(optional)</em></span>
+    <input
+      type="text"
+      autocomplete="off"
+      placeholder="Event name — Silver Cup 2026, Sunday Club Night, …"
+      value={cfg.tournament}
+      oninput={(e) => (cfg.tournament = (e.currentTarget as HTMLInputElement).value)}
+      onfocus={() => (showTournamentPicker = true)}
+      onblur={() => setTimeout(() => (showTournamentPicker = false), 200)}
+      maxlength="60"
+    />
+    {#if showTournamentPicker}
+      {@const suggestions = tournamentSuggestions(cfg.tournament)}
+      {#if suggestions.length > 0}
+        <ul class="suggest">
+          {#each suggestions as t (t.key)}
+            <li>
+              <button type="button" onclick={() => pickTournament(t.name)}>
+                <span class="pname">{t.name}</span>
+              </button>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    {/if}
+  </label>
+  {/if}
 
   {#if cfg.mode === 'singles'}
     <div class="player-row">
@@ -414,18 +633,47 @@
     <p class="hint">Tap Share → Add to Home Screen to install.</p>
   {/if}
 
-  <p class="version-line">
-    © 2026 Swapnil Deshpande
-    <span class="hint-sep" aria-hidden="true">·</span>
-    <span class="hint-ver">v{APP_VERSION}</span>
-    <span class="hint-sep" aria-hidden="true">·</span>
-    <a
-      href="#feedback"
-      class="feedback-link"
-      onclick={openFeedback}
-      aria-label="Send feedback about Carromscore"
-    >Feedback ⇗</a>
-  </p>
+  <!--
+    Footer: two rows so the useful links (How to use, Feedback) sit
+    on top and don't get lost in the meta strip. Row 2 is quiet:
+    version + copyright, low contrast.
+  -->
+  <div class="foot-block">
+    <!--
+      Row 1 uses <div> not <p> because SignInButton renders a <button>
+      / <div> block, and <button> nested inside a <p> is invalid HTML
+      (browsers auto-close the <p> and the layout breaks).
+    -->
+    <div class="foot-links">
+      <a
+        href={`${base}help/`}
+        class="foot-link"
+        aria-label="How to use Carromscore"
+      >How to use ⇗</a>
+      <span class="foot-sep" aria-hidden="true">·</span>
+      <a
+        href="#feedback"
+        class="foot-link"
+        onclick={openFeedback}
+        aria-label="Send feedback about Carromscore"
+      >Feedback ⇗</a>
+      <span class="foot-sep" aria-hidden="true">·</span>
+      <!--
+        Admin entry point. Same SignInButton component the lobby
+        uses. Signed-out: renders as an "Admin" pill; tap opens
+        Google sign-in. Signed-in: becomes the avatar + name pill,
+        tap opens an inline dropdown with role + Sign out.
+        `dropUp` because the footer sits at the bottom of the page
+        — a downward dropdown would clip below the fold.
+      -->
+      <SignInButton signedOutLabel="Admin" dropUp />
+    </div>
+    <p class="foot-meta">
+      <span class="foot-ver">v{APP_VERSION}</span>
+      <span class="foot-sep" aria-hidden="true">·</span>
+      © 2026 Swapnil Deshpande
+    </p>
+  </div>
 </form>
 
 {#if showFeedbackPopup}
@@ -513,7 +761,7 @@
   legend {
     padding: 0;
     margin-bottom: 0.5rem;
-    color: var(--muted);
+    color: var(--fg);
     text-transform: uppercase;
     letter-spacing: 0.08em;
     font-size: 0.75rem;
@@ -550,6 +798,22 @@
     letter-spacing: 0.02em;
   }
 
+  /* Very narrow phones (≤ 360px): trim padding + text so the three-
+     column Mode / Match-rules grids fit without spilling out of the
+     container. Label text still wraps if needed. */
+  @media (max-width: 380px) {
+    fieldset label {
+      padding: 0.5rem 0.4rem;
+      min-height: 3rem;
+    }
+    .opt-title { font-size: 0.82rem; }
+    .opt-meta { font-size: 0.62rem; }
+    fieldset.rules label { padding: 0.5rem 0.55rem; }
+    fieldset.rules label > span { font-size: 0.62rem; }
+    fieldset.rules input[type='number'] { font-size: 1rem; }
+    legend { font-size: 0.7rem; }
+  }
+
   .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
   .row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.75rem; }
 
@@ -575,7 +839,7 @@
   }
   fieldset.rules label:focus-within { border-color: var(--accent); }
   fieldset.rules label > span {
-    color: var(--muted);
+    color: var(--fg);
     font-size: 0.7rem;
     text-transform: uppercase;
     letter-spacing: 0.08em;
@@ -627,14 +891,27 @@
     font-size: 0.75rem;
   }
 
-  label.picker, .note-input, .row3 label {
+  label.picker, .note-input, .row3 label, .tournament-input {
     display: flex;
     flex-direction: column;
     gap: 0.35rem;
     position: relative;
   }
-  label > span {
+  /* Tournament input keeps its own spacing so it feels like a
+     high-level context row, distinct from the player rows below. */
+  .tournament-input {
+    margin: 0.5rem 0 0;
+  }
+  .tournament-input .hint-inline {
     color: var(--muted);
+    font-style: normal;
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 0.7rem;
+    margin-left: 0.3rem;
+  }
+  label > span {
+    color: var(--fg);
     font-size: 0.75rem;
     text-transform: uppercase;
     letter-spacing: 0.08em;
@@ -684,6 +961,29 @@
   .suggest button:hover { background: #1c1c1c; }
   .pname { font-size: 0.95rem; }
   .pmeta { color: var(--muted); font-size: 0.75rem; }
+
+  /* "Same as X? Tap to link" chip below a name input, shown only when
+     the ranker finds a fuzzy match the user should confirm. */
+  .id-chip-suggest {
+    display: inline-block;
+    margin: 0.35rem 0 0;
+    padding: 0.25rem 0.55rem;
+    border-radius: 0.5rem;
+    font: inherit;
+    font-size: 0.78rem;
+    line-height: 1.2;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: left;
+    color: #ffd54a;
+    background: rgba(255, 213, 74, 0.08);
+    border: 1px solid rgba(255, 213, 74, 0.35);
+    cursor: pointer;
+  }
+  .id-chip-suggest:hover { background: rgba(255, 213, 74, 0.16); }
+  .id-chip-suggest strong { color: #ffd54a; }
 
   .start {
     background: var(--accent);
@@ -830,15 +1130,49 @@
    * both screens read as one product. Version chip: soft accent pill,
    * sans-serif, bold — glanceable but doesn't fight the copyright text.
    */
-  .version-line {
+  /* Footer: two rows. Nav on top (thumb-priority), meta below. */
+  .foot-nav {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 1rem 0 0.35rem;
+    font-size: 0.85rem;
+    flex-wrap: wrap;
+  }
+  /* Two-row footer wrapper. Row 1 = actionable links (How to use,
+     Feedback); row 2 = meta (version + copyright). Keeps both rows
+     centred, with the meta row noticeably quieter than the links. */
+  .foot-block {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.35rem;
+    margin: 0.5rem 0 0;
+  }
+  .foot-links {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 0.35rem;
+    margin: 0;
+    font-size: 0.85rem;
+    flex-wrap: wrap;
+  }
+  .foot-meta {
     text-align: center;
     color: var(--muted);
-    font-size: 0.75rem;
+    font-size: 0.72rem;
     margin: 0;
     letter-spacing: 0.02em;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 0.3rem;
+    flex-wrap: wrap;
   }
-  .hint-sep { opacity: 0.4; margin: 0 0.3rem; }
-  .hint-ver {
+  .foot-sep { opacity: 0.4; }
+  .foot-ver {
     display: inline-block;
     padding: 0.1rem 0.5rem;
     background: rgba(255, 213, 74, 0.14);
@@ -850,17 +1184,18 @@
     font-size: 0.7rem;
     letter-spacing: 0.06em;
     line-height: 1;
-    vertical-align: baseline;
   }
-  .feedback-link {
-    color: var(--muted);
+  .foot-link {
+    color: var(--fg);
     text-decoration: none;
-    border-bottom: 1px dotted rgba(255,255,255,0.35);
-    transition: color 0.15s, border-color 0.15s;
+    padding: 0.15rem 0.5rem;
+    border-radius: 0.35rem;
+    font-weight: 600;
+    transition: color 0.15s, background 0.15s;
   }
-  .feedback-link:hover {
+  .foot-link:hover {
     color: var(--accent);
-    border-bottom-color: var(--accent);
+    background: rgba(255, 213, 74, 0.08);
   }
 
   /*
@@ -990,7 +1325,6 @@
     cursor: pointer;
     font-family: inherit;
   }
-
   @media (max-width: 520px) {
     fieldset { grid-template-columns: 1fr; }
     fieldset.fmt-mode { grid-template-columns: 1fr 1fr 1fr; }

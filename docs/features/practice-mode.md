@@ -17,13 +17,16 @@ sets, boards per set, one player name, and one "Represents" field.
   <img src="../screenshots/08-practice-setup.png" alt="Practice mode setup with a single player row" width="360" />
 </p>
 
-Defaults are **1 set × 4 boards**. Change them to match your usual drill.
+Defaults are **1 set × 4 boards**. Change them to match your usual
+drill. Note: the Tournament tag field is hidden in Practice — it's a
+versus-match concept.
 
 ## Scoring a session
 
 Tap **Start match** and the scoreboard opens. Instead of the usual
-SET / POINTS / BOARD layout, you get a row of digit cells labelled
-**B1, B2, B3, …** with **SET** on the left and **TOTAL** on the right.
+five-column SET / POINTS / BOARD layout, you get a row of digit cells
+labelled **B1, B2, B3, …** with **SET** on the left and **TOTAL** on
+the right.
 
 <p align="center">
   <img src="../screenshots/09-practice-single-set.png" alt="Practice single-set scoreboard, four boards" width="720" />
@@ -51,6 +54,22 @@ through them, and a small pip strip in the header tells you which set
 you're on. The running **Total missed** at the top of the screen
 accumulates across all sets so you always see the grand total.
 
+## Live broadcast
+
+Toggle **Live** on the setup screen and the practice session publishes
+to a shareable URL just like a versus match. The overlay renders a
+compact per-set row: one wide pill with SOLO badge + player name +
+country, then one row per set showing every board tile with the miss
+count in DSEG7 digits, plus a TOTAL tile on the right.
+
+This is useful for club sessions where everyone runs the same drill
+and a projector shows the live scoreboard — no need to co-locate
+laptop and phone, the overlay updates within ~1 s of every miss you
+enter on the umpire's device.
+
+See [Broadcast overlay](./broadcast-overlay.md) for the OBS/Prism
+setup.
+
 ## Ending a session
 
 Tap **🏁 End Match** — the recap popup shows the whole board-by-board
@@ -63,7 +82,19 @@ matrix with per-set totals and the grand total missed:
 No fireworks, no medals — Practice never declares a winner. Take a
 screenshot if you want to share with a group.
 
+## Archive + retention
+
+Practice runs are archived to the /matches record in Firebase alongside
+versus matches, and appear in the /live/ lobby's History tab under the
+"Default" bucket (practice sessions can't be tagged with a tournament
+tag). Retention is **3 months** — practice runs are the highest-volume
+record type, so the shorter TTL keeps the lobby uncluttered.
+
+If a session got recorded with a typo or a mistake, a super-admin can
+edit or delete the record via the /admin/ panel's History cleanup tab.
+
 ## Related
 
 - [Keeping the score](./keeping-the-score.md) — normal Singles/Doubles scoring.
+- [Broadcast overlay](./broadcast-overlay.md) — including the practice overlay layout.
 - [Install on Android](./install-android.md) or [Install on iPhone](./install-iphone.md).

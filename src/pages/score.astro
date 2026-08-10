@@ -9,10 +9,10 @@ import OverlayBoard from '../components/OverlayBoard.svelte';
 <BaseLayout title="Carromscore — live">
   <div id="app-root">
     <div class="player-only">
-      <ScoreBoard client:load />
+      <ScoreBoard client:only="svelte" />
     </div>
     <div class="overlay-only">
-      <OverlayBoard client:load />
+      <OverlayBoard client:only="svelte" />
     </div>
   </div>
   <script>

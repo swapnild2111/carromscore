@@ -75,8 +75,17 @@ const base = import.meta.env.BASE_URL;
     <script is:inline define:vars={{ base }}>
       // Set data-channel="beta" on <html> so the tiny beta banner
       // and any future channel-specific tweaks can key off it.
+      // Restricted to the home page — the banner would eat vertical
+      // room the score screen and live lobby genuinely need for their
+      // own chrome (End/Close buttons falling off the bottom of the
+      // viewport on shorter phones). Users see it once when they
+      // land, then it's out of the way.
       if (base.includes('/beta/')) {
-        document.documentElement.dataset.channel = 'beta';
+        const path = window.location.pathname;
+        const isHome = path === base || path === base.replace(/\/$/, '');
+        if (isHome) {
+          document.documentElement.dataset.channel = 'beta';
+        }
       }
     </script>
     <slot />
@@ -93,15 +102,15 @@ const base = import.meta.env.BASE_URL;
        * The initial controller acquisition on first load is filtered
        * out: only *changes* to an existing controller count as updates.
        *
-       * SKIP on the beta channel — beta builds change frequently and
-       * every visit should pull the latest. public/sw.js also hardcodes
-       * /carromscore/ paths so it wouldn't work under /carromscore/beta/
-       * anyway; better to skip than poison the tab with a broken
-       * registration.
+       * SKIP in two situations:
+       *   - Dev mode: SW would serve stale bundles between edits.
+       *   - Beta channel (/carromscore/beta/): beta builds change
+       *     frequently; also public/sw.js hardcodes /carromscore/
+       *     paths and wouldn't work under /beta/ anyway.
        */
       if ('serviceWorker' in navigator) {
         const isBeta = import.meta.env.BASE_URL.includes('/beta/');
-        if (isBeta) {
+        if (import.meta.env.DEV || isBeta) {
           navigator.serviceWorker.getRegistrations().then((regs) => {
             regs.forEach((r) => r.unregister());
           });

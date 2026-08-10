@@ -35,6 +35,22 @@ export type MatchConfig = {
   bestOf: number;       // number of sets in the match (India=3, Europe/EuroCup=1)
   pointsTarget: number; // POINTS clamp (default 25)
   maxBoards: number;    // BOARD cap (default 8, 0 for unlimited in EuroCup)
+  // Live broadcast: if `live` is true, every state change on the score
+  // screen is published to Firebase `/live/{mid}`. `mid` is a 6-char
+  // slug generated at Start; spectators visit /live/?mid=<mid> to watch.
+  // Both default off so non-broadcast matches never touch Firebase for
+  // sync (they still hit Firebase for identity + history at match end).
+  live: boolean;
+  mid: string;
+  /**
+   * Tournament / event name. Free-text at setup, auto-suggested from
+   * prior entries. Empty string means "no tournament" → the app
+   * treats it as bucket "Default". Retention differs by tag:
+   *   - filled tournament: 1 year (matches you care about)
+   *   - blank / "Default": 3 months (casual play)
+   * Practice mode is always 3-month regardless of tag.
+   */
+  tournament: string;
 };
 
 export const DEFAULT_CONFIG: MatchConfig = {
@@ -49,6 +65,9 @@ export const DEFAULT_CONFIG: MatchConfig = {
   bestOf: 3,
   pointsTarget: 25,
   maxBoards: 8,
+  live: false,
+  mid: '',
+  tournament: '',
 };
 
 export function formatPreset(format: Format): Partial<MatchConfig> {
@@ -85,6 +104,9 @@ const QUERY_KEYS: (keyof MatchConfig)[] = [
   'bestOf',
   'pointsTarget',
   'maxBoards',
+  'live',
+  'mid',
+  'tournament',
 ];
 
 export function encodeConfig(cfg: MatchConfig): string {
@@ -134,6 +156,19 @@ export function decodeConfig(query: URLSearchParams): MatchConfig {
   // 0 is a valid maxBoards value (EuroCup unlimited).
   const maxBoards = parseInRange(query.get('maxBoards'), 0);
   if (maxBoards !== null) out.maxBoards = maxBoards;
+
+  // Live broadcast: `live` is a truthy string. `mid` is the 6-char slug
+  // generated at match start. Both propagate through the URL so a
+  // mid-match refresh doesn't drop the broadcast.
+  out.live = query.get('live') === 'true';
+  const midParam = query.get('mid') ?? '';
+  if (/^[a-z0-9]{4,12}$/i.test(midParam)) out.mid = midParam;
+
+  // Tournament / event name. Free-text, trimmed and length-capped to
+  // 60 chars to match the RTDB validator. Blank stays blank (→
+  // grouped as "Default" in the lobby).
+  const tour = (query.get('tournament') ?? '').trim().slice(0, 60);
+  if (tour) out.tournament = tour;
 
   return out;
 }

@@ -1,61 +1,69 @@
 # Share URL
 
-The **⧉ Share URL** button in the score-screen footer opens a small
-popup with URLs you can hand off to a streamer or (in future) a
-spectator.
+The **⧉ Share** button in the score-screen footer opens a small popup
+with two URLs you can hand off — one for spectators to watch on their
+own device, one for streaming software.
 
 <p align="center">
-  <img src="../screenshots/12-share-popup.png" alt="Share match URL popup with Overlay URL and Live spectator URL" width="720" />
+  <img src="../screenshots/12-share-popup.png" alt="Share match URL popup with spectator URL and OBS overlay URL" width="720" />
 </p>
 
-Two URLs are on offer.
+## Spectator URL
 
-## Overlay URL — ready to use today
+Paste this into a WhatsApp / iMessage / email to friends and family so
+they can watch the live score on their own phone. Opens as the full
+read-only scoreboard — coloured pills, DSEG7 digits, set pips, BREAK
+and queen indicators, board-by-board recap below.
+
+Updates within ~1 s of every tap on the umpire's device (as long as
+**Live** was toggled on at setup). Works from anywhere with a browser.
+
+Tap **Copy** on the row — the URL lands on your clipboard, the button
+flashes ✓ Copied, and you're done.
+
+## OBS overlay URL
 
 Paste this into **OBS**, **Prism Live Studio**, or any streaming
 software's Browser Source. It renders the transparent bottom-third
-scoreboard strip that's designed to composite over a camera feed of
-your carrom board.
+scoreboard strip designed to composite over a camera feed of your
+carrom board.
 
-Tap the **Copy** button — the URL lands on your clipboard, the button
-flashes ✓ Copied, and you're done. See the full walkthrough in
-[Broadcast overlay](./broadcast-overlay.md).
+Full walkthrough in [Broadcast overlay](./broadcast-overlay.md).
 
-## Live spectator URL — coming soon
+## Requires Live broadcast
 
-The second row is a URL for sending to friends/family so they can watch
-the live score on their own phone. The Copy button is disabled today
-because **cross-device live sync isn't shipped yet** — a URL alone
-isn't enough to sync scores from your phone to someone else's phone.
+Both URLs work only when **Live** is toggled on at match setup. Without
+Live, no data publishes to Firebase and the URL renders an empty
+scoreboard.
 
-We're planning to add a live-sync backend (probably Firebase's free
-tier or Supabase Realtime) in a future release so this actually works.
-When it does, the button will turn on and existing spectator URLs will
-start working — no re-share needed.
+Practice mode supports Live the same way — the spectator URL shows the
+per-set miss matrix, and the OBS overlay renders the compact
+practice-specific tile row.
 
-Until then, if you want to share the current score with someone remote,
-either:
-- Take a screenshot and send it, or
-- Point them at the live broadcast (if you're streaming with the
-  overlay).
+## What's in the URL
 
-## What's actually in the URL
+Both URLs carry a short 6-character `mid` (match ID) that keys into the
+Firebase Realtime Database record for this match. The difference:
 
-Both URLs are just the current match's setup encoded in the query
-string — player names, "Represents" fields, sets, points target, board
-cap, mode. Anyone who opens them sees a scoreboard set up for those
-players. The difference:
-
-- Overlay URL has `&view=overlay` appended → renders as a transparent
-  broadcast strip.
-- Live spectator URL has no `view` parameter → renders as the normal
-  score screen.
+- **Spectator URL**: `.../live/?mid=xxx` — renders the full scoreboard.
+- **OBS overlay URL**: `.../live/?mid=xxx&view=overlay` — renders as a
+  transparent broadcast strip.
 
 Nothing sensitive is in the URL. There are no tokens, no accounts, no
-credentials. Sharing the URL is exactly like sharing a link to a
+credentials. The `mid` is randomly generated at match start and only
+identifies which live-record to subscribe to — anyone with the URL sees
+the same data. Sharing the URL is exactly like sharing a link to a
 public webpage.
+
+## Also on the /live/ lobby
+
+Every match with Live enabled also shows up in the /live/ lobby's
+"Now Playing" tab automatically. If you'd rather send someone the lobby
+URL and let them find your match by name, that works too. Once the
+match ends, it moves to the "History" tab (grouped by tournament tag)
+where it's viewable forever.
 
 ## Related
 
-- [Broadcast overlay](./broadcast-overlay.md) — how to use the overlay URL.
+- [Broadcast overlay](./broadcast-overlay.md) — how to use the overlay URL in OBS/Prism.
 - [Keeping the score](./keeping-the-score.md).
