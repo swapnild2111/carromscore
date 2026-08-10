@@ -182,8 +182,8 @@
         {#if role?.isSuper}
           <!--
             Super-admin gets a link to the global /admin/ page.
-            Anchor uses import.meta.env.BASE_URL so it works at both
-            /carromscore/admin/ and /carromscore/beta/admin/.
+            Anchor uses import.meta.env.BASE_URL so it resolves relative
+            to whatever base path this build was deployed under.
           -->
           <a
             class="dropdown-item"

@@ -1,16 +1,14 @@
 name: Deploy to GitHub Pages
 
-# We publish ONE Pages artifact that contains both channels:
-#   /                    → main branch build (production, existing users)
-#   /beta/               → v2.0-dev branch build (public-URL beta)
+# Publishes the main-branch build to /carromscore/.
 #
-# Either branch pushing triggers the same workflow. Both channels
-# always rebuild so a push to v2.0-dev never orphans main and vice
-# versa. Users on either channel see their build re-published within
-# ~1 min of any push.
+# Prior to v2.0 GA (2026-08) this workflow also built the v2.0-dev
+# branch to /carromscore/beta/ as a public preview channel. That
+# channel was retired after v2.0.0 shipped; future preview work will
+# use short-lived feature branches instead.
 on:
   push:
-    branches: [main, v2.0-dev]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -26,59 +24,27 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      # Main branch build → dist-main/  (deploys to /carromscore/)
-      - name: Checkout main
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: main
-          path: main-src
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: npm
-          cache-dependency-path: main-src/package-lock.json
 
-      - name: Install (main)
+      - name: Install
         run: npm ci
-        working-directory: main-src
 
-      - name: Build (main → /carromscore/)
+      - name: Build
         run: npm run build
-        working-directory: main-src
         env:
           PUBLIC_BASE: /carromscore/
-
-      # Beta branch build → dist-beta/  (deploys to /carromscore/beta/)
-      - name: Checkout v2.0-dev
-        uses: actions/checkout@v4
-        with:
-          ref: v2.0-dev
-          path: beta-src
-
-      - name: Install (beta)
-        run: npm ci
-        working-directory: beta-src
-
-      - name: Build (beta → /carromscore/beta/)
-        run: npm run build
-        working-directory: beta-src
-        env:
-          PUBLIC_BASE: /carromscore/beta/
-
-      # Merge: main's dist goes to the root, beta's dist goes into /beta.
-      - name: Assemble combined dist
-        run: |
-          mkdir -p combined
-          cp -R main-src/dist/. combined/
-          mkdir -p combined/beta
-          cp -R beta-src/dist/. combined/beta/
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./combined
+          path: ./dist
 
   deploy:
     needs: build

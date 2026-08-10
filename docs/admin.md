@@ -1,6 +1,6 @@
 # Carromscore admin — maintainer guide
 
-Applies to: **Carromscore v2.0.x** (the beta channel and future GA).
+Applies to: **Carromscore v2.0.x and later**.
 
 Carromscore's admin surface is one page (`/admin/`) plus inline
 affordances (pencil on match cards, "Fix this match" on the end
@@ -34,8 +34,8 @@ mutation rule checks the role. UI gating is UX only.
 As of v2.0, the Roles tab accepts a **Gmail address** directly. No
 more UID sharing.
 
-1. Recipient signs in at `/carromscore/beta/` at least once — even
-   the "not authorised" outcome is fine. This writes their
+1. Recipient signs in at `/carromscore/` at least once — even the
+   "not authorised" outcome is fine. This writes their
    `{email, displayName}` to `/users/{uid}` (a client-side mirror
    written on every sign-in), which the admin page uses to resolve
    email → UID.

@@ -3,11 +3,8 @@ import { defineConfig } from 'astro/config';
 import svelte from '@astrojs/svelte';
 
 /*
- * Base path for the built site.
- *   - Production (main branch → GitHub Pages root):  /carromscore/
- *   - Beta       (v2.0-dev branch → /beta subpath):   /carromscore/beta/
- *
- * The deploy workflow sets PUBLIC_BASE per branch build. Local dev
+ * Base path for the built site. Production ships to GitHub Pages at
+ * /carromscore/. The deploy workflow sets PUBLIC_BASE, and local dev
  * falls back to /carromscore/ so URLs match production.
  */
 const base = process.env.PUBLIC_BASE || '/carromscore/';

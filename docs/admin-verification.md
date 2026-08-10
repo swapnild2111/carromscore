@@ -1,7 +1,7 @@
 # Admin verification — E2E checklist
 
-Run through this on the beta channel after any change to auth,
-roles, or admin helpers. Applies to `/carromscore/beta/`.
+Run through this after any change to auth, roles, or admin helpers.
+Applies to `/carromscore/`.
 
 ## Setup
 

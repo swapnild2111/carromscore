@@ -201,7 +201,7 @@
     </p>
     <p class="lead-sub">
       To grant access: the recipient signs in with Google at
-      <code>/carromscore/beta/</code> once (via Admin in the footer).
+      <code>/carromscore/</code> once (via Admin in the footer).
       Then enter their Gmail address below.
     </p>
   </div>
