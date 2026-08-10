@@ -3,7 +3,7 @@
    * /admin/ shell. Super-only page — anonymous or non-super users
    * see an "Access denied" screen with a Sign-in / Sign-out button
    * as appropriate. Super-admins see the tab bar and can switch
-   * between Players, Tournaments, Live cleanup, and Audit.
+   * between Players, Tournaments, Live matches, and Audit.
    *
    * Client-side gating here is UX only — the RTDB rules are what
    * actually enforce super-only writes. Every helper this page
@@ -137,7 +137,7 @@
         class:tab-active={tab === 'live'}
         aria-selected={tab === 'live'}
         onclick={() => (tab = 'live')}
-      >Live cleanup</button>
+      >Live matches</button>
       <button
         type="button"
         role="tab"

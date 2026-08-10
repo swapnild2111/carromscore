@@ -1,19 +1,18 @@
 <script lang="ts">
   /**
-   * Admin — Live cleanup tab.
+   * Admin — Live matches tab.
    *
-   * Lists /live/{mid} records the app subscribes to via
-   * subscribeAllLive. The lobby filters records with
-   * (now - updatedAt >= 4h) out of the "Now Playing" view — those
-   * are considered stale. This tab shows those same stale entries
-   * plus any active-but-abandoned ones (matchResult === null) so a
-   * super-admin can force-delete records that armLiveCleanup's
-   * onDisconnect handler didn't catch (force-quit, connectivity
-   * blip, etc.).
+   * Lists every /live/{mid} record the app is subscribed to via
+   * subscribeAllLive. Filter chips let the admin switch between:
+   *   - "All": every live record, active or stuck (default)
+   *   - "Stuck only": records with no updates in >4 h, or no
+   *     matchResult set for >2 h (the pre-v2.0 "Live cleanup"
+   *     scope, retained as a filter option)
    *
-   * A "healthy" live match (recently updated, or already
-   * matchResult set) is hidden — this tab is for cleanup, not
-   * inspection. To browse live matches, use the lobby.
+   * Multi-select + bulk delete works on whatever the current filter
+   * shows. Delete removes the /live/{mid} ephemeral broadcast only —
+   * archived /matches records are unaffected, and admins can bulk-
+   * delete those separately from the History cleanup tab.
    */
   import { onMount } from 'svelte';
   import {
@@ -32,6 +31,19 @@
   let saving = $state(false);
   let banner = $state<{ kind: 'ok' | 'err'; message: string } | null>(null);
   let confirmMid = $state<string | null>(null);
+  /**
+   * Which subset of live records to show. 'all' is the default (v2.0.x+
+   * rework); 'stuck' is the pre-rework filter that only showed records
+   * needing cleanup. Selection state is cleared when the filter flips
+   * so a bulk-delete on the newly-filtered set doesn't accidentally
+   * catch rows the admin has stopped looking at.
+   */
+  let filter = $state<'all' | 'stuck'>('all');
+  function setFilter(next: 'all' | 'stuck') {
+    if (filter === next) return;
+    filter = next;
+    selected = new Set();
+  }
   /**
    * Selected midss for bulk delete. Kept as a Set for O(1)
    * membership tests as the list re-renders on every subscribeAllLive
@@ -72,8 +84,15 @@
     return false;
   }
 
-  const stuck = $derived(
-    entries.filter(isStuck).sort((a, b) => a.updatedAt - b.updatedAt),
+  /**
+   * Rows the admin currently sees, sorted oldest-updatedAt first
+   * (matches the pre-rework ordering — stale/stuck records surface
+   * naturally at the top of an unfiltered list).
+   */
+  const visible = $derived(
+    entries
+      .filter((e) => (filter === 'stuck' ? isStuck(e) : true))
+      .sort((a, b) => a.updatedAt - b.updatedAt),
   );
 
   function flash(kind: 'ok' | 'err', message: string) {
@@ -106,10 +125,10 @@
     selected = new Set(selected);
   }
   function toggleSelectAll() {
-    if (stuck.every((e) => selected.has(e.mid))) {
+    if (visible.every((e) => selected.has(e.mid))) {
       selected = new Set();
     } else {
-      selected = new Set(stuck.map((e) => e.mid));
+      selected = new Set(visible.map((e) => e.mid));
     }
   }
   function clearSelection() {
@@ -133,7 +152,7 @@
   }
 
   const allSelected = $derived(
-    stuck.length > 0 && stuck.every((e) => selected.has(e.mid)),
+    visible.length > 0 && visible.every((e) => selected.has(e.mid)),
   );
 </script>
 
@@ -145,10 +164,30 @@
   {/if}
 
   <p class="lead">
-    Shows /live records that are stuck: no updates for &gt;4 h, or
-    &gt;2 h without a match result. Healthy live matches are hidden —
-    browse those in the lobby.
+    Every /live/{'{mid}'} record in Firebase. Use the filter to narrow
+    to stuck records only (no updates &gt;4 h, or &gt;2 h without a
+    match result). Delete removes the ephemeral broadcast only —
+    archived matches live under History cleanup.
   </p>
+
+  <div class="filter-bar" role="tablist" aria-label="Filter live records">
+    <button
+      type="button"
+      class="filter-chip"
+      class:filter-chip-on={filter === 'all'}
+      onclick={() => setFilter('all')}
+      role="tab"
+      aria-selected={filter === 'all'}
+    >All <span class="filter-count">{entries.length}</span></button>
+    <button
+      type="button"
+      class="filter-chip"
+      class:filter-chip-on={filter === 'stuck'}
+      onclick={() => setFilter('stuck')}
+      role="tab"
+      aria-selected={filter === 'stuck'}
+    >Stuck only <span class="filter-count">{entries.filter(isStuck).length}</span></button>
+  </div>
 
   <AdminBulkBar
     count={selected.size}
@@ -158,8 +197,10 @@
     onClearSelection={clearSelection}
   />
 
-  {#if stuck.length === 0}
-    <p class="empty">Nothing to clean up.</p>
+  {#if visible.length === 0}
+    <p class="empty">
+      {#if filter === 'stuck'}Nothing to clean up.{:else}No live matches right now.{/if}
+    </p>
   {:else}
     <div class="select-hdr">
       <label class="sel-all">
@@ -173,7 +214,7 @@
       </label>
     </div>
     <ul class="list">
-      {#each stuck as e (e.mid)}
+      {#each visible as e (e.mid)}
         <li class="row" class:row-selected={selected.has(e.mid)}>
           <label class="row-check">
             <input
@@ -195,7 +236,11 @@
               {sideName(e, 'a')}
               {#if sideName(e, 'b')}<span class="vs">vs</span> {sideName(e, 'b')}{/if}
               <span class="age">· updated {relTime(e.updatedAt)}</span>
-              {#if !e.liveState.matchResult}<span class="chip chip-warn">no result</span>{/if}
+              {#if isStuck(e)}
+                <span class="chip chip-warn">stuck</span>
+              {:else if !e.liveState.matchResult}
+                <span class="chip chip-live">LIVE</span>
+              {/if}
             </div>
           </div>
           <button
@@ -338,6 +383,52 @@
     color: #ffb74d;
     background: rgba(255, 183, 77, 0.1);
     border-color: rgba(255, 183, 77, 0.3);
+  }
+  /* Live chip: red dot + red-tinted "LIVE" text. Matches the /live/
+     lobby's "Now Playing" style so admins recognise it instantly. */
+  .chip-live {
+    color: #ef8985;
+    background: rgba(239, 83, 80, 0.1);
+    border-color: rgba(239, 83, 80, 0.3);
+    font-weight: 700;
+    letter-spacing: 0.06em;
+  }
+
+  /* Filter tabs — bar of tab-like chips above the bulk bar. */
+  .filter-bar {
+    display: flex;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+  }
+  .filter-chip {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: var(--muted);
+    padding: 0.35rem 0.75rem;
+    border-radius: 999px;
+    font: inherit;
+    font-size: 0.78rem;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    transition: background 0.12s, border-color 0.12s, color 0.12s;
+  }
+  .filter-chip:hover { background: rgba(255, 255, 255, 0.06); }
+  .filter-chip-on {
+    background: rgba(255, 213, 74, 0.12);
+    border-color: rgba(255, 213, 74, 0.5);
+    color: var(--accent, #ffd54a);
+  }
+  .filter-count {
+    font-weight: 700;
+    font-family: monospace;
+    color: inherit;
+    opacity: 0.85;
+    background: rgba(0, 0, 0, 0.25);
+    padding: 0.02rem 0.35rem;
+    border-radius: 999px;
+    font-size: 0.72rem;
   }
   .row-sub {
     color: var(--muted);

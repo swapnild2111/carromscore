@@ -88,10 +88,15 @@ Applies to `/carromscore/`.
   matches show under "Default" bucket in the lobby, still visible.
 - [ ] Multi-select 2 rows → **Delete selected** → both gone.
 
-## /admin/ Live cleanup
+## /admin/ Live matches
 
-- [ ] Only shows records with no updates in 4+h, or no
-  matchResult for 2+h.
+- [ ] Default filter is "All" — lists every /live/{mid} record.
+  Active broadcasts have a red **LIVE** chip; stuck ones have a
+  **stuck** chip. Counts on the two filter chips match the visible
+  row count when each is selected.
+- [ ] Switching to "Stuck only" narrows to records with no updates
+  in 4+h, or no matchResult for 2+h. Selection state resets on
+  filter change (prevents stale bulk-delete targets).
 - [ ] Delete → record disappears; History unaffected.
 - [ ] Multi-select → **Delete selected** → all removed atomically.
 - [ ] Passive auto-sweep: any signed-in super's `/admin/` visit
