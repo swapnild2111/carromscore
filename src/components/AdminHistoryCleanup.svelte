@@ -199,7 +199,27 @@
             <div class="row-sub">
               {sideNameMatch(m, 'a')}
               {#if sideNameMatch(m, 'b')}<span class="vs">vs</span> {sideNameMatch(m, 'b')}{/if}
-              {#if m.result?.finalPointsA !== undefined}
+              {#if m.mode === 'practice'}
+                <!--
+                  Practice records don't have a versus-shape result.
+                  `finalPointsA` is technically defined (always 0)
+                  which would otherwise trip the old `!== undefined`
+                  guard and render "0-0 · 0-0" — meaningless for a
+                  solo drill. Show total misses + total boards from
+                  the practiceBoards matrix instead, mirroring the
+                  Lobby History card's shape.
+                -->
+                {@const rows = m.practiceBoards ?? []}
+                {@const totalMisses = rows.reduce(
+                  (s, row) => s + (row ?? []).reduce((a, v) => a + (v ?? 0), 0),
+                  0,
+                )}
+                {@const boardsPerSet = m.cfg?.maxBoards ?? (rows[0]?.length ?? 0)}
+                {@const totalBoards = rows.length * boardsPerSet}
+                <span class="score">
+                  {totalMisses} misses · {totalBoards} boards
+                </span>
+              {:else if m.result?.finalPointsA !== undefined}
                 <span class="score">
                   {m.result?.setsA ?? 0}–{m.result?.setsB ?? 0}
                   ·
