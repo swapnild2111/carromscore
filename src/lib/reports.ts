@@ -15,9 +15,15 @@
 import type { MatchRecord } from './history';
 import { playerName } from './history';
 
-/** One row of the per-match table. Mirrors the xlsx prototype. */
+/**
+ * One row of the per-match table. The Firebase push id is retained
+ * as `_matchId` for row-key stability in Svelte's `{#each}` block
+ * but never surfaced to users — it's noise (a hex string) and the
+ * user-visible identity of a match is (Ended + Side A + Side B).
+ * Underscore prefix marks it as internal.
+ */
 export type ReportRow = {
-  matchId: string;      // last-6 of the RTDB push id
+  _matchId: string;     // Firebase push id, keyed on the row, not shown
   endedAt: string;      // YYYY-MM-DD (UTC — matches the archive)
   endedAtRaw: number;   // epoch ms for sorting
   mode: 'Singles' | 'Doubles';
@@ -113,19 +119,21 @@ function teamName(m: MatchRecord, side: 'a' | 'b'): string {
  * Build the per-match rows. Sorted newest first (matches the History
  * tab default). Practice + missing-mode records are dropped.
  */
+const WINNER_LABEL: Record<'a' | 'b' | 'draw', ReportRow['winner']> = {
+  a: 'A',
+  b: 'B',
+  draw: 'Draw',
+};
+
 export function buildReportRows(matches: MatchRecord[]): ReportRow[] {
   const rows: ReportRow[] = [];
   for (const m of matches) {
     if (m.mode !== 'singles' && m.mode !== 'doubles') continue;
     const { boardsWonA, boardsWonB } = countBoardsWon(m);
     const winnerRaw = m.result?.winner ?? null;
-    const winner: ReportRow['winner'] =
-      winnerRaw === 'a' ? 'A'
-      : winnerRaw === 'b' ? 'B'
-      : winnerRaw === 'draw' ? 'Draw'
-      : '';
+    const winner: ReportRow['winner'] = winnerRaw ? WINNER_LABEL[winnerRaw] : '';
     rows.push({
-      matchId: m.id.slice(-6),
+      _matchId: m.id,
       endedAt: formatDate(m.endedAt),
       endedAtRaw: m.endedAt ?? 0,
       mode: m.mode === 'singles' ? 'Singles' : 'Doubles',
@@ -151,26 +159,49 @@ export function buildReportRows(matches: MatchRecord[]): ReportRow[] {
  * contributes to both players' summaries. Draws don't count as wins
  * or losses for either side.
  */
+/** Fresh zeroed summary for a newly-seen player id. */
+function emptyPlayerSummary(pid: string): PlayerSummary {
+  return {
+    playerId: pid,
+    name: playerName(pid),
+    matches: 0,
+    wins: 0,
+    losses: 0,
+    draws: 0,
+    boardsWon: 0,
+    pointsScored: 0,
+  };
+}
+
+/**
+ * Accumulate one side's contribution to each of its players' rolling
+ * summaries. Called twice per match (side A + side B) with the values
+ * relevant to that side. Draws increment `draws`; wins on the OTHER
+ * side become `losses` here.
+ */
+function accumulateSide(
+  map: Map<string, PlayerSummary>,
+  playerIds: string[],
+  boardsWon: number,
+  pointsScored: number,
+  wasWin: boolean,
+  wasLoss: boolean,
+  wasDraw: boolean,
+): void {
+  for (const pid of playerIds) {
+    const s = map.get(pid) ?? emptyPlayerSummary(pid);
+    s.matches += 1;
+    s.boardsWon += boardsWon;
+    s.pointsScored += pointsScored;
+    if (wasWin) s.wins += 1;
+    else if (wasLoss) s.losses += 1;
+    else if (wasDraw) s.draws += 1;
+    map.set(pid, s);
+  }
+}
+
 export function buildPlayerSummary(matches: MatchRecord[]): PlayerSummary[] {
   const map = new Map<string, PlayerSummary>();
-
-  function ensure(pid: string): PlayerSummary {
-    let s = map.get(pid);
-    if (!s) {
-      s = {
-        playerId: pid,
-        name: playerName(pid),
-        matches: 0,
-        wins: 0,
-        losses: 0,
-        draws: 0,
-        boardsWon: 0,
-        pointsScored: 0,
-      };
-      map.set(pid, s);
-    }
-    return s;
-  }
 
   for (const m of matches) {
     if (m.mode !== 'singles' && m.mode !== 'doubles') continue;
@@ -181,25 +212,10 @@ export function buildPlayerSummary(matches: MatchRecord[]): PlayerSummary[] {
 
     const sideAIds = [m.playerAId, m.playerA2Id].filter((x): x is string => !!x);
     const sideBIds = [m.playerBId, m.playerB2Id].filter((x): x is string => !!x);
+    const isDraw = winner === 'draw';
 
-    for (const pid of sideAIds) {
-      const s = ensure(pid);
-      s.matches += 1;
-      s.boardsWon += boardsWonA;
-      s.pointsScored += pointsA;
-      if (winner === 'a') s.wins += 1;
-      else if (winner === 'b') s.losses += 1;
-      else if (winner === 'draw') s.draws += 1;
-    }
-    for (const pid of sideBIds) {
-      const s = ensure(pid);
-      s.matches += 1;
-      s.boardsWon += boardsWonB;
-      s.pointsScored += pointsB;
-      if (winner === 'b') s.wins += 1;
-      else if (winner === 'a') s.losses += 1;
-      else if (winner === 'draw') s.draws += 1;
-    }
+    accumulateSide(map, sideAIds, boardsWonA, pointsA, winner === 'a', winner === 'b', isDraw);
+    accumulateSide(map, sideBIds, boardsWonB, pointsB, winner === 'b', winner === 'a', isDraw);
   }
 
   const out = Array.from(map.values());
@@ -225,7 +241,7 @@ export function buildTournamentReport(
     return tournament === null ? tag === '' : tag === tournament;
   });
   return {
-    tournament: tournament ?? 'Default (untagged)',
+    tournament: tournament ?? 'Default',
     matches: filtered.length,
     rows: buildReportRows(filtered),
     playerSummary: buildPlayerSummary(filtered),
@@ -235,7 +251,6 @@ export function buildTournamentReport(
 // ─── Serialisation ──────────────────────────────────────────────
 
 const CSV_HEADERS = [
-  'Match ID',
   'Ended',
   'Mode',
   'Side A',
@@ -247,12 +262,10 @@ const CSV_HEADERS = [
   'Points A',
   'Points B',
   'Winner',
-  'Recorded by',
 ];
 
 function rowValues(r: ReportRow): (string | number)[] {
   return [
-    r.matchId,
     r.endedAt,
     r.mode,
     r.sideA,
@@ -264,7 +277,6 @@ function rowValues(r: ReportRow): (string | number)[] {
     r.pointsA,
     r.pointsB,
     r.winner,
-    r.recordedBy,
   ];
 }
 

@@ -28,9 +28,10 @@
     type MatchRecord,
   } from '../lib/history';
   import { subscribePlayers, subscribeStore } from '../lib/players';
-  import { APP_VERSION } from '../lib/version';
+  import { APP_VERSION, releaseUrl } from '../lib/version';
   import LiveScoreboardView from './LiveScoreboardView.svelte';
   import SignInButton from './SignInButton.svelte';
+  import FeedbackPopup from './FeedbackPopup.svelte';
   import MatchEditModal from './MatchEditModal.svelte';
   import ReportsTab from './reports/ReportsTab.svelte';
   import { subscribeCurrentUserRole, type Role } from '../lib/roles';
@@ -648,13 +649,11 @@
     <a class="back" href={base}>← Back</a>
     <h1>Lobby</h1>
     <!--
-      SignInButton mounted in `signedInOnly` mode: renders the avatar +
-      menu ONLY when a user is already signed in. Anonymous visitors
-      see no sign-in prompt on the lobby — sign-in lives on the home
-      footer, which is the single-entry design goal.
+      Header used to carry a signed-in avatar chip and a version pill.
+      Both moved into the footer (2026-08-11) so the lobby's chrome
+      matches the home screen. Auth entry now lives at the bottom
+      alongside How-to-use / Feedback, exactly like /.
     -->
-    <SignInButton signedInOnly />
-    <span class="ver" aria-label="Carromscore version">v{APP_VERSION}</span>
   </header>
 
   <!-- Segmented tabs -->
@@ -1006,6 +1005,38 @@
       />
     {/if}
   {/if}
+
+  <!--
+    Lobby footer. Mirrors the home-screen footer for visual continuity
+    across the app. Row 1: actionable links (How to use, Feedback,
+    Admin/sign-in). Row 2: version + copyright, low contrast.
+    Everything on this row is the same component the home footer uses,
+    so a change in one place propagates to both.
+  -->
+  <div class="foot-block">
+    <div class="foot-links">
+      <a
+        href={`${base}help/`}
+        class="foot-link"
+        aria-label="How to use Carromscore"
+      >How to use ⇗</a>
+      <span class="foot-sep" aria-hidden="true">·</span>
+      <FeedbackPopup />
+      <span class="foot-sep" aria-hidden="true">·</span>
+      <SignInButton signedOutLabel="Admin" dropUp />
+    </div>
+    <p class="foot-meta">
+      <a
+        class="foot-ver"
+        href={releaseUrl()}
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label={`Carromscore v${APP_VERSION} release notes on GitHub`}
+      >v{APP_VERSION}</a>
+      <span class="foot-sep" aria-hidden="true">·</span>
+      © 2026 Swapnil Deshpande
+    </p>
+  </div>
 </main>
 
 <dialog bind:this={dialog} class="sheet" onclick={onDialogClick} onclose={closePopup}>
@@ -1299,6 +1330,14 @@
     padding: 0.15rem 0.5rem;
     border-radius: 0.35rem;
     font-weight: 700;
+    /* Anchor override: no default underline; hover-brighten to hint
+       tappability. Opens the release notes for the running version. */
+    text-decoration: none;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .ver:hover {
+    background: rgba(255, 213, 74, 0.16);
+    border-color: rgba(255, 213, 74, 0.5);
   }
 
   /* Segmented control */
@@ -1927,5 +1966,70 @@
   @keyframes pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.35; }
+  }
+
+  /* Footer — copied verbatim from MatchSetup so the home screen and
+     the lobby share the same look. Duplicated (not shared) because
+     Svelte scopes styles per component. Change any of these? Change
+     both files. */
+  .foot-block {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.35rem;
+    margin: 1.5rem 0 0.75rem;
+  }
+  .foot-links {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 0.35rem;
+    margin: 0;
+    font-size: 0.85rem;
+    flex-wrap: wrap;
+  }
+  .foot-meta {
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.72rem;
+    margin: 0;
+    letter-spacing: 0.02em;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 0.3rem;
+    flex-wrap: wrap;
+  }
+  .foot-sep { opacity: 0.4; }
+  .foot-ver {
+    display: inline-block;
+    padding: 0.1rem 0.5rem;
+    background: rgba(255, 213, 74, 0.14);
+    border: 1px solid rgba(255, 213, 74, 0.35);
+    border-radius: 999px;
+    color: var(--accent);
+    font-family: inherit;
+    font-weight: 700;
+    font-size: 0.7rem;
+    letter-spacing: 0.06em;
+    line-height: 1;
+    text-decoration: none;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .foot-ver:hover {
+    background: rgba(255, 213, 74, 0.22);
+    border-color: rgba(255, 213, 74, 0.55);
+  }
+  .foot-link {
+    color: var(--fg);
+    text-decoration: none;
+    padding: 0.15rem 0.5rem;
+    border-radius: 0.35rem;
+    font-weight: 600;
+    transition: color 0.15s, background 0.15s;
+  }
+  .foot-link:hover {
+    color: var(--accent);
+    background: rgba(255, 213, 74, 0.08);
   }
 </style>

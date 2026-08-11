@@ -23,14 +23,19 @@ Left to right: **SET · POINTS · BOARD · POINTS · SET**.
 
 ## Updating the score
 
-Every digit is a control. Two gestures to remember:
+Every digit is a control. Two gestures — that's the whole set:
 
-- **Tap a digit** → +1
-- **Swipe left on a digit** → +1
-- **Swipe right on a digit** → −1 (undo a mistake)
+- **Tap a digit** → +1  (or **swipe left** on the digit — same result)
+- **Swipe right on a digit** → **−1** (this is how you undo)
 
 One gesture = one adjust. Deliberately small so an accidental touch
 never resets a whole board.
+
+> **The undo trick — swipe right.** New users regularly ask "how do I
+> reduce the score when I tapped by mistake?" The answer is
+> swipe-right on the same digit that's showing the wrong value. Works
+> on POINTS, SET, and BOARD — anywhere you see a digit. No confirm
+> dialog; the correction is instant.
 
 Nothing auto-completes. Points don't jump to the next set when you hit
 25 — you decide when the set ends by tapping the **SET** column. The
@@ -101,6 +106,36 @@ medal treatment — 🥇 1ST on the winner, 🥈 2ND on the loser.
 <p align="center">
   <img src="../screenshots/07-end-match-medals.png" alt="Twin-medal treatment on the pills after End Match" width="720" />
 </p>
+
+## Tied match: the deciding-board chooser
+
+If the last board of a match ends with **sets AND points level**, End
+opens a small chooser instead of committing the result:
+
+<p align="center">
+  <img src="../screenshots/36-decider-popup.png" alt="Match tied? popup with two buttons — Call it a draw or Play deciding board" width="720" />
+</p>
+
+Two paths:
+
+- **Call it a draw** — commits as a draw. Both pills get a muted
+  bronze treatment with a 🤝 handshake medal; the footer reads
+  "Match tied · sets X-X · points X-X". Sets are NOT credited to
+  either side (a tied set has no winner).
+- **Play deciding board** — un-ends the match, extends the board
+  limit by one for this session, flips the BREAK chip (rotates on
+  every board like real carrom), clears the queen, and drops an
+  amber "⚡ Deciding board" banner above the scoreboard. Score the
+  extra board as normal; tap End again when done. Different regions
+  decide ties differently, so the umpire picks each time.
+
+<p align="center">
+  <img src="../screenshots/37-decider-banner.png" alt="Scoreboard in deciding-board mode with amber banner and un-frozen scoring" width="720" />
+</p>
+
+An early End on a tie (below the board limit) still auto-commits as
+a draw — that's the umpire's likely intent when they're calling it
+short.
 
 ## Post-End: the lockout
 

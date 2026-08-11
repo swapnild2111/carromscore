@@ -3,9 +3,24 @@
  * appVersionName. The update-check compares this string against the
  * `tag_name` on the latest GitHub Release.
  */
-export const APP_VERSION = '2.1.2';
+export const APP_VERSION = '2.2.0';
 
 const REPO = 'swapnild2111/carromscore';
+
+/**
+ * URL to a specific version's release page on GitHub. Rendered as
+ * the click target for every version pill in the app (home footer,
+ * scoreboard footer, lobby header) so users can read the release
+ * notes for the build they're running with one tap.
+ *
+ * Accepts a version like "2.1.2" or "v2.1.2" — normalises the leading
+ * "v". Falls back to /releases if the version is empty.
+ */
+export function releaseUrl(version: string = APP_VERSION): string {
+  if (!version) return `https://github.com/${REPO}/releases`;
+  const tag = version.startsWith('v') ? version : `v${version}`;
+  return `https://github.com/${REPO}/releases/tag/${tag}`;
+}
 
 /**
  * Metadata about the latest release, extracted from the GitHub Release

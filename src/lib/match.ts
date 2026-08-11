@@ -62,7 +62,11 @@ export const DEFAULT_CONFIG: MatchConfig = {
   playerB2: '',
   noteA: '',
   noteB: '',
-  bestOf: 3,
+  // Versus-match default is 1 set × 25 points × 8 boards — the most
+  // common casual and club-night format. Bo3 remains a one-tap preset
+  // for tournament organisers who need it. Practice mode overrides
+  // these on Mode = Practice (see MatchSetup.setMode).
+  bestOf: 1,
   pointsTarget: 25,
   maxBoards: 8,
   live: false,

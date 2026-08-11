@@ -25,6 +25,7 @@
   import {
     loadAll as loadAllTournaments,
     subscribeStore as subscribeTournamentsStore,
+    subscribeTournaments,
   } from '../../lib/tournaments';
   import BarChart from './BarChart.svelte';
 
@@ -52,6 +53,12 @@
   // $derived recomputation when the store changes.
   let tournamentTick = $state(0);
   onMount(() => {
+    // Kick off the Firebase load — mirrors AdminRoles / MatchSetup /
+    // AdminTournaments. `subscribeStore` alone just registers a
+    // listener; the async loader is what actually fills memoryStore.
+    // Silent-on-failure in tournaments.ts; the picker just stays
+    // showing "Default (untagged)" if RTDB is unreachable.
+    void subscribeTournaments();
     const unsub = subscribeTournamentsStore(() => (tournamentTick += 1));
     return () => unsub();
   });
@@ -68,17 +75,24 @@
   type PickerOption = { key: string | null; label: string };
   const options = $derived<PickerOption[]>(() => {
     void tournamentTick;
-    const opts: PickerOption[] = [{ key: null, label: 'Default (untagged)' }];
+    // Default bucket first (matches how History labels the untagged
+    // group — one consistent term across both tabs). Then real
+    // tournaments most-recently-active first.
+    const opts: PickerOption[] = [{ key: null, label: 'Default' }];
     for (const t of loadAllTournaments()) {
       opts.push({ key: t.name, label: t.name });
     }
     return opts;
   });
 
-  // Selected tournament. `null` = the Default (untagged) bucket.
-  // `undefined` = nothing picked yet (initial state before user
-  // interaction OR before the URL param resolves to a valid option).
-  let selection = $state<string | null | undefined>(initialTournament);
+  // Selected tournament. `null` = the Default bucket (untagged
+  // matches — mirrors the History tab's terminology). Auto-selects
+  // Default on first Reports open so users see data straight away
+  // instead of a "pick a tournament" empty state. Deep-link via
+  // ?tournament=... overrides — those callers know what they want.
+  let selection = $state<string | null | undefined>(
+    initialTournament === undefined ? null : initialTournament,
+  );
 
   const report = $derived<TournamentReport | null>(
     selection === undefined ? null : buildTournamentReport(matches, selection),
@@ -244,7 +258,6 @@
       <table class="matches-tbl">
         <thead>
           <tr>
-            <th>Match</th>
             <th>Ended</th>
             <th>Mode</th>
             <th class="col-name">Side A</th>
@@ -256,13 +269,11 @@
             <th>Points A</th>
             <th>Points B</th>
             <th>Winner</th>
-            <th>Recorded by</th>
           </tr>
         </thead>
         <tbody>
-          {#each report.rows as r (r.matchId + r.endedAtRaw)}
+          {#each report.rows as r (r._matchId)}
             <tr>
-              <td class="mid">{r.matchId}</td>
               <td>{r.endedAt}</td>
               <td>{r.mode}</td>
               <td class="col-name">{r.sideA}</td>
@@ -279,7 +290,6 @@
                 {:else if r.winner === 'B'}<span class="winner-tag winner-b">B</span>
                 {/if}
               </td>
-              <td class="recorded-by">{r.recordedBy}</td>
             </tr>
           {/each}
         </tbody>
@@ -429,10 +439,8 @@
     border-radius: 0.6rem;
   }
   .matches-tbl {
-    min-width: 720px;
+    min-width: 620px;
   }
-  .mid { font-family: monospace; color: var(--muted, #9aa0a6); }
-  .recorded-by { color: var(--muted, #9aa0a6); font-size: 0.78rem; }
   .winner-cell { padding: 0.3rem !important; }
   .winner-tag {
     display: inline-block;

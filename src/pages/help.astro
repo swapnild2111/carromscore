@@ -21,14 +21,19 @@ const sections = [
     id: 'setup',
     title: 'Setting up a match',
     body:
-      'Pick a format (Best of 3, Single set to 25, or Custom), a mode ' +
-      '(Singles, Doubles, or Practice), enter the players, and hit Start. ' +
-      'Names you type are remembered across devices so autocomplete gets ' +
-      'sharper over time. Doubles adds a second name row per side. ' +
-      'Practice collapses to a single player row — no opponent needed.',
+      'Pick a mode (Singles, Doubles, or Practice), enter the players, ' +
+      'and hit Start. Default match rules are 1 set × 25 points × 8 ' +
+      'boards — the most common casual and club-night format — but you ' +
+      'can bump SETS to 3 for Best-of-3 tournament matches with a tap. ' +
+      'Names you type are remembered across devices so autocomplete ' +
+      'gets sharper over time. Doubles adds a second name row per team ' +
+      'and tints Team A blue / Team B coral to preview the on-scoreboard ' +
+      'colours. Practice collapses to a single player row — no opponent ' +
+      'needed.',
     shots: [
       { src: '01-setup-blank.png', caption: 'Setup screen fresh — pick format, mode, and start typing.' },
       { src: '02-setup-filled.png', caption: 'Filled setup ready to start. Live toggle enables the OBS-friendly broadcast.' },
+      { src: '34-doubles-setup.png', caption: 'Doubles mode — Team A blue, Team B coral, matching the scoreboard pills.' },
     ],
   },
   {
@@ -50,14 +55,17 @@ const sections = [
     title: 'Scoring on the board',
     body:
       'The scoreboard is a five-column strip: SET · POINTS · BOARD · ' +
-      'POINTS · SET. Every column is tappable. Tap adds one, swipe left ' +
-      'adds, swipe right subtracts. The BREAK chip shows who is opening ' +
-      'the current board and auto-flips when you tap BOARD +1. Tap the ' +
-      'small coin above a player\'s pill to mark them as the queen ' +
-      'holder — the per-board recap then decorates their score with a ' +
-      'small "+Q" suffix. BOARD +1 is blocked until you either mark a ' +
-      'queen or confirm "no queen" for that board — the guard prevents ' +
-      'accidentally advancing past a half-scored board.',
+      'POINTS · SET. Every column is tappable, with a simple gesture ' +
+      'set: TAP the digit (or SWIPE LEFT on it) to add one. SWIPE RIGHT ' +
+      'on the digit to reduce — that\'s how you undo a mistake, correct ' +
+      'a wrong-side credit, or roll back a stray tap. The same rule ' +
+      'applies to POINTS, SET, and BOARD columns. The BREAK chip shows ' +
+      'who is opening the current board and auto-flips when you tap ' +
+      'BOARD +1. Tap the small coin above a player\'s pill to mark them ' +
+      'as the queen holder — the per-board recap then decorates their ' +
+      'score with a small "+Q" suffix. BOARD +1 is blocked until you ' +
+      'either mark a queen or confirm "no queen" for that board — the ' +
+      'guard prevents accidentally advancing past a half-scored board.',
     shots: [
       { src: '03-score-fresh.png', caption: 'Fresh scoreboard — SET 0 both sides, BOARD 0.' },
       { src: '04-score-midset.png', caption: 'Mid-set with the BREAK chip on the left player.' },
@@ -75,26 +83,41 @@ const sections = [
       '🥇 1ST medal and the loser\'s a silver 🥈 2ND. Once the match is ' +
       'marked ended, scoring inputs freeze — a toast reminds you if you ' +
       'try to tap POINTS/BOARD/SET after End. Reset clears everything if ' +
-      'you actually want to start over.',
+      'you actually want to start over. If the last board ends with sets ' +
+      'AND points level, End opens a small "Match tied?" chooser — Play ' +
+      'a deciding board to break the tie, or commit as a draw. Different ' +
+      'regions decide ties differently, so the umpire picks each time.',
     shots: [
       { src: '06-end-match-popup.png', caption: 'End-of-match recap — paper-scorecard matrix with per-board +Q.' },
       { src: '07-end-match-medals.png', caption: 'Winner medals on the main board once the match resolves.' },
+      { src: '36-decider-popup.png', caption: 'Match tied at the last board — choose to play a decider or call it a draw.' },
+      { src: '37-decider-banner.png', caption: 'Deciding board in progress — amber banner + un-frozen scoreboard.' },
       { src: '33-match-end-lockout.png', caption: 'Post-End lockout — positive taps freeze; Reset re-arms scoring.' },
     ],
   },
   {
     id: 'lobby',
-    title: 'Now Playing + History lobby',
+    title: 'Lobby — Now Playing, History, Reports',
     body:
-      'Tap the red Lobby pill on the home screen to open it. ' +
-      '"Now Playing" lists ongoing broadcasts; "History" lists every ' +
-      'finished match. Both tabs group by tournament tag — Now Playing ' +
+      'Tap the red Lobby pill on the home screen to open it. Three tabs: ' +
+      '"Now Playing" lists ongoing broadcasts, "History" lists every ' +
+      'finished match, and "Reports" gives you per-tournament stats. ' +
+      'Now Playing + History group by tournament tag — Now Playing ' +
       'defaults its groups to open, History defaults folded so long ' +
-      'archives stay scannable. Tap any card to open a full read-only ' +
-      'recap in a centred popup. Cards on Now Playing that hit 4 h ' +
-      'without an update are auto-swept on the next lobby load, so ' +
-      'zombie broadcasts don\'t linger.',
-    shots: [],
+      'archives stay scannable. Practice runs get their own collapsible ' +
+      'section below the tournament groups in History (different stats, ' +
+      'different card render). Tap any card to open a full read-only ' +
+      'recap. Reports has a chip picker of every tournament (Default ' +
+      'auto-selects on open for untagged matches) and shows two bar ' +
+      'charts (wins per player, points scored per player), a per-player ' +
+      'summary table, and every match in a copy-pasteable table. ⧉ Copy ' +
+      'table dumps TSV to your clipboard for Sheets/Excel; ↓ Download ' +
+      'CSV writes a plain CSV file. Cards on Now Playing that hit 4 h ' +
+      'without an update are auto-swept on the next lobby load.',
+    shots: [
+      { src: '35-lobby-tabs.png', caption: 'Lobby with three tabs — Now Playing, History, Reports.' },
+      { src: '38-reports-tab.png', caption: 'Reports tab — tournament picker, bar charts, player summary, matches table.' },
+    ],
   },
   {
     id: 'live',
@@ -141,14 +164,18 @@ const sections = [
     title: 'Admin panel (for tournament organisers)',
     body:
       'If you run tournaments, sign in with Google via the Admin link ' +
-      'in the home footer. A super-admin (Carromscore\'s maintainer) can ' +
-      'grant you Organiser access on specific tournaments — after that, ' +
-      'match cards from your tournament show a ✎ pencil in the lobby ' +
-      'History tab. Tap the pencil to edit scores, correct board-log ' +
-      'entries, or delete a bad match. Full-CRUD super-admin sees the ' +
-      '/admin/ panel with tabs for Roles, Players, Tournaments, Live ' +
-      'cleanup, History cleanup, and an audit log covering every ' +
-      'administrative write.',
+      'in the home or Lobby footer. A super-admin (Carromscore\'s ' +
+      'maintainer) can grant you Organiser access on specific ' +
+      'tournaments — after that, match cards from your tournament show ' +
+      'a ✎ pencil in the History tab. Tap the pencil to edit scores, ' +
+      'correct board-log entries, or delete a bad match. Full-CRUD ' +
+      'super-admin sees the /admin/ panel with tabs for Roles, Players, ' +
+      'Tournaments, Live matches (with All / Stuck-only filter chips), ' +
+      'History cleanup, and an audit log covering every administrative ' +
+      'write. Signed-in casual users can also self-delete matches they ' +
+      'recorded themselves — the delete affordance appears at the ' +
+      'bottom of the match sheet only on records where createdBy ' +
+      'matches your uid.',
     shots: [],
   },
   {

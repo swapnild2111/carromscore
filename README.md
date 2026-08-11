@@ -41,10 +41,12 @@ That's it. No account. No download from an app store.
 **Score any carrom match.** Singles, doubles, or a solo drill.
 
 - 🎯 **[Keeping the score](./docs/features/keeping-the-score.md)** —
-  tap a digit to add a point, swipe to fix a mistake. Big high-contrast
-  numbers for camera legibility. BOARD starts at 0 and advances only
-  when you tap; queen marker guards BOARD +1 so no board goes past
-  half-scored.
+  **tap** (or swipe left) on a digit to add a point; **swipe right**
+  on a digit to reduce — that's how you undo a mistake or roll back a
+  wrong-side credit. Same gesture works on POINTS, SET, and BOARD.
+  Big high-contrast numbers for camera legibility. BOARD starts at 0
+  and advances only when you tap; queen marker guards BOARD +1 so no
+  board goes past half-scored.
 - 🎱 **[Break and queen indicators](./docs/features/break-and-queen.md)** —
   a small chip shows who's breaking; a coloured queen coin shows who
   pocketed it. Never lose track mid-match.
@@ -62,15 +64,25 @@ That's it. No account. No download from an app store.
 - 📺 **[Broadcast overlay](./docs/features/broadcast-overlay.md)** —
   point OBS or Prism at a URL and get a transparent scoreboard strip
   live-composited over your camera feed.
-- 📜 **Now Playing + History lobby** — one place to browse ongoing
-  broadcasts and every match you've ever finished. Grouped by
-  tournament tag, collapsible, searchable.
+- 📜 **Lobby** — one place to browse ongoing broadcasts, every match
+  you've ever finished, and per-tournament reports. Three tabs:
+  Now Playing / History / Reports. Grouped by tournament tag,
+  collapsible; Practice runs get their own section in History.
+- 📊 **Reports** — pick a tournament from the chip picker and see
+  per-player wins/losses/draws, cumulative boards + points, plus two
+  bar charts and a copy-pasteable match table. ⧉ Copy or ↓ Download
+  CSV for use in any spreadsheet.
+- 🤝 **Draw match + deciding board** — if the last board of a match
+  ends with sets AND points level, End opens a chooser: play one
+  deciding board to break the tie, or commit as a draw. Different
+  regions decide ties differently; the umpire picks.
 - 🛠️ **Admin panel for organisers** — signed-in super-admins get a
-  full `/admin/` surface (Players, Tournaments, Live cleanup, History
-  cleanup, Audit log). Tournament organisers get inline ✎ edit
-  affordances on their event's matches.
+  full `/admin/` surface (Players, Tournaments, Live matches with
+  All/Stuck filter, History cleanup, Audit log). Tournament organisers
+  get inline ✎ edit affordances on their event's matches. Signed-in
+  casual users can self-delete their own recorded matches.
 - 🔗 **[Share URL](./docs/features/share-url.md)** — one-tap copy of
-  spectator + OBS overlay URLs from the score screen.
+  spectator + OBS overlay URLs from the lobby's match sheet.
 
 Everything else — landscape lock, wake lock, offline play, mid-match
 refresh restoration — just works.
@@ -87,8 +99,12 @@ tournament name. Tap Start match.
   <img src="docs/screenshots/02-setup-filled.png" alt="Setup filled with two players" width="320" />
 </p>
 
-**Score the match.** Tap a digit for +1. Swipe left for +1, swipe
-right for −1. That's the whole gesture set. Mark the queen holder by
+**Score the match.** Two gestures, that's the whole set:
+
+- **Tap a digit** (or swipe left on it) → **+1**
+- **Swipe right on a digit** → **−1** (undo / reduce)
+
+Works on every digit — SET, POINTS, BOARD. Mark the queen holder by
 tapping the coin above their pill — BOARD +1 requires the queen to
 be marked (or "no queen" confirmed) before it'll advance.
 

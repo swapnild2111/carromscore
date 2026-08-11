@@ -1,4 +1,4 @@
-# Screenshots capture list — v2.0
+# Screenshots capture list — v2.2
 
 Two mirrored copies of every screenshot exist:
 
@@ -7,9 +7,42 @@ Two mirrored copies of every screenshot exist:
 
 Both must be updated in lockstep — same filename, same content in both trees.
 
-For a fresh v2.0 pass, capture on the beta channel (`/carromscore/beta/`)
-after signing in as super so the pencil affordance is visible. Landscape
-device or 1920×1080 browser at DPR 2 for the score-screen shots.
+`scripts/screenshots.ts` automates every capture that doesn't need
+authenticated Firebase state. Run against a local `astro dev` server:
+
+```
+npx astro dev --background
+npx tsx scripts/screenshots.ts
+cp docs/screenshots/*.png public/help/
+```
+
+## v2.2 captured (automated) ✅
+
+Refreshed against the current codebase in the v2.2 pass:
+
+- `01-setup-blank.png` / `02-setup-filled.png` — home with Lobby pill + 1-set default + Tournament tag
+- `03-score-fresh.png` / `04-score-midset.png` / `05-score-queen-lockout.png`
+- `06-end-match-popup.png` / `07-end-match-medals.png`
+- `08-practice-setup.png` / `09-practice-single-set.png` / `10-practice-multi-scroll.png` / `11-practice-recap.png`
+- `13-overlay-bare.png` / `14-overlay-composited.png` / `15-overlay-endgame.png`
+- `16-feedback-popup.png`
+- `33-match-end-lockout.png`
+
+New v2.2 captures:
+
+- `34-doubles-setup.png` — Doubles mode with the blue/coral Team A/B tinting
+- `35-lobby-tabs.png` — Lobby with three tabs (Now Playing / History / Reports)
+- `36-decider-popup.png` — "MATCH TIED?" chooser with the two-button prompt
+- `37-decider-banner.png` — Deciding-board banner + un-frozen scoreboard
+- `38-reports-tab.png` — Full Reports tab (picker, charts, summary, table)
+
+## Still to capture manually 🟡
+
+Screens that need authenticated Firebase state (super sign-in) or a
+live match to be running — automation can't set these up in headless
+Chromium.
+
+## 1. Refresh the existing set (16 files)
 
 ## 1. Refresh the existing set (16 files)
 

@@ -34,9 +34,11 @@
     APP_VERSION,
     fetchLatestRelease,
     isNewerVersion,
+    releaseUrl as buildReleaseUrl,
     type ReleaseInfo,
   } from '../lib/version';
   import SignInButton from './SignInButton.svelte';
+  import FeedbackPopup from './FeedbackPopup.svelte';
 
   const base: string = import.meta.env.BASE_URL;
 
@@ -123,9 +125,12 @@
     if (m === 'singles') {
       cfg.playerA2 = '';
       cfg.playerB2 = '';
-      // Restore match-shape defaults if we're coming back from Practice.
+      // Restore versus-match defaults if we're coming back from Practice.
+      // Mirrors DEFAULT_CFG (1 set × 25 points × 8 boards) so the two
+      // paths — fresh page load vs mode-switch — always seed the same
+      // config for a versus match.
       if (wasPractice) {
-        cfg.bestOf = 3;
+        cfg.bestOf = 1;
         cfg.maxBoards = 8;
         cfg.pointsTarget = 25;
       }
@@ -141,7 +146,8 @@
       cfg.bestOf = 1;
       cfg.maxBoards = 4;
     } else if (m === 'doubles' && wasPractice) {
-      cfg.bestOf = 3;
+      // Same restore as the singles path above.
+      cfg.bestOf = 1;
       cfg.maxBoards = 8;
       cfg.pointsTarget = 25;
     }
@@ -350,57 +356,9 @@
     window.location.reload();
   }
 
-  /*
-   * Feedback popup. We don't rely on `mailto:` alone because many
-   * modern browsers (especially on desktop) have no default mail app
-   * registered and silently no-op the click. Instead we show a small
-   * dialog with the address visible, a Copy button, a "Compose in
-   * Gmail (web)" link (works in any browser), and — for people who DO
-   * have a mail app configured — a plain mailto link.
-   *
-   * The address is assembled at click time from three fragments so
-   * naive HTML-scraping bots (which don't run JS) can't harvest it
-   * from the deployed bundle. Sophisticated scrapers can still find
-   * it — this is a mitigation, not a barrier.
-   */
-  let showFeedbackPopup = $state(false);
-  let feedbackCopied = $state(false);
-  let feedbackCopiedTimer: number | null = null;
-
-  const feedbackEmail = 'swapnild2111' + '@' + 'gmail.com';
-  const feedbackSubject = $derived(`Carromscore v${APP_VERSION} feedback`);
-  const feedbackMailto = $derived(
-    `mailto:${feedbackEmail}?subject=${encodeURIComponent(feedbackSubject)}`,
-  );
-  const feedbackGmailWeb = $derived(
-    `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(feedbackEmail)}&su=${encodeURIComponent(feedbackSubject)}`,
-  );
-  // Public GitHub Discussion, pre-filled title/body so the thread lands
-  // in the "General" category with a version-tagged title. Users can
-  // still edit both before submitting.
-  const feedbackDiscussionUrl = $derived(
-    `https://github.com/swapnild2111/carromscore/discussions/new?category=general&title=${encodeURIComponent(`Carromscore v${APP_VERSION} — `)}&body=${encodeURIComponent(`Running Carromscore v${APP_VERSION}.\n\n<!-- Add your question / idea / observation here -->\n`)}`,
-  );
-
-  function openFeedback(e: Event) {
-    e.preventDefault();
-    showFeedbackPopup = true;
-  }
-  async function copyFeedbackEmail() {
-    try {
-      await navigator.clipboard.writeText(feedbackEmail);
-    } catch {
-      const el = document.createElement('input');
-      el.value = feedbackEmail;
-      document.body.appendChild(el);
-      el.select();
-      try { document.execCommand('copy'); } catch { /* silent */ }
-      el.remove();
-    }
-    feedbackCopied = true;
-    if (feedbackCopiedTimer !== null) clearTimeout(feedbackCopiedTimer);
-    feedbackCopiedTimer = window.setTimeout(() => { feedbackCopied = false; }, 1500);
-  }
+  // Feedback popup extracted to a shared component so the lobby
+  // footer can render the same UX without duplicating state.
+  // See src/components/FeedbackPopup.svelte.
 </script>
 
 {#snippet picker(label: string, key: keyof MatchConfig)}
@@ -562,7 +520,14 @@
       {@render noteInput('Represents', 'noteA')}
     </div>
   {:else}
-    <div class="team-block">
+    <!--
+      Doubles: two team blocks tinted with the same side-A blue and
+      side-B coral used by the scoreboard pills. Makes the setup
+      screen preview the on-scoreboard identity — the reader can
+      already tell which team is which colour before the match
+      starts.
+    -->
+    <div class="team-block team-block-a">
       <h3>Team A</h3>
       <div class="row2">
         {@render picker('Player 1', 'playerA')}
@@ -570,7 +535,7 @@
       </div>
       {@render noteInput('Team A represents', 'noteA')}
     </div>
-    <div class="team-block">
+    <div class="team-block team-block-b">
       <h3>Team B</h3>
       <div class="row2">
         {@render picker('Player 1', 'playerB')}
@@ -651,12 +616,7 @@
         aria-label="How to use Carromscore"
       >How to use ⇗</a>
       <span class="foot-sep" aria-hidden="true">·</span>
-      <a
-        href="#feedback"
-        class="foot-link"
-        onclick={openFeedback}
-        aria-label="Send feedback about Carromscore"
-      >Feedback ⇗</a>
+      <FeedbackPopup />
       <span class="foot-sep" aria-hidden="true">·</span>
       <!--
         Admin entry point. Same SignInButton component the lobby
@@ -669,62 +629,20 @@
       <SignInButton signedOutLabel="Admin" dropUp />
     </div>
     <p class="foot-meta">
-      <span class="foot-ver">v{APP_VERSION}</span>
+      <a
+        class="foot-ver"
+        href={buildReleaseUrl()}
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label={`Carromscore v${APP_VERSION} release notes on GitHub`}
+      >v{APP_VERSION}</a>
       <span class="foot-sep" aria-hidden="true">·</span>
       © 2026 Swapnil Deshpande
     </p>
   </div>
 </form>
 
-{#if showFeedbackPopup}
-  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="fb-title">
-    <div class="dialog-card fb-card">
-      <h2 id="fb-title">Send feedback</h2>
-      <p class="fb-intro">
-        Bug reports, feature ideas, or "hey I use this at my club" — all
-        welcome. Version {APP_VERSION} will be included in the subject.
-      </p>
-
-      <div class="fb-email-row">
-        <input
-          type="text"
-          readonly
-          value={feedbackEmail}
-          class="fb-email"
-          aria-label="Feedback email address"
-          onclick={(e) => (e.currentTarget as HTMLInputElement).select()}
-        />
-        <button type="button" class="fb-copy" onclick={copyFeedbackEmail}>
-          {feedbackCopied ? '✓ Copied' : 'Copy'}
-        </button>
-      </div>
-
-      <div class="fb-actions">
-        <a
-          href={feedbackGmailWeb}
-          target="_blank"
-          rel="noopener"
-          class="fb-btn fb-btn-primary"
-        >Open in Gmail</a>
-        <a
-          href={feedbackMailto}
-          class="fb-btn fb-btn-secondary"
-        >Use my mail app</a>
-      </div>
-
-      <p class="fb-alt">
-        Prefer a public thread?
-        <a href={feedbackDiscussionUrl} target="_blank" rel="noopener">
-          Start a GitHub Discussion
-        </a>.
-      </p>
-
-      <div class="dialog-actions">
-        <button class="cancel" onclick={() => (showFeedbackPopup = false)}>Close</button>
-      </div>
-    </div>
-  </div>
-{/if}
+<!-- FeedbackPopup owns its own trigger + dialog; see foot-links above. -->
 
 <style>
   .setup {
@@ -890,6 +808,22 @@
     letter-spacing: 0.08em;
     font-size: 0.75rem;
   }
+  /* Doubles: tint each team's block with its scoreboard colour so the
+     setup screen previews the on-scoreboard identity. Same
+     --side-a / --side-b custom properties the pills use, at low
+     alpha so form inputs on top stay readable. Team-A blue, team-B
+     coral — order fixed (never swapped) to match the pill positions
+     on the scoreboard. */
+  .team-block-a {
+    background: rgba(79, 195, 247, 0.06);
+    border-color: rgba(79, 195, 247, 0.35);
+  }
+  .team-block-a h3 { color: var(--side-a); }
+  .team-block-b {
+    background: rgba(255, 138, 101, 0.06);
+    border-color: rgba(255, 138, 101, 0.35);
+  }
+  .team-block-b h3 { color: var(--side-b); }
 
   label.picker, .note-input, .row3 label, .tournament-input {
     display: flex;
@@ -1184,6 +1118,15 @@
     font-size: 0.7rem;
     letter-spacing: 0.06em;
     line-height: 1;
+    /* Anchor override: no default underline; subtle hover-emphasis
+       hints that the pill is tappable (opens the release notes on
+       GitHub for the current version). */
+    text-decoration: none;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .foot-ver:hover {
+    background: rgba(255, 213, 74, 0.22);
+    border-color: rgba(255, 213, 74, 0.55);
   }
   .foot-link {
     color: var(--fg);
@@ -1198,133 +1141,10 @@
     background: rgba(255, 213, 74, 0.08);
   }
 
-  /*
-   * Feedback popup. Same base .dialog + .dialog-card shape as the score
-   * screen's confirmations so both screens read as one product.
-   * Duplicated here (rather than shared) because Svelte scopes styles
-   * per-component and MatchSetup didn't previously need dialog styles.
-   */
-  .dialog {
-    position: fixed;
-    inset: 0;
-    background: rgba(0,0,0,0.75);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 100;
-    padding: 1rem;
-  }
-  .dialog-card {
-    background: #141414;
-    border: 2px solid var(--accent);
-    border-radius: 1rem;
-    padding: 1.25rem;
-    max-width: 24rem;
-    width: 100%;
-    text-align: center;
-  }
-  .dialog-card h2 {
-    margin: 0 0 0.5rem;
-    font-size: 1.2rem;
-    color: var(--accent);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-  }
-  .fb-intro {
-    color: var(--muted);
-    font-size: 0.85rem;
-    line-height: 1.4;
-    margin: 0 0 1rem;
-    text-align: left;
-  }
-  .fb-email-row {
-    display: flex;
-    gap: 0.5rem;
-    margin-bottom: 1rem;
-  }
-  .fb-email {
-    flex: 1;
-    min-width: 0;
-    padding: 0.5rem 0.7rem;
-    background: #0b0b0b;
-    border: 1px solid #2a2a2a;
-    border-radius: 0.5rem;
-    color: var(--fg);
-    font-family: ui-monospace, 'SF Mono', Consolas, monospace;
-    font-size: 0.85rem;
-  }
-  .fb-email:focus { outline: none; border-color: var(--accent); }
-  .fb-copy {
-    flex-shrink: 0;
-    padding: 0.5rem 0.9rem;
-    background: var(--accent);
-    color: #0b0b0b;
-    border: none;
-    border-radius: 0.5rem;
-    font-family: inherit;
-    font-weight: 800;
-    font-size: 0.85rem;
-    cursor: pointer;
-    transition: filter 0.1s;
-  }
-  .fb-copy:hover { filter: brightness(1.1); }
-
-  .fb-actions {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 0.5rem;
-    margin-bottom: 0.85rem;
-  }
-  .fb-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0.6rem 0.85rem;
-    border-radius: 0.5rem;
-    font-family: inherit;
-    font-weight: 800;
-    font-size: 0.85rem;
-    letter-spacing: 0.02em;
-    text-decoration: none;
-    text-align: center;
-    line-height: 1.2;
-    transition: background 0.1s, border-color 0.15s;
-  }
-  .fb-btn-primary {
-    background: var(--accent);
-    color: #0b0b0b;
-    border: 1px solid var(--accent);
-  }
-  .fb-btn-primary:hover { filter: brightness(1.1); }
-  .fb-btn-secondary {
-    background: transparent;
-    color: var(--fg);
-    border: 1px solid #333;
-  }
-  .fb-btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
-
-  .fb-alt {
-    color: var(--muted);
-    font-size: 0.78rem;
-    margin: 0 0 0.85rem;
-    line-height: 1.4;
-  }
-  .fb-alt a { color: var(--accent); }
-  .fb-alt a:hover { text-decoration: underline; }
-
-  .dialog-actions { display: flex; gap: 0.5rem; }
-  .dialog-actions .cancel {
-    flex: 1;
-    padding: 0.6rem 1rem;
-    font-weight: 700;
-    font-size: 0.95rem;
-    border-radius: 999px;
-    background: #1f1f1f;
-    color: var(--fg);
-    border: 1px solid #333;
-    cursor: pointer;
-    font-family: inherit;
-  }
+  /* Feedback popup CSS now lives inside FeedbackPopup.svelte (moved
+     2026-08-11 when the popup was extracted). MatchSetup previously
+     duplicated `.dialog` / `.dialog-card` / `.fb-*` classes here;
+     kept only the trigger-link styling via `.foot-link` below. */
   @media (max-width: 520px) {
     fieldset { grid-template-columns: 1fr; }
     fieldset.fmt-mode { grid-template-columns: 1fr 1fr 1fr; }

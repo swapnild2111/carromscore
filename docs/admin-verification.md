@@ -19,8 +19,8 @@ Applies to `/carromscore/`.
 - [ ] Home page loads without any auth-related chrome except the
   small "Admin" footer link.
 - [ ] Setup → Start a Singles match, score a few points, tap End.
-  The match completes and appears in the Live lobby History tab.
-- [ ] Live lobby loads: no sign-in pill in the header, no pencil
+  The match completes and appears in the Lobby History tab.
+- [ ] Lobby loads: no sign-in pill in the header, no pencil
   on any cards.
 - [ ] `/admin/` shows "Sign in with Google" gate.
 

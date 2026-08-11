@@ -510,6 +510,152 @@ async function main() {
   console.log('33-match-end-lockout.png');
   await lockoutCtx.close();
 
+  /*
+   * 34 Doubles setup — team A + team B blocks tinted blue/coral to
+   * preview the on-scoreboard identity. Portrait phone, home page,
+   * Doubles mode picked, both team blocks populated.
+   */
+  const doublesCtx = await browser.newContext({
+    ...devices['Pixel 7'],
+    viewport: PORTRAIT,
+    reducedMotion: 'reduce',
+  });
+  const p11 = await doublesCtx.newPage();
+  await p11.goto(BASE + '/', { waitUntil: 'networkidle' });
+  await p11.waitForTimeout(400);
+  await p11.locator('label:has(input[value="doubles"])').click({ force: true });
+  await p11.waitForTimeout(300);
+  const doublesInputs = p11.locator('input[placeholder="Type a name…"]');
+  await doublesInputs.nth(0).fill('Swapnil Deshpande');
+  await doublesInputs.nth(1).fill('Yuvaraj Eshwaramoorthy');
+  await doublesInputs.nth(2).fill('Prem Kumar');
+  await doublesInputs.nth(3).fill('Yash Patel');
+  await p11.locator('input[placeholder="Country, state, club…"]').nth(0).fill('Denmark');
+  await p11.locator('input[placeholder="Country, state, club…"]').nth(1).fill('India');
+  await p11.locator('body').click({ position: { x: 10, y: 10 }, force: true });
+  await p11.waitForTimeout(300);
+  await p11.screenshot({ path: `${OUT}/34-doubles-setup.png` });
+  console.log('34-doubles-setup.png');
+  await doublesCtx.close();
+
+  /*
+   * 35 Lobby view — showing three tabs (Now Playing / History /
+   * Reports) and the new home-parity footer. Portrait phone.
+   */
+  const lobbyCtx = await browser.newContext({
+    ...devices['Pixel 7'],
+    viewport: { width: 412, height: 1200 },
+    reducedMotion: 'reduce',
+  });
+  const p12 = await lobbyCtx.newPage();
+  await p12.goto(BASE + '/live/', { waitUntil: 'networkidle' });
+  await p12.waitForTimeout(1500);
+  await p12.screenshot({ path: `${OUT}/35-lobby-tabs.png`, fullPage: true });
+  console.log('35-lobby-tabs.png');
+  await lobbyCtx.close();
+
+  /*
+   * 36 Deciding-board chooser popup. Drive to a maxBoards-reached tie
+   * with 2 boards, then tap End — the "Match tied?" chooser appears
+   * with two buttons: Call it a draw / Play deciding board.
+   */
+  const deciderCtx = await browser.newContext({
+    viewport: LANDSCAPE,
+    deviceScaleFactor: 2,
+    reducedMotion: 'reduce',
+  });
+  const p13 = await deciderCtx.newPage();
+  const shortMatchUrl = `${BASE}/score/?${new URLSearchParams({
+    mode: 'singles',
+    playerA: PLAYER_A,
+    playerB: PLAYER_B,
+    noteA: NOTE_A,
+    noteB: NOTE_B,
+    bestOf: '1',
+    pointsTarget: '25',
+    maxBoards: '2',
+  }).toString()}`;
+  await p13.goto(shortMatchUrl, { waitUntil: 'networkidle' });
+  await p13.waitForTimeout(400);
+  await p13.evaluate(`
+    (async () => {
+      const tap = async (sel, n) => {
+        const btn = document.querySelector(sel);
+        for (let i = 0; i < n; i += 1) {
+          btn.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, isPrimary: true, clientX: 0, clientY: 0 }));
+          btn.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, isPrimary: true, clientX: 0, clientY: 0 }));
+          await new Promise((r) => setTimeout(r, 4));
+        }
+      };
+      const tapQueen = async () => {
+        const c = document.querySelector('.head-side .coin-btn');
+        if (c && !c.classList.contains('coin-red')) {
+          c.click();
+          await new Promise((r) => setTimeout(r, 40));
+        }
+      };
+      // Board 1: tie 5-5
+      await tap('.col.side-a.pts', 5);
+      await tap('.col.side-b.pts', 5);
+      await tapQueen();
+      await tap('.col.mid.brd', 1);
+      // Board 2: tie 3-3 (cumulative 8-8) at maxBoards → End triggers chooser
+      await tap('.col.side-a.pts', 3);
+      await tap('.col.side-b.pts', 3);
+      await tapQueen();
+    })();
+  `);
+  await p13.waitForTimeout(200);
+  await p13.locator('.foot-btn.endm').click({ force: true });
+  await p13.waitForTimeout(500);
+  await p13.screenshot({ path: `${OUT}/36-decider-popup.png` });
+  console.log('36-decider-popup.png');
+
+  /*
+   * 37 Deciding-board banner in play. From the same match, click
+   * "Play deciding board" and screenshot the un-frozen scoreboard
+   * with the amber banner at the top.
+   */
+  await p13.locator('.champ-choice .confirm-big:not(.confirm-secondary)').click({ force: true });
+  await p13.waitForTimeout(400);
+  // Score a few points on the decider so the digits aren't all zero.
+  await p13.evaluate(`
+    (async () => {
+      const tap = async (sel, n) => {
+        const btn = document.querySelector(sel);
+        for (let i = 0; i < n; i += 1) {
+          btn.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, isPrimary: true, clientX: 0, clientY: 0 }));
+          btn.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, isPrimary: true, clientX: 0, clientY: 0 }));
+          await new Promise((r) => setTimeout(r, 4));
+        }
+      };
+      await tap('.col.side-a.pts', 4);
+      await tap('.col.side-b.pts', 2);
+    })();
+  `);
+  await p13.waitForTimeout(300);
+  await p13.screenshot({ path: `${OUT}/37-decider-banner.png` });
+  console.log('37-decider-banner.png');
+  await deciderCtx.close();
+
+  /*
+   * 38 Reports tab — picker + summary card + charts + table.
+   * Opens the deep-link URL directly so the Reports tab loads
+   * pre-selected. Full-page screenshot on wide viewport to catch
+   * the whole layout in one image.
+   */
+  const reportsCtx = await browser.newContext({
+    viewport: { width: 1200, height: 1400 },
+    reducedMotion: 'reduce',
+  });
+  const p14 = await reportsCtx.newPage();
+  await p14.goto(`${BASE}/live/?tab=reports`, { waitUntil: 'networkidle' });
+  // Wait long enough for /matches to load + tournaments store to hydrate.
+  await p14.waitForTimeout(2500);
+  await p14.screenshot({ path: `${OUT}/38-reports-tab.png`, fullPage: true });
+  console.log('38-reports-tab.png');
+  await reportsCtx.close();
+
   await browser.close();
   console.log(`Wrote screenshots to ${OUT}`);
 }

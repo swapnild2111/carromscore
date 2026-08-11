@@ -10,7 +10,7 @@
     type MatchConfig,
     type Side as SideId,
   } from '../lib/match';
-  import { APP_VERSION } from '../lib/version';
+  import { APP_VERSION, releaseUrl } from '../lib/version';
   import {
     finishMatch,
     loadMatchIdentity,
@@ -914,41 +914,29 @@
       winner = 'b';
       awardExtraSet = true;
     } else {
-      // Fully tied — sets AND points equal. The next step depends on
-      // whether the match has more boards to play or the maxBoards
-      // limit has been reached:
+      // Fully tied — sets AND points equal. Two paths:
       //
-      // - Below the limit: this is an early End on a tie. Umpire's
-      //   intent is "call it a draw now." Commit as draw immediately,
-      //   crediting the decider set to both sides so the SETS header
-      //   reads honestly (1-1 not 0-0).
+      // - At the limit AND not already playing the decider: show the
+      //   "Play deciding board / Call it a draw" chooser. Defer the
+      //   archive write until the umpire chooses.
+      // - Otherwise (early End on a tie, or a decider board that also
+      //   tied): auto-commit as draw.
       //
-      // - At the limit: the match has genuinely run its length and
-      //   the score is level. Different regions decide ties different
-      //   ways — some call it a draw, others play one more board. Ask
-      //   the umpire via the winner popup and defer the archive
-      //   write until they choose. See handleDrawChoice() below.
+      // Consistent rule for BOTH paths: **SETS only ticks up when a
+      // side wins the set**. A tied set has no winner, so neither
+      // sideA.sets nor sideB.sets moves. This keeps the pre-decision
+      // popup (SETS 0-0) and any post-decider popup (SETS 1-0 for
+      // whichever side won the extra board) reading honestly instead
+      // of the previous "1-1 for a draw" quirk which suggested both
+      // sides had won a set.
       if (board >= cfg.maxBoards && !isDecidingBoard) {
-        // Show the "Play deciding board / Call it a draw" chooser.
-        // Set matchResult to 'draw' provisionally so the popup renders
-        // the DRAW variant + the lockout applies while the umpire
-        // decides. Do NOT credit sets or write the archive yet.
-        //
-        // `!isDecidingBoard` guard: if the umpire is currently
-        // playing the extra deciding board and it ALSO ends tied
-        // (per user's expectation "one player will win 100%" this
-        // shouldn't happen, but code defensively), fall through to
-        // the auto-commit draw path below rather than looping the
-        // chooser forever.
         matchResult = 'draw';
         pendingDrawChoice = true;
         showWinnerPopup = true;
         return;
       }
-      // Below limit — commit as draw right away.
+      // Below limit or decider-also-tied — auto-commit as draw.
       winner = 'draw';
-      sideA.sets = Math.min(cfg.bestOf, sideA.sets + 1);
-      sideB.sets = Math.min(cfg.bestOf, sideB.sets + 1);
     }
     if (awardExtraSet && (winner === 'a' || winner === 'b')) {
       const s = winner === 'a' ? sideA : sideB;
@@ -978,16 +966,41 @@
   function handleDrawChoice(choice: 'draw' | 'decider') {
     pendingDrawChoice = false;
     if (choice === 'draw') {
-      sideA.sets = Math.min(cfg.bestOf, sideA.sets + 1);
-      sideB.sets = Math.min(cfg.bestOf, sideB.sets + 1);
+      // Draws don't credit sets — a tied set has no winner, so
+      // sideA.sets and sideB.sets both stay put. Consistent with the
+      // below-limit auto-draw path in endMatch() (same rule applies
+      // everywhere: SETS only ticks up when someone wins the set).
       // Keep popup open — user can now tap "View scorecard" like any
       // finished match. Committing the archive fires-and-forgets.
       recordFinishedMatch('draw');
     } else {
-      // Play deciding board: allow one more board over the config limit.
+      // Play deciding board. Three things happen here:
+      //
+      // 1. Match un-ends. matchResult back to null, popup closes,
+      //    scoring inputs re-enable via isMatchDecided() flipping.
+      //
+      // 2. cfg.maxBoards raised by 1 for THIS session only (not
+      //    persisted). The extra board is played over-and-above
+      //    what was configured at setup.
+      //
+      // 3. Fresh-board state reset for the decider itself. Endless
+      //    matched to the standard BOARD+1 path (adjustBoard's
+      //    delta>0 branch): the tied final board was already
+      //    snapshotted into boardLog by endMatch() above, so
+      //    starting the decider means:
+      //      - flip break (rotates on every board in real carrom)
+      //      - clear queen (per-board state, new board = new queen)
+      //      - re-baseline pointsAtBoardStart to current cumulative
+      //        POINTS so the decider's scoring deltas are correct.
+      //    Without this, the umpire's decider taps would be
+      //    computed against the pre-tied-board baseline and produce
+      //    wrong per-board deltas in the boardLog.
       matchResult = null;
       cfg.maxBoards = cfg.maxBoards + 1;
       isDecidingBoard = true;
+      currentBreak = currentBreak === 'a' ? 'b' : 'a';
+      queenHolder = null;
+      pointsAtBoardStart = { a: sideA.points, b: sideB.points };
       showWinnerPopup = false;
     }
   }
@@ -1369,7 +1382,7 @@
     -->
     <div class="decider-banner" role="status" aria-live="polite">
       <span aria-hidden="true">⚡</span>
-      <span>Deciding board — no draws from here</span>
+      <span>Deciding board</span>
     </div>
   {/if}
   <header class="head">
@@ -1573,7 +1586,13 @@
       <span class="hint">
         © 2026 Swapnil Deshpande
         <span class="hint-sep" aria-hidden="true">·</span>
-        <span class="hint-ver">v{APP_VERSION}</span>
+        <a
+          class="hint-ver"
+          href={releaseUrl()}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label={`Carromscore v${APP_VERSION} release notes on GitHub`}
+        >v{APP_VERSION}</a>
       </span>
     {/if}
     <div class="foot-actions">
@@ -2503,6 +2522,15 @@
     letter-spacing: 0.06em;
     line-height: 1;
     vertical-align: baseline;
+    /* Version-pill is now an anchor to the release notes on GitHub.
+       Kill the default underline; a subtle hover-brighten hints
+       tappability without competing with the rest of the footer. */
+    text-decoration: none;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .hint-ver:hover {
+    background: rgba(255, 213, 74, 0.22);
+    border-color: rgba(255, 213, 74, 0.55);
   }
   .winner {
     display: inline-flex;
