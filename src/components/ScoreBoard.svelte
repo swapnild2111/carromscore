@@ -200,6 +200,25 @@
    */
   const currentSet = $derived(Math.min(cfg.bestOf, sideA.sets + sideB.sets + 1));
   let matchResult = $state<'a' | 'b' | 'draw' | null>(null);
+  /**
+   * True once the umpire chose "Play deciding board" from the at-
+   * maxBoards tie popup. Drives:
+   * - A small "Deciding board" banner above the scoreboard.
+   * - The behaviour on the next End: same endMatch() flow runs, but
+   *   the maxBoards limit has been raised by one so the extra board's
+   *   score is retained in the boardLog and the winner/draw path
+   *   proceeds normally.
+   * Cleared on resetScores() so a Reset takes the match back to a
+   * pre-decider state.
+   */
+  let isDecidingBoard = $state(false);
+  /**
+   * Signals the winner popup should render its "Play deciding board /
+   * Call it a draw" chooser instead of the normal "View scorecard"
+   * single-button path. True only during the brief window between
+   * endMatch() detecting an at-limit tie and the umpire resolving it.
+   */
+  let pendingDrawChoice = $state(false);
   let confirmExit = $state(false);
   let isPortrait = $state(false);
   let storageKey = $state<string | null>(null);
@@ -895,11 +914,38 @@
       winner = 'b';
       awardExtraSet = true;
     } else {
-      // Fully tied — sets AND points equal. Record as a draw and
-      // credit the decider set to BOTH sides so the header reads
-      // "SETS 1–1" honestly (a set actually was played, it just
-      // ended level). Without this, the recap table shows SET 1
-      // played but the SETS column stays 0–0, which reads as broken.
+      // Fully tied — sets AND points equal. The next step depends on
+      // whether the match has more boards to play or the maxBoards
+      // limit has been reached:
+      //
+      // - Below the limit: this is an early End on a tie. Umpire's
+      //   intent is "call it a draw now." Commit as draw immediately,
+      //   crediting the decider set to both sides so the SETS header
+      //   reads honestly (1-1 not 0-0).
+      //
+      // - At the limit: the match has genuinely run its length and
+      //   the score is level. Different regions decide ties different
+      //   ways — some call it a draw, others play one more board. Ask
+      //   the umpire via the winner popup and defer the archive
+      //   write until they choose. See handleDrawChoice() below.
+      if (board >= cfg.maxBoards && !isDecidingBoard) {
+        // Show the "Play deciding board / Call it a draw" chooser.
+        // Set matchResult to 'draw' provisionally so the popup renders
+        // the DRAW variant + the lockout applies while the umpire
+        // decides. Do NOT credit sets or write the archive yet.
+        //
+        // `!isDecidingBoard` guard: if the umpire is currently
+        // playing the extra deciding board and it ALSO ends tied
+        // (per user's expectation "one player will win 100%" this
+        // shouldn't happen, but code defensively), fall through to
+        // the auto-commit draw path below rather than looping the
+        // chooser forever.
+        matchResult = 'draw';
+        pendingDrawChoice = true;
+        showWinnerPopup = true;
+        return;
+      }
+      // Below limit — commit as draw right away.
       winner = 'draw';
       sideA.sets = Math.min(cfg.bestOf, sideA.sets + 1);
       sideB.sets = Math.min(cfg.bestOf, sideB.sets + 1);
@@ -911,6 +957,39 @@
     matchResult = winner;
     showWinnerPopup = true;
     recordFinishedMatch(winner);
+  }
+
+  /**
+   * Umpire's response to the "at-maxBoards tie" chooser in the winner
+   * popup. Only fires when matchResult is 'draw' AND the tie hit the
+   * board limit — set at line 911 above (which returns before writing
+   * the archive record).
+   *
+   * `choice === 'draw'`: commit the provisional draw as-is. Award +1
+   * set to both sides so SETS reads honestly, then archive.
+   *
+   * `choice === 'decider'`: un-end. Clear matchResult, extend
+   * cfg.maxBoards by 1 (session-only — not persisted; this state was
+   * hydrated from URL params at mount and lives in the component),
+   * raise the isDecidingBoard flag so the banner renders, and dismiss
+   * the popup. Scoring inputs come back to life via isMatchDecided()
+   * flipping to false.
+   */
+  function handleDrawChoice(choice: 'draw' | 'decider') {
+    pendingDrawChoice = false;
+    if (choice === 'draw') {
+      sideA.sets = Math.min(cfg.bestOf, sideA.sets + 1);
+      sideB.sets = Math.min(cfg.bestOf, sideB.sets + 1);
+      // Keep popup open — user can now tap "View scorecard" like any
+      // finished match. Committing the archive fires-and-forgets.
+      recordFinishedMatch('draw');
+    } else {
+      // Play deciding board: allow one more board over the config limit.
+      matchResult = null;
+      cfg.maxBoards = cfg.maxBoards + 1;
+      isDecidingBoard = true;
+      showWinnerPopup = false;
+    }
   }
 
   /**
@@ -1025,6 +1104,7 @@
     sideB.points = 0;
     board = 0;
     matchResult = null;
+    isDecidingBoard = false;
     colourA = 'a';
     colourB = 'b';
     currentBreak = 'a';
@@ -1279,6 +1359,19 @@
       </div>
     {/if}
   {:else}
+  {#if isDecidingBoard}
+    <!--
+      Deciding-board banner. Rendered when the umpire chose "Play
+      deciding board" from the at-maxBoards tie chooser. Signals that
+      the scoreboard is now in a tiebreaker state — one extra board
+      is being played on top of the configured maxBoards limit.
+      Clears when the match ends or on Reset.
+    -->
+    <div class="decider-banner" role="status" aria-live="polite">
+      <span aria-hidden="true">⚡</span>
+      <span>Deciding board — no draws from here</span>
+    </div>
+  {/if}
   <header class="head">
     <!-- Side A: [NAME PILL] [BREAK-chip?] [coin] -->
     <div class="head-side head-side-a">
@@ -1510,7 +1603,14 @@
       class="dialog winner-dialog"
       role="dialog"
       aria-modal="true"
-      onclick={(e) => { if (e.target === e.currentTarget) showWinnerPopup = false; }}
+      onclick={(e) => {
+        // When the umpire must choose between "draw" and "decider",
+        // outside-click can't dismiss — they'd bypass the choice and
+        // leave the match in a half-committed state (matchResult set
+        // but no archive written). Force a button press.
+        if (pendingDrawChoice) return;
+        if (e.target === e.currentTarget) showWinnerPopup = false;
+      }}
     >
       {#if matchResult !== 'draw'}
         <div class="fireworks" aria-hidden="true">
@@ -1520,15 +1620,17 @@
         </div>
       {/if}
       <div class="dialog-card champion" class:draw={matchResult === 'draw'}>
-        <button
-          type="button"
-          class="dialog-close"
-          onclick={() => (showWinnerPopup = false)}
-          aria-label="Close"
-        >✕</button>
+        {#if !pendingDrawChoice}
+          <button
+            type="button"
+            class="dialog-close"
+            onclick={() => (showWinnerPopup = false)}
+            aria-label="Close"
+          >✕</button>
+        {/if}
         {#if matchResult === 'draw'}
           <div class="champ-trophy" aria-hidden="true">🤝</div>
-          <div class="champ-label">DRAW</div>
+          <div class="champ-label">{pendingDrawChoice ? 'MATCH TIED?' : 'DRAW'}</div>
           <div class="champ-name">{sideA.name} · {sideB.name}</div>
         {:else}
           <div class="champ-trophy" aria-hidden="true">🏆</div>
@@ -1540,12 +1642,38 @@
           <span class="champ-sep">·</span>
           Final board <strong>{pad2(sideA.points)}–{pad2(sideB.points)}</strong>
         </div>
-        <button
-          class="confirm-big"
-          onclick={() => { showWinnerPopup = false; showScorecardPopup = true; }}
-        >
-          View scorecard
-        </button>
+        {#if pendingDrawChoice}
+          <!--
+            The at-maxBoards tie chooser. Umpire picks between playing
+            one extra board to break the tie (common in some regions)
+            or calling it a draw here. Outside-click and ✕ are
+            suppressed above so the umpire can't dismiss and get
+            stuck — one of these two must be picked.
+          -->
+          <p class="champ-choice-hint">
+            The match reached the last board with scores level. Play a
+            deciding board, or commit as a draw?
+          </p>
+          <div class="champ-choice">
+            <button
+              type="button"
+              class="confirm-big confirm-secondary"
+              onclick={() => handleDrawChoice('draw')}
+            >Call it a draw</button>
+            <button
+              type="button"
+              class="confirm-big"
+              onclick={() => handleDrawChoice('decider')}
+            >Play deciding board</button>
+          </div>
+        {:else}
+          <button
+            class="confirm-big"
+            onclick={() => { showWinnerPopup = false; showScorecardPopup = true; }}
+          >
+            View scorecard
+          </button>
+        {/if}
       </div>
     </div>
   {/if}
@@ -2653,6 +2781,54 @@
     transition: transform 0.1s;
   }
   .confirm-big:active { transform: translateY(1px); }
+  /* Two-button chooser variant for the at-maxBoards draw prompt.
+     Primary stays gold ("Play deciding board" is the more decisive
+     act); secondary reads as an outlined muted button so the umpire
+     picks intentionally. Row wraps to a column on narrow phones. */
+  .champ-choice {
+    display: flex;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    justify-content: center;
+    margin-top: 0.2rem;
+  }
+  .champ-choice .confirm-big { flex: 1 1 auto; min-width: 12rem; padding: 0.7rem 1.1rem; }
+  .confirm-secondary {
+    background: transparent !important;
+    color: var(--fg, #f5f5f5) !important;
+    border: 1.5px solid rgba(255, 213, 74, 0.5) !important;
+    box-shadow: none !important;
+  }
+  .confirm-secondary:hover { background: rgba(255, 213, 74, 0.08) !important; }
+  .champ-choice-hint {
+    margin: 0.1rem 0 0.4rem;
+    text-align: center;
+    color: var(--muted, #9aa0a6);
+    font-size: 0.85rem;
+    line-height: 1.4;
+  }
+
+  /* Deciding-board banner. Muted amber, single line, sits above the
+     scoreboard header. Doesn't compete with the pills but is
+     unmistakably visible so umpire + spectators know this isn't a
+     normal board. */
+  .decider-banner {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.35rem 0.75rem;
+    margin: 0 auto 0.5rem;
+    max-width: 32rem;
+    background: rgba(255, 183, 77, 0.12);
+    border: 1px solid rgba(255, 183, 77, 0.4);
+    border-radius: 999px;
+    color: #ffb74d;
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
 
   .fireworks {
     position: absolute;

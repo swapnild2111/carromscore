@@ -32,14 +32,22 @@
   import LiveScoreboardView from './LiveScoreboardView.svelte';
   import SignInButton from './SignInButton.svelte';
   import MatchEditModal from './MatchEditModal.svelte';
+  import ReportsTab from './reports/ReportsTab.svelte';
   import { subscribeCurrentUserRole, type Role } from '../lib/roles';
   import { currentUser } from '../lib/auth';
 
   const base: string = import.meta.env.BASE_URL;
   const STALE_WINDOW_MS = 4 * 60 * 60 * 1000;
 
-  type Tab = 'live' | 'history';
+  type Tab = 'live' | 'history' | 'reports';
   let tab = $state<Tab>('live');
+  /**
+   * Selected tournament in the Reports tab. `null` = the Default
+   * (untagged) bucket; `undefined` = nothing picked yet. Held here
+   * (not inside ReportsTab) so it survives tab-switches and can be
+   * mirrored to the URL for deep-linking.
+   */
+  let reportsSelection = $state<string | null | undefined>(undefined);
   let liveLoading = $state(true);
   let historyLoading = $state(false);
   let historyLoaded = $state(false);
@@ -66,6 +74,7 @@
   const DEFAULT_COLLAPSED: Record<Tab, boolean> = {
     live: false,     // Live: default open — few groups, want them visible
     history: true,   // History: default folded — many groups, low visual weight
+    reports: true,   // Reports: no groups, unused — kept in type for exhaustiveness
   };
   let groupOverride = $state<Map<string, boolean>>(loadOverride());
 
@@ -136,6 +145,29 @@
   // Prism as a Browser Source over a live camera feed.
   let overlayMid = $state<string | null>(null);
 
+  /**
+   * Mirror the current tab + Reports selection into the URL query
+   * string so the page is deep-linkable. Uses replaceState so the
+   * browser history doesn't fill up with per-tab entries — the Back
+   * button still takes the user to the home screen, not through
+   * every tab they touched.
+   */
+  function syncUrl(): void {
+    if (typeof window === 'undefined') return;
+    const url = new URL(window.location.href);
+    // Preserve mid/view for overlay flows; touch only tab + tournament.
+    if (tab === 'live') url.searchParams.delete('tab');
+    else url.searchParams.set('tab', tab);
+    if (tab === 'reports') {
+      if (reportsSelection === undefined) url.searchParams.delete('tournament');
+      else if (reportsSelection === null) url.searchParams.set('tournament', '');
+      else url.searchParams.set('tournament', reportsSelection);
+    } else {
+      url.searchParams.delete('tournament');
+    }
+    window.history.replaceState({}, '', url.toString());
+  }
+
   onMount(() => {
     // Read the target mid before the Firebase subscription lands.
     // We hold onto it and pop the popup open the moment its entry
@@ -150,6 +182,20 @@
       document.documentElement.dataset.overlay = 'true';
     } else if (validMid) {
       pendingMid = validMid;
+    }
+
+    // Deep-link for Reports: /live/?tab=reports[&tournament=<name>].
+    // `tab=reports` opens the Reports tab straight away; `tournament`
+    // pre-selects a picker chip. Unknown tournament names fall
+    // through to null and the picker shows nothing selected.
+    const tabParam = params.get('tab');
+    if (tabParam === 'history') tab = 'history';
+    else if (tabParam === 'reports') tab = 'reports';
+    const tournamentParam = params.get('tournament');
+    if (tournamentParam !== null) {
+      // Empty-string tournament param = the Default (untagged)
+      // bucket. Non-empty = a real tournament name.
+      reportsSelection = tournamentParam || null;
     }
 
     let unsub: (() => void) | null = null;
@@ -288,15 +334,25 @@
   }
 
   // Load History on tab switch (once). Reloads on tab-switch-back
-  // are cheap — Firebase caches the read.
+  // are cheap — Firebase caches the read. Also fires on Reports
+  // switch because Reports reads the same /matches tree.
   $effect(() => {
-    if (tab !== 'history' || historyLoaded) return;
+    if ((tab !== 'history' && tab !== 'reports') || historyLoaded) return;
     historyLoading = true;
     void loadHistory().then((m) => {
       matches = m;
       historyLoading = false;
       historyLoaded = true;
     });
+  });
+
+  // Mirror tab + Reports selection into the URL query string.
+  $effect(() => {
+    // Reactive deps: touch tab and reportsSelection so the effect
+    // re-runs on either change.
+    void tab;
+    void reportsSelection;
+    syncUrl();
   });
 
   $effect(() => {
@@ -419,7 +475,23 @@
   }
 
   const liveGroups = $derived(groupByTournament(live, bucketOfLive));
-  const historyGroups = $derived(groupByTournament(matches, bucketOfMatch));
+  // Split the History tab into versus buckets + a separate Practice
+  // section below. Practice records don't belong under any tournament
+  // (setup hides the tag field for solo drills), so lumping them into
+  // the "Default" bucket alongside untagged versus matches was
+  // visually confusing — different stats, different render shape.
+  // Now: tournament groups render first, Practice section renders
+  // after them if any practice records exist.
+  const versusMatches = $derived(matches.filter((m) => m.mode !== 'practice'));
+  const practiceMatches = $derived(
+    matches.filter((m) => m.mode === 'practice')
+      .sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0)),
+  );
+  const historyGroups = $derived(groupByTournament(versusMatches, bucketOfMatch));
+  // Bucket key reserved for the Practice collapsible section. Not a
+  // real tournament name; matched against the same collapsed-state
+  // Map so the practice section remembers its open/closed state.
+  const PRACTICE_BUCKET = '__practice__';
 
   function sideNameLive(e: LobbyEntry, side: 'a' | 'b'): string {
     const m = e.meta;
@@ -574,7 +646,7 @@
 <main>
   <header class="hdr">
     <a class="back" href={base}>← Back</a>
-    <h1>Live matches</h1>
+    <h1>Lobby</h1>
     <!--
       SignInButton mounted in `signedInOnly` mode: renders the avatar +
       menu ONLY when a user is already signed in. Anonymous visitors
@@ -609,6 +681,16 @@
     >
       History
       {#if historyLoaded}<span class="tab-count">{matches.length}</span>{/if}
+    </button>
+    <button
+      type="button"
+      role="tab"
+      class="tab"
+      class:tab-active={tab === 'reports'}
+      aria-selected={tab === 'reports'}
+      onclick={() => (tab = 'reports')}
+    >
+      Reports
     </button>
   </div>
 
@@ -707,7 +789,7 @@
         </section>
       {/each}
     {/if}
-  {:else}
+  {:else if tab === 'history'}
     <!-- History tab -->
     {#if historyLoading}
       <p class="state">Loading…</p>
@@ -832,6 +914,96 @@
           {/if}
         </section>
       {/each}
+      <!--
+        Practice section — flat list of solo drill runs. Renders below
+        the tournament-grouped versus matches so those two very
+        different concepts don't intermix visually. Collapsible via
+        the same isCollapsed/toggleGroup state Map used for real
+        buckets; the reserved key `__practice__` never clashes with a
+        real tournament name (60-char alphanumeric-plus-dash regex).
+      -->
+      {#if practiceMatches.length > 0}
+        {@const practiceFolded = isCollapsed('history', PRACTICE_BUCKET)}
+        <section class="tour-group" class:folded={practiceFolded}>
+          <button
+            type="button"
+            class="tour-hdr"
+            aria-expanded={!practiceFolded}
+            onclick={() => toggleGroup('history', PRACTICE_BUCKET)}
+          >
+            <span class="tour-caret" class:tour-caret-folded={practiceFolded} aria-hidden="true">▾</span>
+            <span class="tour-name">Practice</span>
+            <span class="tour-count">{practiceMatches.length}</span>
+          </button>
+          {#if !practiceFolded}
+          <ul class="grid">
+            {#each practiceMatches as m (m.id)}
+              {@const editable = canEditMatch(m)}
+              {@const rows = m.practiceBoards ?? []}
+              {@const totalMisses = rows.reduce(
+                (s, row) => s + (row ?? []).reduce((a, v) => a + (v ?? 0), 0),
+                0,
+              )}
+              {@const boardsPerSet = m.cfg?.maxBoards ?? (rows[0]?.length ?? 0)}
+              {@const totalBoards = rows.length * boardsPerSet}
+              <li class="card-li">
+                {#if editable}
+                  <button
+                    type="button"
+                    class="card-edit"
+                    onclick={(e) => openEdit(m, e)}
+                    aria-label="Edit match"
+                  >✎</button>
+                {/if}
+                <button
+                  type="button"
+                  class="card card-ended"
+                  onclick={() => openMatch(m)}
+                >
+                  <div class="card-hdr">
+                    <span class="card-badge card-badge-practice">Practice</span>
+                    <span class="card-mode">{modeLabelMatch(m)}</span>
+                    <span class="card-meta">{relTime(m.endedAt)}</span>
+                  </div>
+                  <div class="card-teams">
+                    <span class="team-block team-a" style="flex:1">
+                      <span class="team-name">{sideNameMatch(m, 'a')}</span>
+                    </span>
+                  </div>
+                  <div class="card-scores">
+                    <span class="score-block">
+                      <span class="score-lbl">MISSES</span>
+                      <span class="score-val">{totalMisses}</span>
+                    </span>
+                    <span class="score-block">
+                      <span class="score-lbl">BOARDS</span>
+                      <span class="score-val">{totalBoards}</span>
+                    </span>
+                  </div>
+                </button>
+              </li>
+            {/each}
+          </ul>
+          {/if}
+        </section>
+      {/if}
+    {/if}
+  {:else if tab === 'reports'}
+    <!--
+      Reports tab. Waits for the same /matches load the History tab
+      relies on (see the $effect at line ~338 that fires loadHistory
+      on switching to either 'history' or 'reports'). Emits selection
+      changes back so LiveLobby can mirror them into the URL query
+      string via syncUrl().
+    -->
+    {#if historyLoading}
+      <p class="state">Loading…</p>
+    {:else}
+      <ReportsTab
+        matches={matches}
+        initialTournament={reportsSelection}
+        onSelectionChange={(t) => (reportsSelection = t)}
+      />
     {/if}
   {/if}
 </main>
@@ -1132,7 +1304,7 @@
   /* Segmented control */
   .tabs {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr 1fr 1fr;
     gap: 0.25rem;
     padding: 0.25rem;
     background: #141414;

@@ -11,13 +11,16 @@ const base = import.meta.env.BASE_URL;
         <h1>Carrom<span class="h1-accent">S</span>core</h1>
         <p class="tag">Live scoring for players &amp; broadcasters</p>
       </div>
-      <!-- Live pill sits top-right so it doesn't get lost in the
+      <!-- Lobby pill sits top-right so it doesn't get lost in the
            footer. Prominent enough to catch first-time visitors'
            eye; not so loud that it competes with the Start-match
-           button. -->
-      <a class="live-cta" href={`${base}live/`} aria-label="Watch live matches">
+           button. Labelled "Lobby" (not "Live") because the /live/
+           destination now hosts Now Playing + History + Reports —
+           calling it "Live" alone undersells the content. The red
+           dot stays; it still signals ongoing broadcasts inside. -->
+      <a class="live-cta" href={`${base}live/`} aria-label="Open the lobby">
         <span class="live-dot" aria-hidden="true"></span>
-        <span class="live-lbl">Live</span>
+        <span class="live-lbl">Lobby</span>
       </a>
     </header>
     <MatchSetup client:only="svelte" />
