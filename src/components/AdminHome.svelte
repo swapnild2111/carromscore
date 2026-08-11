@@ -18,6 +18,8 @@
     type Role,
   } from '../lib/roles';
   import SignInButton from './SignInButton.svelte';
+  import FeedbackPopup from './FeedbackPopup.svelte';
+  import { APP_VERSION, releaseUrl } from '../lib/version';
   import AdminPlayers from './AdminPlayers.svelte';
   import AdminTournaments from './AdminTournaments.svelte';
   import AdminLiveCleanup from './AdminLiveCleanup.svelte';
@@ -59,7 +61,12 @@
   <header class="hdr">
     <a class="back" href={base}>← Home</a>
     <h1>Admin</h1>
-    <SignInButton signedInOnly />
+    <!--
+      Header used to carry a signed-in avatar chip. Moved to the
+      new footer below (2026-08-11) so admin, home, and lobby all
+      share the same auth-entry layout. Duplicate avatar in header
+      + footer was confusing.
+    -->
   </header>
 
   {#if !user}
@@ -172,6 +179,40 @@
       {/if}
     </div>
   {/if}
+
+  <!--
+    Admin footer. Same shape as the home + lobby footers so every
+    screen in the app reads as one product. Row 1: How to use ⇗ ·
+    Feedback ⇗ · Admin (signed-in avatar or sign-in link). Row 2:
+    version pill (links to that release's notes on GitHub) +
+    copyright. CSS below is copied verbatim from LiveLobby / home
+    — component-scoped styles can't be shared, so a change here
+    should be mirrored to the other two.
+  -->
+  <div class="foot-block">
+    <div class="foot-links">
+      <a
+        href={`${base}help/`}
+        class="foot-link"
+        aria-label="How to use Carromscore"
+      >How to use ⇗</a>
+      <span class="foot-sep" aria-hidden="true">·</span>
+      <FeedbackPopup />
+      <span class="foot-sep" aria-hidden="true">·</span>
+      <SignInButton signedOutLabel="Admin" dropUp />
+    </div>
+    <p class="foot-meta">
+      <a
+        class="foot-ver"
+        href={releaseUrl()}
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label={`Carromscore v${APP_VERSION} release notes on GitHub`}
+      >v{APP_VERSION}</a>
+      <span class="foot-sep" aria-hidden="true">·</span>
+      © 2026 Swapnil Deshpande
+    </p>
+  </div>
 </main>
 
 <style>
@@ -278,5 +319,70 @@
 
   .panel {
     padding: 0.75rem 0;
+  }
+
+  /* Footer — copied verbatim from LiveLobby + MatchSetup so every
+     screen shares the same look. Component-scoped Svelte CSS can't
+     be shared across three files without a base stylesheet; a change
+     here should be mirrored to both other places. */
+  .foot-block {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.35rem;
+    margin: 1.5rem 0 0.75rem;
+  }
+  .foot-links {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 0.35rem;
+    margin: 0;
+    font-size: 0.85rem;
+    flex-wrap: wrap;
+  }
+  .foot-meta {
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.72rem;
+    margin: 0;
+    letter-spacing: 0.02em;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 0.3rem;
+    flex-wrap: wrap;
+  }
+  .foot-sep { opacity: 0.4; }
+  .foot-ver {
+    display: inline-block;
+    padding: 0.1rem 0.5rem;
+    background: rgba(255, 213, 74, 0.14);
+    border: 1px solid rgba(255, 213, 74, 0.35);
+    border-radius: 999px;
+    color: var(--accent);
+    font-family: inherit;
+    font-weight: 700;
+    font-size: 0.7rem;
+    letter-spacing: 0.06em;
+    line-height: 1;
+    text-decoration: none;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .foot-ver:hover {
+    background: rgba(255, 213, 74, 0.22);
+    border-color: rgba(255, 213, 74, 0.55);
+  }
+  .foot-link {
+    color: var(--fg);
+    text-decoration: none;
+    padding: 0.15rem 0.5rem;
+    border-radius: 0.35rem;
+    font-weight: 600;
+    transition: color 0.15s, background 0.15s;
+  }
+  .foot-link:hover {
+    color: var(--accent);
+    background: rgba(255, 213, 74, 0.08);
   }
 </style>
