@@ -19,7 +19,6 @@
   } from '../lib/history';
   import { subscribePlayers } from '../lib/players';
   import {
-    armLiveCleanup,
     deleteLive,
     publishLive,
     type LivePayload,
@@ -236,11 +235,17 @@
     // forking identity on a page-refreshed-mid-match device).
     // Silent-on-failure inside the module.
     void subscribePlayers();
-    // If this match broadcasts live, register a Firebase auto-cleanup
-    // that removes /live/{mid} when the umpire's tab closes without
-    // tapping End. Firebase honours this server-side once the
-    // WebSocket drops. Practice mode has no mid, so this is a no-op.
-    if (cfg.live && cfg.mid) void armLiveCleanup(cfg.mid);
+    // NOTE: armLiveCleanup was previously called here to register a
+    // Firebase onDisconnect().remove() so the /live/{mid} record
+    // vanished when the umpire's tab closed. In practice mobile
+    // browsers drop WebSockets constantly — screen dim, brief WiFi
+    // flicker, page-visibility toggle — and every drop caused the
+    // record to disappear even though the umpire was still on the
+    // match. Removed 2026-08-11 (v2.2.2). Zombie cleanup falls back
+    // to the passive 4-hour sweep in AdminLiveCleanup + sweepStaleLive
+    // that fires on every admin's /admin/ visit. Slightly longer
+    // linger for records the umpire never explicitly ended, much more
+    // resilient live broadcast.
 
     // Role subscription — so the end-recap can render a "Fix this
     // match" link for signed-in admins. The subscription lives for

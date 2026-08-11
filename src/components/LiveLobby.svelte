@@ -134,7 +134,13 @@
   // at the stale array entry, so the popup showed pre-edit data
   // while the card showed post-edit. Now we hold only the id and
   // resolve against the current `matches` array at render time.
-  type PopupKind = { source: 'live'; entry: LobbyEntry } | { source: 'match'; matchId: string };
+  // openPopup stores an IDENTIFIER (mid for live, matchId for history)
+  // and resolves the current record via `$derived` on each render. That
+  // way subscribeAllLive updates propagate to the open sheet dialog —
+  // previously the live variant captured the entry object by value at
+  // click time, so the sheet was a frozen snapshot instead of a
+  // live view. Fixed 2026-08-11.
+  type PopupKind = { source: 'live'; mid: string } | { source: 'match'; matchId: string };
   let openPopup = $state<PopupKind | null>(null);
   let dialog: HTMLDialogElement | null = $state(null);
   // Deep-link support: /live/?mid=xxx auto-opens the popup for that
@@ -372,7 +378,7 @@
     if (!pendingMid) return;
     const match = entries.find((e) => e.mid === pendingMid);
     if (!match) return;
-    openPopup = { source: 'live', entry: match };
+    openPopup = { source: 'live', mid: match.mid };
     pendingMid = null;
   });
 
@@ -394,7 +400,7 @@
   }
   function popupMid(): string | null {
     if (openPopup?.source !== 'live') return null;
-    return openPopup.entry.mid;
+    return openPopup.mid;
   }
   async function copyShareUrl() {
     const mid = popupMid();
@@ -416,7 +422,7 @@
   }
 
   function openEntry(entry: LobbyEntry) {
-    openPopup = { source: 'live', entry };
+    openPopup = { source: 'live', mid: entry.mid };
     copiedKind = null;
   }
   function openMatch(match: MatchRecord) {
@@ -585,12 +591,22 @@
       ? matches.find((m) => m.id === openPopup.matchId) ?? null
       : null,
   );
+  // Resolve the current live entry from the live-subscription array
+  // by mid, on every render — this is what makes the open sheet
+  // dialog update live as subscribeAllLive pushes new snapshots.
+  // Returns null if the record has since disappeared from /live/
+  // (umpire closed the tab, onDisconnect fired, admin swept it).
+  const openLiveEntry = $derived(
+    openPopup?.source === 'live'
+      ? entries.find((e) => e.mid === openPopup.mid) ?? null
+      : null,
+  );
 
   const popupRecord = $derived(
     openPopup === null
       ? null
       : openPopup.source === 'live'
-        ? openPopup.entry
+        ? openLiveEntry
         : openMatchRecord
           ? matchAsLiveRecord(openMatchRecord)
           : null,
@@ -599,13 +615,13 @@
     openPopup === null
       ? false
       : openPopup.source === 'match' ||
-        !!(openPopup.source === 'live' && openPopup.entry.liveState.matchResult),
+        !!(openPopup.source === 'live' && openLiveEntry?.liveState.matchResult),
   );
   const popupMode = $derived(
     openPopup === null
       ? ''
       : openPopup.source === 'live'
-        ? modeLabelLive(openPopup.entry)
+        ? (openLiveEntry ? modeLabelLive(openLiveEntry) : '')
         : openMatchRecord
           ? modeLabelMatch(openMatchRecord)
           : '',
@@ -617,7 +633,7 @@
     openPopup === null
       ? ''
       : openPopup.source === 'live'
-        ? (openPopup.entry.meta.tournament ?? '').trim()
+        ? (openLiveEntry?.meta.tournament ?? '').trim()
         : (openMatchRecord?.tournament ?? '').trim(),
   );
 
