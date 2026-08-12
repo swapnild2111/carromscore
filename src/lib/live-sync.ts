@@ -167,6 +167,36 @@ export async function publishLive(
 }
 
 /**
+ * Force-cycle the RTDB connection: `goOffline()` then `goOnline()`.
+ * A no-op on healthy connections (SDK detects it's already online and
+ * reconnects instantly), but on MIUI / other aggressive-throttling
+ * Android devices where the OS suspended the socket without the SDK
+ * noticing, this abandons the stuck connection and forces a fresh
+ * handshake. Called from the score screen's visibilitychange handler
+ * after a hidden→visible transition that lasted long enough to
+ * suggest the OS may have paused the app.
+ *
+ * Silent-on-failure like every other Firebase helper — if the SDK
+ * won't load or the cycle throws, the app keeps working via cached
+ * localStorage state and the next real publish attempt.
+ */
+export async function nudgeFirebaseReconnect(): Promise<void> {
+  try {
+    const [{ firebaseApp }, { getDatabase, goOffline, goOnline }] = await Promise.all([
+      import('./firebase'),
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    goOffline(db);
+    // Immediate re-online. Firebase serialises these correctly —
+    // no need to await; the SDK queues them in order.
+    goOnline(db);
+  } catch {
+    // silent
+  }
+}
+
+/**
  * Subscribe to updates at `/live/{mid}`. Calls `onData` immediately
  * with the current snapshot (if any) and again on every remote change.
  * Returns an unsubscribe function.

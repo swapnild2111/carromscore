@@ -20,6 +20,7 @@
   import { subscribePlayers } from '../lib/players';
   import {
     deleteLive,
+    nudgeFirebaseReconnect,
     publishLive,
     type LivePayload,
     type LiveRecord,
@@ -371,10 +372,35 @@
       // ignore
     }
   }
+  // Track when the tab was last hidden so we can decide whether to
+  // force-cycle Firebase's connection on return. On aggressive Android
+  // OSes (MIUI notably), the socket to firebaseio.com gets suspended
+  // silently during background, and the SDK's own retry timer can be
+  // slow to notice — writes queue for seconds before landing. Cycling
+  // via goOffline/goOnline recovers immediately. See
+  // `nudgeFirebaseReconnect` for detail.
+  let hiddenSince: number | null = null;
+  const HIDDEN_NUDGE_THRESHOLD_MS = 2000;
   function onVisibilityChange() {
+    if (document.visibilityState === 'hidden') {
+      hiddenSince = Date.now();
+      return;
+    }
     if (document.visibilityState === 'visible') {
       if (!wakeLock) requestWakeLock();
       if (!document.fullscreenElement) landscapeLocked = false;
+      // Only nudge if we've been hidden long enough that the OS
+      // could have suspended background sockets. Quick focus-blur
+      // flickers (Chrome popup, notification banner) skip this.
+      if (
+        cfg.live &&
+        cfg.mid &&
+        hiddenSince !== null &&
+        Date.now() - hiddenSince > HIDDEN_NUDGE_THRESHOLD_MS
+      ) {
+        void nudgeFirebaseReconnect();
+      }
+      hiddenSince = null;
     }
   }
   // Belt-and-braces backup for Android WebView / Chrome edge cases where

@@ -201,32 +201,41 @@
 
     <div class="summary">
       <h3 class="section-hdr">Player summary</h3>
-      <table class="summary-tbl">
-        <thead>
-          <tr>
-            <th class="col-name">Player</th>
-            <th>Matches</th>
-            <th>W</th>
-            <th>L</th>
-            <th>D</th>
-            <th>Boards</th>
-            <th>Points</th>
-          </tr>
-        </thead>
-        <tbody>
-          {#each report.playerSummary as p (p.playerId)}
+      <!--
+        Wrap the table in a horizontally-scrollable div so the POINTS
+        column doesn't fall off narrow phones. Long player names in
+        the first column push the numeric columns to the right; on a
+        phone-width viewport, without scroll, the last column clips.
+        Mirrors the .tbl-scroll pattern used by the Matches table.
+      -->
+      <div class="summary-scroll">
+        <table class="summary-tbl">
+          <thead>
             <tr>
-              <td class="col-name">{p.name}</td>
-              <td>{p.matches}</td>
-              <td>{p.wins}</td>
-              <td>{p.losses}</td>
-              <td>{p.draws}</td>
-              <td>{p.boardsWon}</td>
-              <td>{p.pointsScored}</td>
+              <th class="col-name">Player</th>
+              <th>Matches</th>
+              <th>W</th>
+              <th>L</th>
+              <th>D</th>
+              <th>Boards</th>
+              <th>Points</th>
             </tr>
-          {/each}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {#each report.playerSummary as p (p.playerId)}
+              <tr>
+                <td class="col-name">{p.name}</td>
+                <td>{p.matches}</td>
+                <td>{p.wins}</td>
+                <td>{p.losses}</td>
+                <td>{p.draws}</td>
+                <td>{p.boardsWon}</td>
+                <td>{p.pointsScored}</td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <div class="tbl-hdr">
@@ -377,6 +386,17 @@
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 0.6rem;
     padding: 0.85rem 1rem 1rem;
+  }
+  /* Horizontal-scroll shell so the summary table's rightmost columns
+     (Boards, Points) don't clip on narrow phones when player names
+     are long. Same pattern as .tbl-scroll for the Matches table. */
+  .summary-scroll {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    margin: 0 -0.35rem;
+  }
+  .summary-tbl {
+    min-width: 460px;
   }
   .summary-tbl,
   .matches-tbl {
