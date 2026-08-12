@@ -1,14 +1,21 @@
 name: Deploy to GitHub Pages
 
-# Publishes the main-branch build to /carromscore/.
+# Publishes:
+#   - main branch → /carromscore/ (production)
+#   - `beta` branch → /carromscore/beta/ (public preview channel)
 #
-# Prior to v2.0 GA (2026-08) this workflow also built the v2.0-dev
-# branch to /carromscore/beta/ as a public preview channel. That
-# channel was retired after v2.0.0 shipped; future preview work will
-# use short-lived feature branches instead.
+# The `beta` branch is a floating label: whatever release is being
+# tested next gets checked out as `beta` and pushed. Keeps the URL
+# stable so testers can bookmark it and reload for each build.
+#
+# Beta job produces a combined artifact: it clones main, builds it
+# with PUBLIC_BASE=/carromscore/, then builds the beta branch with
+# PUBLIC_BASE=/carromscore/beta/ and drops the result into
+# dist-combined/beta/. This preserves production at the root while
+# adding the preview at /beta/. Same Pages site, no separate hosting.
 on:
   push:
-    branches: [main]
+    branches: [main, beta]
   workflow_dispatch:
 
 permissions:
@@ -18,10 +25,11 @@ permissions:
 
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
-  build:
+  build-main:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -36,7 +44,7 @@ jobs:
       - name: Install
         run: npm ci
 
-      - name: Build
+      - name: Build (main → /carromscore/)
         run: npm run build
         env:
           PUBLIC_BASE: /carromscore/
@@ -46,8 +54,70 @@ jobs:
         with:
           path: ./dist
 
-  deploy:
-    needs: build
+  deploy-main:
+    if: github.ref == 'refs/heads/main'
+    needs: build-main
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+  build-beta:
+    if: github.ref == 'refs/heads/beta'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout beta branch
+        uses: actions/checkout@v4
+
+      - name: Checkout main into ./main-build
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: main-build
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install (main)
+        working-directory: main-build
+        run: npm ci
+
+      - name: Build main → dist-combined/
+        working-directory: main-build
+        run: npm run build
+        env:
+          PUBLIC_BASE: /carromscore/
+
+      - name: Install (beta)
+        run: npm ci
+
+      - name: Build beta → dist-combined/beta/
+        run: npm run build
+        env:
+          PUBLIC_BASE: /carromscore/beta/
+
+      - name: Compose combined artifact
+        run: |
+          mkdir -p dist-combined
+          cp -R main-build/dist/. dist-combined/
+          mkdir -p dist-combined/beta
+          cp -R dist/. dist-combined/beta/
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./dist-combined
+
+  deploy-beta:
+    if: github.ref == 'refs/heads/beta'
+    needs: build-beta
     runs-on: ubuntu-latest
     environment:
       name: github-pages
