@@ -1273,34 +1273,26 @@
      size. Text-shadow provides an outline that reads even when the
      tile background is defeated by an unusually bright feed. */
   :global(.overlay-wrap .prow-cell .digit) {
-    /* 3rem floor for tiny viewer windows, 8vw scaling for mid-size,
-       6rem cap for high-DPI broadcast canvases. On 1920px stream
-       8vw ≈ 154px; the cap prevents runaway growth. */
-    font-size: clamp(3rem, 8vw, 6rem) !important;
+    font-size: clamp(4rem, 10.8vw, 8.2rem) !important;
     line-height: 1 !important;
     text-shadow: 0 0 6px rgba(0, 0, 0, 0.9), 0 2px 4px rgba(0, 0, 0, 0.9) !important;
   }
   :global(.overlay-wrap .prow-total .digit) {
-    font-size: clamp(3.4rem, 8.5vw, 6.6rem) !important;
+    font-size: clamp(4.6rem, 11.5vw, 9rem) !important;
     line-height: 1 !important;
     text-shadow: 0 0 6px rgba(0, 0, 0, 0.9), 0 2px 4px rgba(0, 0, 0, 0.9) !important;
   }
   :global(.overlay-wrap .prow-label) {
-    font-size: clamp(0.75rem, 1.4vw, 1rem) !important;
+    font-size: clamp(1rem, 1.9vw, 1.35rem) !important;
   }
-  /* Solo-pill name: the versus-overlay bumps .name to 1.5rem which
-     is right for narrow per-side pills. Solo has the whole strip
-     width to fill, so 1.5rem there reads as overwhelming. Cap this
-     one back to overlay-appropriate weight, distinct from the
-     digit-cell scale. */
   :global(.overlay-wrap .solo-pill .name) {
-    font-size: clamp(1rem, 2vw, 1.6rem) !important;
+    font-size: clamp(1.35rem, 2.7vw, 2.15rem) !important;
   }
   :global(.overlay-wrap .practice-badge) {
-    font-size: clamp(0.7rem, 1.2vw, 1rem) !important;
+    font-size: clamp(0.95rem, 1.65vw, 1.35rem) !important;
   }
   :global(.overlay-wrap .solo-note) {
-    font-size: clamp(0.7rem, 1.2vw, 1rem) !important;
+    font-size: clamp(0.95rem, 1.65vw, 1.35rem) !important;
   }
   :global(.overlay-wrap .lbl) {
     font-size: 0.55rem !important;
