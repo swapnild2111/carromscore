@@ -1273,26 +1273,26 @@
      size. Text-shadow provides an outline that reads even when the
      tile background is defeated by an unusually bright feed. */
   :global(.overlay-wrap .prow-cell .digit) {
-    font-size: clamp(4rem, 10.8vw, 8.2rem) !important;
+    font-size: clamp(4.5rem, 12.5vw, 9.5rem) !important;
     line-height: 1 !important;
     text-shadow: 0 0 6px rgba(0, 0, 0, 0.9), 0 2px 4px rgba(0, 0, 0, 0.9) !important;
   }
   :global(.overlay-wrap .prow-total .digit) {
-    font-size: clamp(4.6rem, 11.5vw, 9rem) !important;
+    font-size: clamp(5.2rem, 13.5vw, 10.5rem) !important;
     line-height: 1 !important;
     text-shadow: 0 0 6px rgba(0, 0, 0, 0.9), 0 2px 4px rgba(0, 0, 0, 0.9) !important;
   }
   :global(.overlay-wrap .prow-label) {
-    font-size: clamp(1rem, 1.9vw, 1.35rem) !important;
+    font-size: clamp(1.15rem, 2.2vw, 1.6rem) !important;
   }
   :global(.overlay-wrap .solo-pill .name) {
-    font-size: clamp(1.35rem, 2.7vw, 2.15rem) !important;
+    font-size: clamp(1.5rem, 3.1vw, 2.5rem) !important;
   }
   :global(.overlay-wrap .practice-badge) {
-    font-size: clamp(0.95rem, 1.65vw, 1.35rem) !important;
+    font-size: clamp(1.05rem, 1.9vw, 1.6rem) !important;
   }
   :global(.overlay-wrap .solo-note) {
-    font-size: clamp(0.95rem, 1.65vw, 1.35rem) !important;
+    font-size: clamp(1.05rem, 1.9vw, 1.6rem) !important;
   }
   :global(.overlay-wrap .lbl) {
     font-size: 0.55rem !important;
