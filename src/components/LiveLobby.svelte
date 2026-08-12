@@ -1039,6 +1039,14 @@
       <span class="foot-sep" aria-hidden="true">·</span>
       <FeedbackPopup />
       <span class="foot-sep" aria-hidden="true">·</span>
+      <a
+        href="https://ko-fi.com/carromscore"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="foot-link foot-link-support"
+        aria-label="Support Carromscore on Ko-fi"
+      >Support ❤</a>
+      <span class="foot-sep" aria-hidden="true">·</span>
       <SignInButton signedOutLabel="Admin" dropUp />
     </div>
     <p class="foot-meta">
@@ -2047,5 +2055,16 @@
   .foot-link:hover {
     color: var(--accent);
     background: rgba(255, 213, 74, 0.08);
+  }
+  /* Support link — golden accent tint (matches the version pill,
+     BREAK chip, primary buttons). Not red — red is the "danger"
+     register in this app. Same block duplicated across the three
+     footer surfaces (Svelte-scoped styles). */
+  .foot-link-support {
+    color: var(--accent, #ffd54a);
+  }
+  .foot-link-support:hover {
+    color: var(--accent, #ffd54a);
+    background: rgba(255, 213, 74, 0.14);
   }
 </style>

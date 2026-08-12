@@ -6,6 +6,8 @@
   <a href="https://swapnild2111.github.io/carromscore/"><img src="https://img.shields.io/website?url=https%3A%2F%2Fswapnild2111.github.io%2Fcarromscore%2F&label=carromscore.app&up_color=ffb300" alt="Website" /></a>
   <a href="https://github.com/swapnild2111/carromscore/actions/workflows/deploy.yml"><img src="https://github.com/swapnild2111/carromscore/actions/workflows/deploy.yml/badge.svg" alt="Deploy status" /></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT" /></a>
+  <a href="https://github.com/sponsors/swapnild2111"><img src="https://img.shields.io/badge/GitHub-Sponsor-ea4aaa?logo=githubsponsors&logoColor=white" alt="GitHub Sponsors" /></a>
+  <a href="https://ko-fi.com/carromscore"><img src="https://img.shields.io/badge/Ko--fi-Support-ff5e5b?logo=ko-fi&logoColor=white" alt="Ko-fi" /></a>
 </p>
 
 <p align="center">
@@ -171,6 +173,20 @@ shared Firebase-backed player roster so a second match with the same
 person picks the right identity. The typed name creates a Player
 record on match end (never on typing, so setup-time typos don't
 pollute the roster).
+
+## Supporting the project
+
+Carromscore is a hobby project. It will always stay free — no ads,
+no premium tier, no data sold. If you'd like to help cover the domain
+and hosting costs (or just say thanks), two options:
+
+- **[Support on Ko-fi ❤](https://ko-fi.com/carromscore)** — card,
+  PayPal, Apple Pay, or Google Pay. One-time or monthly.
+- **[Sponsor on GitHub ❤](https://github.com/sponsors/swapnild2111)**
+  — repo-native, card checkout.
+
+Both go directly to the maintainer's account. Nothing in the app is
+gated behind money.
 
 ## Developing Carromscore
 

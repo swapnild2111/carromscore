@@ -1,0 +1,15 @@
+# Configures the "Sponsor ❤" button GitHub renders in this repo's
+# header. GitHub reads this file automatically — no other setup
+# needed on the repo side. Two channels wired:
+#
+#   github         → github.com/sponsors/swapnild2111 (repo-native
+#                    Sponsor button; card checkout via Stripe Connect)
+#   custom         → ko-fi.com/carromscore (app-facing donate page;
+#                    accepts card + PayPal + Apple Pay + Google Pay)
+#
+# Both funnel to the maintainer's Danske Bank personal account. The
+# app itself will always stay free — donations cover domain + hosting.
+
+github: swapnild2111
+custom:
+  - https://ko-fi.com/carromscore

@@ -199,6 +199,14 @@
       <span class="foot-sep" aria-hidden="true">·</span>
       <FeedbackPopup />
       <span class="foot-sep" aria-hidden="true">·</span>
+      <a
+        href="https://ko-fi.com/carromscore"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="foot-link foot-link-support"
+        aria-label="Support Carromscore on Ko-fi"
+      >Support ❤</a>
+      <span class="foot-sep" aria-hidden="true">·</span>
       <SignInButton signedOutLabel="Admin" dropUp />
     </div>
     <p class="foot-meta">
@@ -384,5 +392,13 @@
   .foot-link:hover {
     color: var(--accent);
     background: rgba(255, 213, 74, 0.08);
+  }
+  /* Support link — golden accent, not red. */
+  .foot-link-support {
+    color: var(--accent);
+  }
+  .foot-link-support:hover {
+    color: var(--accent);
+    background: rgba(255, 213, 74, 0.14);
   }
 </style>
