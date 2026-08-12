@@ -8,11 +8,17 @@ name: Deploy to GitHub Pages
 # tested next gets checked out as `beta` and pushed. Keeps the URL
 # stable so testers can bookmark it and reload for each build.
 #
-# Beta job produces a combined artifact: it clones main, builds it
-# with PUBLIC_BASE=/carromscore/, then builds the beta branch with
-# PUBLIC_BASE=/carromscore/beta/ and drops the result into
-# dist-combined/beta/. This preserves production at the root while
-# adding the preview at /beta/. Same Pages site, no separate hosting.
+# Beta job produces a combined artifact: mirrors the live production
+# site into dist-combined/ (so /carromscore/ keeps serving main
+# untouched), then builds the beta branch at PUBLIC_BASE=/carromscore/beta/
+# and drops the result into dist-combined/beta/. The whole thing is
+# uploaded as one Pages artifact. Same Pages site, no separate hosting.
+#
+# Mirroring beats "rebuild main in a subdir" because Astro 7 + rolldown-vite
+# has a tsconfig-resolution bug when running builds from nested
+# working-directories (rolldown walks upward looking for
+# `astro/tsconfigs/strict.json` and finds nothing in the sibling
+# node_modules tree). Mirroring is also strictly faster.
 on:
   push:
     branches: [main, beta]
@@ -73,40 +79,52 @@ jobs:
       - name: Checkout beta branch
         uses: actions/checkout@v4
 
-      - name: Checkout main into ./main-build
-        uses: actions/checkout@v4
-        with:
-          ref: main
-          path: main-build
-
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: npm
 
-      - name: Install (main)
-        working-directory: main-build
+      - name: Install
         run: npm ci
 
-      - name: Build main → dist-combined/
-        working-directory: main-build
-        run: npm run build
-        env:
-          PUBLIC_BASE: /carromscore/
-
-      - name: Install (beta)
-        run: npm ci
-
-      - name: Build beta → dist-combined/beta/
+      - name: Build beta → dist/
         run: npm run build
         env:
           PUBLIC_BASE: /carromscore/beta/
 
-      - name: Compose combined artifact
+      - name: Mirror live production site into dist-combined/
+        # --mirror recurses, --no-parent keeps us inside /carromscore/,
+        # --page-requisites grabs assets referenced by HTML,
+        # -nH strips the hostname dir, --cut-dirs=1 strips the /carromscore/
+        # prefix so files land at the artifact root. --reject-regex prunes
+        # any pre-existing /beta/ paths so we don't fight our fresh build.
         run: |
           mkdir -p dist-combined
-          cp -R main-build/dist/. dist-combined/
+          cd dist-combined
+          wget \
+            --mirror \
+            --no-parent \
+            --page-requisites \
+            --convert-links=off \
+            --no-host-directories \
+            --cut-dirs=1 \
+            --reject-regex '/carromscore/beta/' \
+            --quiet \
+            --tries=3 \
+            --wait=0.2 \
+            https://swapnild2111.github.io/carromscore/ || true
+          # Guardrail: bail if the mirror produced nothing useful. That
+          # means production is down or wget failed silently — we should
+          # not publish an empty root over a working main deploy.
+          if [ ! -f index.html ] && [ ! -f 404.html ]; then
+            echo "::error::Failed to mirror live production site — no index.html present"
+            exit 1
+          fi
+
+      - name: Overlay beta build at /beta/
+        run: |
+          rm -rf dist-combined/beta
           mkdir -p dist-combined/beta
           cp -R dist/. dist-combined/beta/
 
