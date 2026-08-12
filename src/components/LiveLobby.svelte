@@ -1284,6 +1284,10 @@
   }
   :global(.overlay-wrap .prow-label) {
     font-size: clamp(1.15rem, 2.2vw, 1.6rem) !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    text-align: center !important;
   }
   :global(.overlay-wrap .solo-pill .name) {
     font-size: clamp(1.5rem, 3.1vw, 2.5rem) !important;
