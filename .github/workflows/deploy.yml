@@ -136,11 +136,15 @@ jobs:
           # Sanity checks: fail the job if the artifact is missing
           # any of the JS bundles that the HTML references. Prevents
           # the "production goes blank" incident from ever recurring.
+          # Strip the /carromscore/ base prefix from each referenced
+          # URL and check that the resulting file exists under
+          # dist-combined/. Bug fixed 2026-08-13: earlier version
+          # produced paths like `dist-combined./_astro/...` from an
+          # accidental `.` prepend on the URL suffix; corrected here.
           echo "== Verifying main artifact =="
           test -f dist-combined/index.html
           for js in $(grep -oE '/carromscore/_astro/[A-Za-z]+\.[A-Za-z0-9_-]+\.js' dist-combined/index.html || true); do
-            local_path=".${js#/carromscore}"
-            local_path="dist-combined${local_path}"
+            local_path="dist-combined${js#/carromscore}"
             if [ ! -f "$local_path" ]; then
               echo "::error::main HTML references $js but $local_path is missing"
               exit 1
@@ -149,8 +153,7 @@ jobs:
           echo "== Verifying beta artifact =="
           test -f dist-combined/beta/index.html
           for js in $(grep -oE '/carromscore/beta/_astro/[A-Za-z]+\.[A-Za-z0-9_-]+\.js' dist-combined/beta/index.html || true); do
-            local_path=".${js#/carromscore}"
-            local_path="dist-combined${local_path}"
+            local_path="dist-combined${js#/carromscore}"
             if [ ! -f "$local_path" ]; then
               echo "::error::beta HTML references $js but $local_path is missing"
               exit 1
