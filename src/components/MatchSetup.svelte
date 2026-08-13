@@ -744,14 +744,16 @@
       >Support ❤</a>
       <span class="foot-sep" aria-hidden="true">·</span>
       <!--
-        Admin entry point. Same SignInButton component the lobby
-        uses. Signed-out: renders as an "Admin" pill; tap opens
+        Sign-in entry point. Same SignInButton component the lobby
+        uses. Signed-out: renders as a "Sign in" pill; tap opens
         Google sign-in. Signed-in: becomes the avatar + name pill,
         tap opens an inline dropdown with role + Sign out.
+        Not every user is an admin — the pill should read as a
+        neutral sign-in affordance, not an admin-only claim.
         `dropUp` because the footer sits at the bottom of the page
         — a downward dropdown would clip below the fold.
       -->
-      <SignInButton signedOutLabel="Admin" dropUp />
+      <SignInButton dropUp />
     </div>
     <p class="foot-meta">
       <a

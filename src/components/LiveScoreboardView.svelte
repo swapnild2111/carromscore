@@ -85,10 +85,23 @@
       arr.push(entry);
       bySet.set(entry.set, arr);
     }
+    // Union of set indices we should render:
+    //   - 0..bestOf-1 so unplayed sets in a bo3-ending-2-0 still
+    //     emit an empty placeholder group (unchanged behaviour).
+    //   - Every set index that actually appears in the log,
+    //     regardless of bestOf. This catches records with
+    //     1-indexed set values (a few admin-created / legacy
+    //     records had set=1 for the first set instead of 0), and
+    //     any other case where a board's set >= bestOf. Without
+    //     this the scorecard silently disappeared for those
+    //     records (bug reported 2026-08-13 on Sreenivas vs Arun,
+    //     match -Ozw8zal0Ur3u7FdxUTq).
+    const setIndices = new Set<number>();
+    for (let i = 0; i < meta.bestOf; i += 1) setIndices.add(i);
+    for (const s of bySet.keys()) setIndices.add(s);
+    const sortedIndices = Array.from(setIndices).sort((a, b) => a - b);
     const groups: SetGroup[] = [];
-    // Iterate 0..bestOf-1 so unplayed sets (bo3 that ended in 2-0)
-    // still emit a placeholder group with `boards: []`.
-    for (let i = 0; i < meta.bestOf; i += 1) {
+    for (const i of sortedIndices) {
       const boards = bySet.get(i) ?? [];
       const totalA = boards.reduce((sum, b) => sum + b.pointsA, 0);
       const totalB = boards.reduce((sum, b) => sum + b.pointsB, 0);
@@ -274,7 +287,7 @@
     at a glance. On narrow screens the table can scroll horizontally
     if the fixed cell widths overflow.
   -->
-  {#if setGroups().length > 0 && (setGroups()[0].boards.length > 0)}
+  {#if setGroups().some((g) => g.boards.length > 0)}
     {@const groups = setGroups()}
     <div class="scorecard">
       {#each groups as g (g.setIdx)}
