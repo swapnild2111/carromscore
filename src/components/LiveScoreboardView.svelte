@@ -54,9 +54,20 @@
     pointsB: number;
     endedAt: number;
   };
+  /**
+   * Board row with pre-computed cumulative totals. Rendering the
+   * scorecard used to compute cumulatives via `.push()` inside a
+   * `{@const}` template expression, but Svelte 5's fine-grained
+   * reactivity kept re-invoking that push across re-renders while
+   * the outer array remained the same — so cumulative totals grew
+   * by multiples of themselves on every state update (bug reported
+   * 2026-08-14: A had 8 points, table showed 40; 10 → 50). Pure
+   * computation here removes the render-time side effect entirely.
+   */
+  type BoardRow = BoardEntry & { cumA: number; cumB: number };
   type SetGroup = {
     setIdx: number;
-    boards: BoardEntry[];
+    boards: BoardRow[];
     totalA: number;
     totalB: number;
     winner: 'a' | 'b' | 'tie' | null;
@@ -102,9 +113,18 @@
     const sortedIndices = Array.from(setIndices).sort((a, b) => a - b);
     const groups: SetGroup[] = [];
     for (const i of sortedIndices) {
-      const boards = bySet.get(i) ?? [];
-      const totalA = boards.reduce((sum, b) => sum + b.pointsA, 0);
-      const totalB = boards.reduce((sum, b) => sum + b.pointsB, 0);
+      const raw = bySet.get(i) ?? [];
+      // Pre-compute per-row cumulatives so the template renders
+      // purely — no push-mutations from a @const block.
+      let cumA = 0;
+      let cumB = 0;
+      const boards: BoardRow[] = raw.map((b) => {
+        cumA += b.pointsA;
+        cumB += b.pointsB;
+        return { ...b, cumA, cumB };
+      });
+      const totalA = cumA;
+      const totalB = cumB;
       let winner: SetGroup['winner'] = null;
       if (boards.length > 0) {
         if (totalA > totalB) winner = 'a';
@@ -292,8 +312,6 @@
     <div class="scorecard">
       {#each groups as g (g.setIdx)}
         {#if g.boards.length > 0}
-          {@const cumulA = []}
-          {@const cumulB = []}
           {@const firstBreaker = g.boards[0].breakSide}
           <div class="sc-set">
             <div class="sc-set-head">
@@ -325,8 +343,6 @@
                 <span class="sc-cell sc-b-pts" role="columnheader">Score</span>
               </div>
               {#each g.boards as entry (`${entry.set}-${entry.board}`)}
-                {@const _cumA = (cumulA.push((cumulA[cumulA.length - 1] ?? 0) + entry.pointsA), cumulA[cumulA.length - 1])}
-                {@const _cumB = (cumulB.push((cumulB[cumulB.length - 1] ?? 0) + entry.pointsB), cumulB[cumulB.length - 1])}
                 {@const queenA = entry.queen === 'a'}
                 {@const queenB = entry.queen === 'b'}
                 <!--
@@ -343,7 +359,7 @@
                 {@const coinsA = queenA ? Math.max(0, entry.pointsA - 3) : entry.pointsA}
                 {@const coinsB = queenB ? Math.max(0, entry.pointsB - 3) : entry.pointsB}
                 <div class="sc-row" role="row">
-                  <span class="sc-cell sc-a-pts side-a" role="cell">{_cumA}</span>
+                  <span class="sc-cell sc-a-pts side-a" role="cell">{entry.cumA}</span>
                   <span class="sc-cell sc-a-score side-a" role="cell">
                     {coinsA}{#if queenA}<span class="sc-q-tag" aria-label="Queen">+Q</span>{/if}
                   </span>
@@ -351,7 +367,7 @@
                   <span class="sc-cell sc-b-score side-b" role="cell">
                     {coinsB}{#if queenB}<span class="sc-q-tag" aria-label="Queen">+Q</span>{/if}
                   </span>
-                  <span class="sc-cell sc-b-pts side-b" role="cell">{_cumB}</span>
+                  <span class="sc-cell sc-b-pts side-b" role="cell">{entry.cumB}</span>
                 </div>
               {/each}
               <div class="sc-row sc-total" role="row">
