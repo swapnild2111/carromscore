@@ -579,7 +579,21 @@
     if (delta > 0 && !isPractice) {
       const currentBoardHasScore =
         sideA.points > pointsAtBoardStart.a || sideB.points > pointsAtBoardStart.b;
-      if (currentBoardHasScore) {
+      // Board-cap safeguard mirrors endMatch(): once the umpire has
+      // hit cfg.maxBoards worth of boards, refuse to open a phantom
+      // Nth+1 row from stray points. Without this, tapping SET+ at
+      // the cap with any running-board delta appended an extra board
+      // AND — because we didn't update pointsAtBoardStart afterwards —
+      // repeated SET+ taps kept re-firing the snapshot forever
+      // (bug reported 2026-08-14). Silently roll the stray points
+      // back to the last committed baseline; SET+ then proceeds to
+      // credit the set without touching the archive.
+      const atBoardCap =
+        !isBoardsUnlimited(cfg) && board >= cfg.maxBoards && !isDecidingBoard;
+      if (currentBoardHasScore && atBoardCap) {
+        sideA.points = pointsAtBoardStart.a;
+        sideB.points = pointsAtBoardStart.b;
+      } else if (currentBoardHasScore) {
         if (queenHolder === null) {
           // Block SET+1 with the same toast BOARD+1 uses. Real carrom:
           // no board can end without a queen result.
@@ -602,6 +616,11 @@
         // count stored on match archive matches boardLog.length —
         // the same reason endMatch() advances after its own snapshot.
         board = board + 1;
+        // Re-baseline pointsAtBoardStart to the just-snapshotted
+        // totals. Without this, a subsequent SET+ tap sees the
+        // same points-still-ahead-of-baseline signal and captures
+        // another phantom row, indefinitely.
+        pointsAtBoardStart = { a: sideA.points, b: sideB.points };
       }
     }
 
