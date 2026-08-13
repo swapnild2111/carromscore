@@ -64,43 +64,58 @@ const base = import.meta.env.BASE_URL;
       const FALLBACK_ID = 'hydration-fallback';
       const RELOAD_BTN_ID = 'hydration-fallback-reload';
       const WATCHDOG_MS = 12000;
-      // Astro-island's authoritative hydration signal: after the
-      // dynamic import + Svelte mount succeeds it removes the `ssr`
-      // attribute AND dispatches `astro:hydrate`. So the "we
-      // succeeded" check is: does any astro-island NOT have the
-      // ssr attribute? Failing that, the `astro:hydrate` event is
-      // caught on capture (bubbles:true in the event init).
-      // Previous versions checked `astro-island form.setup` which
-      // false-positive'd because Svelte 5 mounts the form as a
-      // sibling of the island's shadowless root — the selector
-      // never matched even after successful hydration.
+      // Hydration signal from astro-island: on success it calls
+      // `this.removeAttribute("ssr")` before dispatching an
+      // `astro:hydrate` CustomEvent. That event does NOT bubble
+      // (bubbles defaults to false on CustomEvent), so we can't
+      // catch it on window/document.
+      //
+      // Reliable path: MutationObserver on document.body watching
+      // for `ssr` attribute removal on any astro-island. That
+      // works regardless of load timing and doesn't depend on
+      // whether we attached before or after the island's own
+      // lifecycle. As a belt-and-braces, we also attach an
+      // `astro:hydrate` listener directly to any astro-island in
+      // the DOM at script-run time.
       let hydrated = false;
       let revealed = false;
-      let watchdogFired = false;
       const islands = () => document.querySelectorAll('astro-island');
-      const anyHydrated = () => {
-        const list = islands();
-        if (list.length === 0) return false;
-        for (const n of list) if (!n.hasAttribute('ssr')) return true;
+      const anyHydratedNow = () => {
+        for (const n of islands()) if (!n.hasAttribute('ssr')) return true;
         return false;
       };
       const markHydrated = () => {
+        if (hydrated) return;
         hydrated = true;
-        // If the fallback was already shown but hydration then
-        // succeeded (rare race — user coming online mid-fetch,
-        // or the second retry landed), hide it.
         const el = document.getElementById(FALLBACK_ID);
         if (el && !el.hidden) el.hidden = true;
-        revealed = false;
+        if (mo) mo.disconnect();
       };
-      window.addEventListener(
-        'astro:hydrate',
-        () => markHydrated(),
-        true, // capture; event fires on the astro-island element
-      );
+      // Observe `ssr` attribute removal on astro-island elements.
+      const mo = new MutationObserver(() => {
+        if (anyHydratedNow()) markHydrated();
+      });
+      const startObserving = () => {
+        // If a page was somehow served with hydration already done
+        // (unlikely for client:only but possible with cached HTML),
+        // exit early.
+        if (anyHydratedNow()) { markHydrated(); return; }
+        mo.observe(document.body, {
+          subtree: true,
+          attributes: true,
+          attributeFilter: ['ssr'],
+          childList: true,
+        });
+        // Belt-and-braces: attach directly to any island element
+        // to catch its own astro:hydrate event.
+        for (const n of islands()) {
+          n.addEventListener('astro:hydrate', markHydrated);
+        }
+      };
+      if (document.body) startObserving();
+      else document.addEventListener('DOMContentLoaded', startObserving, { once: true });
       const reveal = () => {
-        // Never reveal after hydration; never reveal twice.
-        if (hydrated || anyHydrated()) { markHydrated(); return; }
+        if (hydrated || anyHydratedNow()) { markHydrated(); return; }
         if (revealed) return;
         revealed = true;
         const el = document.getElementById(FALLBACK_ID);
@@ -117,7 +132,10 @@ const base = import.meta.env.BASE_URL;
       window.addEventListener('astro:hydration-error', reveal);
       const startWatchdog = () => {
         window.setTimeout(() => {
-          watchdogFired = true;
+          // Re-check via BOTH the mutation state AND a direct DOM
+          // scan in case the observer somehow missed the event
+          // (fires from a different tree, etc.).
+          if (hydrated || anyHydratedNow()) { markHydrated(); return; }
           reveal();
         }, WATCHDOG_MS);
       };
@@ -126,9 +144,7 @@ const base = import.meta.env.BASE_URL;
       } else {
         startWatchdog();
       }
-      // Reload button — bypass the SW cache for the retry so a
-      // corrupted cache entry doesn't stick. Adding a param forces
-      // the SW's `cacheFirst` to miss and go network.
+      // Reload button — bypass the SW cache for the retry.
       document.addEventListener('click', (ev) => {
         const target = ev.target;
         if (!(target instanceof Element)) return;
@@ -137,8 +153,6 @@ const base = import.meta.env.BASE_URL;
         url.searchParams.set('__retry', String(Date.now()));
         window.location.replace(url.toString());
       });
-      // If the fallback is showing because we were offline and the
-      // network comes back, reload automatically.
       window.addEventListener('online', () => {
         if (revealed) {
           const url = new URL(window.location.href);
