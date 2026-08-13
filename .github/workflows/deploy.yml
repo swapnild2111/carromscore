@@ -8,17 +8,15 @@ name: Deploy to GitHub Pages
 # tested next gets checked out as `beta` and pushed. Keeps the URL
 # stable so testers can bookmark it and reload for each build.
 #
-# Beta job produces a combined artifact: mirrors the live production
-# site into dist-combined/ (so /carromscore/ keeps serving main
-# untouched), then builds the beta branch at PUBLIC_BASE=/carromscore/beta/
-# and drops the result into dist-combined/beta/. The whole thing is
-# uploaded as one Pages artifact. Same Pages site, no separate hosting.
+# Beta job produces a combined artifact by BUILDING main from source
+# (not wget-mirroring the live site — wget can't fetch JS bundles
+# that Astro islands import dynamically, so mirrors were serving
+# broken HTML for main → blank screen on production). Both branches
+# are built inside their own workspace directories so tsconfig
+# extension resolution works correctly.
 #
-# Mirroring beats "rebuild main in a subdir" because Astro 7 + rolldown-vite
-# has a tsconfig-resolution bug when running builds from nested
-# working-directories (rolldown walks upward looking for
-# `astro/tsconfigs/strict.json` and finds nothing in the sibling
-# node_modules tree). Mirroring is also strictly faster.
+# Emergency safeguard: on ANY beta build failure, the deploy-beta
+# step is skipped so a broken beta artifact never overwrites main.
 on:
   push:
     branches: [main, beta]
@@ -75,58 +73,90 @@ jobs:
   build-beta:
     if: github.ref == 'refs/heads/beta'
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        # Every step runs in ./beta by default so npm/astro resolve
+        # from the beta checkout's own node_modules. Main is built
+        # in a sibling dir with its own working-directory override.
+        working-directory: ./beta
     steps:
-      - name: Checkout beta branch
+      - name: Checkout beta branch → ./beta
         uses: actions/checkout@v4
+        with:
+          path: beta
+
+      - name: Checkout main branch → ./main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: main
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: npm
+          cache-dependency-path: |
+            beta/package-lock.json
+            main/package-lock.json
 
-      - name: Install
+      # Install + build main FIRST so a failure here fails the whole
+      # job, preventing deploy-beta from ever publishing a beta-only
+      # artifact that would blank out production.
+      - name: Install (main)
+        working-directory: ./main
         run: npm ci
 
-      - name: Build beta → dist/
+      - name: Build main → main/dist/
+        working-directory: ./main
+        run: npm run build
+        env:
+          PUBLIC_BASE: /carromscore/
+
+      - name: Install (beta)
+        run: npm ci
+
+      - name: Build beta → beta/dist/
         run: npm run build
         env:
           PUBLIC_BASE: /carromscore/beta/
 
-      - name: Mirror live production site into dist-combined/
-        # --mirror recurses, --no-parent keeps us inside /carromscore/,
-        # --page-requisites grabs assets referenced by HTML,
-        # -nH strips the hostname dir, --cut-dirs=1 strips the /carromscore/
-        # prefix so files land at the artifact root. --reject-regex prunes
-        # any pre-existing /beta/ paths so we don't fight our fresh build.
+      # Compose the final artifact: main at root, beta under /beta/.
+      # Runs from repo root (default working-directory override
+      # doesn't apply to composite bash blocks with cd).
+      - name: Compose combined artifact
+        working-directory: .
         run: |
+          set -euo pipefail
+          rm -rf dist-combined
           mkdir -p dist-combined
-          cd dist-combined
-          wget \
-            --mirror \
-            --no-parent \
-            --page-requisites \
-            --convert-links=off \
-            --no-host-directories \
-            --cut-dirs=1 \
-            --reject-regex '/carromscore/beta/' \
-            --quiet \
-            --tries=3 \
-            --wait=0.2 \
-            https://swapnild2111.github.io/carromscore/ || true
-          # Guardrail: bail if the mirror produced nothing useful. That
-          # means production is down or wget failed silently — we should
-          # not publish an empty root over a working main deploy.
-          if [ ! -f index.html ] && [ ! -f 404.html ]; then
-            echo "::error::Failed to mirror live production site — no index.html present"
-            exit 1
-          fi
-
-      - name: Overlay beta build at /beta/
-        run: |
-          rm -rf dist-combined/beta
+          cp -R main/dist/. dist-combined/
           mkdir -p dist-combined/beta
-          cp -R dist/. dist-combined/beta/
+          cp -R beta/dist/. dist-combined/beta/
+          # Sanity checks: fail the job if the artifact is missing
+          # any of the JS bundles that the HTML references. Prevents
+          # the "production goes blank" incident from ever recurring.
+          echo "== Verifying main artifact =="
+          test -f dist-combined/index.html
+          for js in $(grep -oE '/carromscore/_astro/[A-Za-z]+\.[A-Za-z0-9_-]+\.js' dist-combined/index.html || true); do
+            local_path=".${js#/carromscore}"
+            local_path="dist-combined${local_path}"
+            if [ ! -f "$local_path" ]; then
+              echo "::error::main HTML references $js but $local_path is missing"
+              exit 1
+            fi
+          done
+          echo "== Verifying beta artifact =="
+          test -f dist-combined/beta/index.html
+          for js in $(grep -oE '/carromscore/beta/_astro/[A-Za-z]+\.[A-Za-z0-9_-]+\.js' dist-combined/beta/index.html || true); do
+            local_path=".${js#/carromscore}"
+            local_path="dist-combined${local_path}"
+            if [ ! -f "$local_path" ]; then
+              echo "::error::beta HTML references $js but $local_path is missing"
+              exit 1
+            fi
+          done
+          echo "OK — main + beta both self-consistent"
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
