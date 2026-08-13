@@ -134,6 +134,17 @@
    */
   let matchDecidedToast = $state(false);
   /**
+   * Fires when the umpire taps End at the board cap while there are
+   * leftover in-progress points on the running board. The BOARD+1
+   * tap correctly refuses to open a new board past the cap (see
+   * `boardCap` at ~L530), but End's "auto-capture running board"
+   * path used to bypass that check and phantom-append an extra
+   * boardLog row. Fixed 2026-08-13. Toast asks the umpire to either
+   * tap SET+1 (starting a new set) or clear the stray points
+   * (POINTS-1) before ending.
+   */
+  let boardCapReachedToast = $state(false);
+  /**
    * Set to true when finishMatch() failed to reach Firebase (network
    * dead, rules denied). Surfaces as a small non-blocking toast so
    * the umpire knows the archive attempt failed rather than
@@ -904,6 +915,18 @@
     const currentBoardHasScore =
       sideA.points > pointsAtBoardStart.a || sideB.points > pointsAtBoardStart.b;
     if (currentBoardHasScore) {
+      // Board-cap guard. If the umpire has already completed
+      // cfg.maxBoards boards (and this isn't the decider extension),
+      // silently refuse to append a phantom row. BOARD+1 already
+      // rejects the same tap; End's auto-capture used to bypass the
+      // check. Toast tells the umpire what to do instead.
+      const atBoardCap =
+        !isBoardsUnlimited(cfg) && board >= cfg.maxBoards && !isDecidingBoard;
+      if (atBoardCap) {
+        boardCapReachedToast = true;
+        window.setTimeout(() => { boardCapReachedToast = false; }, 3500);
+        return;
+      }
       if (queenHolder === null) {
         // Real carrom: no board can end without a queen. Block End
         // with the same toast that adjustBoard(+1) uses.
@@ -1890,6 +1913,19 @@
     -->
     <div class="queen-toast" role="status" aria-live="polite">
       Set decided — tap SET+1 or End
+    </div>
+  {/if}
+
+  {#if boardCapReachedToast}
+    <!--
+      Surfaced when End is tapped at the board cap with leftover
+      in-progress points. Previously End would silently append a
+      phantom row past the cap (bug fixed 2026-08-13). Toast asks
+      the umpire to either finalise the set (SET+1) or clear the
+      stray points before ending.
+    -->
+    <div class="queen-toast" role="status" aria-live="polite">
+      Board cap reached — tap SET+1 or clear the extra points
     </div>
   {/if}
 
