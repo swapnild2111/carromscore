@@ -30,6 +30,7 @@
   import { subscribeCurrentUserRole, type Role } from '../lib/roles';
   import { subscribeAuth } from '../lib/auth';
   import { clearResume } from '../lib/resume';
+  import { normalizeKey } from '../lib/tournaments';
   import type { MatchRecord } from '../lib/history';
 
   type Side = { name: string; note: string; sets: number; points: number };
@@ -870,17 +871,8 @@
   const canEditArchived = $derived(() => {
     if (!archivedMatchId || !role) return false;
     if (role.isSuper) return true;
-    const tour = (cfg.tournament ?? '').trim();
-    if (!tour) return false;
-    const key = tour
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[̀-ͯ]/g, '')
-      .replace(/[^a-z0-9\s-]/g, ' ')
-      .replace(/\s+/g, '-')
-      .replace(/-+/g, '-')
-      .replace(/^-|-$/g, '')
-      .slice(0, 60);
+    const key = normalizeKey(cfg.tournament ?? '');
+    if (!key) return false;
     return role.organiserOf.has(key);
   });
   // Fixed array of spark indices for the fireworks each-loop.

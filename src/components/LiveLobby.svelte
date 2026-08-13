@@ -36,6 +36,7 @@
   import ReportsTab from './reports/ReportsTab.svelte';
   import { subscribeCurrentUserRole, type Role } from '../lib/roles';
   import { currentUser } from '../lib/auth';
+  import { normalizeKey } from '../lib/tournaments';
 
   const base: string = import.meta.env.BASE_URL;
   const STALE_WINDOW_MS = 4 * 60 * 60 * 1000;
@@ -271,22 +272,16 @@
   function canEditMatch(m: MatchRecord): boolean {
     if (!role) return false;
     if (role.isSuper) return true;
-    const tour = (m.tournament ?? '').trim();
-    if (!tour) return false;
-    // Tournament KEYS are the normalised form. But records store the
-    // display name in `m.tournament` (as written by
-    // finishMatch → tournament.trim().slice(0,60)). We need to look
-    // up the key. Cheapest: normalise here inline (mirrors
-    // tournaments.ts normalizeKey), no cross-module import.
-    const key = tour
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[̀-ͯ]/g, '')
-      .replace(/[^a-z0-9\s-]/g, ' ')
-      .replace(/\s+/g, '-')
-      .replace(/-+/g, '-')
-      .replace(/^-|-$/g, '')
-      .slice(0, 60);
+    // Prefer the record's stored tournamentKey (added 2026-08-13).
+    // Falls back to slugifying the display name for older records
+    // that predate the field. RTDB rules will only authorise
+    // organiser writes when the record has tournamentKey set, so
+    // the fallback here just makes the pencil visible; the actual
+    // save will fail with an auth error for legacy records. That's
+    // acceptable — the modal surfaces the failure and the user can
+    // ping a super-admin to open + resave once.
+    const key = m.tournamentKey ?? normalizeKey(m.tournament ?? '');
+    if (!key) return false;
     return role.organiserOf.has(key);
   }
 

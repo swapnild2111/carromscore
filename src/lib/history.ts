@@ -32,6 +32,7 @@ import {
 } from './players';
 import { currentUser } from './auth';
 import { logAudit } from './audit';
+import { normalizeKey } from './tournaments';
 
 /**
  * The full identity block passed from ScoreBoard's endMatch() to
@@ -72,6 +73,15 @@ export type MatchResultInput = {
    * (grouped by name, kept 1 year for versus matches).
    */
   tournament?: string;
+  /**
+   * Slug form of `tournament` (the key under /tournaments/{key}/).
+   * Written alongside `tournament` on every archive write so RTDB
+   * rules can look up `/tournaments/{tournamentKey}/organisers/`
+   * without having to slugify at rule-eval time. Absent on records
+   * from before this field was introduced — those can only be
+   * edited by super-admins, not tournament organisers.
+   */
+  tournamentKey?: string;
   startedAt: number;
   endedAt: number;
   /**
@@ -205,7 +215,14 @@ export async function finishMatch(
       ? { practiceBoards: result.practiceBoards }
       : {}),
     ...(result.tournament?.trim()
-      ? { tournament: result.tournament.trim().slice(0, 60) }
+      ? {
+          tournament: result.tournament.trim().slice(0, 60),
+          // Slug alongside the display name so the RTDB rule can
+          // look up /tournaments/{tournamentKey}/organisers/ to
+          // authorise per-tournament edits. See database.rules.json
+          // on the matches/$matchId .write branch.
+          tournamentKey: normalizeKey(result.tournament),
+        }
       : {}),
     startedAt: result.startedAt,
     endedAt: result.endedAt,
@@ -450,6 +467,18 @@ function applyMatchPatch(
   patch: MatchPatch,
 ): Record<string, unknown> {
   const next: Record<string, unknown> = { ...existing };
+  // Opportunistic backfill: if this record predates the
+  // tournamentKey field but has a tournament tag, stamp the slug
+  // in now. Any admin edit of a legacy record thus makes it
+  // organiser-editable going forward. Idempotent — no-op if
+  // the field is already present.
+  if (
+    typeof next.tournament === 'string' &&
+    next.tournament.trim() !== '' &&
+    typeof next.tournamentKey !== 'string'
+  ) {
+    next.tournamentKey = normalizeKey(next.tournament);
+  }
   if (patch.result) {
     const prev = (existing.result as Record<string, unknown>) ?? {};
     next.result = { ...prev, ...patch.result };
@@ -481,13 +510,21 @@ function applyTournamentPatch(
   tournament: MatchPatch['tournament'],
 ): void {
   if (tournament === null || tournament === '') {
-    // Explicit clearing — remove the field entirely so the retention
-    // sweep classifies the match as untagged (3-month TTL).
+    // Explicit clearing — remove both fields entirely so the
+    // retention sweep classifies the match as untagged (3-month TTL)
+    // and no stale tournamentKey survives.
     delete next.tournament;
+    delete next.tournamentKey;
     return;
   }
   if (typeof tournament === 'string') {
-    next.tournament = tournament.trim().slice(0, 60);
+    const trimmed = tournament.trim().slice(0, 60);
+    next.tournament = trimmed;
+    // Slug alongside the display name so the RTDB rule can look up
+    // /tournaments/{tournamentKey}/organisers/ on organiser edits.
+    // Keep tournament + tournamentKey in lockstep on every write —
+    // callers must never write one without the other.
+    next.tournamentKey = normalizeKey(trimmed);
   }
 }
 
