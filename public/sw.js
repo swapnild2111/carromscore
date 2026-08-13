@@ -113,20 +113,36 @@ self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET') return;
 
-  // Navigation requests: network-first with cached-index fallback.
-  // Users on a good network get the latest deploy immediately; users
-  // on a bad network get the precached shell so the app still opens.
+  // Navigation requests: network-first with a cached-shell fallback
+  // for the matching route (query-string-agnostic). Users on a good
+  // network get the latest deploy immediately; users on a bad network
+  // get the precached HTML for their target route so /score/?...
+  // opens the scoreboard, not the home page.
+  //
+  // Route-matching detail: caches.match(req) is exact-URL, so a
+  // request for /score/?mid=abc never matches the cached /score/
+  // entry. We strip the query and re-match against the route path.
   if (req.mode === 'navigate') {
     event.respondWith((async () => {
       try {
         const res = await fetch(req);
-        // Cache the fresh HTML for offline reload.
         const cache = await caches.open(currentCacheName);
-        cache.put(req, res.clone());
+        // Cache under the query-stripped URL so future offline hits
+        // to the same route match regardless of params.
+        const cleanUrl = new URL(req.url);
+        cleanUrl.search = '';
+        cache.put(cleanUrl.toString(), res.clone());
         return res;
       } catch {
-        const cached = await caches.match(req);
+        // Try exact match first (survives the pre-query-strip era).
+        let cached = await caches.match(req);
         if (cached) return cached;
+        // Query-stripped fallback: /score/?x=y → try /score/.
+        const cleanUrl = new URL(req.url);
+        cleanUrl.search = '';
+        cached = await caches.match(cleanUrl.toString());
+        if (cached) return cached;
+        // Last resort: the home shell so at least something renders.
         const offline = await caches.match(OFFLINE_URL);
         if (offline) return offline;
         return Response.error();
