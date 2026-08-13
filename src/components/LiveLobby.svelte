@@ -830,7 +830,7 @@
                   {#if copiedCardKey === `live:${e.mid}`}
                     <span aria-hidden="true">✓</span>
                   {:else}
-                    <span aria-hidden="true">⧉</span>
+                    <span aria-hidden="true">🔗</span>
                   {/if}
                 </button>
                 <button type="button" class="card card-live" onclick={() => openEntry(e)}>
@@ -947,7 +947,7 @@
                   {#if copiedCardKey === `match:${m.id}`}
                     <span aria-hidden="true">✓</span>
                   {:else}
-                    <span aria-hidden="true">⧉</span>
+                    <span aria-hidden="true">🔗</span>
                   {/if}
                 </button>
                 {#if editable}

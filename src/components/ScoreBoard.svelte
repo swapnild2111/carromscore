@@ -134,17 +134,6 @@
    */
   let matchDecidedToast = $state(false);
   /**
-   * Fires when the umpire taps End at the board cap while there are
-   * leftover in-progress points on the running board. The BOARD+1
-   * tap correctly refuses to open a new board past the cap (see
-   * `boardCap` at ~L530), but End's "auto-capture running board"
-   * path used to bypass that check and phantom-append an extra
-   * boardLog row. Fixed 2026-08-13. Toast asks the umpire to either
-   * tap SET+1 (starting a new set) or clear the stray points
-   * (POINTS-1) before ending.
-   */
-  let boardCapReachedToast = $state(false);
-  /**
    * Set to true when finishMatch() failed to reach Firebase (network
    * dead, rules denied). Surfaces as a small non-blocking toast so
    * the umpire knows the archive attempt failed rather than
@@ -915,18 +904,27 @@
     const currentBoardHasScore =
       sideA.points > pointsAtBoardStart.a || sideB.points > pointsAtBoardStart.b;
     if (currentBoardHasScore) {
-      // Board-cap guard. If the umpire has already completed
+      // Board-cap safeguard. If the umpire has already completed
       // cfg.maxBoards boards (and this isn't the decider extension),
-      // silently refuse to append a phantom row. BOARD+1 already
-      // rejects the same tap; End's auto-capture used to bypass the
-      // check. Toast tells the umpire what to do instead.
+      // do NOT append a phantom row past the cap. Any leftover
+      // per-set points on the running board are discarded — the
+      // umpire tapped End, which means they want to finalise. The
+      // winner-decision block below will still credit the leading
+      // side an extra set via `awardExtraSet`, so the final result
+      // reads honestly ("wins 1-0" for the sideA-in-front case).
+      // This was the reported bug (2026-08-13, match
+      // -OzuEZ0ec3ZoVZ9iw4Q3): a stray queen delta after board 8
+      // was appended as a phantom board 9 because End used to
+      // bypass boardCap's ceiling.
       const atBoardCap =
         !isBoardsUnlimited(cfg) && board >= cfg.maxBoards && !isDecidingBoard;
       if (atBoardCap) {
-        boardCapReachedToast = true;
-        window.setTimeout(() => { boardCapReachedToast = false; }, 3500);
-        return;
-      }
+        // Roll the running board's points back to the last saved
+        // baseline so the winner comparison sees only the
+        // completed-board totals, and skip the append.
+        sideA.points = pointsAtBoardStart.a;
+        sideB.points = pointsAtBoardStart.b;
+      } else {
       if (queenHolder === null) {
         // Real carrom: no board can end without a queen. Block End
         // with the same toast that adjustBoard(+1) uses.
@@ -953,6 +951,7 @@
       // End auto-captured a running board, and the recap trim on
       // the History side would then drop that same entry.
       board = board + 1;
+      }
     }
     let winner: 'a' | 'b' | 'draw' | null = null;
     let awardExtraSet = false;
@@ -1916,18 +1915,6 @@
     </div>
   {/if}
 
-  {#if boardCapReachedToast}
-    <!--
-      Surfaced when End is tapped at the board cap with leftover
-      in-progress points. Previously End would silently append a
-      phantom row past the cap (bug fixed 2026-08-13). Toast asks
-      the umpire to either finalise the set (SET+1) or clear the
-      stray points before ending.
-    -->
-    <div class="queen-toast" role="status" aria-live="polite">
-      Board cap reached — tap SET+1 or clear the extra points
-    </div>
-  {/if}
 
   {#if matchDecidedToast}
     <!--
