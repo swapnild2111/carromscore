@@ -147,6 +147,10 @@
   // match. Cleared once the popup opens (or when the user manually
   // closes it) so subsequent updates to `entries` don't re-open it.
   let pendingMid = $state<string | null>(null);
+  // Deep-link support for history archives: /live/?match=<id>. Held
+  // until loadHistory() completes; opened as soon as the matching
+  // record appears in the `matches` array. Cleared on open.
+  let pendingMatchId = $state<string | null>(null);
   // Overlay mode: /live/?mid=xxx&view=overlay renders ONLY the
   // scoreboard strip on a transparent background. Meant for OBS /
   // Prism as a Browser Source over a live camera feed.
@@ -203,6 +207,18 @@
       // Empty-string tournament param = the Default (untagged)
       // bucket. Non-empty = a real tournament name.
       reportsSelection = tournamentParam || null;
+    }
+
+    // Deep-link for a specific history record: /live/?match=<id> (or
+    // ?tab=history&match=<id>). Matches on MatchRecord.id (a Firebase
+    // push-id). Held as pendingMatchId until loadHistory() finishes;
+    // opened when the record appears in the loaded matches array.
+    const matchParam = params.get('match');
+    if (matchParam && /^[A-Za-z0-9_-]{6,40}$/.test(matchParam)) {
+      pendingMatchId = matchParam;
+      // If the URL didn't ask for a specific tab, default to history
+      // — otherwise respect the explicit tab= choice above.
+      if (!tabParam) tab = 'history';
     }
 
     let unsub: (() => void) | null = null;
@@ -382,6 +398,16 @@
     pendingMid = null;
   });
 
+  // Same shape for history archives: /live/?match=<id> opens the
+  // sheet dialog with the matching MatchRecord.
+  $effect(() => {
+    if (!pendingMatchId) return;
+    const match = matches.find((m) => m.id === pendingMatchId);
+    if (!match) return;
+    openPopup = { source: 'match', matchId: match.id };
+    pendingMatchId = null;
+  });
+
   // Ephemeral "✓ Copied" tick for the popup's Share + OBS buttons.
   // Tracks which URL got copied last so only that button flips.
   let copiedKind = $state<'share' | 'obs' | null>(null);
@@ -424,6 +450,31 @@
   function openEntry(entry: LobbyEntry) {
     openPopup = { source: 'live', mid: entry.mid };
     copiedKind = null;
+  }
+  // Per-card copied tick. Tracks which card's copy button was last
+  // tapped so only that button's icon flips. Separate from copiedKind
+  // above (which tracks the sheet dialog's Share/OBS buttons). Value
+  // is the card identifier ("live:<mid>" or "match:<id>") so the two
+  // tabs' cards can't accidentally share a checkmark.
+  let copiedCardKey = $state<string | null>(null);
+  let copiedCardTimer: number | null = null;
+  async function copyLiveMidUrl(mid: string, event: Event): Promise<void> {
+    // Stop propagation so the surrounding card doesn't also open the
+    // sheet dialog on the same tap.
+    event.stopPropagation();
+    const url = `${window.location.origin}${base}live/?mid=${encodeURIComponent(mid)}`;
+    await writeClipboard(url);
+    copiedCardKey = `live:${mid}`;
+    if (copiedCardTimer !== null) window.clearTimeout(copiedCardTimer);
+    copiedCardTimer = window.setTimeout(() => { copiedCardKey = null; }, 1500);
+  }
+  async function copyMatchIdUrl(id: string, event: Event): Promise<void> {
+    event.stopPropagation();
+    const url = `${window.location.origin}${base}live/?tab=history&match=${encodeURIComponent(id)}`;
+    await writeClipboard(url);
+    copiedCardKey = `match:${id}`;
+    if (copiedCardTimer !== null) window.clearTimeout(copiedCardTimer);
+    copiedCardTimer = window.setTimeout(() => { copiedCardKey = null; }, 1500);
   }
   function openMatch(match: MatchRecord) {
     openPopup = { source: 'match', matchId: match.id };
@@ -543,6 +594,39 @@
     if (m.mode === 'singles') return 'Singles';
     if (m.mode === 'doubles') return 'Doubles';
     return 'Practice';
+  }
+  /**
+   * Compact stats for a practice-mode live card. Returns:
+   *   - playedBoards: number of boards with any recorded miss so far
+   *   - totalBoards: capacity across all configured sets
+   *   - totalMisses: sum of misses across every recorded board
+   *
+   * Uses `practiceBoards` when present (bestOf × maxBoards matrix of
+   * miss counts). Falls back to (board+1, meta.bestOf * meta.maxBoards,
+   * sideA.points) when the matrix is missing from an older payload.
+   */
+  function practiceSummary(s: import('../lib/live-sync').LivePayload):
+    { playedBoards: number; totalBoards: number; totalMisses: number } {
+    const matrix = s.practiceBoards;
+    if (Array.isArray(matrix) && matrix.length > 0 && Array.isArray(matrix[0])) {
+      let played = 0;
+      let misses = 0;
+      for (const row of matrix) {
+        for (const v of row) {
+          if (typeof v === 'number' && v > 0) {
+            played += 1;
+            misses += v;
+          }
+        }
+      }
+      const total = matrix.length * matrix[0].length;
+      return { playedBoards: played, totalBoards: total, totalMisses: misses };
+    }
+    return {
+      playedBoards: s.board + 1,
+      totalBoards: 0,
+      totalMisses: s.sideA?.points ?? 0,
+    };
   }
 
   // Convert a MatchRecord into a LiveRecord shape so LiveScoreboardView
@@ -735,7 +819,20 @@
           <ul class="grid">
             {#each entriesInBucket as e (e.mid)}
               {@const s = e.liveState}
-              <li>
+              <li class="card-li">
+                <button
+                  type="button"
+                  class="card-copy"
+                  aria-label="Copy share URL for this match"
+                  title="Copy share URL"
+                  onclick={(ev) => copyLiveMidUrl(e.mid, ev)}
+                >
+                  {#if copiedCardKey === `live:${e.mid}`}
+                    <span aria-hidden="true">✓</span>
+                  {:else}
+                    <span aria-hidden="true">⧉</span>
+                  {/if}
+                </button>
                 <button type="button" class="card card-live" onclick={() => openEntry(e)}>
                   <div class="card-hdr">
                     <span class="card-badge">
@@ -781,18 +878,24 @@
                   </span>
                 {:else}
                   <!--
-                    Practice: sideA.points isn't meaningful (real data
-                    lives in the practiceBoards matrix). Show only
-                    board number + a Solo Drill label so lobby cards
-                    read consistently without inventing numbers.
+                    Practice card summary: boards actually played + total
+                    misses so far. `practiceBoards` is a bestOf × maxBoards
+                    matrix of missed-shot counts; a "played" board is one
+                    with any positive value, and misses sum across the
+                    whole matrix. sideA.points also carries the running
+                    misses count but only reflects the current board, so
+                    the matrix sum is the honest all-set total. Falls
+                    back gracefully if the payload is old/missing the
+                    matrix.
                   -->
+                  {@const summary = practiceSummary(s)}
                   <span class="score-block">
-                    <span class="score-lbl">BOARD</span>
-                    <span class="score-val">{s.board}</span>
+                    <span class="score-lbl">BOARDS</span>
+                    <span class="score-val">{summary.playedBoards}<span class="score-of">/{summary.totalBoards}</span></span>
                   </span>
                   <span class="score-block">
-                    <span class="score-lbl">MODE</span>
-                    <span class="score-val" style="font-size: 0.85rem">Solo drill</span>
+                    <span class="score-lbl">MISSES</span>
+                    <span class="score-val">{summary.totalMisses}</span>
                   </span>
                 {/if}
               </div>
@@ -834,6 +937,19 @@
               {@const winner = r?.winner}
               {@const editable = canEditMatch(m)}
               <li class="card-li">
+                <button
+                  type="button"
+                  class="card-copy"
+                  aria-label="Copy share URL for this match"
+                  title="Copy share URL"
+                  onclick={(ev) => copyMatchIdUrl(m.id, ev)}
+                >
+                  {#if copiedCardKey === `match:${m.id}`}
+                    <span aria-hidden="true">✓</span>
+                  {:else}
+                    <span aria-hidden="true">⧉</span>
+                  {/if}
+                </button>
                 {#if editable}
                   <!--
                     Pencil sits absolutely-positioned in the card's
@@ -1567,6 +1683,40 @@
   .card-edit:active {
     transform: scale(0.94);
   }
+  /* Copy-share-URL button sits absolutely-positioned in the card's
+     top-right corner. Sibling of the main card button (nested
+     buttons are invalid HTML) with a higher z-index so its tap
+     wins over the surrounding card. Reuses `.card-li { position:
+     relative }` for the anchor. */
+  .card-copy {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    z-index: 3;
+    width: 1.9rem;
+    height: 1.9rem;
+    padding: 0;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    color: var(--muted, #9aa0a6);
+    border-radius: 0.5rem;
+    font-size: 0.95rem;
+    line-height: 1;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    -webkit-tap-highlight-color: transparent;
+    transition: background 0.12s, border-color 0.12s, color 0.12s, transform 0.08s;
+  }
+  .card-copy:hover {
+    background: rgba(255, 213, 74, 0.14);
+    border-color: rgba(255, 213, 74, 0.5);
+    color: var(--accent, #ffd54a);
+  }
+  .card-copy:active {
+    transform: scale(0.94);
+  }
 
   .card {
     display: flex;
@@ -1599,6 +1749,11 @@
     align-items: center;
     gap: 0.5rem;
     margin-bottom: 0.55rem;
+    /* Reserve space at the right for the absolutely-positioned
+       `.card-copy` button so the relative-time meta doesn't collide
+       with it. Width matches .card-copy (1.9rem) + a small breathing
+       gap. */
+    padding-right: 2.35rem;
   }
   .card-badge {
     display: inline-flex;
@@ -1730,6 +1885,12 @@
     font-weight: 700;
     font-size: 0.95rem;
     font-variant-numeric: tabular-nums;
+  }
+  .score-of {
+    color: var(--muted, #9aa0a6);
+    font-weight: 500;
+    font-size: 0.75rem;
+    margin-left: 0.1rem;
   }
   .digit-a { color: var(--side-a, #4fc3f7); }
   .digit-b { color: var(--side-b, #ff8a65); }
