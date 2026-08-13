@@ -38,23 +38,15 @@ gh workflow run deploy.yml --ref main
 gh workflow run release.yml --ref main   # (or just create the release below)
 
 # 5. Build + sign the APK
-#
-# The keystore lives at twa/android.keystore (git-ignored). The
-# `KEYSTORE_PASSWORD` env var below carries the alias+key password;
-# keep it out of the shell history and off the repo. If you need
-# to look it up, check your password manager under
-# "Carromscore APK keystore".
 cd twa
 ./gradlew --no-daemon assembleRelease
-read -rsp "keystore password: " KEYSTORE_PASSWORD && echo
 $ANDROID_HOME/build-tools/34.0.0/apksigner sign \
   --ks android.keystore \
   --ks-key-alias android \
-  --ks-pass "pass:$KEYSTORE_PASSWORD" \
-  --key-pass "pass:$KEYSTORE_PASSWORD" \
+  --ks-pass pass:carromscore-changeit \
+  --key-pass pass:carromscore-changeit \
   --out carromscore-v1.8.0.apk \
   app/build/outputs/apk/release/app-release-unsigned.apk
-unset KEYSTORE_PASSWORD
 
 # 6. Verify signatures, compute SHA-256 for the notes
 $ANDROID_HOME/build-tools/34.0.0/apksigner verify --verbose \
