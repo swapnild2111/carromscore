@@ -135,6 +135,14 @@
    */
   let matchDecidedToast = $state(false);
   /**
+   * Fires when SET+1 is tapped on the losing side (per-set points
+   * lower than or equal to the opponent). Real-carrom rule: the
+   * winning side credits the set. This prevents a common umpire
+   * mis-tap that silently crowned the wrong player (bug reported
+   * 2026-08-14: 8-10 A tapped SET+, End declared A winner).
+   */
+  let setLoserToast = $state(false);
+  /**
    * Set to true when finishMatch() failed to reach Firebase (network
    * dead, rules denied). Surfaces as a small non-blocking toast so
    * the umpire knows the archive attempt failed rather than
@@ -569,6 +577,25 @@
       matchDecidedToast = true;
       window.setTimeout(() => { matchDecidedToast = false; }, 2500);
       return;
+    }
+    // Real-carrom rule: SET+1 can only credit the side that WON the
+    // set (more per-set points). Tapping SET+ on the losing side
+    // used to silently credit them anyway (bug reported 2026-08-14:
+    // 8-10 A tapped, End declared A winner). Also reject on a tied
+    // per-set score — the umpire needs to either score one more
+    // point or use the End-then-decider flow to break the tie.
+    // Applies to versus modes only, and only on delta > 0 (SET-1
+    // undoes freely as always). Runs BEFORE the running-board
+    // snapshot at ~L579 so a rejected SET+ doesn't append a phantom
+    // row / mutate pointsAtBoardStart.
+    if (delta > 0 && !isPractice) {
+      const tappedPts = side === 'a' ? sideA.points : sideB.points;
+      const otherPts = side === 'a' ? sideB.points : sideA.points;
+      if (tappedPts <= otherPts) {
+        setLoserToast = true;
+        window.setTimeout(() => { setLoserToast = false; }, 3000);
+        return;
+      }
     }
     // Before the SET+ handler could reset points/board/queen for the
     // new set, we need to snapshot the running (in-progress) board so
@@ -1923,6 +1950,18 @@
     -->
     <div class="queen-toast" role="status" aria-live="polite">
       Set decided — tap SET+1 or End
+    </div>
+  {/if}
+
+  {#if setLoserToast}
+    <!--
+      Surfaced when SET+1 is tapped on the losing side (per-set
+      points not strictly higher than the opponent). Real carrom:
+      only the winning side can credit a set. Prevents the umpire
+      from accidentally awarding a set to the wrong player.
+    -->
+    <div class="queen-toast" role="status" aria-live="polite">
+      Only the leading side can be credited a set
     </div>
   {/if}
 
