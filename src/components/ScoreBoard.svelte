@@ -29,6 +29,7 @@
   import MatchEditModal from './MatchEditModal.svelte';
   import { subscribeCurrentUserRole, type Role } from '../lib/roles';
   import { subscribeAuth } from '../lib/auth';
+  import { clearResume } from '../lib/resume';
   import type { MatchRecord } from '../lib/history';
 
   type Side = { name: string; note: string; sets: number; points: number };
@@ -894,6 +895,7 @@
       showPracticePopup = true;
       recordFinishedMatch(null);
       if (cfg.live && cfg.mid) void deleteLive(cfg.mid);
+      clearResume();
       return;
     }
     // Capture the current in-progress board if it has any points +
@@ -902,6 +904,27 @@
     const currentBoardHasScore =
       sideA.points > pointsAtBoardStart.a || sideB.points > pointsAtBoardStart.b;
     if (currentBoardHasScore) {
+      // Board-cap safeguard. If the umpire has already completed
+      // cfg.maxBoards boards (and this isn't the decider extension),
+      // do NOT append a phantom row past the cap. Any leftover
+      // per-set points on the running board are discarded — the
+      // umpire tapped End, which means they want to finalise. The
+      // winner-decision block below will still credit the leading
+      // side an extra set via `awardExtraSet`, so the final result
+      // reads honestly ("wins 1-0" for the sideA-in-front case).
+      // This was the reported bug (2026-08-13, match
+      // -OzuEZ0ec3ZoVZ9iw4Q3): a stray queen delta after board 8
+      // was appended as a phantom board 9 because End used to
+      // bypass boardCap's ceiling.
+      const atBoardCap =
+        !isBoardsUnlimited(cfg) && board >= cfg.maxBoards && !isDecidingBoard;
+      if (atBoardCap) {
+        // Roll the running board's points back to the last saved
+        // baseline so the winner comparison sees only the
+        // completed-board totals, and skip the append.
+        sideA.points = pointsAtBoardStart.a;
+        sideB.points = pointsAtBoardStart.b;
+      } else {
       if (queenHolder === null) {
         // Real carrom: no board can end without a queen. Block End
         // with the same toast that adjustBoard(+1) uses.
@@ -928,6 +951,7 @@
       // End auto-captured a running board, and the recap trim on
       // the History side would then drop that same entry.
       board = board + 1;
+      }
     }
     let winner: 'a' | 'b' | 'draw' | null = null;
     let awardExtraSet = false;
@@ -976,6 +1000,7 @@
     matchResult = winner;
     showWinnerPopup = true;
     recordFinishedMatch(winner);
+    clearResume();
   }
 
   /**
@@ -1004,6 +1029,7 @@
       // Keep popup open — user can now tap "View scorecard" like any
       // finished match. Committing the archive fires-and-forgets.
       recordFinishedMatch('draw');
+      clearResume();
     } else {
       // Play deciding board. Three things happen here:
       //
@@ -1888,6 +1914,7 @@
       Set decided — tap SET+1 or End
     </div>
   {/if}
+
 
   {#if matchDecidedToast}
     <!--

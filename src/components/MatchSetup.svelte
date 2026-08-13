@@ -22,7 +22,8 @@
     saveMatchStart,
     clearMatchIdentity,
   } from '../lib/history';
-  import { newMid } from '../lib/live-sync';
+  import { newMid, subscribeLive, type LiveRecord } from '../lib/live-sync';
+  import { saveResume, loadResume, clearResume, type ResumeRecord } from '../lib/resume';
   import {
     createOrTouchTournament,
     rankTournaments,
@@ -101,6 +102,73 @@
     void subscribeTournaments();
     return unsub;
   });
+
+  // Resume-match chip. If the last-started match is still ongoing
+  // on the server (record exists, matchResult is null, updatedAt is
+  // within the 4h sweep window), surface a chip above the form so
+  // the umpire can jump back into the /score/ view they closed. See
+  // src/lib/resume.ts for storage semantics.
+  const STALE_WINDOW_MS = 4 * 60 * 60 * 1000;
+  let resumeCandidate = $state<ResumeRecord | null>(null);
+  let resumeLiveRecord = $state<LiveRecord | null>(null);
+  const resumeVisible = $derived(
+    resumeCandidate !== null &&
+      resumeLiveRecord !== null &&
+      resumeLiveRecord.liveState?.matchResult == null &&
+      Date.now() - resumeLiveRecord.updatedAt < STALE_WINDOW_MS,
+  );
+  $effect(() => {
+    const rec = loadResume();
+    if (!rec) return;
+    resumeCandidate = rec;
+    let unsub: (() => void) | null = null;
+    let cancelled = false;
+    void subscribeLive(rec.mid, (live) => {
+      if (cancelled) return;
+      if (!live) {
+        // Record was deleted (admin cleanup, sweep). Clear the pointer.
+        clearResume();
+        resumeCandidate = null;
+        resumeLiveRecord = null;
+        return;
+      }
+      resumeLiveRecord = live;
+      // Fire-and-forget cleanup if the server says the match ended
+      // or hasn't been touched in > 4h. The chip disappears via
+      // resumeVisible; also clear localStorage so the check doesn't
+      // re-run on the next visit.
+      const ended = live.liveState?.matchResult != null;
+      const stale = Date.now() - live.updatedAt >= STALE_WINDOW_MS;
+      if (ended || stale) clearResume();
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unsub = fn;
+    });
+    return () => {
+      cancelled = true;
+      if (unsub) unsub();
+    };
+  });
+
+  function onResume(): void {
+    if (!resumeCandidate) return;
+    window.location.href = resumeCandidate.scoreUrl;
+  }
+  function onDiscardResume(): void {
+    clearResume();
+    resumeCandidate = null;
+    resumeLiveRecord = null;
+  }
+  function resumeSubtitle(rec: ResumeRecord): string {
+    const m = rec.meta;
+    if (m.mode === 'practice') {
+      return `Practice · ${m.playerA}`;
+    }
+    const a = [m.playerA, m.playerA2].filter(Boolean).join(' & ');
+    const b = [m.playerB, m.playerB2].filter(Boolean).join(' & ');
+    const modeLabel = m.mode === 'doubles' ? 'Doubles' : 'Singles';
+    return `${modeLabel} · ${a} vs ${b}`;
+  }
 
   // Footer "Admin" affordance is now a <SignInButton signedOutLabel="Admin" />
   // in the template — it owns its own auth + role subscription, so no
@@ -286,7 +354,23 @@
     // autocompletes them next time. Practice mode contributes only
     // playerA; Doubles contributes all four.
     rememberPlayers(cfg.playerA, cfg.playerA2, cfg.playerB, cfg.playerB2);
-    window.location.href = `${base}score/?${encodeConfig(cfg)}`;
+    // Remember this match so a mistakenly-closed /score/ tab can be
+    // resumed from Home. Cleared on End paths in ScoreBoard.
+    const scoreUrl = `${base}score/?${encodeConfig(cfg)}`;
+    saveResume({
+      mid: cfg.mid,
+      scoreUrl,
+      startedAt: Date.now(),
+      meta: {
+        mode: cfg.mode,
+        playerA: cfg.playerA,
+        ...(cfg.playerA2 ? { playerA2: cfg.playerA2 } : {}),
+        playerB: cfg.playerB,
+        ...(cfg.playerB2 ? { playerB2: cfg.playerB2 } : {}),
+        ...(cfg.tournament ? { tournament: cfg.tournament } : {}),
+      },
+    });
+    window.location.href = scoreUrl;
   }
 
   // PWA install prompt. Android/desktop Chrome fires `beforeinstallprompt`; iOS
@@ -424,6 +508,31 @@
   </label>
 {/snippet}
 
+
+{#if resumeVisible && resumeCandidate}
+  <!-- Resume-match chip. Appears when the last-started /score/ tab
+       was closed while a match was still ongoing. Tap Resume to jump
+       back to the same /score/?... URL; Discard forgets the pointer
+       (leaves the /live/{mid} record in place — 4h sweep or admin
+       cleanup handles that). -->
+  <aside class="resume-chip" aria-label="Resume last match">
+    <div class="resume-body">
+      <span class="resume-icon" aria-hidden="true">↻</span>
+      <div class="resume-text">
+        <strong>Resume match</strong>
+        <span class="resume-sub">{resumeSubtitle(resumeCandidate)}</span>
+      </div>
+    </div>
+    <div class="resume-actions">
+      <button type="button" class="resume-btn resume-primary" onclick={onResume}>
+        Resume
+      </button>
+      <button type="button" class="resume-btn resume-secondary" onclick={onDiscardResume}>
+        Discard
+      </button>
+    </div>
+  </aside>
+{/if}
 
 <form class="setup" onsubmit={start}>
   <fieldset class="rules" class:rules-practice={cfg.mode === 'practice'}>
@@ -668,6 +777,85 @@
     max-width: 640px;
     margin: 0 auto;
     padding: 1.5rem 1rem 3rem;
+  }
+  .resume-chip {
+    max-width: 640px;
+    margin: 0.75rem auto 0;
+    padding: 0.75rem 1rem;
+    background: rgba(255, 213, 74, 0.08);
+    border: 1px solid rgba(255, 213, 74, 0.45);
+    border-radius: 0.75rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    box-shadow: 0 2px 12px rgba(255, 179, 0, 0.08);
+  }
+  .resume-body {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    min-width: 0;
+  }
+  .resume-icon {
+    color: var(--accent, #ffd54a);
+    font-size: 1.5rem;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+  .resume-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .resume-text strong {
+    color: var(--fg);
+    font-size: 0.95rem;
+    letter-spacing: 0.01em;
+  }
+  .resume-sub {
+    color: var(--muted);
+    font-size: 0.8rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .resume-actions {
+    display: flex;
+    gap: 0.4rem;
+    flex-shrink: 0;
+  }
+  .resume-btn {
+    padding: 0.4rem 0.75rem;
+    border-radius: 0.5rem;
+    font-weight: 600;
+    font-size: 0.8rem;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: background 0.15s, border-color 0.15s, transform 0.1s;
+  }
+  .resume-btn:active { transform: scale(0.97); }
+  .resume-primary {
+    background: var(--accent, #ffd54a);
+    color: #1a1a1a;
+  }
+  .resume-primary:hover { filter: brightness(1.08); }
+  .resume-secondary {
+    background: transparent;
+    color: var(--muted);
+    border-color: rgba(255, 255, 255, 0.12);
+  }
+  .resume-secondary:hover {
+    color: var(--fg);
+    border-color: rgba(255, 255, 255, 0.28);
+  }
+  @media (max-width: 480px) {
+    .resume-chip {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 0.55rem;
+    }
+    .resume-actions { justify-content: flex-end; }
   }
   fieldset {
     border: none;
