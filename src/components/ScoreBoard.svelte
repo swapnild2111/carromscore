@@ -135,6 +135,14 @@
    */
   let matchDecidedToast = $state(false);
   /**
+   * Fires when SET+1 is tapped on the losing side (per-set points
+   * lower than or equal to the opponent). Real-carrom rule: the
+   * winning side credits the set. This prevents a common umpire
+   * mis-tap that silently crowned the wrong player (bug reported
+   * 2026-08-14: 8-10 A tapped SET+, End declared A winner).
+   */
+  let setLoserToast = $state(false);
+  /**
    * Set to true when finishMatch() failed to reach Firebase (network
    * dead, rules denied). Surfaces as a small non-blocking toast so
    * the umpire knows the archive attempt failed rather than
@@ -570,6 +578,25 @@
       window.setTimeout(() => { matchDecidedToast = false; }, 2500);
       return;
     }
+    // Real-carrom rule: SET+1 can only credit the side that WON the
+    // set (more per-set points). Tapping SET+ on the losing side
+    // used to silently credit them anyway (bug reported 2026-08-14:
+    // 8-10 A tapped, End declared A winner). Also reject on a tied
+    // per-set score — the umpire needs to either score one more
+    // point or use the End-then-decider flow to break the tie.
+    // Applies to versus modes only, and only on delta > 0 (SET-1
+    // undoes freely as always). Runs BEFORE the running-board
+    // snapshot at ~L579 so a rejected SET+ doesn't append a phantom
+    // row / mutate pointsAtBoardStart.
+    if (delta > 0 && !isPractice) {
+      const tappedPts = side === 'a' ? sideA.points : sideB.points;
+      const otherPts = side === 'a' ? sideB.points : sideA.points;
+      if (tappedPts <= otherPts) {
+        setLoserToast = true;
+        window.setTimeout(() => { setLoserToast = false; }, 3000);
+        return;
+      }
+    }
     // Before the SET+ handler could reset points/board/queen for the
     // new set, we need to snapshot the running (in-progress) board so
     // it lands in the boardLog — otherwise the last board of every
@@ -579,7 +606,21 @@
     if (delta > 0 && !isPractice) {
       const currentBoardHasScore =
         sideA.points > pointsAtBoardStart.a || sideB.points > pointsAtBoardStart.b;
-      if (currentBoardHasScore) {
+      // Board-cap safeguard mirrors endMatch(): once the umpire has
+      // hit cfg.maxBoards worth of boards, refuse to open a phantom
+      // Nth+1 row from stray points. Without this, tapping SET+ at
+      // the cap with any running-board delta appended an extra board
+      // AND — because we didn't update pointsAtBoardStart afterwards —
+      // repeated SET+ taps kept re-firing the snapshot forever
+      // (bug reported 2026-08-14). Silently roll the stray points
+      // back to the last committed baseline; SET+ then proceeds to
+      // credit the set without touching the archive.
+      const atBoardCap =
+        !isBoardsUnlimited(cfg) && board >= cfg.maxBoards && !isDecidingBoard;
+      if (currentBoardHasScore && atBoardCap) {
+        sideA.points = pointsAtBoardStart.a;
+        sideB.points = pointsAtBoardStart.b;
+      } else if (currentBoardHasScore) {
         if (queenHolder === null) {
           // Block SET+1 with the same toast BOARD+1 uses. Real carrom:
           // no board can end without a queen result.
@@ -602,6 +643,11 @@
         // count stored on match archive matches boardLog.length —
         // the same reason endMatch() advances after its own snapshot.
         board = board + 1;
+        // Re-baseline pointsAtBoardStart to the just-snapshotted
+        // totals. Without this, a subsequent SET+ tap sees the
+        // same points-still-ahead-of-baseline signal and captures
+        // another phantom row, indefinitely.
+        pointsAtBoardStart = { a: sideA.points, b: sideB.points };
       }
     }
 
@@ -736,10 +782,26 @@
   }
 
   /*
-   * BREAK toggle. Never null — the chip always lives next to one of
-   * the two players. Tapping flips it between the two sides.
+   * BREAK chip is only user-toggleable before the first board is
+   * played — that's the umpire's window to set who won the toss.
+   * Once scoring has begun, the break flips automatically:
+   *   - adjustBoard(+1) at ~L759 flips it every completed board
+   *   - adjustSets(+1) at ~L687 flips it at set boundaries
+   * A stray tap after that could put the archived record out of
+   * sync with reality, so we ignore taps and dim the chip.
    */
+  const breakToggleAllowed = $derived(
+    !isPractice
+    && board === 0
+    && boardLog.length === 0
+    && sideA.sets === 0
+    && sideB.sets === 0
+    && sideA.points === 0
+    && sideB.points === 0
+    && matchResult === null,
+  );
   function cycleBreak() {
+    if (!breakToggleAllowed) return;
     currentBreak = currentBreak === 'a' ? 'b' : 'a';
   }
   function cycleQueen() {
@@ -1467,8 +1529,12 @@
         <button
           type="button"
           class="chip chip-break tone-{colourA}"
+          class:chip-locked={!breakToggleAllowed}
           onclick={cycleBreak}
-          aria-label="{sideA.name} breaks. Tap to change."
+          disabled={!breakToggleAllowed}
+          aria-label={breakToggleAllowed
+            ? `${sideA.name} breaks. Tap to change.`
+            : `${sideA.name} breaks this board.`}
         >
           <span class="chip-lbl">BREAK</span>
         </button>
@@ -1527,8 +1593,12 @@
         <button
           type="button"
           class="chip chip-break tone-{colourB}"
+          class:chip-locked={!breakToggleAllowed}
           onclick={cycleBreak}
-          aria-label="{sideB.name} breaks. Tap to change."
+          disabled={!breakToggleAllowed}
+          aria-label={breakToggleAllowed
+            ? `${sideB.name} breaks. Tap to change.`
+            : `${sideB.name} breaks this board.`}
         >
           <span class="chip-lbl">BREAK</span>
         </button>
@@ -1907,6 +1977,18 @@
     </div>
   {/if}
 
+  {#if setLoserToast}
+    <!--
+      Surfaced when SET+1 is tapped on the losing side (per-set
+      points not strictly higher than the opponent). Real carrom:
+      only the winning side can credit a set. Prevents the umpire
+      from accidentally awarding a set to the wrong player.
+    -->
+    <div class="queen-toast" role="status" aria-live="polite">
+      Only the leading side can be credited a set
+    </div>
+  {/if}
+
 
   {#if matchDecidedToast}
     <!--
@@ -2196,10 +2278,20 @@
     -webkit-tap-highlight-color: transparent;
     transition: background 0.1s, transform 0.06s, box-shadow 0.15s;
   }
-  .chip:hover {
+  .chip:hover:not(:disabled) {
     background: linear-gradient(120deg, rgba(255, 213, 74, 0.3), rgba(255, 213, 74, 0.12));
   }
-  .chip:active { transform: translateY(1px); }
+  .chip:active:not(:disabled) { transform: translateY(1px); }
+  /* Locked state: once the first board is played the BREAK chip
+     becomes an indicator, not a control. Auto-flip via
+     adjustBoard()/adjustSets() drives its side. Muted appearance
+     to signal non-interactive; still readable so viewers can
+     tell who's breaking this board. */
+  .chip-locked {
+    cursor: default;
+    opacity: 0.7;
+    box-shadow: none;
+  }
 
   .chip-lbl { line-height: 1; }
 
