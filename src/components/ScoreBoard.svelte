@@ -29,6 +29,7 @@
   import MatchEditModal from './MatchEditModal.svelte';
   import { subscribeCurrentUserRole, type Role } from '../lib/roles';
   import { subscribeAuth } from '../lib/auth';
+  import { clearResume } from '../lib/resume';
   import type { MatchRecord } from '../lib/history';
 
   type Side = { name: string; note: string; sets: number; points: number };
@@ -894,6 +895,7 @@
       showPracticePopup = true;
       recordFinishedMatch(null);
       if (cfg.live && cfg.mid) void deleteLive(cfg.mid);
+      clearResume();
       return;
     }
     // Capture the current in-progress board if it has any points +
@@ -976,6 +978,7 @@
     matchResult = winner;
     showWinnerPopup = true;
     recordFinishedMatch(winner);
+    clearResume();
   }
 
   /**
@@ -1004,6 +1007,7 @@
       // Keep popup open — user can now tap "View scorecard" like any
       // finished match. Committing the archive fires-and-forgets.
       recordFinishedMatch('draw');
+      clearResume();
     } else {
       // Play deciding board. Three things happen here:
       //
