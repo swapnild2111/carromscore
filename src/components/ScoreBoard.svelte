@@ -782,10 +782,26 @@
   }
 
   /*
-   * BREAK toggle. Never null — the chip always lives next to one of
-   * the two players. Tapping flips it between the two sides.
+   * BREAK chip is only user-toggleable before the first board is
+   * played — that's the umpire's window to set who won the toss.
+   * Once scoring has begun, the break flips automatically:
+   *   - adjustBoard(+1) at ~L759 flips it every completed board
+   *   - adjustSets(+1) at ~L687 flips it at set boundaries
+   * A stray tap after that could put the archived record out of
+   * sync with reality, so we ignore taps and dim the chip.
    */
+  const breakToggleAllowed = $derived(
+    !isPractice
+    && board === 0
+    && boardLog.length === 0
+    && sideA.sets === 0
+    && sideB.sets === 0
+    && sideA.points === 0
+    && sideB.points === 0
+    && matchResult === null,
+  );
   function cycleBreak() {
+    if (!breakToggleAllowed) return;
     currentBreak = currentBreak === 'a' ? 'b' : 'a';
   }
   function cycleQueen() {
@@ -1513,8 +1529,12 @@
         <button
           type="button"
           class="chip chip-break tone-{colourA}"
+          class:chip-locked={!breakToggleAllowed}
           onclick={cycleBreak}
-          aria-label="{sideA.name} breaks. Tap to change."
+          disabled={!breakToggleAllowed}
+          aria-label={breakToggleAllowed
+            ? `${sideA.name} breaks. Tap to change.`
+            : `${sideA.name} breaks this board.`}
         >
           <span class="chip-lbl">BREAK</span>
         </button>
@@ -1573,8 +1593,12 @@
         <button
           type="button"
           class="chip chip-break tone-{colourB}"
+          class:chip-locked={!breakToggleAllowed}
           onclick={cycleBreak}
-          aria-label="{sideB.name} breaks. Tap to change."
+          disabled={!breakToggleAllowed}
+          aria-label={breakToggleAllowed
+            ? `${sideB.name} breaks. Tap to change.`
+            : `${sideB.name} breaks this board.`}
         >
           <span class="chip-lbl">BREAK</span>
         </button>
@@ -2254,10 +2278,20 @@
     -webkit-tap-highlight-color: transparent;
     transition: background 0.1s, transform 0.06s, box-shadow 0.15s;
   }
-  .chip:hover {
+  .chip:hover:not(:disabled) {
     background: linear-gradient(120deg, rgba(255, 213, 74, 0.3), rgba(255, 213, 74, 0.12));
   }
-  .chip:active { transform: translateY(1px); }
+  .chip:active:not(:disabled) { transform: translateY(1px); }
+  /* Locked state: once the first board is played the BREAK chip
+     becomes an indicator, not a control. Auto-flip via
+     adjustBoard()/adjustSets() drives its side. Muted appearance
+     to signal non-interactive; still readable so viewers can
+     tell who's breaking this board. */
+  .chip-locked {
+    cursor: default;
+    opacity: 0.7;
+    box-shadow: none;
+  }
 
   .chip-lbl { line-height: 1; }
 
