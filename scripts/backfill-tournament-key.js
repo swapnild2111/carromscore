@@ -14,7 +14,10 @@
  */
 (async () => {
   const REGION = 'https://carrom-score-default-rtdb.firebaseio.com';
-  const API_KEY = 'AIzaSyAljLdG7WHQEcxUiVtX-KoASUe-VQP1BXw';
+  // Firebase Web API keys are public identifiers, NOT secrets — see
+  // https://firebase.google.com/docs/projects/api-keys and the
+  // matching note in src/lib/firebase.ts.
+  const API_KEY = 'AIzaSyAljLdG7WHQEcxUiVtX-KoASUe-VQP1BXw'; // gitleaks:allow  pragma: allowlist secret  trufflehog:ignore
 
   function normalizeKey(name) {
     return String(name || '')

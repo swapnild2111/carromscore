@@ -20,8 +20,14 @@
  */
 import { initializeApp, getApps, type FirebaseApp } from 'firebase/app';
 
+// Firebase Web API keys are public identifiers, NOT secrets — per
+// https://firebase.google.com/docs/projects/api-keys — access control
+// is enforced by database.rules.json, not by this key. The key is
+// also shipped verbatim in the client bundle to every visitor.
+// Suppresses false-positive alerts from generic secret scanners
+// (gitleaks, trufflehog, GitHub secret scanning).
 const firebaseConfig = {
-  apiKey: 'AIzaSyAljLdG7WHQEcxUiVtX-KoASUe-VQP1BXw',
+  apiKey: 'AIzaSyAljLdG7WHQEcxUiVtX-KoASUe-VQP1BXw', // gitleaks:allow  pragma: allowlist secret  trufflehog:ignore
   authDomain: 'carrom-score.firebaseapp.com',
   databaseURL: 'https://carrom-score-default-rtdb.firebaseio.com',
   projectId: 'carrom-score',
