@@ -284,24 +284,27 @@
     // declaration above for the "why."
     refreshLocalOffline();
     const onStorage = (ev: StorageEvent) => {
-      // Only re-read on writes to the sync queue or the resume
-      // pointer. Any other localStorage write is unrelated.
+      // Re-read on writes to the sync queue, the resume pointer,
+      // OR any per-match state key (`carromscore:state:*`). The
+      // score state key changes on every tap on Tab A even before
+      // the offline enqueue fires, so it's a more reliable signal
+      // for "user did something." A null key means "clear all
+      // storage" — refresh in that case too.
       if (
-        ev.key === SYNC_QUEUE_STORAGE_KEY ||
         ev.key === null ||
-        ev.key === 'carromscore:resumeMid'
+        ev.key === SYNC_QUEUE_STORAGE_KEY ||
+        ev.key === 'carromscore:resumeMid' ||
+        (typeof ev.key === 'string' && ev.key.startsWith('carromscore:state:'))
       ) {
         refreshLocalOffline();
       }
     };
     window.addEventListener('storage', onStorage);
-    // Same-tab writes don't fire 'storage' events (that's a
-    // cross-tab-only signal), but the queue and resume pointer
-    // are set from ScoreBoard which normally runs in a DIFFERENT
-    // tab. If the umpire is on the same tab as the lobby (edge
-    // case), a 3s poll picks up their changes without needing
-    // a bespoke pub/sub between the two components.
-    const localOfflinePoll = window.setInterval(refreshLocalOffline, 3000);
+    // Poll fallback: `storage` events are the primary signal but
+    // some browser/SW combinations delay them or drop them
+    // entirely on the same origin. 1s poll picks up the state
+    // fast enough for a live-lobby feel without being wasteful.
+    const localOfflinePoll = window.setInterval(refreshLocalOffline, 1000);
 
     // Identity store: needed for History tab to render player IDs as
     // canonical names. Cheap to subscribe here — the store lives in
@@ -352,25 +355,18 @@
     } catch {
       queued = [];
     }
-    if (queued.length === 0) {
-      if (localOfflineEntries.length > 0) localOfflineEntries = [];
-      return;
-    }
-    const synthesised: LobbyEntry[] = queued.map((q) => ({
+    // Always reassign. An earlier version added a shallow same-shape
+    // guard on (mid, updatedAt) to skip no-op renders, but that
+    // made the lobby miss same-mid updates when the payload changed
+    // but the coalesce didn't bump updatedAt in a shape our guard
+    // could see. Cheap to always rebuild; the array is short
+    // (usually 1 entry) and Svelte's reactivity does its own diff.
+    localOfflineEntries = queued.map((q) => ({
       mid: q.mid,
       updatedAt: q.enqueuedAt,
       meta: q.meta,
       liveState: q.payload,
     }));
-    // Compare shallowly; skip the reassignment if nothing changed
-    // to avoid triggering unnecessary re-renders.
-    const same =
-      synthesised.length === localOfflineEntries.length &&
-      synthesised.every((s, i) => {
-        const prev = localOfflineEntries[i];
-        return prev && prev.mid === s.mid && prev.updatedAt === s.updatedAt;
-      });
-    if (!same) localOfflineEntries = synthesised;
   }
 
   // Role reactive state + edit-modal open target.

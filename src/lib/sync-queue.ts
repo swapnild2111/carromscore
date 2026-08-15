@@ -140,6 +140,14 @@ function writeQueue(snapshot: QueueSnapshot): void {
 /**
  * Enqueue a live write. Coalesces by mid — the queue keeps at most
  * one entry per match, always the latest state.
+ *
+ * `enqueuedAt` is refreshed on every call (not just the first) so
+ * downstream consumers can detect a change on the coalesced entry
+ * via a timestamp bump. Specifically: LiveLobby's cross-tab
+ * refreshLocalOffline() compares (mid, updatedAt) shallowly to
+ * decide whether to re-render. Without this bump, per-tap
+ * coalesces looked identical to Tab B and it didn't live-update
+ * (reported 2026-08-16).
  */
 export function enqueueLive(item: Omit<QueuedLiveWrite, 'kind' | 'enqueuedAt'>): void {
   const q = readQueue();
