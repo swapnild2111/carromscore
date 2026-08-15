@@ -46,11 +46,28 @@ type Subscriber = (state: ConnectivityState) => void;
 
 // Module-level state. Two independent signals, combined at read time.
 let navigatorOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
-// null = we've never heard from .info/connected. Treat as "trust
-// navigator.onLine" until we get a real value. This matters for the
-// very first paint before Firebase has loaded.
+// null = we've never heard from .info/connected. Treat as pending
+// until either the SDK reports state OR a boot-time timer expires
+// (see FIRST_CONNECT_TIMEOUT below). This matters because
+// `navigator.onLine` is UNRELIABLE — it stays true when Chrome
+// DevTools' Network → Offline is toggled, and doesn't reflect
+// captive-portal / DNS-out cases. If the Firebase WebSocket can't
+// establish within a reasonable window, we treat the app as offline
+// even if navigator says otherwise.
 let firebaseConnected: boolean | null = null;
 let serverOffsetMs = 0;
+
+/**
+ * If Firebase hasn't confirmed a connection within this window at
+ * boot, we flip firebaseConnected to false explicitly. Firebase's
+ * SDK only emits `.info/connected: true` on a successful
+ * WebSocket; it does NOT emit `false` when it's been unable to
+ * connect since boot, so without this timer the module would stay
+ * in the "pending" state forever on a cold-start offline visit.
+ * 5 s is enough for a good network to negotiate the socket and
+ * short enough to feel responsive when the umpire is offline.
+ */
+const FIRST_CONNECT_TIMEOUT = 5000;
 
 const subscribers = new Set<Subscriber>();
 let bootstrapped = false;
@@ -154,6 +171,21 @@ function bootstrap(): void {
     window.addEventListener('offline', () => setNav(false));
   }
 
+  // Boot-time timeout: if Firebase hasn't confirmed a connection
+  // within FIRST_CONNECT_TIMEOUT, assume we're offline. The SDK
+  // will still update `firebaseConnected` to true later if it
+  // succeeds; this just handles the "app booted offline and the
+  // socket never got anywhere" case that navigator.onLine can't
+  // reliably signal (DevTools throttle, captive portal, DNS out).
+  if (typeof window !== 'undefined') {
+    window.setTimeout(() => {
+      if (firebaseConnected === null) {
+        firebaseConnected = false;
+        notify();
+      }
+    }, FIRST_CONNECT_TIMEOUT);
+  }
+
   // Firebase side. Silent-on-failure: if the SDK can't load (offline
   // first-visit before the bundle is cached), we stay on the
   // navigator-only signal path.
@@ -181,7 +213,9 @@ function bootstrap(): void {
         // serverNow().
       });
     } catch {
-      // Firebase didn't load. Stay on navigator-only.
+      // Firebase didn't load. Stay on navigator-only. If the boot
+      // timer already fired, we're already in the offline state
+      // (correct — we don't have Firebase, so we can't reach it).
     }
   })();
 }
