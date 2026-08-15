@@ -24,7 +24,12 @@
  * asset-manifest names, up-front.
  */
 
-const APP_VERSION = '2.2.9';
+// Bumped on every offline-mode-related change during v3.0 development
+// so browsers re-fetch this file (byte-level diff) and re-install the
+// SW, which clears the stale cache from before the banner/etc. slices
+// shipped. Users on the old SW keep seeing stale HTML with no banner.
+// Reset to '3.0.0' at release.
+const APP_VERSION = '2.2.9-beta.6';
 
 // Base URL is derived from the SW's own location so the same source
 // works on both main (/carromscore/) and beta (/carromscore/beta/).

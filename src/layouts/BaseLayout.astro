@@ -168,6 +168,18 @@ const base = import.meta.env.BASE_URL;
           window.addEventListener('load', () => {
             navigator.serviceWorker
               .register(`${import.meta.env.BASE_URL}sw.js`, { scope: import.meta.env.BASE_URL })
+              .then((reg) => {
+                // Force a proactive update check on every page load.
+                // Chrome auto-checks only every ~24h; explicit update()
+                // makes new SW versions install right away, so the
+                // corresponding cache (which is versioned by
+                // APP_VERSION + manifest.buildId) rotates promptly.
+                // Without this, HTML changes since the last-installed
+                // SW's install() would sit in stale cache indefinitely,
+                // manifesting as "banner is missing on hard-refresh
+                // while offline" bugs.
+                reg?.update().catch(() => {});
+              })
               .catch(() => {});
 
             const hadControllerAtLoad = !!navigator.serviceWorker.controller;
