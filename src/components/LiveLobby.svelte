@@ -1574,7 +1574,19 @@
   }
   .empty p { margin: 0.5rem 0; }
   .empty strong { color: var(--fg, #f5f5f5); font-weight: 700; }
-  .empty-sub {
+  /*
+   * `.empty .empty-sub` (nested selector) instead of the plain
+   * `.empty-sub` because `.empty p { margin: 0.5rem 0 }` above
+   * has specificity 0,2,1 (two classes + one element) whereas
+   * `.empty-sub` alone is 0,2,0. The `p` shorthand includes
+   * `margin-left: 0; margin-right: 0` which would override
+   * `.empty-sub`'s `margin-left: auto`, breaking the horizontal
+   * centering — the block would collapse against the left edge
+   * of the .empty container instead of centering under the
+   * "You're offline." header. Nesting bumps specificity to
+   * 0,3,0 so this rule wins cleanly.
+   */
+  .empty .empty-sub {
     max-width: 22rem;
     margin-left: auto;
     margin-right: auto;
