@@ -25,6 +25,7 @@
     type Role,
   } from '../lib/roles';
   import { upsertOwnUserMirror } from '../lib/users';
+  import { subscribeConnectivity } from '../lib/connectivity';
 
   interface Props {
     signedInOnly?: boolean;
@@ -52,6 +53,15 @@
   let user = $state<AuthUser | null>(null);
   let role = $state<Role | null>(null);
   let menuOpen = $state(false);
+  /**
+   * Mirrors connectivity's `online` flag. Google sign-in's popup
+   * requires internet to complete the OAuth round-trip; hanging
+   * offline is worse than showing the button as disabled with a
+   * clear tooltip. Drives the signed-out pill's disabled state.
+   * Signed-in dropdown items still work offline — Sign out just
+   * clears local auth state.
+   */
+  let online = $state(true);
 
   /**
    * Svelte action: fires a callback when a click happens outside the
@@ -95,9 +105,13 @@
       if (u) void upsertOwnUserMirror(u);
     });
     const unsubRole = subscribeCurrentUserRole((r) => (role = r));
+    const unsubConn = subscribeConnectivity((state) => {
+      online = state.online;
+    });
     return () => {
       unsubAuth();
       unsubRole();
+      unsubConn();
     };
   });
 
@@ -116,8 +130,13 @@
     <button
       type="button"
       class="signin-pill"
+      class:signin-offline={!online}
       onclick={onSignIn}
-      aria-label={`${signedOutLabel} — Sign in with Google`}
+      disabled={!online}
+      aria-label={online
+        ? `${signedOutLabel} — Sign in with Google`
+        : `${signedOutLabel} — connect to the internet to sign in`}
+      title={online ? undefined : 'Connect to the internet to sign in'}
     >
       <span class="g" aria-hidden="true">G</span>
       <span>{signedOutLabel}</span>
@@ -218,9 +237,22 @@
     transition: background 0.12s, border-color 0.12s;
     -webkit-tap-highlight-color: transparent;
   }
-  .signin-pill:hover {
+  .signin-pill:hover:not(:disabled) {
     background: rgba(255, 255, 255, 0.1);
     border-color: rgba(255, 255, 255, 0.28);
+  }
+  /* Offline: no Google popup can complete without internet. Grey
+     the pill out with a "not-allowed" cursor so the umpire knows
+     it's disabled on purpose. Tooltip explains why. */
+  .signin-pill:disabled,
+  .signin-offline {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+  .signin-pill:disabled:hover,
+  .signin-offline:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.16);
   }
   .g {
     display: inline-flex;
