@@ -535,6 +535,34 @@
 {/if}
 
 <form class="setup" onsubmit={start}>
+  <!--
+    Mode selection renders BEFORE Match rules because the chosen
+    mode reshapes the rules block: Practice hides the Points input
+    and relabels Boards → Boards per set, and setMode() rewrites
+    bestOf/pointsTarget/maxBoards defaults. Rendering Mode first
+    means the umpire picks it once, then reads/edits rule values
+    that already reflect the mode — no back-and-forth. Reordered
+    2026-08-15.
+  -->
+  <fieldset class="fmt fmt-mode">
+    <legend>Mode</legend>
+    <label class:selected={cfg.mode === 'singles'}>
+      <input type="radio" name="mode" value="singles" checked={cfg.mode === 'singles'} onchange={() => setMode('singles')} />
+      <span class="opt-title">Singles</span>
+      <span class="opt-meta">1 vs 1</span>
+    </label>
+    <label class:selected={cfg.mode === 'doubles'}>
+      <input type="radio" name="mode" value="doubles" checked={cfg.mode === 'doubles'} onchange={() => setMode('doubles')} />
+      <span class="opt-title">Doubles</span>
+      <span class="opt-meta">2 vs 2</span>
+    </label>
+    <label class:selected={cfg.mode === 'practice'}>
+      <input type="radio" name="mode" value="practice" checked={cfg.mode === 'practice'} onchange={() => setMode('practice')} />
+      <span class="opt-title">Practice</span>
+      <span class="opt-meta">Solo drill</span>
+    </label>
+  </fieldset>
+
   <fieldset class="rules" class:rules-practice={cfg.mode === 'practice'}>
     <legend>Match rules</legend>
     <label>
@@ -553,25 +581,6 @@
         {#if cfg.mode !== 'practice'}<em class="hint-inline">(0 = ∞)</em>{/if}
       </span>
       <input type="number" min={cfg.mode === 'practice' ? 1 : 0} step="1" bind:value={cfg.maxBoards} />
-    </label>
-  </fieldset>
-
-  <fieldset class="fmt fmt-mode">
-    <legend>Mode</legend>
-    <label class:selected={cfg.mode === 'singles'}>
-      <input type="radio" name="mode" value="singles" checked={cfg.mode === 'singles'} onchange={() => setMode('singles')} />
-      <span class="opt-title">Singles</span>
-      <span class="opt-meta">1 vs 1</span>
-    </label>
-    <label class:selected={cfg.mode === 'doubles'}>
-      <input type="radio" name="mode" value="doubles" checked={cfg.mode === 'doubles'} onchange={() => setMode('doubles')} />
-      <span class="opt-title">Doubles</span>
-      <span class="opt-meta">2 vs 2</span>
-    </label>
-    <label class:selected={cfg.mode === 'practice'}>
-      <input type="radio" name="mode" value="practice" checked={cfg.mode === 'practice'} onchange={() => setMode('practice')} />
-      <span class="opt-title">Practice</span>
-      <span class="opt-meta">Solo drill</span>
     </label>
   </fieldset>
 
