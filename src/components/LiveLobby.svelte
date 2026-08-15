@@ -1574,7 +1574,12 @@
   }
   .empty p { margin: 0.5rem 0; }
   .empty strong { color: var(--fg, #f5f5f5); font-weight: 700; }
-  .empty-sub { max-width: 22rem; margin-left: auto; margin-right: auto; }
+  .empty-sub {
+    max-width: 22rem;
+    margin-left: auto;
+    margin-right: auto;
+    text-align: center;
+  }
 
   /* Tournament section wrapper. Each group gets a soft-bordered
      panel so multi-tournament lobbies read as distinct buckets,
