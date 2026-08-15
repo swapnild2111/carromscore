@@ -81,6 +81,26 @@ const base = import.meta.env.BASE_URL;
       0%, 100% { opacity: 1; }
       50% { opacity: 0.4; }
     }
+    /* Offline variant: swap the red pulse for muted grey to signal
+       "the lobby needs internet to show what others are playing."
+       Driven by body[data-offline="true"] set by BaseLayout's
+       offline-detection script. Mirrors the .card-badge-ended
+       treatment in LiveLobby.svelte so the muted state is visually
+       consistent across the app. */
+    :global(body[data-offline="true"]) .live-cta {
+      color: var(--muted, #9aa0a6);
+      background: rgba(255, 255, 255, 0.05);
+      border-color: rgba(255, 255, 255, 0.14);
+    }
+    :global(body[data-offline="true"]) .live-cta:hover {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: rgba(255, 255, 255, 0.22);
+    }
+    :global(body[data-offline="true"]) .live-dot {
+      background: var(--muted, #9aa0a6);
+      box-shadow: none;
+      animation: none;
+    }
     /*
      * Title is the visual anchor of the setup screen. Gold gradient clipped
      * to the text, gentle drop-shadow, and a small underline accent so it
