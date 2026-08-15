@@ -24,7 +24,7 @@
  * asset-manifest names, up-front.
  */
 
-const APP_VERSION = '2.2.8';
+const APP_VERSION = '2.2.9';
 
 // Base URL is derived from the SW's own location so the same source
 // works on both main (/carromscore/) and beta (/carromscore/beta/).
