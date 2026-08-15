@@ -28,10 +28,12 @@
   import LiveScoreboardView from './LiveScoreboardView.svelte';
   import MatchEditModal from './MatchEditModal.svelte';
   import { subscribeCurrentUserRole, type Role } from '../lib/roles';
-  import { subscribeAuth } from '../lib/auth';
+  import { subscribeAuth, currentUser } from '../lib/auth';
   import { clearResume } from '../lib/resume';
   import { normalizeKey } from '../lib/tournaments';
   import type { MatchRecord } from '../lib/history';
+  import { subscribeConnectivity, getConnectivity } from '../lib/connectivity';
+  import { enqueueLive, enqueueMatch, dropLive, flushQueue } from '../lib/sync-queue';
 
   type Side = { name: string; note: string; sets: number; points: number };
   /*
@@ -272,6 +274,10 @@
     // needed — subscribeAuth's side effect is what we're after.
     unsubAuth = subscribeAuth(() => { /* cache populated by side effect */ });
 
+    // Connectivity watch — flushes the offline sync queue whenever
+    // we transition to online. See armConnectivityWatch above.
+    armConnectivityWatch();
+
     // currentBreak stays null until the organiser marks board 0's breaker;
     // hydrate below can restore a live value if we're resuming a match.
 
@@ -333,6 +339,11 @@
       releaseLandscape();
       unsubRole?.();
       unsubAuth?.();
+      unsubConnectivity?.();
+      if (flushIntervalId !== null) {
+        window.clearInterval(flushIntervalId);
+        flushIntervalId = null;
+      }
     };
   });
 
@@ -447,6 +458,11 @@
     // the same payload to Firebase /live/{mid}. Spectator devices
     // subscribed to that slug receive the update ~500 ms later.
     // Silent-on-failure via publishLive.
+    //
+    // Offline path (v3.0): when connectivity says we can't reach
+    // Firebase, hand the payload to the sync queue instead. The
+    // queue coalesces per-mid so a burst of taps produces one
+    // queued write, and it flushes when connectivity returns.
     if (cfg.live && cfg.mid) {
       // Practice: sideA.points isn't updated by adjustPracticeBoard —
       // the real data lives in practiceBoards[]. To keep spectator +
@@ -469,25 +485,63 @@
         ...(!isPractice && boardLog.length > 0 ? { boardLog } : {}),
         ...(isPractice ? { practiceBoards } : {}),
       };
-      void publishLive(
-        cfg.mid,
-        {
-          mode: cfg.mode,
-          playerA: cfg.playerA,
-          playerA2: cfg.playerA2,
-          playerB: cfg.playerB,
-          playerB2: cfg.playerB2,
-          noteA: cfg.noteA,
-          noteB: cfg.noteB,
-          bestOf: cfg.bestOf,
-          pointsTarget: cfg.pointsTarget,
-          maxBoards: cfg.maxBoards,
-          tournament: cfg.tournament,
-        },
-        payload,
-      );
+      const meta = {
+        mode: cfg.mode,
+        playerA: cfg.playerA,
+        playerA2: cfg.playerA2,
+        playerB: cfg.playerB,
+        playerB2: cfg.playerB2,
+        noteA: cfg.noteA,
+        noteB: cfg.noteB,
+        bestOf: cfg.bestOf,
+        pointsTarget: cfg.pointsTarget,
+        maxBoards: cfg.maxBoards,
+        tournament: cfg.tournament,
+      };
+      if (getConnectivity().online) {
+        void publishLive(cfg.mid, meta, payload);
+      } else {
+        // Offline: keep the state in the queue so it flushes when
+        // we reconnect. Coalesced by mid, so this is O(1) storage
+        // regardless of tap volume.
+        enqueueLive({ mid: cfg.mid, meta, payload });
+      }
     }
   });
+
+  /*
+   * Connectivity subscription. Two jobs:
+   *   1. Whenever we transition to online, flush the sync queue so
+   *      any buffered live/match writes reach Firebase promptly.
+   *   2. Also fire a periodic 30 s flush while online, as a safety
+   *      net for the case where the online transition somehow
+   *      missed (e.g. laptop lid open with WiFi already up).
+   *
+   * Both triggers call flushQueue, which is idempotent + retry-safe
+   * per the module contract.
+   */
+  let unsubConnectivity: (() => void) | null = null;
+  let flushIntervalId: number | null = null;
+  let prevOnline: boolean | null = null;
+  function armConnectivityWatch() {
+    unsubConnectivity = subscribeConnectivity((state) => {
+      // First fire seeds prevOnline; only true transitions trigger
+      // a flush after that.
+      if (prevOnline === null) {
+        prevOnline = state.online;
+        if (state.online) void flushQueue();
+        return;
+      }
+      if (!prevOnline && state.online) {
+        // offline → online: flush ASAP
+        void flushQueue();
+      }
+      prevOnline = state.online;
+    });
+    flushIntervalId = window.setInterval(() => {
+      if (getConnectivity().online) void flushQueue();
+    }, 30_000);
+  }
 
   function updateOrientation() {
     isPortrait = window.innerHeight > window.innerWidth;
@@ -1137,44 +1191,69 @@
       const key = matchStateKey(cfg.mode, cfg.playerA, cfg.playerB);
       const identity = loadMatchIdentity(key);
       const startedAt = loadMatchStart(key) ?? Date.now();
-      finishMatch(
-        {
-          aName: cfg.playerA,
-          aResolvedId: identity.aResolvedId,
-          a2Name: cfg.playerA2,
-          a2ResolvedId: identity.a2ResolvedId,
-          bName: cfg.playerB,
-          bResolvedId: identity.bResolvedId,
-          b2Name: cfg.playerB2,
-          b2ResolvedId: identity.b2ResolvedId,
+      const identityPayload = {
+        aName: cfg.playerA,
+        aResolvedId: identity.aResolvedId,
+        a2Name: cfg.playerA2,
+        a2ResolvedId: identity.a2ResolvedId,
+        bName: cfg.playerB,
+        bResolvedId: identity.bResolvedId,
+        b2Name: cfg.playerB2,
+        b2ResolvedId: identity.b2ResolvedId,
+      };
+      const resultPayload = {
+        mode: cfg.mode,
+        winner,
+        sideA: { points: sideA.points, sets: sideA.sets },
+        sideB: { points: sideB.points, sets: sideB.sets },
+        board,
+        cfg: {
+          bestOf: cfg.bestOf,
+          maxBoards: cfg.maxBoards,
+          pointsTarget: cfg.pointsTarget,
+          format: cfg.format,
         },
-        {
-          mode: cfg.mode,
-          winner,
-          sideA: { points: sideA.points, sets: sideA.sets },
-          sideB: { points: sideB.points, sets: sideB.sets },
-          board,
-          cfg: {
-            bestOf: cfg.bestOf,
-            maxBoards: cfg.maxBoards,
-            pointsTarget: cfg.pointsTarget,
-            format: cfg.format,
-          },
-          notes: { a: sideA.note, b: sideB.note },
-          ...(cfg.tournament ? { tournament: cfg.tournament } : {}),
-          startedAt,
-          endedAt: Date.now(),
-          ...(boardLog.length > 0 ? { boardLog: [...boardLog] } : {}),
-          ...(isPractice && practiceBoards.length > 0
-            ? { practiceBoards: practiceBoards.map((row) => [...row]) }
-            : {}),
-        },
-      ).then((matchId) => {
+        notes: { a: sideA.note, b: sideB.note },
+        ...(cfg.tournament ? { tournament: cfg.tournament } : {}),
+        startedAt,
+        endedAt: Date.now(),
+        ...(boardLog.length > 0 ? { boardLog: [...boardLog] } : {}),
+        ...(isPractice && practiceBoards.length > 0
+          ? { practiceBoards: practiceBoards.map((row) => [...row]) }
+          : {}),
+      };
+      // Offline path (v3.0): if we know we can't reach Firebase,
+      // don't even try — enqueue directly so the archive syncs
+      // when connectivity returns. Also drop the /live/{mid} queue
+      // entry since the archive is now authoritative for this match.
+      if (!getConnectivity().online) {
+        enqueueMatch({
+          identity: identityPayload,
+          result: resultPayload,
+          createdByAtEnqueue: currentUser()?.uid ?? null,
+        });
+        if (cfg.mid) dropLive(cfg.mid);
+        clearMatchIdentity(key);
+        // From the umpire's POV, the End tap was successful — no
+        // toast, no error. The queue will replay when we reconnect.
+        return;
+      }
+      finishMatch(identityPayload, resultPayload).then((matchId) => {
         // finishMatch resolves to null when the RTDB write failed
         // (network dead, rules denied, package failed to load).
-        // Surface the failure so the umpire can retry — silent
-        // failure is what caused Prem/Yash's #3 to vanish.
+        // If we're STILL online per connectivity, that's a real
+        // failure (rules denied / bad payload) — surface it. If we
+        // dropped offline mid-flight, queue and stay quiet.
         if (matchId === null) {
+          if (!getConnectivity().online) {
+            enqueueMatch({
+              identity: identityPayload,
+              result: resultPayload,
+              createdByAtEnqueue: currentUser()?.uid ?? null,
+            });
+            if (cfg.mid) dropLive(cfg.mid);
+            return;
+          }
           archiveFailedToast = true;
           window.setTimeout(() => { archiveFailedToast = false; }, 6000);
           return;
