@@ -932,7 +932,12 @@
     {/if}
   {:else if tab === 'history'}
     <!-- History tab -->
-    {#if historyLoading}
+    {#if !online && matches.length === 0}
+      <div class="empty">
+        <p><strong>You're offline.</strong></p>
+        <p class="empty-sub">Your match history lives on Firebase — connect to see past matches. Any match you record on this device meanwhile will sync automatically when you're back online.</p>
+      </div>
+    {:else if historyLoading}
       <p class="state">Loading…</p>
     {:else if matches.length === 0}
       <div class="empty">
@@ -1150,7 +1155,12 @@
       changes back so LiveLobby can mirror them into the URL query
       string via syncUrl().
     -->
-    {#if historyLoading}
+    {#if !online && matches.length === 0}
+      <div class="empty">
+        <p><strong>You're offline.</strong></p>
+        <p class="empty-sub">Reports aggregate match records from Firebase — connect to see totals, per-player stats, and per-tournament trends.</p>
+      </div>
+    {:else if historyLoading}
       <p class="state">Loading…</p>
     {:else}
       <ReportsTab
