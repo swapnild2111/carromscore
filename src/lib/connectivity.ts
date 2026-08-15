@@ -64,26 +64,46 @@ let serverOffsetMs = 0;
  * WebSocket; it does NOT emit `false` when it's been unable to
  * connect since boot, so without this timer the module would stay
  * in the "pending" state forever on a cold-start offline visit.
- * 5 s is enough for a good network to negotiate the socket and
- * short enough to feel responsive when the umpire is offline.
+ *
+ * During the pending window, currentState() reports offline
+ * conservatively (banner shown, writes queued). Shorter timeout =
+ * faster hide-banner-if-online, but risks flapping online→offline
+ * on flaky networks. 2.5 s is long enough for a good network to
+ * negotiate the WebSocket and short enough that the banner isn't
+ * annoyingly slow to hide on cold-start when actually online.
  */
-const FIRST_CONNECT_TIMEOUT = 5000;
+const FIRST_CONNECT_TIMEOUT = 2500;
 
 const subscribers = new Set<Subscriber>();
 let bootstrapped = false;
 
 function currentState(): ConnectivityState {
-  // If we've never heard from Firebase, trust navigator.
+  // Re-read navigator.onLine on every call — the module-level
+  // `navigatorOnline` reflects the last event we observed, but
+  // between events navigator can flip without firing (e.g. right
+  // at page load, before the online/offline listeners even
+  // attached). Live-read is cheap and avoids stale reads.
+  const nav = typeof navigator !== 'undefined' ? navigator.onLine !== false : true;
+  navigatorOnline = nav;
+
+  // If Firebase hasn't confirmed reachability yet, be
+  // conservative and report offline. The 5-second boot timer
+  // (see bootstrap below) will eventually flip firebaseConnected
+  // to false if the SDK can't reach Firebase, or a real
+  // successful connection will flip it to true. Either way the
+  // pending state is short-lived. During that window the banner
+  // shows and writes queue — safer than optimistically claiming
+  // online and having writes silently fail.
   if (firebaseConnected === null) {
     return {
-      online: navigatorOnline,
-      source: 'navigator',
+      online: false,
+      source: 'firebase',
     };
   }
   // Both signals present: require BOTH true to consider ourselves
   // online. Either "no" wins.
-  const online = navigatorOnline && firebaseConnected;
-  const source: ConnectivityState['source'] = !navigatorOnline
+  const online = nav && firebaseConnected;
+  const source: ConnectivityState['source'] = !nav
     ? 'navigator'
     : !firebaseConnected
       ? 'firebase'

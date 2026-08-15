@@ -153,41 +153,46 @@ const base = import.meta.env.BASE_URL;
           if (online) delete document.body.dataset.offline;
           else document.body.dataset.offline = 'true';
         };
-        // Two-layer strategy:
+        // Show banner immediately (conservative default until we
+        // know we're online). Async: subscribeConnectivity from
+        // ../lib/connectivity combines navigator.onLine +
+        // Firebase `.info/connected`. When it says online, hide
+        // the banner. When offline, show. During the pending
+        // window (Firebase SDK still loading OR waiting for the
+        // 5-second boot timeout), we conservatively show the
+        // banner. Better a brief unnecessary banner than the
+        // flash-and-hide bug where users see "you're offline"
+        // for half a second and then it disappears prematurely.
         //
-        // 1. Immediate: navigator.onLine + online/offline events.
-        //    Runs synchronously so the banner state is correct
-        //    on first paint. But navigator.onLine is unreliable —
-        //    it stays `true` when Chrome DevTools "Offline" is
-        //    toggled (which only blocks network fetches, not the
-        //    OS-level network flag), and doesn't catch captive-
-        //    portal / DNS-out cases.
-        //
-        // 2. Upgrade: subscribeConnectivity from
-        //    ../lib/connectivity, which combines navigator with
-        //    a real Firebase reachability check via
-        //    `.info/connected` (plus a boot timeout that flips
-        //    to offline if the socket never connects). This is
-        //    the reliable signal but requires the Firebase SDK
-        //    to load, so it can't drive the initial paint.
-        const applyNavigator = () => apply(navigator.onLine !== false);
-        applyNavigator();
-        window.addEventListener('online', applyNavigator);
-        window.addEventListener('offline', applyNavigator);
-        // Re-check on tab return / focus / bfcache restore.
-        document.addEventListener('visibilitychange', applyNavigator);
-        window.addEventListener('focus', applyNavigator);
-        window.addEventListener('pageshow', (ev) => {
-          if (ev.persisted) applyNavigator();
+        // Also fires flushQueue() from ../lib/sync-queue on
+        // every offline→online transition. Living here (not in
+        // any single Svelte island) means the queue drains
+        // regardless of which route the user is on, and even
+        // after they leave the score screen.
+        apply(false);
+        let prevOnline = false;
+        Promise.all([
+          import('../lib/connectivity'),
+          import('../lib/sync-queue'),
+        ]).then(([conn, queue]) => {
+          conn.subscribeConnectivity((state) => {
+            apply(state.online);
+            if (!prevOnline && state.online) {
+              // Offline → online: flush any queued writes now.
+              // Fire-and-forget; flushQueue is idempotent and
+              // handles its own errors.
+              void queue.flushQueue();
+            }
+            prevOnline = state.online;
+          });
+        }).catch(() => {
+          // Modules failed to load (e.g. offline first-visit and
+          // SW cache is empty). Fall back to raw navigator.onLine.
+          const applyNavigator = () => apply(navigator.onLine !== false);
+          applyNavigator();
+          window.addEventListener('online', applyNavigator);
+          window.addEventListener('offline', applyNavigator);
         });
-        // Upgrade to the combined signal once available.
-        // Silent-on-failure: if the module never loads (extreme
-        // first-visit-offline), we stay on the navigator-only path.
-        import('../lib/connectivity').then((mod) => {
-          if (mod && typeof mod.subscribeConnectivity === 'function') {
-            mod.subscribeConnectivity((state) => apply(state.online));
-          }
-        }).catch(() => { /* silent */ });
       })();
 
       if ('serviceWorker' in navigator) {
