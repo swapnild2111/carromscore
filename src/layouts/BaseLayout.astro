@@ -157,6 +157,16 @@ const base = import.meta.env.BASE_URL;
         // online/offline events for background tabs.
         document.addEventListener('visibilitychange', check);
         window.addEventListener('focus', check);
+        // Re-check on back-forward cache restore. When the browser
+        // navigates via Back/Forward, Chrome sometimes serves the
+        // page from bfcache — instantaneous restore of the DOM as
+        // it was, including the banner's hidden state at leave time.
+        // If connectivity changed during the visit to the other
+        // page, the banner would show stale. pageshow with
+        // event.persisted === true is the bfcache indicator.
+        window.addEventListener('pageshow', (ev) => {
+          if (ev.persisted) check();
+        });
       })();
 
       if ('serviceWorker' in navigator) {
