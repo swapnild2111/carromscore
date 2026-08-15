@@ -52,6 +52,10 @@ jobs:
         run: npm run build
         env:
           PUBLIC_BASE: /carromscore/
+          # Firebase Web API key — see src/lib/firebase.ts for the
+          # "public identifier, not a secret" rationale. Sourced from
+          # the repo secret so the literal doesn't sit in source.
+          PUBLIC_FIREBASE_API_KEY: ${{ secrets.PUBLIC_FIREBASE_API_KEY }}
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
@@ -112,6 +116,7 @@ jobs:
         run: npm run build
         env:
           PUBLIC_BASE: /carromscore/
+          PUBLIC_FIREBASE_API_KEY: ${{ secrets.PUBLIC_FIREBASE_API_KEY }}
 
       - name: Install (beta)
         run: npm ci
@@ -120,6 +125,7 @@ jobs:
         run: npm run build
         env:
           PUBLIC_BASE: /carromscore/beta/
+          PUBLIC_FIREBASE_API_KEY: ${{ secrets.PUBLIC_FIREBASE_API_KEY }}
 
       # Compose the final artifact: main at root, beta under /beta/.
       # Runs from repo root (default working-directory override

@@ -20,14 +20,30 @@
  */
 import { initializeApp, getApps, type FirebaseApp } from 'firebase/app';
 
-// Firebase Web API keys are public identifiers, NOT secrets — per
-// https://firebase.google.com/docs/projects/api-keys — access control
-// is enforced by database.rules.json, not by this key. The key is
-// also shipped verbatim in the client bundle to every visitor.
-// Suppresses false-positive alerts from generic secret scanners
-// (gitleaks, trufflehog, GitHub secret scanning).
+// Firebase Web `apiKey` is a public identifier (Google's own docs:
+// https://firebase.google.com/docs/projects/api-keys) — access
+// control is enforced by database.rules.json, not by this key.
+// Even so, we source it from PUBLIC_FIREBASE_API_KEY at build time
+// rather than committing the literal, because generic secret
+// scanners (gitleaks/trufflehog/GitHub secret scanning) match the
+// 39-char Google-API-key regex and can't distinguish the public
+// Web key from a private server credential. Keeping the literal
+// out of the source tree makes those false-positive alerts go
+// away. The value still ends up in the built client bundle —
+// that's expected and Firebase-approved, since the client SDK
+// needs it to reach Firebase at all.
+//
+// The other 6 fields below are Firebase project identifiers,
+// have no regex signature, and stay literal — moving them adds
+// zero security and just spreads secrets over more files. See
+// .env.example and .github/workflows/deploy.yml for the wiring.
+if (!import.meta.env.PUBLIC_FIREBASE_API_KEY) {
+  throw new Error(
+    'PUBLIC_FIREBASE_API_KEY not set at build time — copy .env.example → .env and fill it in, or set it via CI',
+  );
+}
 const firebaseConfig = {
-  apiKey: 'AIzaSyAljLdG7WHQEcxUiVtX-KoASUe-VQP1BXw', // gitleaks:allow  pragma: allowlist secret  trufflehog:ignore
+  apiKey: import.meta.env.PUBLIC_FIREBASE_API_KEY,
   authDomain: 'carrom-score.firebaseapp.com',
   databaseURL: 'https://carrom-score-default-rtdb.firebaseio.com',
   projectId: 'carrom-score',
