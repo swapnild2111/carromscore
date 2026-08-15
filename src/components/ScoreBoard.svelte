@@ -2109,8 +2109,15 @@
 
 <style>
   .wrap {
-    height: 100dvh;
-    max-height: 100dvh;
+    /* Subtract the offline-banner's height (set by BaseLayout as a
+       CSS variable, 0 when online) so the full-viewport score UI
+       still fits under the banner without clipping the bottom.
+       Without this, `100dvh` + body's padding-top from the banner
+       pushes the container below the fold and overflow:hidden
+       cuts the End / Reset / Close footer off. Reported 2026-08-15
+       on desktop landscape at ~600px height. */
+    height: calc(100dvh - var(--offline-banner-h, 0px));
+    max-height: calc(100dvh - var(--offline-banner-h, 0px));
     padding: max(0.4rem, env(safe-area-inset-top)) 0.5rem
              max(0.4rem, env(safe-area-inset-bottom)) 0.5rem;
     display: flex;

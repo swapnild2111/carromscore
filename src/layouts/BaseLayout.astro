@@ -80,14 +80,30 @@ const base = import.meta.env.BASE_URL;
       }
       /* Push page content down when the banner is visible so it
          doesn't overlap the hero / lobby header. Uses a body-level
-         data attribute the inline script sets. */
-      body[data-offline="true"] { padding-top: 2.2rem; }
+         data attribute the inline script sets. Also expose the
+         banner height as a CSS variable so full-viewport-height
+         children (like ScoreBoard's `.wrap` at 100dvh) can subtract
+         it from their own dimension and stay fully within the
+         visible area. Without this the score-board's 100dvh
+         container overflows below the fold when the banner is up
+         (reported 2026-08-15: /beta/score/ appeared blank on a
+         short-viewport desktop window while offline). */
+      body[data-offline="true"] {
+        padding-top: 2.2rem;
+        --offline-banner-h: 2.2rem;
+      }
+      body:not([data-offline]) {
+        --offline-banner-h: 0px;
+      }
       @media (max-width: 480px) {
         .offline-banner {
           font-size: 0.72rem;
           padding: 0.35rem 0.6rem;
         }
-        body[data-offline="true"] { padding-top: 2rem; }
+        body[data-offline="true"] {
+          padding-top: 2rem;
+          --offline-banner-h: 2rem;
+        }
       }
     </style>
   </head>
