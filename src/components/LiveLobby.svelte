@@ -37,6 +37,7 @@
   import { subscribeCurrentUserRole, type Role } from '../lib/roles';
   import { currentUser } from '../lib/auth';
   import { normalizeKey } from '../lib/tournaments';
+  import { subscribeConnectivity } from '../lib/connectivity';
 
   const base: string = import.meta.env.BASE_URL;
   const STALE_WINDOW_MS = 4 * 60 * 60 * 1000;
@@ -51,6 +52,14 @@
    */
   let reportsSelection = $state<string | null | undefined>(undefined);
   let liveLoading = $state(true);
+  /**
+   * Mirrors src/lib/connectivity.ts's canonical online signal.
+   * When false, we clear liveLoading immediately (Firebase's
+   * subscribeAllLive callback would otherwise never fire and the
+   * "Loading…" spinner would sit forever) and swap the empty-state
+   * copy to something offline-aware.
+   */
+  let online = $state(true);
   let historyLoading = $state(false);
   let historyLoaded = $state(false);
   let entries = $state<LobbyEntry[]>([]);
@@ -230,6 +239,19 @@
       unsub = fn;
     });
 
+    // Connectivity mirror. When offline, we can't get a callback
+    // from subscribeAllLive so `liveLoading` would stay true and
+    // the "Loading…" spinner would never clear. Force it off the
+    // moment we know we're offline; the empty-state block then
+    // shows an offline-aware message instead of a stuck spinner.
+    const unsubConn = subscribeConnectivity((state) => {
+      online = state.online;
+      if (!state.online) {
+        liveLoading = false;
+        historyLoading = false;
+      }
+    });
+
     // Identity store: needed for History tab to render player IDs as
     // canonical names. Cheap to subscribe here — the store lives in
     // memory and shares across all mounted components.
@@ -255,6 +277,7 @@
       unsub?.();
       unsubStore();
       unsubRole();
+      unsubConn();
       window.clearInterval(nowTick);
     };
   });
@@ -791,6 +814,11 @@
   {#if tab === 'live'}
     {#if liveLoading}
       <p class="state">Loading…</p>
+    {:else if !online && live.length === 0}
+      <div class="empty">
+        <p><strong>You're offline.</strong></p>
+        <p class="empty-sub">The lobby needs an internet connection to show what others are playing. Your own matches on this device still work — start a match and it'll sync when you're back online.</p>
+      </div>
     {:else if live.length === 0}
       <div class="empty">
         <p><strong>No live matches right now.</strong></p>

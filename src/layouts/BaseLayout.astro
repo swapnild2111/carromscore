@@ -137,9 +137,31 @@ const base = import.meta.env.BASE_URL;
           if (online) delete document.body.dataset.offline;
           else document.body.dataset.offline = 'true';
         };
-        apply(navigator.onLine !== false);
-        window.addEventListener('online', () => apply(true));
-        window.addEventListener('offline', () => apply(false));
+        // navigator.onLine is the primary signal — cheap, sync, no
+        // module dependency. Fires online/offline events on state
+        // change. But it can lie (WiFi with captive portal, DNS
+        // down) so we also subscribe to the connectivity store,
+        // which combines navigator.onLine with Firebase's
+        // .info/connected. If the connectivity module loads (it
+        // needs the Firebase SDK, which is fetched lazily), we
+        // upgrade to the combined signal.
+        const check = () => apply(navigator.onLine !== false);
+        check();
+        window.addEventListener('online', check);
+        window.addEventListener('offline', check);
+        // Re-check on tab return: some browsers suppress
+        // online/offline events for background tabs.
+        document.addEventListener('visibilitychange', check);
+        window.addEventListener('focus', check);
+        // Upgrade to combined signal once the connectivity module
+        // finishes lazy-importing. Silent-on-failure — if the
+        // module never loads (extreme first-visit-offline), we
+        // stay on navigator-only.
+        import('../lib/connectivity').then((mod) => {
+          if (mod && typeof mod.subscribeConnectivity === 'function') {
+            mod.subscribeConnectivity((state) => apply(state.online));
+          }
+        }).catch(() => { /* silent */ });
       })();
 
       if ('serviceWorker' in navigator) {
