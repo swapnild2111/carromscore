@@ -21,7 +21,10 @@
     deletePlayer,
     deletePlayers,
     mergePlayers,
+    rankMatches,
+    addAlias,
     type Player,
+    type PlayerMatch,
   } from '../lib/players';
   import AdminBulkBar from './AdminBulkBar.svelte';
 
@@ -38,9 +41,45 @@
   let banner = $state<{ kind: 'ok' | 'err'; message: string } | null>(null);
   /** Selected player IDs for bulk delete. Merge is one-at-a-time. */
   let selected = $state<Set<string>>(new Set());
-  /** Add-new-player dialog state. */
+  /**
+   * Add-players dialog state. Bulk-capable — the input is a textarea
+   * accepting comma-separated or newline-separated names. On Analyse
+   * (or explicit "next" from the parse screen) each candidate is
+   * ranked against the roster; anything with an existing exact or
+   * fuzzy hit becomes a conflict the admin has to resolve per row.
+   * Clean candidates create normally at commit time.
+   */
   let addingOpen = $state(false);
-  let addingName = $state('');
+  let addingInput = $state('');
+
+  /** One decision the admin has to make about a candidate name that
+   *  matches an existing player. */
+  type ConflictAction = 'create' | 'alias' | 'skip';
+  type Conflict = {
+    /** Umpire-typed candidate. Kept as typed for the alias write. */
+    typed: string;
+    /** Top-ranked existing match (exact or fuzzy). */
+    match: PlayerMatch;
+    /** Runner-up matches (max 2) so the admin can see alternatives. */
+    alternates: PlayerMatch[];
+    /** Chosen action; defaults to 'alias' for exact hits (safe merge)
+     *  and 'create' for fuzzy hits (safer to keep separate; user can
+     *  flip to alias if intended). */
+    action: ConflictAction;
+    /** If action === 'alias', which player id to attach the alias to.
+     *  Defaults to match.player.id but the admin can pick an alternate. */
+    aliasTargetId: string;
+  };
+  let conflicts = $state<Conflict[]>([]);
+  /** Candidates with no ranked match — safe to create as new records. */
+  let cleanCandidates = $state<string[]>([]);
+  /**
+   * Which "screen" of the dialog we're on:
+   *   'input'    — textarea + Analyse button
+   *   'resolve'  — one row per conflict + summary of clean creates
+   *   No conflicts → skip 'resolve' entirely; commit directly.
+   */
+  let addStep = $state<'input' | 'resolve'>('input');
 
   onMount(() => {
     void subscribePlayers();
@@ -184,33 +223,161 @@
 
   function openAdd() {
     addingOpen = true;
-    addingName = '';
+    addingInput = '';
+    conflicts = [];
+    cleanCandidates = [];
+    addStep = 'input';
   }
   function closeAdd() {
     addingOpen = false;
-    addingName = '';
+    addingInput = '';
+    conflicts = [];
+    cleanCandidates = [];
+    addStep = 'input';
   }
-  function saveAdd() {
-    const trimmed = addingName.trim();
-    if (!trimmed) return;
-    if (!isPlausibleName(trimmed)) {
-      flash('err', 'Name is too short or not plausible');
+
+  /**
+   * Split the textarea contents into candidate names. Accepts commas,
+   * newlines, or both as separators. Trims each entry, drops empties,
+   * dedupes within the batch (case-insensitive on the normalised form).
+   */
+  function parseCandidates(raw: string): string[] {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const part of raw.split(/[,\n]/)) {
+      const t = part.trim();
+      if (!t) continue;
+      const key = t.toLowerCase().replace(/\s+/g, ' ');
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(t);
+    }
+    return out;
+  }
+
+  /**
+   * Classify each parsed candidate against the roster:
+   *   - No ranked hit → cleanCandidates (create as new).
+   *   - Exact or fuzzy hit → conflicts (admin resolves per row).
+   *   - Prefix-only hit → also a conflict (surface for review; a
+   *     prefix match usually means the admin typed a shorter form
+   *     of an existing name).
+   *
+   * Silently drops isPlausibleName failures with a flash banner
+   * summarising how many were dropped.
+   */
+  function analyseAdd() {
+    const raw = addingInput;
+    const parsed = parseCandidates(raw);
+    if (parsed.length === 0) {
+      flash('err', 'No names to add');
       return;
     }
-    saving = true;
-    try {
-      // createPlayer is synchronous locally + fires the Firebase
-      // write in the background. Idempotent — if a normalised
-      // duplicate already exists we get that one back.
-      const p = createPlayer(trimmed);
-      saving = false;
-      flash('ok', `"${p.canonicalName}" added`);
-      closeAdd();
-    } catch (err) {
-      saving = false;
-      const msg = err instanceof Error ? err.message : String(err);
-      flash('err', msg || 'Add failed');
+    const roster = loadAll();
+    const nextConflicts: Conflict[] = [];
+    const nextClean: string[] = [];
+    let dropped = 0;
+    for (const typed of parsed) {
+      if (!isPlausibleName(typed)) {
+        dropped += 1;
+        continue;
+      }
+      const hits = rankMatches(roster, typed, 3);
+      if (hits.length === 0) {
+        nextClean.push(typed);
+        continue;
+      }
+      const top = hits[0];
+      // Default action: exact match → alias (safe merge — the
+      // umpire typed a name identical after normalisation to an
+      // existing player, so we should link, not duplicate). Fuzzy
+      // and prefix → create (safer to keep separate; admin flips
+      // to alias explicitly when they know it's the same person).
+      const defaultAction: ConflictAction =
+        top.rank === 'exact' ? 'alias' : 'create';
+      nextConflicts.push({
+        typed,
+        match: top,
+        alternates: hits.slice(1),
+        action: defaultAction,
+        aliasTargetId: top.player.id,
+      });
     }
+    conflicts = nextConflicts;
+    cleanCandidates = nextClean;
+    if (dropped > 0) {
+      flash(
+        'err',
+        `${dropped} name${dropped === 1 ? '' : 's'} skipped — too short or not plausible`,
+      );
+    }
+    // No conflicts to resolve → commit directly. Any dropped-invalid
+    // names already flashed; a clean-only batch just runs.
+    if (nextConflicts.length === 0) {
+      void commitAdd();
+      return;
+    }
+    addStep = 'resolve';
+  }
+
+  /**
+   * Apply the plan built by analyseAdd + any admin overrides on
+   * conflicts. Creates run first (cheap, local + fire-and-forget
+   * Firebase), then aliases (cheap same-record write). Skips do
+   * nothing. Errors on individual items don't halt the batch — the
+   * summary at the end reports counts.
+   */
+  async function commitAdd() {
+    saving = true;
+    let created = 0;
+    let aliased = 0;
+    let skipped = 0;
+    let failed = 0;
+    try {
+      // 1) Clean candidates → straight create.
+      for (const typed of cleanCandidates) {
+        try {
+          createPlayer(typed);
+          created += 1;
+        } catch {
+          failed += 1;
+        }
+      }
+      // 2) Resolved conflicts.
+      for (const c of conflicts) {
+        try {
+          if (c.action === 'skip') {
+            skipped += 1;
+            continue;
+          }
+          if (c.action === 'create') {
+            createPlayer(c.typed);
+            created += 1;
+            continue;
+          }
+          // action === 'alias'
+          const target = c.aliasTargetId;
+          if (!target) {
+            failed += 1;
+            continue;
+          }
+          const p = addAlias(target, c.typed);
+          if (p) aliased += 1;
+          else failed += 1;
+        } catch {
+          failed += 1;
+        }
+      }
+    } finally {
+      saving = false;
+    }
+    const parts: string[] = [];
+    if (created) parts.push(`${created} created`);
+    if (aliased) parts.push(`${aliased} aliased`);
+    if (skipped) parts.push(`${skipped} skipped`);
+    if (failed) parts.push(`${failed} failed`);
+    flash(failed ? 'err' : 'ok', parts.length ? parts.join(', ') : 'Nothing to do');
+    closeAdd();
   }
 </script>
 
@@ -235,7 +402,7 @@
       class="btn btn-primary"
       onclick={openAdd}
       disabled={saving}
-    >+ Add player</button>
+    >+ Add players</button>
   </div>
 
   <div class="controls">
@@ -385,11 +552,12 @@
   {#if addingOpen}
     <!--
       Add-player dialog. Free-text name; createPlayer's
-      isPlausibleName guard rejects single-char / clearly-garbage
-      inputs (2-char minimum with at least one letter). Duplicate-
-      by-normalized-name lookups are handled inside createPlayer so
-      the returned record may be pre-existing (fine — the "Added"
-      banner is honest either way; the roster stays deduplicated).
+      Bulk-add players. Textarea accepts comma-separated or newline-
+      separated names. On Analyse, each candidate is ranked against
+      the roster (see rankMatches in src/lib/players.ts); anything
+      with an exact or fuzzy match becomes a conflict the admin has
+      to resolve on the second screen. Clean candidates create
+      straight through. Skipped names never touch Firebase.
     -->
     <div
       class="dialog"
@@ -399,28 +567,119 @@
       onclick={(e) => { if (e.target === e.currentTarget) closeAdd(); }}
     >
       <div class="dialog-card dialog-card-wide">
-        <h3 id="add-player-title">Add player</h3>
-        <p>
-          Adds a player to the shared roster. Names are typically
-          created automatically when a match ends; use this only if
-          you need to pre-seed a player before their first game.
-        </p>
-        <input
-          type="text"
-          bind:value={addingName}
-          placeholder="Full name"
-          aria-label="Player name"
-          maxlength="60"
-        />
-        <div class="dialog-actions">
-          <button type="button" class="btn" onclick={closeAdd} disabled={saving}>Cancel</button>
-          <button
-            type="button"
-            class="btn btn-primary"
-            onclick={saveAdd}
-            disabled={saving || !addingName.trim()}
-          >{saving ? 'Adding…' : 'Add'}</button>
-        </div>
+        {#if addStep === 'input'}
+          <h3 id="add-player-title">Add players</h3>
+          <p>
+            Add one or many players to the shared roster. Enter names
+            <strong>comma-separated</strong> (<code>Ravi K, Priya M, Nirmal S</code>)
+            or one name per line — mix both if it's easier. On the next
+            screen you'll resolve any names that already exist in the
+            roster.
+          </p>
+          <textarea
+            class="add-textarea"
+            bind:value={addingInput}
+            placeholder={'Ravi K, Priya M, Nirmal S\nDee K'}
+            aria-label="Player names"
+            rows="5"
+          ></textarea>
+          <div class="dialog-actions">
+            <button type="button" class="btn" onclick={closeAdd} disabled={saving}>Cancel</button>
+            <button
+              type="button"
+              class="btn btn-primary"
+              onclick={analyseAdd}
+              disabled={saving || !addingInput.trim()}
+            >{saving ? 'Adding…' : 'Analyse'}</button>
+          </div>
+        {:else}
+          <h3 id="add-player-title">Resolve conflicts</h3>
+          <p>
+            {conflicts.length} name{conflicts.length === 1 ? '' : 's'}
+            match{conflicts.length === 1 ? 'es' : ''} an existing player.
+            Choose an action per row.
+            {#if cleanCandidates.length > 0}
+              <span class="muted-inline">
+                · {cleanCandidates.length} clean name{cleanCandidates.length === 1 ? '' : 's'} will create as new.
+              </span>
+            {/if}
+          </p>
+          <ul class="conflict-list">
+            {#each conflicts as c, i (c.typed + '|' + c.match.player.id)}
+              <li class="conflict-row">
+                <div class="conflict-hdr">
+                  <span class="conflict-typed">"{c.typed}"</span>
+                  <span class="conflict-rank chip">{c.match.rank}</span>
+                </div>
+                <div class="conflict-body">
+                  <p class="conflict-sub">
+                    Existing: <strong>{c.match.player.canonicalName}</strong>
+                    <code class="conflict-id">{c.match.player.id}</code>
+                  </p>
+                  {#if c.alternates.length > 0}
+                    <p class="conflict-alt">
+                      Also matches:
+                      {#each c.alternates as alt, ai (alt.player.id)}
+                        <span class="conflict-alt-item">
+                          {alt.player.canonicalName}
+                          <span class="chip">{alt.rank}</span>
+                        </span>{ai < c.alternates.length - 1 ? ', ' : ''}
+                      {/each}
+                    </p>
+                  {/if}
+                  <div class="conflict-actions">
+                    <label class="radio">
+                      <input
+                        type="radio"
+                        name={`conflict-${i}`}
+                        checked={c.action === 'create'}
+                        onchange={() => (conflicts[i].action = 'create')}
+                      />
+                      Create as new
+                    </label>
+                    <label class="radio">
+                      <input
+                        type="radio"
+                        name={`conflict-${i}`}
+                        checked={c.action === 'alias'}
+                        onchange={() => (conflicts[i].action = 'alias')}
+                      />
+                      Add as alias of
+                      <select
+                        class="conflict-target"
+                        bind:value={conflicts[i].aliasTargetId}
+                        disabled={c.action !== 'alias'}
+                      >
+                        <option value={c.match.player.id}>{c.match.player.canonicalName}</option>
+                        {#each c.alternates as alt (alt.player.id)}
+                          <option value={alt.player.id}>{alt.player.canonicalName}</option>
+                        {/each}
+                      </select>
+                    </label>
+                    <label class="radio">
+                      <input
+                        type="radio"
+                        name={`conflict-${i}`}
+                        checked={c.action === 'skip'}
+                        onchange={() => (conflicts[i].action = 'skip')}
+                      />
+                      Skip
+                    </label>
+                  </div>
+                </div>
+              </li>
+            {/each}
+          </ul>
+          <div class="dialog-actions">
+            <button type="button" class="btn" onclick={() => (addStep = 'input')} disabled={saving}>Back</button>
+            <button
+              type="button"
+              class="btn btn-primary"
+              onclick={commitAdd}
+              disabled={saving}
+            >{saving ? 'Applying…' : 'Apply'}</button>
+          </div>
+        {/if}
       </div>
     </div>
   {/if}
@@ -681,5 +940,126 @@
     gap: 0.5rem;
     justify-content: flex-end;
     margin-top: 0.5rem;
+  }
+
+  /* Bulk-add textarea. Same visual language as .dialog-card input[type=text];
+     multi-line so it fits comma + newline batches without a scroll bar. */
+  .add-textarea {
+    width: 100%;
+    box-sizing: border-box;
+    background: #0f0f0f;
+    color: var(--fg);
+    border: 1px solid #2a2a2a;
+    border-radius: 0.45rem;
+    padding: 0.5rem 0.65rem;
+    font: inherit;
+    font-size: 0.9rem;
+    resize: vertical;
+    min-height: 5.5rem;
+  }
+  .add-textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+
+  /* Muted inline hint used in the conflict-screen header. */
+  .muted-inline {
+    color: var(--muted);
+  }
+
+  /* Conflict list — one card per candidate that matched an existing
+     player. Small, dense, focused on the decision to make. */
+  .conflict-list {
+    list-style: none;
+    padding: 0;
+    margin: 0.5rem 0 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    /* Enough vertical space for ~5 conflicts before this list
+       itself scrolls inside the dialog card. */
+    max-height: 60vh;
+    overflow-y: auto;
+  }
+  .conflict-row {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 0.5rem;
+    padding: 0.55rem 0.7rem;
+  }
+  .conflict-hdr {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.35rem;
+  }
+  .conflict-typed {
+    color: var(--fg);
+    font-weight: 700;
+    font-size: 0.95rem;
+  }
+  .conflict-rank {
+    text-transform: uppercase;
+    font-size: 0.65rem;
+    letter-spacing: 0.06em;
+  }
+  .conflict-sub {
+    margin: 0 0 0.25rem;
+    color: var(--muted);
+    font-size: 0.85rem;
+  }
+  .conflict-sub strong {
+    color: var(--fg);
+    font-weight: 700;
+  }
+  .conflict-id {
+    background: rgba(255, 255, 255, 0.05);
+    padding: 0.05rem 0.35rem;
+    border-radius: 0.3rem;
+    font-size: 0.72rem;
+    margin-left: 0.35rem;
+  }
+  .conflict-alt {
+    margin: 0 0 0.35rem;
+    color: var(--muted);
+    font-size: 0.78rem;
+  }
+  .conflict-alt-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+  }
+  .conflict-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    margin-top: 0.35rem;
+  }
+  .conflict-actions .radio {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    color: var(--fg);
+    font-size: 0.85rem;
+    cursor: pointer;
+    /* Wrap "Add as alias of [dropdown]" nicely on narrow viewports. */
+    flex-wrap: wrap;
+  }
+  .conflict-actions input[type="radio"] {
+    accent-color: var(--accent);
+    cursor: pointer;
+  }
+  .conflict-target {
+    background: #0f0f0f;
+    color: var(--fg);
+    border: 1px solid #2a2a2a;
+    border-radius: 0.35rem;
+    padding: 0.2rem 0.4rem;
+    font: inherit;
+    font-size: 0.85rem;
+  }
+  .conflict-target:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 </style>
