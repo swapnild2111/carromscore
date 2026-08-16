@@ -28,7 +28,23 @@
     loadOrganisers,
     type Tournament,
   } from '../lib/tournaments';
+  import { subscribeCurrentUserRole, type Role } from '../lib/roles';
   import AdminBulkBar from './AdminBulkBar.svelte';
+
+  /**
+   * Current-user role gating: super sees every row's actions; a
+   * plain organiser sees actions only on rows they organise. Row
+   * actions are hidden — not disabled — to keep the row uncluttered.
+   * RTDB rules on /tournaments/$key are the actual enforcement; this
+   * gate avoids the surprise-permission-denied toast when the user
+   * couldn't have succeeded anyway.
+   */
+  let role = $state<Role | null>(null);
+  function canManageTournament(t: Tournament): boolean {
+    if (!role) return false;
+    if (role.isSuper) return true;
+    return role.organiserOf.has(t.key);
+  }
 
   let tick = $state(0);
   let renamingKey = $state<string | null>(null);
@@ -43,6 +59,11 @@
   let banner = $state<{ kind: 'ok' | 'err'; message: string } | null>(null);
   /** Selected tournament keys for bulk delete. */
   let selected = $state<Set<string>>(new Set());
+  /** Free-text filter over the tournament list. Matches on name
+   *  (case-insensitive) and the slugified key so an admin can find
+   *  a record by either the display name or the slug that appears
+   *  in the URL / on match records. */
+  let query = $state('');
   /** Add-new-tournament dialog state. Kept as a simple string + open
    *  flag; validation happens on save. */
   let addingOpen = $state(false);
@@ -51,12 +72,27 @@
   onMount(() => {
     void subscribeTournaments();
     const unsub = subscribeStore(() => (tick += 1));
-    return unsub;
+    const unsubRole = subscribeCurrentUserRole((r) => (role = r));
+    return () => {
+      unsub();
+      unsubRole();
+    };
   });
 
   const list = $derived(() => {
     void tick;
     return loadAll();
+  });
+
+  /** Search-filtered view of `list()`. Empty query = full list.
+   *  Matches name substring OR key substring, both lowercased. */
+  const filtered = $derived(() => {
+    const all = list();
+    const q = query.trim().toLowerCase();
+    if (!q) return all;
+    return all.filter(
+      (t) => t.name.toLowerCase().includes(q) || t.key.toLowerCase().includes(q),
+    );
   });
 
   function flash(kind: 'ok' | 'err', message: string) {
@@ -148,11 +184,14 @@
     selected = new Set(selected);
   }
   function toggleSelectAll() {
-    const all = list();
-    if (all.length > 0 && all.every((t) => selected.has(t.key))) {
+    // Select-all operates on the currently-visible AND manageable
+    // subset. Filter narrows the visible rows; canManageTournament
+    // narrows the actionable rows. Both must be true to include.
+    const manageable = filtered().filter((t) => canManageTournament(t));
+    if (manageable.length > 0 && manageable.every((t) => selected.has(t.key))) {
       selected = new Set();
     } else {
-      selected = new Set(all.map((t) => t.key));
+      selected = new Set(manageable.map((t) => t.key));
     }
   }
   function clearSelection() {
@@ -180,8 +219,12 @@
 
   const allSelected = $derived(() => {
     void tick;
-    const all = list();
-    return all.length > 0 && all.every((t) => selected.has(t.key));
+    // Consistent with toggleSelectAll: "all selected" means every
+    // currently-visible AND manageable row is in the selection.
+    // Under super this is every filtered row; under organiser it's
+    // only the filtered rows they organise.
+    const manageable = filtered().filter((t) => canManageTournament(t));
+    return manageable.length > 0 && manageable.every((t) => selected.has(t.key));
   });
 
   function openAdd() {
@@ -235,8 +278,20 @@
     >+ Add tournament</button>
   </div>
 
-  {#if list().length === 0}
-    <p class="empty">No tournaments yet.</p>
+  <div class="controls">
+    <input
+      type="search"
+      placeholder="Search tournaments…"
+      bind:value={query}
+      aria-label="Search tournaments"
+    />
+    <span class="count">{filtered().length}</span>
+  </div>
+
+  {#if filtered().length === 0}
+    <p class="empty">
+      {query ? 'No tournaments match that search.' : 'No tournaments yet.'}
+    </p>
   {:else}
     <div class="select-hdr">
       <label class="sel-all">
@@ -250,16 +305,22 @@
       </label>
     </div>
     <ul class="list">
-      {#each list() as t (t.key)}
+      {#each filtered() as t (t.key)}
         <li class="row" class:row-selected={selected.has(t.key)}>
-          <label class="row-check">
-            <input
-              type="checkbox"
-              checked={selected.has(t.key)}
-              onchange={() => toggleSel(t.key)}
-              aria-label={`Select ${t.name}`}
-            />
-          </label>
+          {#if canManageTournament(t)}
+            <label class="row-check">
+              <input
+                type="checkbox"
+                checked={selected.has(t.key)}
+                onchange={() => toggleSel(t.key)}
+                aria-label={`Select ${t.name}`}
+              />
+            </label>
+          {:else}
+            <!-- Placeholder keeps the row grid aligned when the checkbox
+                 is hidden for tournaments the organiser doesn't manage. -->
+            <span class="row-check row-check-spacer" aria-hidden="true"></span>
+          {/if}
           {#if renamingKey === t.key}
             <div class="row-edit">
               <input
@@ -289,15 +350,17 @@
                 <span class="chip">last active {new Date(t.lastActive).toLocaleDateString()}</span>
               </div>
             </div>
-            <div class="row-actions">
-              <button type="button" class="btn" onclick={() => startRename(t)}>Rename</button>
-              <button type="button" class="btn" onclick={() => startManage(t)}>Organisers</button>
-              <button
-                type="button"
-                class="btn btn-danger"
-                onclick={() => startDelete(t.key)}
-              >Delete</button>
-            </div>
+            {#if canManageTournament(t)}
+              <div class="row-actions">
+                <button type="button" class="btn" onclick={() => startRename(t)}>Rename</button>
+                <button type="button" class="btn" onclick={() => startManage(t)}>Organisers</button>
+                <button
+                  type="button"
+                  class="btn btn-danger"
+                  onclick={() => startDelete(t.key)}
+                >Delete</button>
+              </div>
+            {/if}
           {/if}
         </li>
       {/each}
@@ -448,6 +511,35 @@
     display: flex;
     justify-content: flex-end;
     padding: 0 0.25rem;
+  }
+
+  /* Search bar — same treatment as AdminPlayers / AdminHistoryCleanup. */
+  .controls {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    margin-top: 0.5rem;
+  }
+  .controls input {
+    flex: 1;
+    background: #0f0f0f;
+    color: var(--fg);
+    border: 1px solid #2a2a2a;
+    border-radius: 0.45rem;
+    padding: 0.5rem 0.65rem;
+    font: inherit;
+    font-size: 0.9rem;
+  }
+  .controls input:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .count {
+    color: var(--muted);
+    font-size: 0.8rem;
+    padding: 0.15rem 0.5rem;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 999px;
   }
 
   /* Bulk-select header + row checkbox, matching AdminLiveCleanup. */

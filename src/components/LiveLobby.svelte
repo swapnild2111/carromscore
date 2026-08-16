@@ -37,6 +37,9 @@
   import { subscribeCurrentUserRole, type Role } from '../lib/roles';
   import { currentUser } from '../lib/auth';
   import { normalizeKey } from '../lib/tournaments';
+  import { subscribeConnectivity } from '../lib/connectivity';
+  import { peekLive, SYNC_QUEUE_STORAGE_KEY } from '../lib/sync-queue';
+  import { loadResume } from '../lib/resume';
 
   const base: string = import.meta.env.BASE_URL;
   const STALE_WINDOW_MS = 4 * 60 * 60 * 1000;
@@ -51,9 +54,38 @@
    */
   let reportsSelection = $state<string | null | undefined>(undefined);
   let liveLoading = $state(true);
+  /**
+   * Mirrors src/lib/connectivity.ts's canonical online signal.
+   * When false, we clear liveLoading immediately (Firebase's
+   * subscribeAllLive callback would otherwise never fire and the
+   * "Loading…" spinner would sit forever) and swap the empty-state
+   * copy to something offline-aware.
+   */
+  let online = $state(true);
   let historyLoading = $state(false);
   let historyLoaded = $state(false);
   let entries = $state<LobbyEntry[]>([]);
+  /**
+   * Locally-synthesised lobby entries backed by the offline sync
+   * queue. When the umpire is scoring an offline match on device A
+   * and opens /live/ in another tab on the same device, they should
+   * see their own active match in the lobby before it flushes to
+   * Firebase. Populated from sync-queue's peekLive() + resume.ts's
+   * saved scoreUrl. Merged into `live` (below) alongside Firebase
+   * entries; marked with `_local: true` so the render can tag them
+   * with an OFFLINE chip and tap-through to the umpire's own
+   * score screen instead of the spectator popup.
+   *
+   * Kept in sync with the queue via a `storage` event listener
+   * that fires when any tab (including the scoring tab) writes to
+   * the queue's localStorage key. Same-origin only — the offline
+   * umpire is by definition on one device.
+   */
+  let localOfflineEntries = $state<LobbyEntry[]>([]);
+  /** Set of mids whose lobby entry is locally-synthesised (offline
+   *  queue), so card renderers can style them differently and the
+   *  tap handler can route them to /score/ instead of the popup. */
+  const localOfflineMids = $derived(new Set(localOfflineEntries.map((e) => e.mid)));
   let matches = $state<MatchRecord[]>([]);
   let now = $state(Date.now());
   let identityTick = $state(0);
@@ -230,6 +262,50 @@
       unsub = fn;
     });
 
+    // Connectivity mirror. When offline, we can't get a callback
+    // from subscribeAllLive so `liveLoading` would stay true and
+    // the "Loading…" spinner would never clear. Force it off the
+    // moment we know we're offline; the empty-state block then
+    // shows an offline-aware message instead of a stuck spinner.
+    const unsubConn = subscribeConnectivity((state) => {
+      online = state.online;
+      if (!state.online) {
+        liveLoading = false;
+        historyLoading = false;
+      }
+      // Any connectivity change may have triggered a queue flush
+      // (see BaseLayout's global handler). Refresh the local-offline
+      // entries in case the flush drained something.
+      refreshLocalOffline();
+    });
+
+    // Local offline entries — populated from sync-queue's peekLive()
+    // and refreshed on cross-tab storage events. See the field
+    // declaration above for the "why."
+    refreshLocalOffline();
+    const onStorage = (ev: StorageEvent) => {
+      // Re-read on writes to the sync queue, the resume pointer,
+      // OR any per-match state key (`carromscore:state:*`). The
+      // score state key changes on every tap on Tab A even before
+      // the offline enqueue fires, so it's a more reliable signal
+      // for "user did something." A null key means "clear all
+      // storage" — refresh in that case too.
+      if (
+        ev.key === null ||
+        ev.key === SYNC_QUEUE_STORAGE_KEY ||
+        ev.key === 'carromscore:resumeMid' ||
+        (typeof ev.key === 'string' && ev.key.startsWith('carromscore:state:'))
+      ) {
+        refreshLocalOffline();
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    // Poll fallback: `storage` events are the primary signal but
+    // some browser/SW combinations delay them or drop them
+    // entirely on the same origin. 1s poll picks up the state
+    // fast enough for a live-lobby feel without being wasteful.
+    const localOfflinePoll = window.setInterval(refreshLocalOffline, 1000);
+
     // Identity store: needed for History tab to render player IDs as
     // canonical names. Cheap to subscribe here — the store lives in
     // memory and shares across all mounted components.
@@ -255,9 +331,43 @@
       unsub?.();
       unsubStore();
       unsubRole();
+      unsubConn();
+      window.removeEventListener('storage', onStorage);
       window.clearInterval(nowTick);
+      window.clearInterval(localOfflinePoll);
     };
   });
+
+  /**
+   * Read the offline sync queue's `live` entries and synthesise
+   * LobbyEntry-shaped rows from them, so the /live/ lobby can
+   * show an active offline match to a same-device second tab.
+   *
+   * `enqueuedAt` becomes updatedAt so the entry sorts alongside
+   * Firebase entries and passes the STALE_WINDOW_MS filter.
+   * `matchId` stays undefined — this record isn't archived yet.
+   */
+  function refreshLocalOffline(): void {
+    if (typeof window === 'undefined') return;
+    let queued: ReturnType<typeof peekLive>;
+    try {
+      queued = peekLive();
+    } catch {
+      queued = [];
+    }
+    // Always reassign. An earlier version added a shallow same-shape
+    // guard on (mid, updatedAt) to skip no-op renders, but that
+    // made the lobby miss same-mid updates when the payload changed
+    // but the coalesce didn't bump updatedAt in a shape our guard
+    // could see. Cheap to always rebuild; the array is short
+    // (usually 1 entry) and Svelte's reactivity does its own diff.
+    localOfflineEntries = queued.map((q) => ({
+      mid: q.mid,
+      updatedAt: q.enqueuedAt,
+      meta: q.meta,
+      liveState: q.payload,
+    }));
+  }
 
   // Role reactive state + edit-modal open target.
   let role = $state<Role | null>(null);
@@ -443,6 +553,22 @@
   }
 
   function openEntry(entry: LobbyEntry) {
+    // Local offline entry: no Firebase record to subscribe the
+    // popup to. Instead, hop to the umpire's own /score/?... URL
+    // stored by resume.ts at match Start. Same-device only —
+    // scoreUrl points at localhost/production of THIS device.
+    if (localOfflineMids.has(entry.mid)) {
+      const rec = loadResume();
+      if (rec && rec.mid === entry.mid) {
+        window.location.href = rec.scoreUrl;
+        return;
+      }
+      // If the resume pointer is stale (e.g. multiple offline
+      // matches were queued and only the latest's scoreUrl is
+      // remembered), fall through to the popup — it'll show
+      // "no live match at this URL," which is at least a real
+      // signal instead of a silent no-op.
+    }
     openPopup = { source: 'live', mid: entry.mid };
     copiedKind = null;
   }
@@ -492,12 +618,20 @@
 
   // Live cards (ongoing matches). Filters out records that haven't
   // seen an update in 4h (leaked from a closed umpire tab).
-  const live = $derived(
-    entries
+  //
+  // Merges Firebase-backed entries with any locally-synthesised
+  // offline entries (from the sync queue). Firebase entries win on
+  // duplicate mids — once a live match syncs, the offline synthesis
+  // fades out on the next refreshLocalOffline() call. Offline entries
+  // don't have a matchResult so they always pass the ongoing filter.
+  const live = $derived.by(() => {
+    const firebaseMids = new Set(entries.map((e) => e.mid));
+    const offlineOnly = localOfflineEntries.filter((e) => !firebaseMids.has(e.mid));
+    return [...entries, ...offlineOnly]
       .filter((e) => !e.liveState.matchResult)
       .filter((e) => now - e.updatedAt < STALE_WINDOW_MS)
-      .sort((a, b) => b.updatedAt - a.updatedAt),
-  );
+      .sort((a, b) => b.updatedAt - a.updatedAt);
+  });
 
   // Tournament bucket label. Blank tag → "Default" bucket. Same
   // logic is applied on live entries + archived matches so cards
@@ -559,12 +693,23 @@
   function sideNameMatch(m: MatchRecord, side: 'a' | 'b'): string {
     void identityTick;
     if (m.mode === 'doubles') {
-      const p1 = playerName(side === 'a' ? m.playerAId : m.playerBId);
-      const p2 = playerName(side === 'a' ? m.playerA2Id : m.playerB2Id);
+      const p1 = playerName(
+        side === 'a' ? m.playerAId : m.playerBId,
+        side === 'a' ? m.aName : m.bName,
+      );
+      const p2 = playerName(
+        side === 'a' ? m.playerA2Id : m.playerB2Id,
+        side === 'a' ? m.a2Name : m.b2Name,
+      );
       return p1 && p2 ? `${p1} & ${p2}` : p1 || p2 || (side === 'a' ? 'Team A' : 'Team B');
     }
     if (m.mode === 'practice' && side === 'b') return '';
-    return playerName(side === 'a' ? m.playerAId : m.playerBId) || (side === 'a' ? 'Side A' : 'Side B');
+    return (
+      playerName(
+        side === 'a' ? m.playerAId : m.playerBId,
+        side === 'a' ? m.aName : m.bName,
+      ) || (side === 'a' ? 'Side A' : 'Side B')
+    );
   }
 
   function relTime(ts: number | undefined): string {
@@ -791,6 +936,11 @@
   {#if tab === 'live'}
     {#if liveLoading}
       <p class="state">Loading…</p>
+    {:else if !online && live.length === 0}
+      <div class="empty">
+        <p><strong>You're offline.</strong></p>
+        <p class="empty-sub">The lobby needs an internet connection to show what others are playing. Your own matches on this device still work — start a match and it'll sync when you're back online.</p>
+      </div>
     {:else if live.length === 0}
       <div class="empty">
         <p><strong>No live matches right now.</strong></p>
@@ -828,12 +978,23 @@
                     <span aria-hidden="true">🔗</span>
                   {/if}
                 </button>
-                <button type="button" class="card card-live" onclick={() => openEntry(e)}>
+                <button type="button" class="card card-live" class:card-offline={localOfflineMids.has(e.mid)} onclick={() => openEntry(e)}>
                   <div class="card-hdr">
-                    <span class="card-badge">
-                      <span class="dot" aria-hidden="true"></span>
-                      LIVE
-                    </span>
+                    {#if localOfflineMids.has(e.mid)}
+                      <!-- Offline-only entry synthesised from the
+                           sync queue. No Firebase record yet; this
+                           card is visible only on the umpire's own
+                           device (same-origin storage events). -->
+                      <span class="card-badge card-badge-offline">
+                        <span class="dot" aria-hidden="true"></span>
+                        OFFLINE
+                      </span>
+                    {:else}
+                      <span class="card-badge">
+                        <span class="dot" aria-hidden="true"></span>
+                        LIVE
+                      </span>
+                    {/if}
                     <span class="card-mode">{modeLabelLive(e)}</span>
                     <span class="card-meta">{relTime(e.updatedAt)}</span>
                   </div>
@@ -904,7 +1065,12 @@
     {/if}
   {:else if tab === 'history'}
     <!-- History tab -->
-    {#if historyLoading}
+    {#if !online && matches.length === 0}
+      <div class="empty">
+        <p><strong>You're offline.</strong></p>
+        <p class="empty-sub">Your match history lives on Firebase — connect to see past matches. Any match you record on this device meanwhile will sync automatically when you're back online.</p>
+      </div>
+    {:else if historyLoading}
       <p class="state">Loading…</p>
     {:else if matches.length === 0}
       <div class="empty">
@@ -1122,7 +1288,12 @@
       changes back so LiveLobby can mirror them into the URL query
       string via syncUrl().
     -->
-    {#if historyLoading}
+    {#if !online && matches.length === 0}
+      <div class="empty">
+        <p><strong>You're offline.</strong></p>
+        <p class="empty-sub">Reports aggregate match records from Firebase — connect to see totals, per-player stats, and per-tournament trends.</p>
+      </div>
+    {:else if historyLoading}
       <p class="state">Loading…</p>
     {:else}
       <ReportsTab
@@ -1158,7 +1329,7 @@
         aria-label="Support Carromscore on Ko-fi"
       >Support ❤</a>
       <span class="foot-sep" aria-hidden="true">·</span>
-      <SignInButton signedOutLabel="Admin" dropUp />
+      <SignInButton dropUp />
     </div>
     <p class="foot-meta">
       <a
@@ -1536,7 +1707,24 @@
   }
   .empty p { margin: 0.5rem 0; }
   .empty strong { color: var(--fg, #f5f5f5); font-weight: 700; }
-  .empty-sub { max-width: 22rem; margin-left: auto; margin-right: auto; }
+  /*
+   * `.empty .empty-sub` (nested selector) instead of the plain
+   * `.empty-sub` because `.empty p { margin: 0.5rem 0 }` above
+   * has specificity 0,2,1 (two classes + one element) whereas
+   * `.empty-sub` alone is 0,2,0. The `p` shorthand includes
+   * `margin-left: 0; margin-right: 0` which would override
+   * `.empty-sub`'s `margin-left: auto`, breaking the horizontal
+   * centering — the block would collapse against the left edge
+   * of the .empty container instead of centering under the
+   * "You're offline." header. Nesting bumps specificity to
+   * 0,3,0 so this rule wins cleanly.
+   */
+  .empty .empty-sub {
+    max-width: 22rem;
+    margin-left: auto;
+    margin-right: auto;
+    text-align: center;
+  }
 
   /* Tournament section wrapper. Each group gets a soft-bordered
      panel so multi-tournament lobbies read as distinct buckets,
@@ -1776,6 +1964,22 @@
     background: rgba(255, 255, 255, 0.05);
     border-color: rgba(255, 255, 255, 0.1);
   }
+  /* Locally-synthesised offline entry (from the sync queue). Amber
+     to hint "queued, not yet shared with anyone." No pulse — the
+     match hasn't reached Firebase and there's no external activity
+     to reflect. Card itself gets a matching amber border tone so
+     the whole card reads as "your device only" at a glance. */
+  .card-badge-offline {
+    color: var(--accent, #ffd54a);
+    background: rgba(255, 213, 74, 0.1);
+    border-color: rgba(255, 213, 74, 0.45);
+  }
+  .card-badge-offline .dot {
+    background: var(--accent, #ffd54a);
+    animation: none;
+  }
+  .card-offline { border-color: rgba(255, 213, 74, 0.35); }
+  .card-offline:hover { border-color: rgba(255, 213, 74, 0.6); }
   /* Distinct amber tint for finished Practice sessions so users can
      tell them apart from vs-match cards at a glance. */
   .card-badge-practice {

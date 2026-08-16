@@ -20,6 +20,8 @@
     type MatchRecord,
   } from '../lib/history';
   import { subscribePlayers, subscribeStore } from '../lib/players';
+  import { subscribeCurrentUserRole, type Role } from '../lib/roles';
+  import { currentUser } from '../lib/auth';
   import AdminBulkBar from './AdminBulkBar.svelte';
 
   let matches = $state<MatchRecord[]>([]);
@@ -30,12 +32,35 @@
   let selected = $state<Set<string>>(new Set());
   let confirmId = $state<string | null>(null);
   let identityTick = $state(0);
+  let role = $state<Role | null>(null);
+
+  /**
+   * Mirrors the /matches/{id} delete rule for UI gating: super, or
+   * organiser of the record's tournamentKey, or the record's creator.
+   * The rule also allows time-decayed deletes for old records; we do
+   * NOT surface that in the UI (it's a stranding-prevention fallback,
+   * not a common action) — organisers who need to delete a very old
+   * record another way can ping a super. Rows outside these categories
+   * still hide their Delete affordance; RTDB is the actual enforcement.
+   */
+  function canDeleteMatch(m: MatchRecord): boolean {
+    if (!role) return false;
+    if (role.isSuper) return true;
+    if (m.tournamentKey && role.organiserOf.has(m.tournamentKey)) return true;
+    const uid = currentUser()?.uid;
+    if (uid && m.createdBy === uid) return true;
+    return false;
+  }
 
   onMount(() => {
     void subscribePlayers();
     const unsubStore = subscribeStore(() => (identityTick += 1));
+    const unsubRole = subscribeCurrentUserRole((r) => (role = r));
     void reload();
-    return unsubStore;
+    return () => {
+      unsubStore();
+      unsubRole();
+    };
   });
 
   async function reload() {
@@ -52,12 +77,23 @@
   function sideNameMatch(m: MatchRecord, side: 'a' | 'b'): string {
     void identityTick;
     if (m.mode === 'doubles') {
-      const p1 = playerName(side === 'a' ? m.playerAId : m.playerBId);
-      const p2 = playerName(side === 'a' ? m.playerA2Id : m.playerB2Id);
+      const p1 = playerName(
+        side === 'a' ? m.playerAId : m.playerBId,
+        side === 'a' ? m.aName : m.bName,
+      );
+      const p2 = playerName(
+        side === 'a' ? m.playerA2Id : m.playerB2Id,
+        side === 'a' ? m.a2Name : m.b2Name,
+      );
       return p1 && p2 ? `${p1} & ${p2}` : p1 || p2 || (side === 'a' ? 'Team A' : 'Team B');
     }
     if (m.mode === 'practice' && side === 'b') return '';
-    return playerName(side === 'a' ? m.playerAId : m.playerBId) || (side === 'a' ? 'Side A' : 'Side B');
+    return (
+      playerName(
+        side === 'a' ? m.playerAId : m.playerBId,
+        side === 'a' ? m.aName : m.bName,
+      ) || (side === 'a' ? 'Side A' : 'Side B')
+    );
   }
 
   function fmtDate(ts: number | undefined): string {
@@ -83,7 +119,11 @@
     selected = new Set(selected);
   }
   function toggleSelectAll() {
-    const rows = filtered();
+    // Only rows the current user can delete are selectable via
+    // Select-all. Organisers see it as "select every match on my
+    // tournaments that's currently visible" — matches from other
+    // tournaments in the same list stay untouched.
+    const rows = filtered().filter((m) => canDeleteMatch(m));
     if (rows.length > 0 && rows.every((m) => selected.has(m.id))) {
       selected = new Set();
     } else {
@@ -126,7 +166,10 @@
 
   const allSelected = $derived(() => {
     void identityTick;
-    const rows = filtered();
+    // Matches allSelected on Tournaments: "all selected" from this
+    // user's manageable-rows perspective. Under super this is every
+    // filtered row; under organiser it's only their tournaments' rows.
+    const rows = filtered().filter((m) => canDeleteMatch(m));
     return rows.length > 0 && rows.every((m) => selected.has(m.id));
   });
 </script>
@@ -180,14 +223,18 @@
     <ul class="list">
       {#each filtered() as m (m.id)}
         <li class="row" class:row-selected={selected.has(m.id)}>
-          <label class="row-check">
-            <input
-              type="checkbox"
-              checked={selected.has(m.id)}
-              onchange={() => toggleSel(m.id)}
-              aria-label="Select match"
-            />
-          </label>
+          {#if canDeleteMatch(m)}
+            <label class="row-check">
+              <input
+                type="checkbox"
+                checked={selected.has(m.id)}
+                onchange={() => toggleSel(m.id)}
+                aria-label="Select match"
+              />
+            </label>
+          {:else}
+            <span class="row-check row-check-spacer" aria-hidden="true"></span>
+          {/if}
           <div class="row-name">
             <div class="row-title">
               <span class="chip chip-mode">{m.mode}</span>
@@ -228,11 +275,13 @@
               {/if}
             </div>
           </div>
-          <button
-            type="button"
-            class="btn btn-danger"
-            onclick={() => (confirmId = m.id)}
-          >Delete</button>
+          {#if canDeleteMatch(m)}
+            <button
+              type="button"
+              class="btn btn-danger"
+              onclick={() => (confirmId = m.id)}
+            >Delete</button>
+          {/if}
         </li>
       {/each}
     </ul>

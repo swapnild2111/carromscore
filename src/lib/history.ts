@@ -25,8 +25,6 @@
  * mirror will be added in the "keep on device only" toggle work later.
  */
 import {
-  createPlayer,
-  ensurePlayerInFirebase,
   loadAll,
   type Player,
 } from './players';
@@ -107,24 +105,25 @@ export type MatchResultInput = {
 };
 
 /**
- * Resolve a typed name into a Firebase player id. If `resolvedId` is
- * already known from Setup, use it. Otherwise call createPlayer to
- * either find an existing local match or create a fresh record.
- * Returns null if the name is empty (used for absent doubles partners).
+ * Resolve a typed name into a Firebase player id, if one was already
+ * chosen during match Setup (via the picker's exact-match / suggest
+ * flow). If no `resolvedId` was captured at Setup, this returns
+ * `null` — the umpire's raw typed name is preserved on the match
+ * record via the aName/bName fields (see B1), and the match archives
+ * without a /players/{id} link.
+ *
+ * The prior behaviour was to call `createPlayer(name)` here as a
+ * fallback, which auto-materialised a new /players/{id} entry for
+ * every never-seen-before name typed at End. That created a long
+ * tail of near-duplicate records (typo variants, casing differences,
+ * inconsistent initials) that admins then had to merge by hand.
+ * From B2 forward, only the admin panel creates player records;
+ * matches with unresolved names archive under the raw string.
  */
 function resolvePlayerId(name: string, resolvedId: string | null | undefined): string | null {
   const n = (name ?? '').trim();
   if (!n) return null;
-  if (resolvedId) return resolvedId;
-  try {
-    const p = createPlayer(n);
-    return p.id;
-  } catch {
-    // isPlausibleName rejected — very short or clearly garbage.
-    // We still record the match, but with an empty playerId for this
-    // side. The typed string lives on in the notes field.
-    return null;
-  }
+  return resolvedId ?? null;
 }
 
 /**
@@ -173,16 +172,25 @@ export async function finishMatch(
     ? null
     : resolvePlayerId(identity.b2Name ?? '', identity.b2ResolvedId);
 
-  // If any resolved id points to a seed-only player (bundled Wikipedia
-  // entry never materialised to Firebase), materialise now — otherwise
-  // future History page reads would see /matches/{id}.playerAId pointing
-  // at a /players/{id} that RTDB doesn't know about, and the display
-  // would fall back to rendering the raw slug.
-  await Promise.all(
-    [playerAId, playerA2Id, playerBId, playerB2Id]
-      .filter((id): id is string => !!id)
-      .map((id) => ensurePlayerInFirebase(id)),
-  );
+  // Seed-only player materialisation used to run here (bundled
+  // Wikipedia entries that never touched Firebase). Retired with B2:
+  // the picker at Setup is now the only path to a Firebase-backed
+  // player id on a match, and the picker already resolves through
+  // the identity store's canonical entries — anything reaching
+  // finishMatch with a resolvedId is already known to Firebase.
+  // ensurePlayerInFirebase in src/lib/players.ts is now dead code;
+  // safe to leave until a later cleanup pass.
+
+  // Preserve raw umpire-typed names on the record. Written alongside
+  // the resolved ids so any downstream reader has an honest display
+  // fallback — critical after B2 removes the id-auto-create at End
+  // (records will start carrying names without ids), and useful for
+  // legibility even when both are present. 80-char cap matches the
+  // RTDB validator.
+  const rawAName = (identity.aName ?? '').trim().slice(0, 80);
+  const rawA2Name = (identity.a2Name ?? '').trim().slice(0, 80);
+  const rawBName = (identity.bName ?? '').trim().slice(0, 80);
+  const rawB2Name = (identity.b2Name ?? '').trim().slice(0, 80);
 
   const record = {
     mode: result.mode,
@@ -190,6 +198,10 @@ export async function finishMatch(
     ...(playerA2Id ? { playerA2Id } : {}),
     ...(playerBId ? { playerBId } : {}),
     ...(playerB2Id ? { playerB2Id } : {}),
+    ...(rawAName ? { aName: rawAName } : {}),
+    ...(rawA2Name ? { a2Name: rawA2Name } : {}),
+    ...(rawBName ? { bName: rawBName } : {}),
+    ...(rawB2Name ? { b2Name: rawB2Name } : {}),
     notes: {
       a: (result.notes.a ?? '').slice(0, 40),
       b: (result.notes.b ?? '').slice(0, 40),
@@ -260,6 +272,20 @@ export type MatchRecord = {
   playerA2Id?: string;
   playerBId?: string;
   playerB2Id?: string;
+  /**
+   * Umpire-typed raw names captured at End Match time. Written
+   * alongside the ids so any downstream reader can render "the
+   * name the umpire actually typed" even if the /players/{id}
+   * store is stale or missing (e.g. player deleted, id never
+   * created because auto-create was off — see finishMatch). The
+   * id, when present, is still the authoritative link for
+   * leaderboards and cross-name lookups; these fields are the
+   * display fallback. Truncated to 80 chars per RTDB rule.
+   */
+  aName?: string;
+  a2Name?: string;
+  bName?: string;
+  b2Name?: string;
   notes?: { a?: string; b?: string };
   cfg?: {
     bestOf?: number;
@@ -716,11 +742,38 @@ export async function deleteMatches(matchIds: string[]): Promise<BulkOutcome> {
  * the "player record exists in Firebase but our subscription hasn't
  * hydrated yet" case.
  */
-export function playerName(id: string | undefined | null): string {
-  if (!id) return '';
+/**
+ * Resolve a player id to a display name.
+ *
+ * Resolution order:
+ *   1. `id` → matching `/players/{id}` in the local store's
+ *      canonical name (authoritative when the store has the record).
+ *   2. `id` → prettified slug (best-effort fallback if the store
+ *      hasn't hydrated yet).
+ *   3. `fallbackName` (the raw umpire-typed name from the match
+ *      record) if id is absent or slug-only-prettify would look
+ *      worse than the actual typed string. Used by match-record
+ *      readers where the id may be missing entirely (B2 soft-archive:
+ *      matches created without id-auto-create).
+ *   4. Empty string.
+ *
+ * Callers that hold the match record should pass `record.aName`,
+ * `record.bName`, etc. as `fallbackName`. Callers that don't have
+ * a record (e.g. leaderboards keying purely on id) omit it.
+ */
+export function playerName(
+  id: string | undefined | null,
+  fallbackName?: string | undefined | null,
+): string {
+  const fb = (fallbackName ?? '').trim();
+  if (!id) return fb;
   const all: readonly Player[] = loadAll();
   const p = all.find((x) => x.id === id);
   if (p) return p.canonicalName;
+  // Id points at a player the store doesn't know. Prefer the raw
+  // fallback name when we have one — a typed "Ravi K" reads better
+  // than a slug-prettified "Ravi K X7f2".
+  if (fb) return fb;
   return prettifySlug(id);
 }
 

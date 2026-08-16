@@ -22,9 +22,11 @@
 board, for organisers running club nights and tournaments, and for
 anyone streaming to YouTube or Facebook.
 
-Runs on your phone, tablet, laptop, or projector. Casual scoring stays
-anonymous — no accounts required. Sign in only if you want to run a
-tournament as an organiser. Same code on every device.
+Runs on your phone, tablet, laptop, or projector. **Works offline** —
+no internet? Score anyway; syncs when you're back online. Casual
+scoring stays anonymous — no accounts required. Sign in only if you
+want to edit your own matches or run a tournament as an organiser.
+Same code on every device.
 
 <p align="center">
   <img src="docs/screenshots/04-score-midset.png" alt="Carromscore mid-match: cyan and coral player pills, big 7-segment digits, gold BREAK chip" width="800" />
@@ -55,6 +57,11 @@ That's it. No account. No download from an app store.
 - 🏓 **[Practice mode](./docs/features/practice-mode.md)** — solo drill
   format. Track missed shots per board, get a full recap at the end.
   Lower total = better session. Broadcasts to Live like versus matches.
+- 🌐 **[Offline-first](./docs/features/offline-mode.md)** — no internet?
+  Score anyway. Start a match, play all boards, End it. Queued locally
+  on your device; syncs to the shared server the moment the network
+  returns. Amber banner + grey lobby chip make the state obvious at a
+  glance. Works on trains, in dead-WiFi halls, on patchy data.
 - 🏷️ **Tournament tag** — tag a match with an event name and every
   match sharing that tag groups together in the lobby. Auto-suggests
   from your prior tags. Tagged versus matches keep for a year;
@@ -78,16 +85,20 @@ That's it. No account. No download from an app store.
   ends with sets AND points level, End opens a chooser: play one
   deciding board to break the tie, or commit as a draw. Different
   regions decide ties differently; the umpire picks.
-- 🛠️ **Admin panel for organisers** — signed-in super-admins get a
-  full `/admin/` surface (Players, Tournaments, Live matches with
-  All/Stuck filter, History cleanup, Audit log). Tournament organisers
-  get inline ✎ edit affordances on their event's matches. Signed-in
-  casual users can self-delete their own recorded matches.
+- 🛠️ **Admin panel for organisers and super-admins** — signed-in
+  organisers get their own `/admin/` surface with Players,
+  Tournaments, Live matches, and History cleanup — full control over
+  the events they organise, no super-admin needed for routine work.
+  Super-admins get all that plus Roles and Audit log.
+  **Bulk-add players** with per-conflict merge / create-new / skip
+  when names overlap. Fixed-height scrollable lists so long rosters
+  and histories don't push the tab bar off-screen. Signed-in casual
+  users can self-edit and self-delete their own recorded matches.
 - 🔗 **[Share URL](./docs/features/share-url.md)** — one-tap copy of
   spectator + OBS overlay URLs from the lobby's match sheet.
 
-Everything else — landscape lock, wake lock, offline play, mid-match
-refresh restoration — just works.
+Everything else — landscape lock, wake lock, mid-match refresh
+restoration, help tooltips on the setup form — just works.
 
 ## How to use it
 
@@ -142,17 +153,30 @@ Full guide: [Broadcast overlay](./docs/features/broadcast-overlay.md).
 
 ## Running a tournament
 
-Sign in with Google via the **Admin** link in the home footer. If
-you're already an authorised organiser, matches tagged to your
-tournament(s) show a ✎ pencil in the lobby History tab — tap to fix
-scores, correct board-log entries, or delete a bad match. To become
-an organiser, share your Firebase UID with a super-admin (visible in
-the "not authorised" dialog on first sign-in) and they'll assign you
-to your tournament.
+Sign in with Google via the **Sign in** link in any footer. Once
+you're set up as an organiser for a tournament, the account menu
+gets an **Open admin panel ⇗** link:
 
-The super-admin (Carromscore's maintainer) has a full `/admin/`
-surface with Roles, Players, Tournaments, Live cleanup, History
-cleanup, and an audit log covering every administrative write. See
+- **Players** — bulk-add rosters (comma-separated or one per line),
+  resolve name conflicts by merging aliases or keeping separate,
+  rename, or remove.
+- **Tournaments** — create, rename, delete, and manage the list of
+  co-organisers for events you organise. Search filters the list.
+- **Live matches** — see every ongoing broadcast, delete
+  yours or your tournament's if it went sideways.
+- **History cleanup** — same treatment for archived matches.
+
+Organisers can also fix or delete any match tagged to their events
+directly from the lobby History tab — a ✎ pencil appears on cards
+they can edit.
+
+To become an organiser, share your Firebase UID with the super-admin
+(visible in the "not authorised" dialog on first sign-in) and they'll
+assign you.
+
+The super-admin (Carromscore's maintainer) has all of the above plus
+Roles (grant / revoke organiser status by email) and an audit log
+covering every administrative write. See
 [docs/admin.md](./docs/admin.md) for the maintainer guide and
 [docs/admin-verification.md](./docs/admin-verification.md) for the
 E2E verification checklist.
@@ -168,25 +192,40 @@ Each entry links to its Wikipedia source — see
   — content licensed CC-BY-SA. Only player names and article URLs are
   used.
 
-Beyond the seed, every name you type at match setup is written to a
-shared Firebase-backed player roster so a second match with the same
-person picks the right identity. The typed name creates a Player
-record on match end (never on typing, so setup-time typos don't
-pollute the roster).
+Beyond the seed, umpires pick from the shared player roster during
+match setup — the auto-complete suggests names as you type, and
+tapping a suggestion links the match to that canonical player.
+Casual matches with unrecognised names archive under the raw name
+without polluting the roster; only the admin panel creates canonical
+`/players/` records (single or bulk-add with merge-on-conflict), so
+the shared roster stays clean.
 
 ## Supporting the project
 
-Carromscore is a hobby project. It will always stay free — no ads,
-no premium tier, no data sold. If you'd like to help cover the domain
-and hosting costs (or just say thanks), two options:
+Carromscore is a hobby project I build in evenings and weekends.
+**It's free, it's ad-free, and it always will be** — no premium tier,
+no data sold, no login walls for casual use.
+
+Running it isn't free for me though: domain, Firebase hosting for the
+live-broadcast and scoreboard-sync features, the occasional Android
+signing cert renewal. Right now it's out of my own pocket, which is
+fine, but a sponsorship or one-off donation makes it sustainable —
+and lets me ship features tournament organisers ask for instead of
+saying "sorry, no budget."
+
+If Carromscore is useful to you or your club, please consider
+supporting:
 
 - **[Support on Ko-fi ❤](https://ko-fi.com/carromscore)** — card,
   PayPal, Apple Pay, or Google Pay. One-time or monthly.
 - **[Sponsor on GitHub ❤](https://github.com/sponsors/swapnild2111)**
-  — repo-native, card checkout.
+  — monthly tiers or one-off. Repo-native card checkout, no PayPal
+  hoops.
 
-Both go directly to the maintainer's account. Nothing in the app is
-gated behind money.
+Any amount helps — even $1/mo tells me it's used and worth keeping
+alive. Both routes go directly to me; nothing is gated behind money.
+Sponsors' names go into the release notes and the RELEASE_NOTES
+supporters list (opt-out available).
 
 ## Developing Carromscore
 

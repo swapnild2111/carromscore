@@ -82,13 +82,21 @@
    */
   function computeSideName(side: 'a' | 'b'): string {
     if (record.mode === 'doubles') {
-      const p1 = playerName(side === 'a' ? record.playerAId : record.playerBId);
-      const p2 = playerName(side === 'a' ? record.playerA2Id : record.playerB2Id);
+      const p1 = playerName(
+        side === 'a' ? record.playerAId : record.playerBId,
+        side === 'a' ? record.aName : record.bName,
+      );
+      const p2 = playerName(
+        side === 'a' ? record.playerA2Id : record.playerB2Id,
+        side === 'a' ? record.a2Name : record.b2Name,
+      );
       return p1 && p2 ? `${p1} & ${p2}` : p1 || p2 || (side === 'a' ? 'Team A' : 'Team B');
     }
     return (
-      playerName(side === 'a' ? record.playerAId : record.playerBId) ||
-      (side === 'a' ? 'Side A' : 'Side B')
+      playerName(
+        side === 'a' ? record.playerAId : record.playerBId,
+        side === 'a' ? record.aName : record.bName,
+      ) || (side === 'a' ? 'Side A' : 'Side B')
     );
   }
   const nameA = computeSideName('a');

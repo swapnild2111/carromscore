@@ -1,14 +1,22 @@
 <script lang="ts">
   /**
-   * /admin/ shell. Super-only page — anonymous or non-super users
-   * see an "Access denied" screen with a Sign-in / Sign-out button
-   * as appropriate. Super-admins see the tab bar and can switch
-   * between Players, Tournaments, Live matches, and Audit.
+   * /admin/ shell. Two role bands can enter:
    *
-   * Client-side gating here is UX only — the RTDB rules are what
-   * actually enforce super-only writes. Every helper this page
-   * calls goes through the update/delete rule branches that check
-   * `root.child('adminRoles').child(auth.uid).val() == 'super'`.
+   *   - Super-admin — sees every tab (Roles, Players, Tournaments,
+   *     Live, History, Audit).
+   *   - Organiser (any /tournaments/{key}/organisers/{uid} = true) —
+   *     sees Players, Tournaments, Live, History. Roles and Audit
+   *     are super-only.
+   *
+   * Anyone else (anonymous, or signed-in with no role) sees an
+   * "access denied" gate with their UID for the super-admin to grant.
+   *
+   * Client-side gating here is UX only — the RTDB rules on each
+   * write path are the actual enforcement. Every helper this page
+   * calls is either super-only (Roles, Audit) or gated per-record
+   * on tournament organiser membership (Live delete, History delete,
+   * Match edit), or unauthorised (organisers cannot delete /players/
+   * or /tournaments/ that aren't theirs).
    */
   import { onMount } from 'svelte';
   import { subscribeAuth, type AuthUser } from '../lib/auth';
@@ -38,6 +46,26 @@
   // for a super-admin during the ~200ms Firebase auth rehydrate.
   let roleLoaded = $state(false);
 
+  /**
+   * True when the signed-in user has ANY admin-plane access —
+   * super-admin, or organiser of at least one tournament. The gate
+   * uses this to decide whether to render the tab bar at all.
+   * Individual tabs then check `role.isSuper` for super-only tabs.
+   */
+  const hasAdminAccess = $derived(!!(role && (role.isSuper || role.organiserOf.size > 0)));
+
+  /**
+   * Which tabs to render. Super-admin gets everything; organisers
+   * get Players / Tournaments / Live / History but NOT Roles or
+   * Audit — those are super-only surfaces (identity grants and
+   * append-only audit trail).
+   */
+  const visibleTabs = $derived<Tab[]>(
+    role?.isSuper
+      ? ['roles', 'players', 'tournaments', 'live', 'history', 'audit']
+      : ['players', 'tournaments', 'live', 'history'],
+  );
+
   onMount(() => {
     const unsubAuth = subscribeAuth((u) => {
       user = u;
@@ -54,6 +82,40 @@
       unsubAuth();
       unsubRole();
     };
+  });
+
+  /**
+   * When the role resolves, land on the sensible default tab for
+   * that role. Super-admins see Roles first (identity/access is the
+   * most-frequent admin task). Organisers see Tournaments — the
+   * likely reason they signed in was to manage their event.
+   *
+   * Fired at most once per session — `subscribeCurrentUserRole`
+   * emits an EMPTY placeholder role immediately on subscribe (so
+   * subscribers don't stall), then streams the real role afterwards
+   * from /adminRoles and per-tournament organisers reads. Auto-
+   * landing on the placeholder would misroute super-admins to the
+   * organiser default; landing only once, after either the super
+   * flag is true OR the organiser set has some entry, avoids the
+   * placeholder race.
+   *
+   * Also fires if a role change makes the current tab invalid
+   * (e.g. super revocation while sitting on the Audit tab).
+   */
+  let landed = $state(false);
+  $effect(() => {
+    if (!roleLoaded || !role) return;
+    const hasResolvedRole = role.isSuper || role.organiserOf.size > 0;
+    if (!landed && hasResolvedRole) {
+      tab = role.isSuper ? 'roles' : 'tournaments';
+      landed = true;
+      return;
+    }
+    // Post-landing safety: if the tab becomes invalid because role
+    // changed (super revoked, organiser removed), fall back.
+    if (landed && !visibleTabs.includes(tab)) {
+      tab = role.isSuper ? 'roles' : 'tournaments';
+    }
   });
 </script>
 
@@ -82,20 +144,21 @@
     <div class="gate">
       <p class="gate-lead">Loading your role…</p>
     </div>
-  {:else if !role?.isSuper}
+  {:else if !hasAdminAccess}
     <!--
-      Signed in but not super. Organisers get their affordances
-      inline in the lobby (pencil on their tournament's cards) —
-      the /admin/ page itself is super-only for now (Phase 4).
-      Show a friendly note explaining that, plus their UID so they
-      can share it with the super-admin if they need broader access.
+      Signed in but no admin-plane access (not super, not organiser
+      of any tournament). Show their UID so they can share it with a
+      super-admin who'll grant them a role. Fall-through affordance:
+      any signed-in user can still edit their OWN matches via the
+      pencil in the lobby History tab — that permission comes from
+      /matches/$id createdBy, not from an admin role.
     -->
     <div class="gate">
-      <p class="gate-lead">You're signed in — but this page is super-admin only.</p>
+      <p class="gate-lead">You're signed in — but you don't have admin access yet.</p>
       <p class="gate-sub">
-        If you're a tournament organiser, edit your event's matches
-        from the History tab in the <a href={`${base}live/`}>Live lobby</a>
-        — a ✎ pencil appears on cards you can edit.
+        Ask a super-admin to add you as an organiser for your tournament,
+        or if you just want to fix your own matches, use the ✎ pencil in
+        the <a href={`${base}live/`}>Live lobby</a>'s History tab.
       </p>
       {#if user.uid}
         <p class="gate-uid" title="Your Firebase UID">
@@ -105,76 +168,92 @@
     </div>
   {:else}
     <!--
-      Super-admin view: full tab bar.
-      Order: identity/access first (Roles), then curated data
-      (Players, Tournaments), then cleanup (Live, History), then
-      the audit trail. Rationale: an admin arriving here usually
-      wants to grant or revoke access first; data curation and
-      cleanup are less-frequent operations.
+      Admin view: tab bar filtered by role.
+      Super-admin: all six tabs. Order is identity/access first
+      (Roles), then curated data (Players, Tournaments), then
+      cleanup (Live, History), then the audit trail.
+      Organiser: four tabs (Players, Tournaments, Live, History) —
+      Roles and Audit are super-only surfaces (identity grants + the
+      append-only audit trail).
+
+      $effect above lands the user on the sensible default tab for
+      their role (Roles for super, Tournaments for organiser).
     -->
     <div class="tabs" role="tablist" aria-label="Admin sections">
-      <button
-        type="button"
-        role="tab"
-        class="tab"
-        class:tab-active={tab === 'roles'}
-        aria-selected={tab === 'roles'}
-        onclick={() => (tab = 'roles')}
-      >Roles</button>
-      <button
-        type="button"
-        role="tab"
-        class="tab"
-        class:tab-active={tab === 'players'}
-        aria-selected={tab === 'players'}
-        onclick={() => (tab = 'players')}
-      >Players</button>
-      <button
-        type="button"
-        role="tab"
-        class="tab"
-        class:tab-active={tab === 'tournaments'}
-        aria-selected={tab === 'tournaments'}
-        onclick={() => (tab = 'tournaments')}
-      >Tournaments</button>
-      <button
-        type="button"
-        role="tab"
-        class="tab"
-        class:tab-active={tab === 'live'}
-        aria-selected={tab === 'live'}
-        onclick={() => (tab = 'live')}
-      >Live matches</button>
-      <button
-        type="button"
-        role="tab"
-        class="tab"
-        class:tab-active={tab === 'history'}
-        aria-selected={tab === 'history'}
-        onclick={() => (tab = 'history')}
-      >History cleanup</button>
-      <button
-        type="button"
-        role="tab"
-        class="tab"
-        class:tab-active={tab === 'audit'}
-        aria-selected={tab === 'audit'}
-        onclick={() => (tab = 'audit')}
-      >Audit log</button>
+      {#if visibleTabs.includes('roles')}
+        <button
+          type="button"
+          role="tab"
+          class="tab"
+          class:tab-active={tab === 'roles'}
+          aria-selected={tab === 'roles'}
+          onclick={() => (tab = 'roles')}
+        >Roles</button>
+      {/if}
+      {#if visibleTabs.includes('players')}
+        <button
+          type="button"
+          role="tab"
+          class="tab"
+          class:tab-active={tab === 'players'}
+          aria-selected={tab === 'players'}
+          onclick={() => (tab = 'players')}
+        >Players</button>
+      {/if}
+      {#if visibleTabs.includes('tournaments')}
+        <button
+          type="button"
+          role="tab"
+          class="tab"
+          class:tab-active={tab === 'tournaments'}
+          aria-selected={tab === 'tournaments'}
+          onclick={() => (tab = 'tournaments')}
+        >Tournaments</button>
+      {/if}
+      {#if visibleTabs.includes('live')}
+        <button
+          type="button"
+          role="tab"
+          class="tab"
+          class:tab-active={tab === 'live'}
+          aria-selected={tab === 'live'}
+          onclick={() => (tab = 'live')}
+        >Live matches</button>
+      {/if}
+      {#if visibleTabs.includes('history')}
+        <button
+          type="button"
+          role="tab"
+          class="tab"
+          class:tab-active={tab === 'history'}
+          aria-selected={tab === 'history'}
+          onclick={() => (tab = 'history')}
+        >History cleanup</button>
+      {/if}
+      {#if visibleTabs.includes('audit')}
+        <button
+          type="button"
+          role="tab"
+          class="tab"
+          class:tab-active={tab === 'audit'}
+          aria-selected={tab === 'audit'}
+          onclick={() => (tab = 'audit')}
+        >Audit log</button>
+      {/if}
     </div>
 
     <div class="panel" role="tabpanel">
-      {#if tab === 'players'}
+      {#if tab === 'players' && visibleTabs.includes('players')}
         <AdminPlayers />
-      {:else if tab === 'tournaments'}
+      {:else if tab === 'tournaments' && visibleTabs.includes('tournaments')}
         <AdminTournaments />
-      {:else if tab === 'live'}
+      {:else if tab === 'live' && visibleTabs.includes('live')}
         <AdminLiveCleanup />
-      {:else if tab === 'history'}
+      {:else if tab === 'history' && visibleTabs.includes('history')}
         <AdminHistoryCleanup />
-      {:else if tab === 'roles'}
+      {:else if tab === 'roles' && visibleTabs.includes('roles')}
         <AdminRoles />
-      {:else if tab === 'audit'}
+      {:else if tab === 'audit' && visibleTabs.includes('audit')}
         <AdminAuditLog />
       {/if}
     </div>
@@ -207,7 +286,7 @@
         aria-label="Support Carromscore on Ko-fi"
       >Support ❤</a>
       <span class="foot-sep" aria-hidden="true">·</span>
-      <SignInButton signedOutLabel="Admin" dropUp />
+      <SignInButton dropUp />
     </div>
     <p class="foot-meta">
       <a
@@ -224,10 +303,27 @@
 </main>
 
 <style>
+  /* Flex column with an EXPLICIT height (not min-height) so
+     .panel > .list can scroll internally instead of pushing the
+     whole page taller. `html, body` in BaseLayout use `min-height:
+     100dvh` which allows body to grow past the viewport when child
+     content is large — a fine default for page-flow surfaces (home,
+     score, lobby) but wrong for admin, where we want the tab bar
+     and toolbar pinned while the list scrolls.
+
+     Height derives from the viewport minus the offline banner (set
+     as --offline-banner-h on body[data-offline="true"] by BaseLayout).
+     Fallback 0px when the banner isn't shown. */
   .wrap {
     max-width: 960px;
     margin: 0 auto;
-    padding: 1rem 1rem 3rem;
+    padding: 1rem 1rem 1rem;
+    display: flex;
+    flex-direction: column;
+    height: calc(100dvh - var(--offline-banner-h, 0px));
+    /* Belt-and-braces: prevent horizontal creep from long slugs / long
+       tournament names widening the flex container. */
+    overflow: hidden;
   }
   .hdr {
     display: flex;
@@ -325,8 +421,68 @@
     background: rgba(255, 213, 74, 0.08);
   }
 
+  /* Flex-column so each tab component can become its own vertical
+     stack of banner → toolbar → scrollable list. `flex: 1` claims all
+     remaining vertical space; `min-height: 0` is critical — without it
+     the flex child inherits `min-height: auto` and overflows instead
+     of scrolling internally. */
   .panel {
-    padding: 0.75rem 0;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    padding: 0.75rem 0 0;
+  }
+  /* Each tab component's root element sits in .panel. Same flex-column
+     dance so its .list can scroll independently.
+
+     :global because Svelte's component-scoped selectors don't reach
+     into child components; this rule targets the section-like root
+     rendered by AdminPlayers / AdminTournaments / etc. */
+  .panel :global(> section),
+  .panel :global(> div) {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  /* Default per-tab pattern: the tab's <ul class="list"> is the
+     scroll container, sitting under a sticky toolbar. Padding-right
+     leaves room for the scrollbar so it doesn't overlap row content. */
+  .panel :global(.list) {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 0;
+    padding-right: 0.25rem;
+    padding-bottom: 0.5rem;
+  }
+  /* Rows inside the scrolling list must NOT shrink — every tab's
+     .list uses display: flex; flex-direction: column, which makes
+     each <li> a flex child, and flex children default to shrinking
+     when the parent is `flex: 1`. Without this override, rows
+     collapse into hairlines (audit rows have small content and were
+     the first to expose it). */
+  .panel :global(.list > *) {
+    flex-shrink: 0;
+  }
+  /* Opt-out pattern: some tabs (Roles) render multiple nested lists
+     inside sub-panels, so scrolling only the single <ul.list> would
+     confine scroll to a tiny inner viewport. Those tabs mark their
+     root <section> with `admin-tab-scrollself` — the section itself
+     becomes the scroll container, and its internal lists fall back
+     to natural height (flex: none, no overflow of their own). */
+  .panel :global(> .admin-tab-scrollself) {
+    overflow-y: auto;
+    min-height: 0;
+    padding-right: 0.25rem;
+    padding-bottom: 0.5rem;
+  }
+  .panel :global(> .admin-tab-scrollself .list) {
+    flex: none;
+    overflow-y: visible;
+    min-height: auto;
+    padding-right: 0;
+    padding-bottom: 0;
   }
 
   /* Footer — copied verbatim from LiveLobby + MatchSetup so every

@@ -22,7 +22,27 @@
     sweepStaleLive,
     type LobbyEntry,
   } from '../lib/live-sync';
+  import { subscribeCurrentUserRole, type Role } from '../lib/roles';
+  import { currentUser } from '../lib/auth';
   import AdminBulkBar from './AdminBulkBar.svelte';
+
+  let role = $state<Role | null>(null);
+
+  /**
+   * Mirrors the /live/{mid} delete rule for UI gating (see rules
+   * for the canonical expression): super, or organiser of the
+   * record's meta.tournamentKey, or the umpire who stamped
+   * createdBy on publish. Anonymous live records (no createdBy)
+   * can only be deleted by super — UI honours that.
+   */
+  function canDeleteLive(e: LobbyEntry): boolean {
+    if (!role) return false;
+    if (role.isSuper) return true;
+    if (e.meta.tournamentKey && role.organiserOf.has(e.meta.tournamentKey)) return true;
+    const uid = currentUser()?.uid;
+    if (uid && e.createdBy === uid) return true;
+    return false;
+  }
 
   const STALE_WINDOW_MS = 4 * 60 * 60 * 1000;
 
@@ -63,9 +83,11 @@
       unsub = fn;
     });
     const tick = window.setInterval(() => (now = Date.now()), 30_000);
+    const unsubRole = subscribeCurrentUserRole((r) => (role = r));
     return () => {
       unsub?.();
       window.clearInterval(tick);
+      unsubRole();
     };
   });
 
@@ -125,10 +147,15 @@
     selected = new Set(selected);
   }
   function toggleSelectAll() {
-    if (visible.every((e) => selected.has(e.mid))) {
+    // Only rows the current user can delete are select-all-eligible.
+    // Under super this is every visible row; under organiser it's
+    // only their tournaments' live records (or their own anonymous
+    // publishes).
+    const manageable = visible.filter((e) => canDeleteLive(e));
+    if (manageable.length > 0 && manageable.every((e) => selected.has(e.mid))) {
       selected = new Set();
     } else {
-      selected = new Set(visible.map((e) => e.mid));
+      selected = new Set(manageable.map((e) => e.mid));
     }
   }
   function clearSelection() {
@@ -151,9 +178,12 @@
     selected = new Set();
   }
 
-  const allSelected = $derived(
-    visible.length > 0 && visible.every((e) => selected.has(e.mid)),
-  );
+  const allSelected = $derived.by(() => {
+    // "All selected" from the manageable perspective — same
+    // pattern as Tournaments and History cleanup.
+    const manageable = visible.filter((e) => canDeleteLive(e));
+    return manageable.length > 0 && manageable.every((e) => selected.has(e.mid));
+  });
 </script>
 
 <section class="live">
@@ -216,14 +246,18 @@
     <ul class="list">
       {#each visible as e (e.mid)}
         <li class="row" class:row-selected={selected.has(e.mid)}>
-          <label class="row-check">
-            <input
-              type="checkbox"
-              checked={selected.has(e.mid)}
-              onchange={() => toggleSel(e.mid)}
-              aria-label={`Select ${e.mid}`}
-            />
-          </label>
+          {#if canDeleteLive(e)}
+            <label class="row-check">
+              <input
+                type="checkbox"
+                checked={selected.has(e.mid)}
+                onchange={() => toggleSel(e.mid)}
+                aria-label={`Select ${e.mid}`}
+              />
+            </label>
+          {:else}
+            <span class="row-check row-check-spacer" aria-hidden="true"></span>
+          {/if}
           <div class="row-name">
             <div class="row-title">
               <span class="mid">{e.mid}</span>
@@ -243,11 +277,13 @@
               {/if}
             </div>
           </div>
-          <button
-            type="button"
-            class="btn btn-danger"
-            onclick={() => (confirmMid = e.mid)}
-          >Delete</button>
+          {#if canDeleteLive(e)}
+            <button
+              type="button"
+              class="btn btn-danger"
+              onclick={() => (confirmMid = e.mid)}
+            >Delete</button>
+          {/if}
         </li>
       {/each}
     </ul>

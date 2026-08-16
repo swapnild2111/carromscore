@@ -25,7 +25,6 @@
   import { newMid, subscribeLive, type LiveRecord } from '../lib/live-sync';
   import { saveResume, loadResume, clearResume, type ResumeRecord } from '../lib/resume';
   import {
-    createOrTouchTournament,
     rankTournaments,
     subscribeStore as subscribeTournamentsStore,
     subscribeTournaments,
@@ -40,6 +39,7 @@
   } from '../lib/version';
   import SignInButton from './SignInButton.svelte';
   import FeedbackPopup from './FeedbackPopup.svelte';
+  import HelpTip from './HelpTip.svelte';
 
   const base: string = import.meta.env.BASE_URL;
 
@@ -329,15 +329,22 @@
     cfg.mid = newMid();
     // Practice never carries a tournament tag; force clear so a
     // stale value doesn't ride the URL. For singles/doubles, trim
-    // and register the tournament (create-if-new bumps lastActive).
+    // and pass the raw string through to /matches/{id}.tournament +
+    // .tournamentKey — the lobby groups on those fields.
+    //
+    // Until B3, this also called createOrTouchTournament(trimmed) to
+    // auto-materialise a /tournaments/{key} entry on first sight. That
+    // produced a long tail of near-duplicates (typos, casing variants,
+    // "Silver Cup" vs "silver cup 2026") that admins had to merge by
+    // hand. Now the admin-panel "+ Add tournament" flow is the only
+    // path to /tournaments/. Matches can still carry any raw string
+    // — the lobby's bucket-by-string grouping keeps working. Attaching
+    // organiser privileges requires the admin to create the canonical
+    // entry to bind the tournamentKey → organisers/ mapping.
     if (cfg.mode === 'practice') {
       cfg.tournament = '';
     } else {
-      const trimmed = cfg.tournament.trim();
-      cfg.tournament = trimmed;
-      if (trimmed) {
-        createOrTouchTournament(trimmed);
-      }
+      cfg.tournament = cfg.tournament.trim();
     }
     // Clear any stale identity handoff from a previous match with these
     // same names, then persist the fresh resolutions + start timestamp
@@ -535,6 +542,41 @@
 {/if}
 
 <form class="setup" onsubmit={start}>
+  <!--
+    Mode selection renders BEFORE Match rules because the chosen
+    mode reshapes the rules block: Practice hides the Points input
+    and relabels Boards → Boards per set, and setMode() rewrites
+    bestOf/pointsTarget/maxBoards defaults. Rendering Mode first
+    means the umpire picks it once, then reads/edits rule values
+    that already reflect the mode — no back-and-forth. Reordered
+    2026-08-15.
+  -->
+  <fieldset class="fmt fmt-mode">
+    <legend>
+      Mode
+      <HelpTip label="Help: match mode">
+        <strong>Singles</strong> — one player per side.<br/>
+        <strong>Doubles</strong> — two players per side (2v2).<br/>
+        <strong>Practice</strong> — solo drill; tracks boards + misses only, no opponent.
+      </HelpTip>
+    </legend>
+    <label class:selected={cfg.mode === 'singles'}>
+      <input type="radio" name="mode" value="singles" checked={cfg.mode === 'singles'} onchange={() => setMode('singles')} />
+      <span class="opt-title">Singles</span>
+      <span class="opt-meta">1 vs 1</span>
+    </label>
+    <label class:selected={cfg.mode === 'doubles'}>
+      <input type="radio" name="mode" value="doubles" checked={cfg.mode === 'doubles'} onchange={() => setMode('doubles')} />
+      <span class="opt-title">Doubles</span>
+      <span class="opt-meta">2 vs 2</span>
+    </label>
+    <label class:selected={cfg.mode === 'practice'}>
+      <input type="radio" name="mode" value="practice" checked={cfg.mode === 'practice'} onchange={() => setMode('practice')} />
+      <span class="opt-title">Practice</span>
+      <span class="opt-meta">Solo drill</span>
+    </label>
+  </fieldset>
+
   <fieldset class="rules" class:rules-practice={cfg.mode === 'practice'}>
     <legend>Match rules</legend>
     <label>
@@ -556,25 +598,6 @@
     </label>
   </fieldset>
 
-  <fieldset class="fmt fmt-mode">
-    <legend>Mode</legend>
-    <label class:selected={cfg.mode === 'singles'}>
-      <input type="radio" name="mode" value="singles" checked={cfg.mode === 'singles'} onchange={() => setMode('singles')} />
-      <span class="opt-title">Singles</span>
-      <span class="opt-meta">1 vs 1</span>
-    </label>
-    <label class:selected={cfg.mode === 'doubles'}>
-      <input type="radio" name="mode" value="doubles" checked={cfg.mode === 'doubles'} onchange={() => setMode('doubles')} />
-      <span class="opt-title">Doubles</span>
-      <span class="opt-meta">2 vs 2</span>
-    </label>
-    <label class:selected={cfg.mode === 'practice'}>
-      <input type="radio" name="mode" value="practice" checked={cfg.mode === 'practice'} onchange={() => setMode('practice')} />
-      <span class="opt-title">Practice</span>
-      <span class="opt-meta">Solo drill</span>
-    </label>
-  </fieldset>
-
 
   <!--
     Tournament / event input. Free-text; auto-suggested from the
@@ -586,7 +609,12 @@
   -->
   {#if cfg.mode !== 'practice'}
   <label class="tournament-input">
-    <span>Tournament <em class="hint-inline">(optional)</em></span>
+    <span>
+      Tournament <em class="hint-inline">(optional)</em>
+      <HelpTip label="Help: tournament">
+        Groups this match with others of the same event name in the Lobby. Leave blank for casual play (matches show under <strong>Default</strong>). Type an existing tournament name to reuse it, or type a new one to create it.
+      </HelpTip>
+    </span>
     <input
       type="text"
       autocomplete="off"
@@ -745,11 +773,12 @@
       <span class="foot-sep" aria-hidden="true">·</span>
       <!--
         Sign-in entry point. Same SignInButton component the lobby
-        uses. Signed-out: renders as a "Sign in" pill; tap opens
-        Google sign-in. Signed-in: becomes the avatar + name pill,
-        tap opens an inline dropdown with role + Sign out.
-        Not every user is an admin — the pill should read as a
-        neutral sign-in affordance, not an admin-only claim.
+        footer uses. Label is "Sign in" everywhere — any user can
+        sign in to edit their own matches. Super-admin + organiser
+        privileges are additional access, layered on top after sign-in,
+        not a separate entry point.
+        Signed in: pill becomes the avatar + name; tap opens an
+        inline dropdown with role + Sign out.
         `dropUp` because the footer sits at the bottom of the page
         — a downward dropdown would clip below the fold.
       -->

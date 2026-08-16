@@ -25,6 +25,7 @@
     type Role,
   } from '../lib/roles';
   import { upsertOwnUserMirror } from '../lib/users';
+  import { subscribeConnectivity } from '../lib/connectivity';
 
   interface Props {
     signedInOnly?: boolean;
@@ -52,6 +53,15 @@
   let user = $state<AuthUser | null>(null);
   let role = $state<Role | null>(null);
   let menuOpen = $state(false);
+  /**
+   * Mirrors connectivity's `online` flag. Google sign-in's popup
+   * requires internet to complete the OAuth round-trip; hanging
+   * offline is worse than showing the button as disabled with a
+   * clear tooltip. Drives the signed-out pill's disabled state.
+   * Signed-in dropdown items still work offline — Sign out just
+   * clears local auth state.
+   */
+  let online = $state(true);
 
   /**
    * Svelte action: fires a callback when a click happens outside the
@@ -95,9 +105,13 @@
       if (u) void upsertOwnUserMirror(u);
     });
     const unsubRole = subscribeCurrentUserRole((r) => (role = r));
+    const unsubConn = subscribeConnectivity((state) => {
+      online = state.online;
+    });
     return () => {
       unsubAuth();
       unsubRole();
+      unsubConn();
     };
   });
 
@@ -116,8 +130,13 @@
     <button
       type="button"
       class="signin-pill"
+      class:signin-offline={!online}
       onclick={onSignIn}
-      aria-label={`${signedOutLabel} — Sign in with Google`}
+      disabled={!online}
+      aria-label={online
+        ? `${signedOutLabel} — Sign in with Google`
+        : `${signedOutLabel} — connect to the internet to sign in`}
+      title={online ? undefined : 'Connect to the internet to sign in'}
     >
       <span class="g" aria-hidden="true">G</span>
       <span>{signedOutLabel}</span>
@@ -141,7 +160,24 @@
       aria-haspopup="menu"
     >
       {#if user.photoURL}
-        <img class="avatar" src={user.photoURL} alt="" width="20" height="20" />
+        <!--
+          `referrerpolicy="no-referrer"` avoids Chrome's ORB (Opaque
+          Response Blocking) rejecting the Google avatar CDN response
+          on some origins. Without it, GET
+          https://lh3.googleusercontent.com/... fails with
+          `net::ERR_BLOCKED_BY_ORB` on dev origins that Google's CDN
+          treats more restrictively than production Firebase-hosted
+          sites. Suppressing the Referer removes the ambiguity — the
+          avatar image endpoint serves the same bytes either way.
+        -->
+        <img
+          class="avatar"
+          src={user.photoURL}
+          alt=""
+          width="20"
+          height="20"
+          referrerpolicy="no-referrer"
+        />
       {:else}
         <span class="avatar avatar-fallback" aria-hidden="true">
           {(user.displayName || user.email || '?').charAt(0).toUpperCase()}
@@ -179,11 +215,15 @@
           </div>
           {#if user.email}<div class="dropdown-email">{user.email}</div>{/if}
         </div>
-        {#if role?.isSuper}
+        {#if role?.isSuper || (role && role.organiserOf.size > 0)}
           <!--
-            Super-admin gets a link to the global /admin/ page.
-            Anchor uses import.meta.env.BASE_URL so it resolves relative
-            to whatever base path this build was deployed under.
+            Admin-plane users (super OR any tournament organiser) get
+            a link to /admin/. AdminHome's gate then serves the tab
+            set appropriate to their role — super sees all six tabs,
+            organiser sees Players / Tournaments / Live / History
+            (Roles + Audit are super-only). Anchor uses BASE_URL so
+            it resolves under whatever base path this build was
+            deployed at.
           -->
           <a
             class="dropdown-item"
@@ -218,9 +258,22 @@
     transition: background 0.12s, border-color 0.12s;
     -webkit-tap-highlight-color: transparent;
   }
-  .signin-pill:hover {
+  .signin-pill:hover:not(:disabled) {
     background: rgba(255, 255, 255, 0.1);
     border-color: rgba(255, 255, 255, 0.28);
+  }
+  /* Offline: no Google popup can complete without internet. Grey
+     the pill out with a "not-allowed" cursor so the umpire knows
+     it's disabled on purpose. Tooltip explains why. */
+  .signin-pill:disabled,
+  .signin-offline {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+  .signin-pill:disabled:hover,
+  .signin-offline:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.16);
   }
   .g {
     display: inline-flex;
