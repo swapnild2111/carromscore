@@ -574,22 +574,12 @@
   <fieldset class="rules" class:rules-practice={cfg.mode === 'practice'}>
     <legend>Match rules</legend>
     <label>
-      <span>
-        Sets
-        <HelpTip label="Help: sets">
-          Best-of series length. <strong>1</strong> = single set (first to points/boards target wins the match). <strong>3</strong> = first to win 2 sets. <strong>5</strong> = first to 3 sets, and so on.
-        </HelpTip>
-      </span>
+      <span>Sets</span>
       <input type="number" min="1" max="9" step="1" bind:value={cfg.bestOf} />
     </label>
     {#if cfg.mode !== 'practice'}
       <label>
-        <span>
-          Points
-          <HelpTip label="Help: points">
-            Points target per set. First side to reach this score (and win the queen, if applicable) takes the set. Standard is <strong>25</strong>.
-          </HelpTip>
-        </span>
+        <span>Points</span>
         <input type="number" min="1" step="1" bind:value={cfg.pointsTarget} />
       </label>
     {/if}
@@ -597,13 +587,6 @@
       <span>
         {cfg.mode === 'practice' ? 'Boards per set' : 'Boards'}
         {#if cfg.mode !== 'practice'}<em class="hint-inline">(0 = ∞)</em>{/if}
-        <HelpTip label="Help: boards">
-          {#if cfg.mode === 'practice'}
-            Number of boards in this practice drill.
-          {:else}
-            Maximum boards played per set. If neither side hits the points target, the higher score after this many boards wins the set. <strong>0</strong> means unlimited — set only ends on points.
-          {/if}
-        </HelpTip>
       </span>
       <input type="number" min={cfg.mode === 'practice' ? 1 : 0} step="1" bind:value={cfg.maxBoards} />
     </label>
