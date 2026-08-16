@@ -88,15 +88,33 @@
    * When the role resolves, land on the sensible default tab for
    * that role. Super-admins see Roles first (identity/access is the
    * most-frequent admin task). Organisers see Tournaments — the
-   * likely reason they signed in was to manage their event. If the
-   * user manually picks a tab, we don't fight them; this only fires
-   * when tab is still the initial state or becomes invalid after a
-   * role change (e.g. super grants organiser then loses super).
+   * likely reason they signed in was to manage their event.
+   *
+   * Fired at most once per session — `subscribeCurrentUserRole`
+   * emits an EMPTY placeholder role immediately on subscribe (so
+   * subscribers don't stall), then streams the real role afterwards
+   * from /adminRoles and per-tournament organisers reads. Auto-
+   * landing on the placeholder would misroute super-admins to the
+   * organiser default; landing only once, after either the super
+   * flag is true OR the organiser set has some entry, avoids the
+   * placeholder race.
+   *
+   * Also fires if a role change makes the current tab invalid
+   * (e.g. super revocation while sitting on the Audit tab).
    */
+  let landed = $state(false);
   $effect(() => {
-    if (!roleLoaded) return;
-    if (!visibleTabs.includes(tab)) {
-      tab = role?.isSuper ? 'roles' : 'tournaments';
+    if (!roleLoaded || !role) return;
+    const hasResolvedRole = role.isSuper || role.organiserOf.size > 0;
+    if (!landed && hasResolvedRole) {
+      tab = role.isSuper ? 'roles' : 'tournaments';
+      landed = true;
+      return;
+    }
+    // Post-landing safety: if the tab becomes invalid because role
+    // changed (super revoked, organiser removed), fall back.
+    if (landed && !visibleTabs.includes(tab)) {
+      tab = role.isSuper ? 'roles' : 'tournaments';
     }
   });
 </script>
@@ -437,6 +455,15 @@
     min-height: 0;
     padding-right: 0.25rem;
     padding-bottom: 0.5rem;
+  }
+  /* Rows inside the scrolling list must NOT shrink — every tab's
+     .list uses display: flex; flex-direction: column, which makes
+     each <li> a flex child, and flex children default to shrinking
+     when the parent is `flex: 1`. Without this override, rows
+     collapse into hairlines (audit rows have small content and were
+     the first to expose it). */
+  .panel :global(.list > *) {
+    flex-shrink: 0;
   }
   /* Opt-out pattern: some tabs (Roles) render multiple nested lists
      inside sub-panels, so scrolling only the single <ul.list> would
