@@ -29,7 +29,7 @@
 // SW, which clears the stale cache from before the banner/etc. slices
 // shipped. Users on the old SW keep seeing stale HTML with no banner.
 // Reset to '3.0.0' at release.
-const APP_VERSION = '2.2.9-beta.37';
+const APP_VERSION = '2.2.9-beta.38';
 
 // Base URL is derived from the SW's own location so the same source
 // works on both main (/carromscore/) and beta (/carromscore/beta/).

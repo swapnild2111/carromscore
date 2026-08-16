@@ -160,7 +160,24 @@
       aria-haspopup="menu"
     >
       {#if user.photoURL}
-        <img class="avatar" src={user.photoURL} alt="" width="20" height="20" />
+        <!--
+          `referrerpolicy="no-referrer"` avoids Chrome's ORB (Opaque
+          Response Blocking) rejecting the Google avatar CDN response
+          on some origins. Without it, GET
+          https://lh3.googleusercontent.com/... fails with
+          `net::ERR_BLOCKED_BY_ORB` on dev origins that Google's CDN
+          treats more restrictively than production Firebase-hosted
+          sites. Suppressing the Referer removes the ambiguity — the
+          avatar image endpoint serves the same bytes either way.
+        -->
+        <img
+          class="avatar"
+          src={user.photoURL}
+          alt=""
+          width="20"
+          height="20"
+          referrerpolicy="no-referrer"
+        />
       {:else}
         <span class="avatar avatar-fallback" aria-hidden="true">
           {(user.displayName || user.email || '?').charAt(0).toUpperCase()}
