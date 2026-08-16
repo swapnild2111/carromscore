@@ -29,7 +29,7 @@
 // SW, which clears the stale cache from before the banner/etc. slices
 // shipped. Users on the old SW keep seeing stale HTML with no banner.
 // Reset to '3.0.0' at release.
-const APP_VERSION = '2.2.9-beta.36';
+const APP_VERSION = '2.2.9-beta.37';
 
 // Base URL is derived from the SW's own location so the same source
 // works on both main (/carromscore/) and beta (/carromscore/beta/).
@@ -117,6 +117,20 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET') return;
+
+  // Cross-origin requests: don't intercept. Third-party assets
+  // (Google avatar CDN at lh3.googleusercontent.com, Firebase RTDB
+  // long-poll, gstatic, etc.) should go straight to the network
+  // without SW routing. Intercepting produces opaque responses that
+  // Chrome sometimes marks as `net::ERR_FAILED` when the request
+  // is passed back through the SW pipeline — for the Google avatar
+  // that surfaces as a broken image in the signed-in pill.
+  //
+  // Anything that DID need offline support for a cross-origin URL
+  // (e.g. Firebase's `.info/connected` long-poll) is handled by the
+  // Firebase SDK's own in-memory buffering, not by us.
+  const reqUrl = new URL(req.url);
+  if (reqUrl.origin !== self.location.origin) return;
 
   // Navigation requests: network-first with a cached-shell fallback
   // for the matching route (query-string-agnostic). Users on a good

@@ -74,12 +74,6 @@ const base = import.meta.env.BASE_URL;
         -webkit-backdrop-filter: blur(6px);
       }
       .offline-banner[hidden] { display: none; }
-      /* Belt-and-braces: even if the [hidden] attribute is out of sync
-         with the state (browser cache, HMR reload, script hasn't run
-         yet), the banner is only visible when body carries the explicit
-         data-offline="true" marker. The inline script keeps [hidden]
-         and body[data-offline] aligned. */
-      body:not([data-offline="true"]) .offline-banner { display: none !important; }
       .offline-banner .offline-icon {
         font-size: 0.9rem;
         line-height: 1;
