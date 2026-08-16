@@ -1,14 +1,22 @@
 <script lang="ts">
   /**
-   * /admin/ shell. Super-only page — anonymous or non-super users
-   * see an "Access denied" screen with a Sign-in / Sign-out button
-   * as appropriate. Super-admins see the tab bar and can switch
-   * between Players, Tournaments, Live matches, and Audit.
+   * /admin/ shell. Two role bands can enter:
    *
-   * Client-side gating here is UX only — the RTDB rules are what
-   * actually enforce super-only writes. Every helper this page
-   * calls goes through the update/delete rule branches that check
-   * `root.child('adminRoles').child(auth.uid).val() == 'super'`.
+   *   - Super-admin — sees every tab (Roles, Players, Tournaments,
+   *     Live, History, Audit).
+   *   - Organiser (any /tournaments/{key}/organisers/{uid} = true) —
+   *     sees Players, Tournaments, Live, History. Roles and Audit
+   *     are super-only.
+   *
+   * Anyone else (anonymous, or signed-in with no role) sees an
+   * "access denied" gate with their UID for the super-admin to grant.
+   *
+   * Client-side gating here is UX only — the RTDB rules on each
+   * write path are the actual enforcement. Every helper this page
+   * calls is either super-only (Roles, Audit) or gated per-record
+   * on tournament organiser membership (Live delete, History delete,
+   * Match edit), or unauthorised (organisers cannot delete /players/
+   * or /tournaments/ that aren't theirs).
    */
   import { onMount } from 'svelte';
   import { subscribeAuth, type AuthUser } from '../lib/auth';
@@ -38,6 +46,26 @@
   // for a super-admin during the ~200ms Firebase auth rehydrate.
   let roleLoaded = $state(false);
 
+  /**
+   * True when the signed-in user has ANY admin-plane access —
+   * super-admin, or organiser of at least one tournament. The gate
+   * uses this to decide whether to render the tab bar at all.
+   * Individual tabs then check `role.isSuper` for super-only tabs.
+   */
+  const hasAdminAccess = $derived(!!(role && (role.isSuper || role.organiserOf.size > 0)));
+
+  /**
+   * Which tabs to render. Super-admin gets everything; organisers
+   * get Players / Tournaments / Live / History but NOT Roles or
+   * Audit — those are super-only surfaces (identity grants and
+   * append-only audit trail).
+   */
+  const visibleTabs = $derived<Tab[]>(
+    role?.isSuper
+      ? ['roles', 'players', 'tournaments', 'live', 'history', 'audit']
+      : ['players', 'tournaments', 'live', 'history'],
+  );
+
   onMount(() => {
     const unsubAuth = subscribeAuth((u) => {
       user = u;
@@ -54,6 +82,22 @@
       unsubAuth();
       unsubRole();
     };
+  });
+
+  /**
+   * When the role resolves, land on the sensible default tab for
+   * that role. Super-admins see Roles first (identity/access is the
+   * most-frequent admin task). Organisers see Tournaments — the
+   * likely reason they signed in was to manage their event. If the
+   * user manually picks a tab, we don't fight them; this only fires
+   * when tab is still the initial state or becomes invalid after a
+   * role change (e.g. super grants organiser then loses super).
+   */
+  $effect(() => {
+    if (!roleLoaded) return;
+    if (!visibleTabs.includes(tab)) {
+      tab = role?.isSuper ? 'roles' : 'tournaments';
+    }
   });
 </script>
 
@@ -82,20 +126,21 @@
     <div class="gate">
       <p class="gate-lead">Loading your role…</p>
     </div>
-  {:else if !role?.isSuper}
+  {:else if !hasAdminAccess}
     <!--
-      Signed in but not super. Organisers get their affordances
-      inline in the lobby (pencil on their tournament's cards) —
-      the /admin/ page itself is super-only for now (Phase 4).
-      Show a friendly note explaining that, plus their UID so they
-      can share it with the super-admin if they need broader access.
+      Signed in but no admin-plane access (not super, not organiser
+      of any tournament). Show their UID so they can share it with a
+      super-admin who'll grant them a role. Fall-through affordance:
+      any signed-in user can still edit their OWN matches via the
+      pencil in the lobby History tab — that permission comes from
+      /matches/$id createdBy, not from an admin role.
     -->
     <div class="gate">
-      <p class="gate-lead">You're signed in — but this page is super-admin only.</p>
+      <p class="gate-lead">You're signed in — but you don't have admin access yet.</p>
       <p class="gate-sub">
-        If you're a tournament organiser, edit your event's matches
-        from the History tab in the <a href={`${base}live/`}>Live lobby</a>
-        — a ✎ pencil appears on cards you can edit.
+        Ask a super-admin to add you as an organiser for your tournament,
+        or if you just want to fix your own matches, use the ✎ pencil in
+        the <a href={`${base}live/`}>Live lobby</a>'s History tab.
       </p>
       {#if user.uid}
         <p class="gate-uid" title="Your Firebase UID">
@@ -105,76 +150,92 @@
     </div>
   {:else}
     <!--
-      Super-admin view: full tab bar.
-      Order: identity/access first (Roles), then curated data
-      (Players, Tournaments), then cleanup (Live, History), then
-      the audit trail. Rationale: an admin arriving here usually
-      wants to grant or revoke access first; data curation and
-      cleanup are less-frequent operations.
+      Admin view: tab bar filtered by role.
+      Super-admin: all six tabs. Order is identity/access first
+      (Roles), then curated data (Players, Tournaments), then
+      cleanup (Live, History), then the audit trail.
+      Organiser: four tabs (Players, Tournaments, Live, History) —
+      Roles and Audit are super-only surfaces (identity grants + the
+      append-only audit trail).
+
+      $effect above lands the user on the sensible default tab for
+      their role (Roles for super, Tournaments for organiser).
     -->
     <div class="tabs" role="tablist" aria-label="Admin sections">
-      <button
-        type="button"
-        role="tab"
-        class="tab"
-        class:tab-active={tab === 'roles'}
-        aria-selected={tab === 'roles'}
-        onclick={() => (tab = 'roles')}
-      >Roles</button>
-      <button
-        type="button"
-        role="tab"
-        class="tab"
-        class:tab-active={tab === 'players'}
-        aria-selected={tab === 'players'}
-        onclick={() => (tab = 'players')}
-      >Players</button>
-      <button
-        type="button"
-        role="tab"
-        class="tab"
-        class:tab-active={tab === 'tournaments'}
-        aria-selected={tab === 'tournaments'}
-        onclick={() => (tab = 'tournaments')}
-      >Tournaments</button>
-      <button
-        type="button"
-        role="tab"
-        class="tab"
-        class:tab-active={tab === 'live'}
-        aria-selected={tab === 'live'}
-        onclick={() => (tab = 'live')}
-      >Live matches</button>
-      <button
-        type="button"
-        role="tab"
-        class="tab"
-        class:tab-active={tab === 'history'}
-        aria-selected={tab === 'history'}
-        onclick={() => (tab = 'history')}
-      >History cleanup</button>
-      <button
-        type="button"
-        role="tab"
-        class="tab"
-        class:tab-active={tab === 'audit'}
-        aria-selected={tab === 'audit'}
-        onclick={() => (tab = 'audit')}
-      >Audit log</button>
+      {#if visibleTabs.includes('roles')}
+        <button
+          type="button"
+          role="tab"
+          class="tab"
+          class:tab-active={tab === 'roles'}
+          aria-selected={tab === 'roles'}
+          onclick={() => (tab = 'roles')}
+        >Roles</button>
+      {/if}
+      {#if visibleTabs.includes('players')}
+        <button
+          type="button"
+          role="tab"
+          class="tab"
+          class:tab-active={tab === 'players'}
+          aria-selected={tab === 'players'}
+          onclick={() => (tab = 'players')}
+        >Players</button>
+      {/if}
+      {#if visibleTabs.includes('tournaments')}
+        <button
+          type="button"
+          role="tab"
+          class="tab"
+          class:tab-active={tab === 'tournaments'}
+          aria-selected={tab === 'tournaments'}
+          onclick={() => (tab = 'tournaments')}
+        >Tournaments</button>
+      {/if}
+      {#if visibleTabs.includes('live')}
+        <button
+          type="button"
+          role="tab"
+          class="tab"
+          class:tab-active={tab === 'live'}
+          aria-selected={tab === 'live'}
+          onclick={() => (tab = 'live')}
+        >Live matches</button>
+      {/if}
+      {#if visibleTabs.includes('history')}
+        <button
+          type="button"
+          role="tab"
+          class="tab"
+          class:tab-active={tab === 'history'}
+          aria-selected={tab === 'history'}
+          onclick={() => (tab = 'history')}
+        >History cleanup</button>
+      {/if}
+      {#if visibleTabs.includes('audit')}
+        <button
+          type="button"
+          role="tab"
+          class="tab"
+          class:tab-active={tab === 'audit'}
+          aria-selected={tab === 'audit'}
+          onclick={() => (tab = 'audit')}
+        >Audit log</button>
+      {/if}
     </div>
 
     <div class="panel" role="tabpanel">
-      {#if tab === 'players'}
+      {#if tab === 'players' && visibleTabs.includes('players')}
         <AdminPlayers />
-      {:else if tab === 'tournaments'}
+      {:else if tab === 'tournaments' && visibleTabs.includes('tournaments')}
         <AdminTournaments />
-      {:else if tab === 'live'}
+      {:else if tab === 'live' && visibleTabs.includes('live')}
         <AdminLiveCleanup />
-      {:else if tab === 'history'}
+      {:else if tab === 'history' && visibleTabs.includes('history')}
         <AdminHistoryCleanup />
-      {:else if tab === 'roles'}
+      {:else if tab === 'roles' && visibleTabs.includes('roles')}
         <AdminRoles />
-      {:else if tab === 'audit'}
+      {:else if tab === 'audit' && visibleTabs.includes('audit')}
         <AdminAuditLog />
       {/if}
     </div>
