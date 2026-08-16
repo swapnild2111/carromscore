@@ -135,12 +135,26 @@ function notify(): void {
 export function subscribeConnectivity(cb: Subscriber): () => void {
   subscribers.add(cb);
   bootstrap();
-  // Fire immediately with the current state (matches Svelte-store
-  // ergonomics — no `.get()` needed for initial value).
-  try {
-    cb(currentState());
-  } catch {
-    // ignore
+  // Fire immediately IF we've already resolved. During the boot
+  // "pending" window (firebaseConnected === null), we deliberately
+  // withhold the first emission — imperative getConnectivity()
+  // still returns the conservative pending-→-offline answer, but
+  // reactive subscribers (notably the offline-banner in BaseLayout)
+  // would otherwise reveal the banner during the pending window
+  // and hide it moments later, producing the "flash on then hide"
+  // effect. Waiting for a real resolution avoids that. The wait is
+  // bounded by FIRST_CONNECT_TIMEOUT above (~2.5s).
+  //
+  // Consequence: subscribers get their first message only when
+  // (a) Firebase confirms connectivity, or (b) the boot timeout
+  // fires and we conclude offline. Both paths call notify(), so
+  // the standard subscription loop picks it up cleanly.
+  if (firebaseConnected !== null) {
+    try {
+      cb(currentState());
+    } catch {
+      // ignore
+    }
   }
   return () => {
     subscribers.delete(cb);

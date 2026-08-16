@@ -153,24 +153,43 @@ const base = import.meta.env.BASE_URL;
           if (online) delete document.body.dataset.offline;
           else document.body.dataset.offline = 'true';
         };
-        // Show banner immediately (conservative default until we
-        // know we're online). Async: subscribeConnectivity from
-        // ../lib/connectivity combines navigator.onLine +
-        // Firebase `.info/connected`. When it says online, hide
-        // the banner. When offline, show. During the pending
-        // window (Firebase SDK still loading OR waiting for the
-        // 5-second boot timeout), we conservatively show the
-        // banner. Better a brief unnecessary banner than the
-        // flash-and-hide bug where users see "you're offline"
-        // for half a second and then it disappears prematurely.
         //
-        // Also fires flushQueue() from ../lib/sync-queue on
-        // every offline→online transition. Living here (not in
-        // any single Svelte island) means the queue drains
-        // regardless of which route the user is on, and even
-        // after they leave the score screen.
-        apply(false);
-        let prevOnline = false;
+        // Cold-start reveal policy — avoid the "flash on, then hide"
+        // that plagued earlier versions when Firebase's .info/connected
+        // took ~1 second to confirm reachability on a good network.
+        // Two branches:
+        //
+        // 1) navigator.onLine === false at boot. That's a definite
+        //    "network is down" signal (Wi-Fi off, airplane mode,
+        //    kernel-level "no network"), and we should reveal the
+        //    banner immediately — waiting to consult Firebase would
+        //    delay the honest signal for no benefit.
+        //
+        // 2) navigator.onLine === true at boot. Ambiguous: could be
+        //    truly online (probably), captive portal, DNS-down, or
+        //    DevTools throttled to Offline (navigator lies). Don't
+        //    reveal the banner yet — wait for the connectivity module
+        //    to make its call, and reveal only if it explicitly
+        //    reports offline. Cost: on a slow-Firebase connection the
+        //    banner takes ~2.5s (FIRST_CONNECT_TIMEOUT in
+        //    connectivity.ts) to appear when actually offline via a
+        //    captive portal. Acceptable trade — the false-positive
+        //    banner flash was more disruptive than a slightly delayed
+        //    true-positive.
+        //
+        // Also fires flushQueue() from ../lib/sync-queue on every
+        // offline→online transition. Living here (not in any single
+        // Svelte island) means the queue drains regardless of which
+        // route the user is on, and even after they leave the score
+        // screen.
+        //
+        const navSaysOffline = navigator.onLine === false;
+        if (navSaysOffline) apply(false);
+        // Track whether we've EVER heard from the connectivity module.
+        // Before we have, `prevOnline` reflects the navigator-only
+        // guess so the first "→ online" transition (if any) doesn't
+        // trigger a spurious flush.
+        let prevOnline = !navSaysOffline;
         Promise.all([
           import('../lib/connectivity'),
           import('../lib/sync-queue'),
