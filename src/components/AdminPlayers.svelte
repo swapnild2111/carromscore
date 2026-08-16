@@ -590,7 +590,7 @@
               class="btn btn-primary"
               onclick={analyseAdd}
               disabled={saving || !addingInput.trim()}
-            >{saving ? 'Adding…' : 'Analyse'}</button>
+            >{saving ? 'Adding…' : 'Add'}</button>
           </div>
         {:else}
           <h3 id="add-player-title">Resolve conflicts</h3>
