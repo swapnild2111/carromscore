@@ -198,11 +198,15 @@
           </div>
           {#if user.email}<div class="dropdown-email">{user.email}</div>{/if}
         </div>
-        {#if role?.isSuper}
+        {#if role?.isSuper || (role && role.organiserOf.size > 0)}
           <!--
-            Super-admin gets a link to the global /admin/ page.
-            Anchor uses import.meta.env.BASE_URL so it resolves relative
-            to whatever base path this build was deployed under.
+            Admin-plane users (super OR any tournament organiser) get
+            a link to /admin/. AdminHome's gate then serves the tab
+            set appropriate to their role — super sees all six tabs,
+            organiser sees Players / Tournaments / Live / History
+            (Roles + Audit are super-only). Anchor uses BASE_URL so
+            it resolves under whatever base path this build was
+            deployed at.
           -->
           <a
             class="dropdown-item"

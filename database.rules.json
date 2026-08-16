@@ -59,7 +59,7 @@
       ".read": true,
       ".indexOn": ["lastActive"],
       "$key": {
-        ".write": "$key.length >= 1 && $key.length <= 60 && ((!data.exists() && newData.exists()) || (data.exists() && newData.exists() && newData.child('createdAt').val() == data.child('createdAt').val() && newData.child('name').val() == data.child('name').val()) || (auth != null && root.child('adminRoles').child(auth.uid).val() == 'super'))",
+        ".write": "$key.length >= 1 && $key.length <= 60 && ((!data.exists() && newData.exists()) || (data.exists() && newData.exists() && newData.child('createdAt').val() == data.child('createdAt').val() && newData.child('name').val() == data.child('name').val()) || (auth != null && root.child('adminRoles').child(auth.uid).val() == 'super') || (auth != null && data.exists() && data.child('organisers').child(auth.uid).val() == true))",
         ".validate": "newData.hasChildren(['name', 'createdAt', 'lastActive']) && newData.child('name').isString() && newData.child('name').val().length >= 1 && newData.child('name').val().length <= 60 && newData.child('createdAt').isNumber() && newData.child('lastActive').isNumber() && newData.child('lastActive').val() <= now && (data.exists() || newData.child('lastActive').val() > now - 300000)",
         "name":       { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 60" },
         "createdAt":  { ".validate": "newData.isNumber()" },
@@ -68,7 +68,7 @@
         "organisers": {
           ".read": "auth != null",
           "$uid": {
-            ".write": "auth != null && root.child('adminRoles').child(auth.uid).val() == 'super'",
+            ".write": "auth != null && ((root.child('adminRoles').child(auth.uid).val() == 'super') || (root.child('tournaments').child($key).child('organisers').child(auth.uid).val() == true))",
             ".validate": "newData.isBoolean() && newData.val() == true && $uid.length >= 1 && $uid.length <= 64"
           }
         },

@@ -28,7 +28,23 @@
     loadOrganisers,
     type Tournament,
   } from '../lib/tournaments';
+  import { subscribeCurrentUserRole, type Role } from '../lib/roles';
   import AdminBulkBar from './AdminBulkBar.svelte';
+
+  /**
+   * Current-user role gating: super sees every row's actions; a
+   * plain organiser sees actions only on rows they organise. Row
+   * actions are hidden — not disabled — to keep the row uncluttered.
+   * RTDB rules on /tournaments/$key are the actual enforcement; this
+   * gate avoids the surprise-permission-denied toast when the user
+   * couldn't have succeeded anyway.
+   */
+  let role = $state<Role | null>(null);
+  function canManageTournament(t: Tournament): boolean {
+    if (!role) return false;
+    if (role.isSuper) return true;
+    return role.organiserOf.has(t.key);
+  }
 
   let tick = $state(0);
   let renamingKey = $state<string | null>(null);
@@ -51,7 +67,11 @@
   onMount(() => {
     void subscribeTournaments();
     const unsub = subscribeStore(() => (tick += 1));
-    return unsub;
+    const unsubRole = subscribeCurrentUserRole((r) => (role = r));
+    return () => {
+      unsub();
+      unsubRole();
+    };
   });
 
   const list = $derived(() => {
@@ -148,11 +168,15 @@
     selected = new Set(selected);
   }
   function toggleSelectAll() {
-    const all = list();
-    if (all.length > 0 && all.every((t) => selected.has(t.key))) {
+    // Select-all only operates on the rows the current user can
+    // actually manage — the rows that render a checkbox. Selecting
+    // rows the user has no auth on would guarantee a bulk-delete
+    // failure and confuse the count in the AdminBulkBar.
+    const manageable = list().filter((t) => canManageTournament(t));
+    if (manageable.length > 0 && manageable.every((t) => selected.has(t.key))) {
       selected = new Set();
     } else {
-      selected = new Set(all.map((t) => t.key));
+      selected = new Set(manageable.map((t) => t.key));
     }
   }
   function clearSelection() {
@@ -180,8 +204,11 @@
 
   const allSelected = $derived(() => {
     void tick;
-    const all = list();
-    return all.length > 0 && all.every((t) => selected.has(t.key));
+    // "all selected" from the current user's perspective — every row
+    // they can manage is selected. Under super this is every row; under
+    // organiser it's only the tournaments they organise.
+    const manageable = list().filter((t) => canManageTournament(t));
+    return manageable.length > 0 && manageable.every((t) => selected.has(t.key));
   });
 
   function openAdd() {
@@ -252,14 +279,20 @@
     <ul class="list">
       {#each list() as t (t.key)}
         <li class="row" class:row-selected={selected.has(t.key)}>
-          <label class="row-check">
-            <input
-              type="checkbox"
-              checked={selected.has(t.key)}
-              onchange={() => toggleSel(t.key)}
-              aria-label={`Select ${t.name}`}
-            />
-          </label>
+          {#if canManageTournament(t)}
+            <label class="row-check">
+              <input
+                type="checkbox"
+                checked={selected.has(t.key)}
+                onchange={() => toggleSel(t.key)}
+                aria-label={`Select ${t.name}`}
+              />
+            </label>
+          {:else}
+            <!-- Placeholder keeps the row grid aligned when the checkbox
+                 is hidden for tournaments the organiser doesn't manage. -->
+            <span class="row-check row-check-spacer" aria-hidden="true"></span>
+          {/if}
           {#if renamingKey === t.key}
             <div class="row-edit">
               <input
@@ -289,15 +322,17 @@
                 <span class="chip">last active {new Date(t.lastActive).toLocaleDateString()}</span>
               </div>
             </div>
-            <div class="row-actions">
-              <button type="button" class="btn" onclick={() => startRename(t)}>Rename</button>
-              <button type="button" class="btn" onclick={() => startManage(t)}>Organisers</button>
-              <button
-                type="button"
-                class="btn btn-danger"
-                onclick={() => startDelete(t.key)}
-              >Delete</button>
-            </div>
+            {#if canManageTournament(t)}
+              <div class="row-actions">
+                <button type="button" class="btn" onclick={() => startRename(t)}>Rename</button>
+                <button type="button" class="btn" onclick={() => startManage(t)}>Organisers</button>
+                <button
+                  type="button"
+                  class="btn btn-danger"
+                  onclick={() => startDelete(t.key)}
+                >Delete</button>
+              </div>
+            {/if}
           {/if}
         </li>
       {/each}
