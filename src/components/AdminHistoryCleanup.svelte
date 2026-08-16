@@ -52,12 +52,23 @@
   function sideNameMatch(m: MatchRecord, side: 'a' | 'b'): string {
     void identityTick;
     if (m.mode === 'doubles') {
-      const p1 = playerName(side === 'a' ? m.playerAId : m.playerBId);
-      const p2 = playerName(side === 'a' ? m.playerA2Id : m.playerB2Id);
+      const p1 = playerName(
+        side === 'a' ? m.playerAId : m.playerBId,
+        side === 'a' ? m.aName : m.bName,
+      );
+      const p2 = playerName(
+        side === 'a' ? m.playerA2Id : m.playerB2Id,
+        side === 'a' ? m.a2Name : m.b2Name,
+      );
       return p1 && p2 ? `${p1} & ${p2}` : p1 || p2 || (side === 'a' ? 'Team A' : 'Team B');
     }
     if (m.mode === 'practice' && side === 'b') return '';
-    return playerName(side === 'a' ? m.playerAId : m.playerBId) || (side === 'a' ? 'Side A' : 'Side B');
+    return (
+      playerName(
+        side === 'a' ? m.playerAId : m.playerBId,
+        side === 'a' ? m.aName : m.bName,
+      ) || (side === 'a' ? 'Side A' : 'Side B')
+    );
   }
 
   function fmtDate(ts: number | undefined): string {
