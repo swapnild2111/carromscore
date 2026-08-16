@@ -24,12 +24,12 @@
  * asset-manifest names, up-front.
  */
 
-// Bumped on every offline-mode-related change during v3.0 development
-// so browsers re-fetch this file (byte-level diff) and re-install the
-// SW, which clears the stale cache from before the banner/etc. slices
-// shipped. Users on the old SW keep seeing stale HTML with no banner.
-// Reset to '3.0.0' at release.
-const APP_VERSION = '2.2.9-beta.38';
+// Bump on every release. Included in the cache name below, so a
+// version change purges old caches on activate. Also bumped between
+// release cycles when a change to this file's byte content matters
+// enough that we want browsers to re-install the SW without waiting
+// for a full deploy — the SDK detects the diff and re-fires install.
+const APP_VERSION = '3.0.0';
 
 // Base URL is derived from the SW's own location so the same source
 // works on both main (/carromscore/) and beta (/carromscore/beta/).
