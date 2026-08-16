@@ -285,21 +285,27 @@
 </main>
 
 <style>
-  /* Flex column so `.panel` can `flex: 1` and give each admin tab a
-     bounded height for inner scrolling. The bottom padding is trimmed
-     when a tab uses the fixed-height scroll pattern — the tab's own
-     list takes over the vertical space instead. */
+  /* Flex column with an EXPLICIT height (not min-height) so
+     .panel > .list can scroll internally instead of pushing the
+     whole page taller. `html, body` in BaseLayout use `min-height:
+     100dvh` which allows body to grow past the viewport when child
+     content is large — a fine default for page-flow surfaces (home,
+     score, lobby) but wrong for admin, where we want the tab bar
+     and toolbar pinned while the list scrolls.
+
+     Height derives from the viewport minus the offline banner (set
+     as --offline-banner-h on body[data-offline="true"] by BaseLayout).
+     Fallback 0px when the banner isn't shown. */
   .wrap {
     max-width: 960px;
     margin: 0 auto;
     padding: 1rem 1rem 1rem;
     display: flex;
     flex-direction: column;
-    /* Account for the app-wide offline banner (set by BaseLayout as
-       --offline-banner-h on body[data-offline="true"]). Without this
-       the .wrap overflows off the bottom of the viewport when the
-       banner shows. */
-    min-height: calc(100dvh - var(--offline-banner-h, 0px));
+    height: calc(100dvh - var(--offline-banner-h, 0px));
+    /* Belt-and-braces: prevent horizontal creep from long slugs / long
+       tournament names widening the flex container. */
+    overflow: hidden;
   }
   .hdr {
     display: flex;
