@@ -73,6 +73,14 @@ export type LiveMeta = {
   maxBoards: number;
   /** Tournament / event tag. Blank = "Default" bucket in the lobby. */
   tournament?: string;
+  /**
+   * Slug form of `tournament` (matches the key under /tournaments/{key}/).
+   * Written alongside `tournament` so RTDB delete rules can look up
+   * `/tournaments/{tournamentKey}/organisers/` to authorise organiser
+   * deletes on this live record — same pattern as /matches/{id}.
+   * Empty/absent when the umpire didn't tag a tournament (Default bucket).
+   */
+  tournamentKey?: string;
 };
 
 /** Metadata + payload — what actually lives at `/live/{mid}`. */
@@ -150,6 +158,7 @@ export async function publishLive(
     if (meta.noteA) metaClean.noteA = meta.noteA;
     if (meta.noteB) metaClean.noteB = meta.noteB;
     if (meta.tournament) metaClean.tournament = meta.tournament;
+    if (meta.tournamentKey) metaClean.tournamentKey = meta.tournamentKey;
     // Stamp `createdBy` when signed in. Anonymous stays anonymous —
     // field absent. RTDB validator on live/$mid/createdBy accepts a
     // string ≤ 64 chars (rules updated 2026-08-09).

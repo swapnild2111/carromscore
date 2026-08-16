@@ -485,6 +485,11 @@
         ...(!isPractice && boardLog.length > 0 ? { boardLog } : {}),
         ...(isPractice ? { practiceBoards } : {}),
       };
+      // tournamentKey rides alongside tournament so the RTDB
+      // /live/{mid} delete rule can look up organiser privileges
+      // via /tournaments/{tournamentKey}/organisers/{auth.uid} —
+      // same pattern used by /matches/{id}.
+      const tournamentKey = normalizeKey(cfg.tournament ?? '');
       const meta = {
         mode: cfg.mode,
         playerA: cfg.playerA,
@@ -497,6 +502,7 @@
         pointsTarget: cfg.pointsTarget,
         maxBoards: cfg.maxBoards,
         tournament: cfg.tournament,
+        ...(tournamentKey ? { tournamentKey } : {}),
       };
       if (getConnectivity().online) {
         void publishLive(cfg.mid, meta, payload);

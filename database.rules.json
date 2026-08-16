@@ -87,7 +87,7 @@
     "live": {
       ".read": true,
       "$mid": {
-        ".write": "$mid.length >= 4 && $mid.length <= 12",
+        ".write": "($mid.length >= 4 && $mid.length <= 12) && ((newData.exists()) || (data.exists() && !newData.exists() && auth != null && ((root.child('adminRoles').child(auth.uid).val() == 'super') || (data.child('meta').child('tournamentKey').exists() && root.child('tournaments').child(data.child('meta').child('tournamentKey').val()).child('organisers').child(auth.uid).val() == true) || (data.child('createdBy').val() == auth.uid))))",
         ".validate": "newData.hasChildren(['updatedAt', 'liveState']) && newData.child('updatedAt').isNumber() && newData.child('updatedAt').val() <= now && newData.child('updatedAt').val() > now - 60000",
         "matchId":   { ".validate": "newData.isString()" },
         "updatedAt": { ".validate": "newData.isNumber()" },
