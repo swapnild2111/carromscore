@@ -40,6 +40,7 @@
   } from '../lib/version';
   import SignInButton from './SignInButton.svelte';
   import FeedbackPopup from './FeedbackPopup.svelte';
+  import HelpTip from './HelpTip.svelte';
 
   const base: string = import.meta.env.BASE_URL;
 
@@ -545,7 +546,14 @@
     2026-08-15.
   -->
   <fieldset class="fmt fmt-mode">
-    <legend>Mode</legend>
+    <legend>
+      Mode
+      <HelpTip label="Help: match mode">
+        <strong>Singles</strong> — one player per side.<br/>
+        <strong>Doubles</strong> — two players per side (2v2).<br/>
+        <strong>Practice</strong> — solo drill; tracks boards + misses only, no opponent.
+      </HelpTip>
+    </legend>
     <label class:selected={cfg.mode === 'singles'}>
       <input type="radio" name="mode" value="singles" checked={cfg.mode === 'singles'} onchange={() => setMode('singles')} />
       <span class="opt-title">Singles</span>
@@ -566,12 +574,22 @@
   <fieldset class="rules" class:rules-practice={cfg.mode === 'practice'}>
     <legend>Match rules</legend>
     <label>
-      <span>Sets</span>
+      <span>
+        Sets
+        <HelpTip label="Help: sets">
+          Best-of series length. <strong>1</strong> = single set (first to points/boards target wins the match). <strong>3</strong> = first to win 2 sets. <strong>5</strong> = first to 3 sets, and so on.
+        </HelpTip>
+      </span>
       <input type="number" min="1" max="9" step="1" bind:value={cfg.bestOf} />
     </label>
     {#if cfg.mode !== 'practice'}
       <label>
-        <span>Points</span>
+        <span>
+          Points
+          <HelpTip label="Help: points">
+            Points target per set. First side to reach this score (and win the queen, if applicable) takes the set. Standard is <strong>25</strong>.
+          </HelpTip>
+        </span>
         <input type="number" min="1" step="1" bind:value={cfg.pointsTarget} />
       </label>
     {/if}
@@ -579,6 +597,13 @@
       <span>
         {cfg.mode === 'practice' ? 'Boards per set' : 'Boards'}
         {#if cfg.mode !== 'practice'}<em class="hint-inline">(0 = ∞)</em>{/if}
+        <HelpTip label="Help: boards">
+          {#if cfg.mode === 'practice'}
+            Number of boards in this practice drill.
+          {:else}
+            Maximum boards played per set. If neither side hits the points target, the higher score after this many boards wins the set. <strong>0</strong> means unlimited — set only ends on points.
+          {/if}
+        </HelpTip>
       </span>
       <input type="number" min={cfg.mode === 'practice' ? 1 : 0} step="1" bind:value={cfg.maxBoards} />
     </label>
@@ -595,7 +620,12 @@
   -->
   {#if cfg.mode !== 'practice'}
   <label class="tournament-input">
-    <span>Tournament <em class="hint-inline">(optional)</em></span>
+    <span>
+      Tournament <em class="hint-inline">(optional)</em>
+      <HelpTip label="Help: tournament">
+        Groups this match with others of the same event name in the Lobby. Leave blank for casual play (matches show under <strong>Default</strong>). Type an existing tournament name to reuse it, or type a new one to create it.
+      </HelpTip>
+    </span>
     <input
       type="text"
       autocomplete="off"
@@ -754,11 +784,12 @@
       <span class="foot-sep" aria-hidden="true">·</span>
       <!--
         Sign-in entry point. Same SignInButton component the lobby
-        uses. Signed-out: renders as a "Sign in" pill; tap opens
-        Google sign-in. Signed-in: becomes the avatar + name pill,
-        tap opens an inline dropdown with role + Sign out.
-        Not every user is an admin — the pill should read as a
-        neutral sign-in affordance, not an admin-only claim.
+        footer uses. Label is "Sign in" everywhere — any user can
+        sign in to edit their own matches. Super-admin + organiser
+        privileges are additional access, layered on top after sign-in,
+        not a separate entry point.
+        Signed in: pill becomes the avatar + name; tap opens an
+        inline dropdown with role + Sign out.
         `dropUp` because the footer sits at the bottom of the page
         — a downward dropdown would clip below the fold.
       -->

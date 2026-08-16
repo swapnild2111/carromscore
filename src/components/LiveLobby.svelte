@@ -1318,7 +1318,7 @@
         aria-label="Support Carromscore on Ko-fi"
       >Support ❤</a>
       <span class="foot-sep" aria-hidden="true">·</span>
-      <SignInButton signedOutLabel="Admin" dropUp />
+      <SignInButton dropUp />
     </div>
     <p class="foot-meta">
       <a
