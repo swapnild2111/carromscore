@@ -285,10 +285,21 @@
 </main>
 
 <style>
+  /* Flex column so `.panel` can `flex: 1` and give each admin tab a
+     bounded height for inner scrolling. The bottom padding is trimmed
+     when a tab uses the fixed-height scroll pattern — the tab's own
+     list takes over the vertical space instead. */
   .wrap {
     max-width: 960px;
     margin: 0 auto;
-    padding: 1rem 1rem 3rem;
+    padding: 1rem 1rem 1rem;
+    display: flex;
+    flex-direction: column;
+    /* Account for the app-wide offline banner (set by BaseLayout as
+       --offline-banner-h on body[data-offline="true"]). Without this
+       the .wrap overflows off the bottom of the viewport when the
+       banner shows. */
+    min-height: calc(100dvh - var(--offline-banner-h, 0px));
   }
   .hdr {
     display: flex;
@@ -386,8 +397,43 @@
     background: rgba(255, 213, 74, 0.08);
   }
 
+  /* Flex-column so each tab component can become its own vertical
+     stack of banner → toolbar → scrollable list. `flex: 1` claims all
+     remaining vertical space; `min-height: 0` is critical — without it
+     the flex child inherits `min-height: auto` and overflows instead
+     of scrolling internally. */
   .panel {
-    padding: 0.75rem 0;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    padding: 0.75rem 0 0;
+  }
+  /* Each tab component's root element sits in .panel. Same flex-column
+     dance so its .list can scroll independently.
+
+     :global because Svelte's component-scoped selectors don't reach
+     into child components; this rule targets the section-like root
+     rendered by AdminPlayers / AdminTournaments / etc. */
+  .panel :global(> section),
+  .panel :global(> div) {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  /* The scroll container — tabs mark their <ul class="list"> with
+     this. Sits under a sticky toolbar, gets all remaining space, and
+     scrolls internally. Padding-right leaves room for the scrollbar
+     so it doesn't overlap row content. */
+  .panel :global(.list) {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 0;
+    padding-right: 0.25rem;
+    /* Bottom padding gives the last row visual breathing room from
+       the scroll container edge; small enough not to feel wasteful. */
+    padding-bottom: 0.5rem;
   }
 
   /* Footer — copied verbatim from LiveLobby + MatchSetup so every
