@@ -25,7 +25,6 @@
   import { newMid, subscribeLive, type LiveRecord } from '../lib/live-sync';
   import { saveResume, loadResume, clearResume, type ResumeRecord } from '../lib/resume';
   import {
-    createOrTouchTournament,
     rankTournaments,
     subscribeStore as subscribeTournamentsStore,
     subscribeTournaments,
@@ -330,15 +329,22 @@
     cfg.mid = newMid();
     // Practice never carries a tournament tag; force clear so a
     // stale value doesn't ride the URL. For singles/doubles, trim
-    // and register the tournament (create-if-new bumps lastActive).
+    // and pass the raw string through to /matches/{id}.tournament +
+    // .tournamentKey — the lobby groups on those fields.
+    //
+    // Until B3, this also called createOrTouchTournament(trimmed) to
+    // auto-materialise a /tournaments/{key} entry on first sight. That
+    // produced a long tail of near-duplicates (typos, casing variants,
+    // "Silver Cup" vs "silver cup 2026") that admins had to merge by
+    // hand. Now the admin-panel "+ Add tournament" flow is the only
+    // path to /tournaments/. Matches can still carry any raw string
+    // — the lobby's bucket-by-string grouping keeps working. Attaching
+    // organiser privileges requires the admin to create the canonical
+    // entry to bind the tournamentKey → organisers/ mapping.
     if (cfg.mode === 'practice') {
       cfg.tournament = '';
     } else {
-      const trimmed = cfg.tournament.trim();
-      cfg.tournament = trimmed;
-      if (trimmed) {
-        createOrTouchTournament(trimmed);
-      }
+      cfg.tournament = cfg.tournament.trim();
     }
     // Clear any stale identity handoff from a previous match with these
     // same names, then persist the fresh resolutions + start timestamp
