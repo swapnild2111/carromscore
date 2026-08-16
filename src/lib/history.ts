@@ -25,8 +25,6 @@
  * mirror will be added in the "keep on device only" toggle work later.
  */
 import {
-  createPlayer,
-  ensurePlayerInFirebase,
   loadAll,
   type Player,
 } from './players';
@@ -107,24 +105,25 @@ export type MatchResultInput = {
 };
 
 /**
- * Resolve a typed name into a Firebase player id. If `resolvedId` is
- * already known from Setup, use it. Otherwise call createPlayer to
- * either find an existing local match or create a fresh record.
- * Returns null if the name is empty (used for absent doubles partners).
+ * Resolve a typed name into a Firebase player id, if one was already
+ * chosen during match Setup (via the picker's exact-match / suggest
+ * flow). If no `resolvedId` was captured at Setup, this returns
+ * `null` — the umpire's raw typed name is preserved on the match
+ * record via the aName/bName fields (see B1), and the match archives
+ * without a /players/{id} link.
+ *
+ * The prior behaviour was to call `createPlayer(name)` here as a
+ * fallback, which auto-materialised a new /players/{id} entry for
+ * every never-seen-before name typed at End. That created a long
+ * tail of near-duplicate records (typo variants, casing differences,
+ * inconsistent initials) that admins then had to merge by hand.
+ * From B2 forward, only the admin panel creates player records;
+ * matches with unresolved names archive under the raw string.
  */
 function resolvePlayerId(name: string, resolvedId: string | null | undefined): string | null {
   const n = (name ?? '').trim();
   if (!n) return null;
-  if (resolvedId) return resolvedId;
-  try {
-    const p = createPlayer(n);
-    return p.id;
-  } catch {
-    // isPlausibleName rejected — very short or clearly garbage.
-    // We still record the match, but with an empty playerId for this
-    // side. The typed string lives on in the notes field.
-    return null;
-  }
+  return resolvedId ?? null;
 }
 
 /**
@@ -173,16 +172,14 @@ export async function finishMatch(
     ? null
     : resolvePlayerId(identity.b2Name ?? '', identity.b2ResolvedId);
 
-  // If any resolved id points to a seed-only player (bundled Wikipedia
-  // entry never materialised to Firebase), materialise now — otherwise
-  // future History page reads would see /matches/{id}.playerAId pointing
-  // at a /players/{id} that RTDB doesn't know about, and the display
-  // would fall back to rendering the raw slug.
-  await Promise.all(
-    [playerAId, playerA2Id, playerBId, playerB2Id]
-      .filter((id): id is string => !!id)
-      .map((id) => ensurePlayerInFirebase(id)),
-  );
+  // Seed-only player materialisation used to run here (bundled
+  // Wikipedia entries that never touched Firebase). Retired with B2:
+  // the picker at Setup is now the only path to a Firebase-backed
+  // player id on a match, and the picker already resolves through
+  // the identity store's canonical entries — anything reaching
+  // finishMatch with a resolvedId is already known to Firebase.
+  // ensurePlayerInFirebase in src/lib/players.ts is now dead code;
+  // safe to leave until a later cleanup pass.
 
   // Preserve raw umpire-typed names on the record. Written alongside
   // the resolved ids so any downstream reader has an honest display
