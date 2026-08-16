@@ -58,6 +58,29 @@ let firebaseConnected: boolean | null = null;
 let serverOffsetMs = 0;
 
 /**
+ * The Firebase SDK's onValue on `.info/connected` fires SYNCHRONOUSLY
+ * with `false` the moment the listener attaches (before the WebSocket
+ * has had any chance to connect), then flips to `true` a few hundred
+ * ms later when the socket handshake completes. That "false first,
+ * true later" produces a banner-flash cascade in any subscriber that
+ * naively renders the boolean.
+ *
+ * `bootDeadline` marks the wall-clock time at which we STOP swallowing
+ * Firebase's early `false` emits. Before this deadline, we ignore any
+ * `false` from `.info/connected` — the connection is still handshaking.
+ * After it (or after the FIRST_CONNECT_TIMEOUT below fires — same idea,
+ * different trigger), a `false` from Firebase is treated as a real
+ * disconnect signal.
+ *
+ * Once we've EVER seen a `true` from Firebase, subsequent `false` emits
+ * are always trusted (the SDK doesn't spontaneously go false-again
+ * during a healthy session — a `false` after `true` means the socket
+ * genuinely dropped).
+ */
+let bootDeadline = 0;
+let hasSeenFirebaseTrue = false;
+
+/**
  * If Firebase hasn't confirmed a connection within this window at
  * boot, we flip firebaseConnected to false explicitly. Firebase's
  * SDK only emits `.info/connected: true` on a successful
@@ -193,6 +216,7 @@ export function serverNow(): number {
 function bootstrap(): void {
   if (bootstrapped) return;
   bootstrapped = true;
+  bootDeadline = Date.now() + FIRST_CONNECT_TIMEOUT;
 
   // Window-level online/offline events. Only in a real browser.
   if (typeof window !== 'undefined') {
@@ -234,6 +258,17 @@ function bootstrap(): void {
         const val = snap.val();
         // .info/connected emits booleans. Anything else = keep prev.
         if (val !== true && val !== false) return;
+        // Suppress the SDK's synchronous initial `false` emit during
+        // the boot window. Without this, every fresh page load flashes
+        // the offline banner for ~700ms while the WebSocket handshake
+        // completes and Firebase re-emits `true`. A `false` is only
+        // trusted once EITHER we've seen `true` at least once (real
+        // socket drop), OR the boot deadline has passed (Firebase
+        // genuinely can't connect — treat as offline).
+        if (val === false && !hasSeenFirebaseTrue && Date.now() < bootDeadline) {
+          return;
+        }
+        if (val === true) hasSeenFirebaseTrue = true;
         if (firebaseConnected === val) return;
         firebaseConnected = val;
         notify();
