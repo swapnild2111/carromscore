@@ -428,18 +428,34 @@
     flex-direction: column;
     min-height: 0;
   }
-  /* The scroll container — tabs mark their <ul class="list"> with
-     this. Sits under a sticky toolbar, gets all remaining space, and
-     scrolls internally. Padding-right leaves room for the scrollbar
-     so it doesn't overlap row content. */
+  /* Default per-tab pattern: the tab's <ul class="list"> is the
+     scroll container, sitting under a sticky toolbar. Padding-right
+     leaves room for the scrollbar so it doesn't overlap row content. */
   .panel :global(.list) {
     flex: 1;
     overflow-y: auto;
     min-height: 0;
     padding-right: 0.25rem;
-    /* Bottom padding gives the last row visual breathing room from
-       the scroll container edge; small enough not to feel wasteful. */
     padding-bottom: 0.5rem;
+  }
+  /* Opt-out pattern: some tabs (Roles) render multiple nested lists
+     inside sub-panels, so scrolling only the single <ul.list> would
+     confine scroll to a tiny inner viewport. Those tabs mark their
+     root <section> with `admin-tab-scrollself` — the section itself
+     becomes the scroll container, and its internal lists fall back
+     to natural height (flex: none, no overflow of their own). */
+  .panel :global(> .admin-tab-scrollself) {
+    overflow-y: auto;
+    min-height: 0;
+    padding-right: 0.25rem;
+    padding-bottom: 0.5rem;
+  }
+  .panel :global(> .admin-tab-scrollself .list) {
+    flex: none;
+    overflow-y: visible;
+    min-height: auto;
+    padding-right: 0;
+    padding-bottom: 0;
   }
 
   /* Footer — copied verbatim from LiveLobby + MatchSetup so every

@@ -184,7 +184,7 @@
   const meUid = $derived(currentUser()?.uid ?? '');
 </script>
 
-<section class="roles">
+<section class="roles admin-tab-scrollself">
   {#if banner}
     <div class="banner" class:banner-err={banner.kind === 'err'} role="status">
       {banner.message}
