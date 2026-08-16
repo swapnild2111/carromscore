@@ -89,6 +89,14 @@ export type LiveRecord = {
   updatedAt: number;
   meta: LiveMeta;
   liveState: LivePayload;
+  /**
+   * Auth uid of the umpire who last published this record. Stamped
+   * in publishLive() when signed in; absent for anonymous publishes.
+   * Used by the /live/{mid} delete rule to allow self-cleanup, and
+   * by AdminLiveCleanup's UI to decide whether to show the Delete
+   * affordance to non-super users.
+   */
+  createdBy?: string;
 };
 
 /**
