@@ -1866,9 +1866,24 @@
           <span class="foot-ico" aria-hidden="true">⇄</span><span class="foot-lbl">Swap</span>
         </button>
       {/if}
+      <!--
+        Reset button hidden 2026-08-17: umpires kept tapping this
+        thinking it would undo the last board / roll back a stray
+        credit, but Reset wipes everything back to 0-0-0. The correct
+        undo path is a right-swipe on the individual digit (POINTS-/
+        BOARD- / SET-). Bringing Reset back requires a clearer
+        distinction (naming, confirmation copy, or a "roll back last
+        board" affordance).
+
+        The confirmReset state machine + resetScores() function are
+        still wired — the toast "Match ended — score is locked. Use
+        Reset to start over." references Reset. Left in place so a
+        future re-introduction is a one-line uncomment.
       <button type="button" class="foot-btn reset" onclick={requestReset} disabled={!hasProgress} aria-label="Reset scores">
         <span class="foot-ico" aria-hidden="true">↻</span><span class="foot-lbl">Reset</span>
       </button>
+      -->
+
       <button type="button" class="foot-btn endm" onclick={endMatch} aria-label="End match">
         <span class="foot-ico" aria-hidden="true">🏁</span><span class="foot-lbl">End</span>
       </button>
