@@ -178,27 +178,63 @@
     return loadAll().find((p) => p.id === editingId) ?? null;
   });
 
-  async function saveEditName() {
+  /**
+   * True when either the Name or Country buffer differs from the
+   * current stored value — enables the bottom Save button. Aliases
+   * are add/remove actions with their own inline commit, so they
+   * don't feed into this dirty flag.
+   */
+  const editDirty = $derived<boolean>(() => {
+    void tick;
+    const p = editingPlayer();
+    if (!p) return false;
+    const nameChanged = editName.trim() !== p.canonicalName && !!editName.trim();
+    const countryChanged = editCountry.trim() !== (p.country ?? '');
+    return nameChanged || countryChanged;
+  });
+
+  /**
+   * Single save action for the Edit dialog: commits any field that
+   * has changed. Runs name update first (it may block on the
+   * isPlausibleName check); country second. Each field's failure is
+   * flashed independently so a name-error doesn't hide a
+   * country-success. Dialog stays open after save — admin can
+   * continue editing aliases or make more changes.
+   */
+  async function saveEdit() {
     if (!editingId) return;
-    const trimmed = editName.trim();
     const current = editingPlayer();
-    if (!current || trimmed === current.canonicalName) return;
+    if (!current) return;
     saving = true;
-    const outcome = await updatePlayerName(editingId, trimmed);
-    saving = false;
-    if (outcome.ok) flash('ok', 'Name updated');
-    else flash('err', outcome.error);
-  }
-  async function saveEditCountry() {
-    if (!editingId) return;
-    const trimmed = editCountry.trim();
-    const current = editingPlayer();
-    if (!current || trimmed === (current.country ?? '')) return;
-    saving = true;
-    const outcome = await updatePlayerCountry(editingId, trimmed);
-    saving = false;
-    if (outcome.ok) flash('ok', 'Country updated');
-    else flash('err', outcome.error);
+    let anyChanged = false;
+    const results: string[] = [];
+    try {
+      const nameTrim = editName.trim();
+      if (nameTrim && nameTrim !== current.canonicalName) {
+        const r = await updatePlayerName(editingId, nameTrim);
+        if (r.ok) {
+          anyChanged = true;
+          results.push('name');
+        } else {
+          flash('err', `Name: ${r.error}`);
+        }
+      }
+      const countryTrim = editCountry.trim();
+      if (countryTrim !== (current.country ?? '')) {
+        const r = await updatePlayerCountry(editingId, countryTrim);
+        if (r.ok) {
+          anyChanged = true;
+          results.push('country');
+        } else {
+          flash('err', `Country: ${r.error}`);
+        }
+      }
+    } finally {
+      saving = false;
+    }
+    if (anyChanged) {
+      flash('ok', `Saved: ${results.join(', ')}`);
+    }
   }
   async function saveEditAddAlias() {
     if (!editingId) return;
@@ -639,33 +675,17 @@
 
         <label class="edit-field">
           <span>Name</span>
-          <div class="edit-row">
-            <input
-              type="text"
-              bind:value={editName}
-              aria-label="Player name"
-              maxlength="60"
-            />
-            <button
-              type="button"
-              class="btn"
-              onclick={saveEditName}
-              disabled={saving || !editName.trim() || editName.trim() === (editingPlayer()?.canonicalName ?? '')}
-            >Save</button>
-          </div>
+          <input
+            type="text"
+            bind:value={editName}
+            aria-label="Player name"
+            maxlength="60"
+          />
         </label>
 
         <label class="edit-field">
           <span>Country</span>
-          <div class="edit-row">
-            <CountrySelect bind:value={editCountry} ariaLabel="Player country" />
-            <button
-              type="button"
-              class="btn"
-              onclick={saveEditCountry}
-              disabled={saving || editCountry.trim() === (editingPlayer()?.country ?? '')}
-            >Save</button>
-          </div>
+          <CountrySelect bind:value={editCountry} ariaLabel="Player country" />
         </label>
 
         {#if editingPlayer()}
@@ -731,7 +751,16 @@
         </div>
 
         <div class="dialog-actions">
-          <button type="button" class="btn" onclick={stopEdit} disabled={saving}>Done</button>
+          <button type="button" class="btn" onclick={stopEdit} disabled={saving}>Close</button>
+          <button
+            type="button"
+            class="btn btn-primary"
+            onclick={async () => {
+              await saveEdit();
+              stopEdit();
+            }}
+            disabled={saving || !editDirty()}
+          >{saving ? 'Saving…' : 'Save changes'}</button>
         </div>
       </div>
     </div>
