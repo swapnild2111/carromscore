@@ -145,6 +145,14 @@
    */
   let setLoserToast = $state(false);
   /**
+   * Fires when SET+1 is tapped on a tied set (per-set points equal on
+   * both sides). Unlike setLoserToast (points strictly lower), a tied
+   * set has NO winner — the umpire needs to route through End Match,
+   * which detects the tie-at-cap and opens the deciding-board chooser.
+   * Copy tells them exactly that so they don't feel stuck.
+   */
+  let setTiedToast = $state(false);
+  /**
    * Fires when a POINTS tap would push this side past the per-board
    * ICF cap of 12 points (maximum theoretical single-board score:
    * 9 pucks × 1 + queen 3 = 12). The umpire is probably meaning to
@@ -739,7 +747,15 @@
     if (delta > 0 && !isPractice) {
       const tappedPts = side === 'a' ? sideA.points : sideB.points;
       const otherPts = side === 'a' ? sideB.points : sideA.points;
-      if (tappedPts <= otherPts) {
+      if (tappedPts === otherPts) {
+        // Tied set — neither side has won. Point the umpire at End
+        // Match; endMatch() will pop the deciding-board chooser when
+        // the set is at cap, and let them commit as a draw otherwise.
+        setTiedToast = true;
+        window.setTimeout(() => { setTiedToast = false; }, 3500);
+        return;
+      }
+      if (tappedPts < otherPts) {
         setLoserToast = true;
         window.setTimeout(() => { setLoserToast = false; }, 3000);
         return;
@@ -814,7 +830,14 @@
     // credits the last set and preserves the points that decided it,
     // so End can render "wins 25-18" honestly instead of "0-0".
     const totalPlayed = sideA.sets + sideB.sets;
-    const anotherSetRemains = delta > 0 && totalPlayed < cfg.bestOf;
+    // Skip the fresh-set setup when THIS SET+1 clinches the match.
+    // The final-set points/board need to persist so the winner
+    // popup can render "Final board X–Y" honestly. The auto-clinch
+    // block below then declares the match. Practice mode has no
+    // clinch, so this reduces to the original condition.
+    const clinchWinThreshold = Math.ceil(cfg.bestOf / 2);
+    const willClinch = !isPractice && delta > 0 && s.sets >= clinchWinThreshold;
+    const anotherSetRemains = delta > 0 && totalPlayed < cfg.bestOf && !willClinch;
     if (anotherSetRemains) {
       sideA.points = 0;
       sideB.points = 0;
@@ -846,8 +869,26 @@
         currentBreak = prevSetOpener === 'a' ? 'b' : 'a';
       }
     }
+    // Auto-clinch: if this SET+1 credit takes the side to the
+    // match-winning threshold (⌈bestOf/2⌉), the match is over —
+    // don't make the umpire hunt for End Match. Set matchResult,
+    // pop the winner ribbon, and archive. Fires only on positive
+    // delta so SET-1 undos never trigger the popup. Skipped in
+    // practice mode (no winner concept). Guarded on matchResult
+    // being null so an already-decided match doesn't re-fire.
+    if (delta > 0 && !isPractice && matchResult === null) {
+      const winThreshold = Math.ceil(cfg.bestOf / 2);
+      if (s.sets >= winThreshold) {
+        matchResult = side;
+        showWinnerPopup = true;
+        recordFinishedMatch(side);
+        clearResume();
+        return;
+      }
+    }
     // matchResult stays untouched: the WINNER ribbon only appears when the
-    // organiser taps End Match, never on a SET +/- alone.
+    // organiser taps End Match, never on a SET +/- alone (except the
+    // auto-clinch case above).
   }
   function adjustBoard(delta: number) {
     void tryLockLandscape();
@@ -2230,12 +2271,24 @@
   {#if setLoserToast}
     <!--
       Surfaced when SET+1 is tapped on the losing side (per-set
-      points not strictly higher than the opponent). Real carrom:
-      only the winning side can credit a set. Prevents the umpire
-      from accidentally awarding a set to the wrong player.
+      points strictly lower than the opponent). Real carrom: only
+      the winning side can credit a set. Prevents the umpire from
+      accidentally awarding a set to the wrong player.
     -->
     <div class="queen-toast" role="status" aria-live="polite">
       Only the leading side can be credited a set
+    </div>
+  {/if}
+
+  {#if setTiedToast}
+    <!--
+      Surfaced when SET+1 is tapped on a tied set (per-set points
+      equal). A tied set has no winner; the umpire needs to tap
+      End Match, which detects the tie-at-cap and pops the
+      deciding-board chooser.
+    -->
+    <div class="queen-toast" role="status" aria-live="polite">
+      Set is tied — tap End Match to play a deciding board
     </div>
   {/if}
 
