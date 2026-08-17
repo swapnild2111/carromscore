@@ -162,6 +162,21 @@
    */
   let singleScorerToast = $state(false);
   /**
+   * Fires when the umpire taps Swap after any board has been
+   * recorded in the current match. Real carrom seat-swaps happen
+   * pre-scoring; swapping mid-match would corrupt the boardLog's
+   * A/B attribution (see the swapSides guard added 2026-08-18).
+   * Auto-dismisses.
+   */
+  let swapBlockedToast = $state(false);
+  /**
+   * Fires when SET+ is tapped after the OTHER side has already
+   * reached the match-winning set count (⌈bestOf/2⌉). Blocking
+   * this stops phantom sets after the match is mathematically
+   * decided — see adjustSets's match-clinch guard added 2026-08-18.
+   */
+  let matchClinchedToast = $state(false);
+  /**
    * Set to true when finishMatch() failed to reach Firebase (network
    * dead, rules denied). Surfaces as a small non-blocking toast so
    * the umpire knows the archive attempt failed rather than
@@ -683,6 +698,22 @@
       matchDecidedToast = true;
       window.setTimeout(() => { matchDecidedToast = false; }, 2500);
       return;
+    }
+    // Match-clinch guard: refuse SET+X when the OTHER side has
+    // already reached ⌈bestOf/2⌉ sets. In bo3 that's 2 — a 0-2 or
+    // 2-0 score means the match is mathematically decided; the
+    // umpire should tap End rather than keep playing. Without this,
+    // a phantom set can be played and its SET+ credit accepted
+    // (bug reported 2026-08-17, mid=ais81o).
+    // Applies to versus modes only.
+    if (delta > 0 && !isPractice) {
+      const winThreshold = Math.ceil(cfg.bestOf / 2);
+      const otherSideSets = side === 'a' ? sideB.sets : sideA.sets;
+      if (otherSideSets >= winThreshold) {
+        matchClinchedToast = true;
+        window.setTimeout(() => { matchClinchedToast = false; }, 3000);
+        return;
+      }
     }
     // Real-carrom rule: SET+1 can only credit the side that WON the
     // set (more per-set points). Tapping SET+ on the losing side
@@ -1324,6 +1355,24 @@
   }
 
   function swapSides() {
+    // Refuse the swap once any board has been recorded. The
+    // boardLog entries carry pointsA/pointsB/breakSide/queen tied
+    // to the pre-swap seats; swapping the live top-row state
+    // without also rewriting the log produces a corrupt-looking
+    // recap (top row says A won 2-1 while the per-set tables say
+    // B won every set). Guard added 2026-08-18 after mid=ais81o
+    // was reported with exactly that inversion.
+    //
+    // If the umpire genuinely needs the players to change seats
+    // mid-match, they should end + restart with the correct
+    // orientation. In practice Swap is only meaningful pre-scoring
+    // (accidental setup mis-order) or during Practice (which has
+    // no boardLog concern — practice mode doesn't append here).
+    if (!isPractice && boardLog.length > 0) {
+      swapBlockedToast = true;
+      window.setTimeout(() => { swapBlockedToast = false; }, 3000);
+      return;
+    }
     // Physical seat swap: every per-player attribute travels with the player,
     // so their names, notes, colours, SET counts, AND current-set POINTS all
     // move together. BOARD stays put — it belongs to the match, not a player.
@@ -2185,6 +2234,31 @@
     -->
     <div class="queen-toast" role="status" aria-live="polite">
       Only one side scores per board — swipe right on the other side to correct
+    </div>
+  {/if}
+
+  {#if swapBlockedToast}
+    <!--
+      Fires when Swap is tapped after any board has been recorded.
+      Swap is only meaningful pre-scoring; a mid-match swap would
+      leave boardLog entries attached to pre-swap A/B labels while
+      the top-row SET/POINTS state flips, producing a corrupt
+      recap (top says A won 2-1, tables say B won every set).
+    -->
+    <div class="queen-toast" role="status" aria-live="polite">
+      Swap is only allowed before the first board — scores are already recorded
+    </div>
+  {/if}
+
+  {#if matchClinchedToast}
+    <!--
+      Fires when SET+ is tapped on either side after the OTHER
+      side has already clinched the match (⌈bestOf/2⌉ sets won).
+      Prevents phantom sets played post-match-decision — a bo3
+      match with sets 0-2 for side B cannot legally continue.
+    -->
+    <div class="queen-toast" role="status" aria-live="polite">
+      Match already decided — tap End to finalise
     </div>
   {/if}
 
