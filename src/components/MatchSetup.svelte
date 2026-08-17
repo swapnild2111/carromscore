@@ -57,10 +57,21 @@
   let loadingPlayers = $state(true);
 
   const players = $derived<PlayerRow[]>(() => {
-    // Concatenate seed + local, then dedupe by case-insensitive name.
+    // Read the identityTick so this recomputes when the /players
+    // Firebase-backed store changes (admin adds a player etc.).
+    void identityTick;
+    // Concatenate seed + local + identity-store, then dedupe by
+    // case-insensitive name. Identity-store rows are shaped as
+    // PlayerRow with source: 'identity' + their stored country so
+    // the picker shows the flag pill on Firebase-backed players too.
+    const identityRows: PlayerRow[] = loadAllPlayers().map((p) => ({
+      name: p.canonicalName,
+      source: 'identity',
+      ...(p.country ? { country: p.country } : {}),
+    }));
     const seen = new Set<string>();
     const out: PlayerRow[] = [];
-    for (const p of [...seedPlayers, ...localPlayers]) {
+    for (const p of [...seedPlayers, ...localPlayers, ...identityRows]) {
       const key = p.name.toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);
@@ -550,9 +561,10 @@
           <li>
             <button type="button" onclick={() => pick(key, p)}>
               <span class="pname">{p.name}</span>
-              {#if p.country}
+              {#if p.country && p.country !== 'Unknown'}
                 <span class="pcountry" title={countryName(p.country)} aria-hidden="true">
-                  {flagEmoji(p.country)} {countryName(p.country)}
+                  {#if flagEmoji(p.country)}{flagEmoji(p.country)}{/if}
+                  {countryName(p.country)}
                 </span>
               {/if}
             </button>

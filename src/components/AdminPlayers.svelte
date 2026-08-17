@@ -18,11 +18,14 @@
     createPlayer,
     isPlausibleName,
     updatePlayerName,
+    updatePlayerCountry,
     deletePlayer,
     deletePlayers,
     mergePlayers,
     rankMatches,
     addAlias,
+    removeAlias,
+    normalize,
     type Player,
     type PlayerMatch,
   } from '../lib/players';
@@ -39,6 +42,24 @@
   let mergeCanonicalId = $state<string | null>(null);
   let mergeIntoId = $state<string | null>(null);
   let mergeConfirmText = $state('');
+
+  /**
+   * Per-player Edit dialog state (v3.1). Consolidates rename +
+   * country + alias-management in a single flow — the inline
+   * rename UI (renamingId/renameValue) is still supported for the
+   * fast path but the primary edit affordance now opens this
+   * dialog. `editingId` is null when the dialog is closed. The
+   * dialog reads the player fresh from `list().find(id)` each
+   * render so identity-store updates from another tab are picked
+   * up without a manual reload.
+   */
+  let editingId = $state<string | null>(null);
+  let editName = $state('');
+  let editCountry = $state('');
+  /** Buffer for the "Add alias" input inside the Edit dialog.
+   *  Kept separate from the top-of-page free-text ranker input
+   *  so state doesn't cross-contaminate. */
+  let editAliasBuffer = $state('');
   let saving = $state(false);
   let banner = $state<{ kind: 'ok' | 'err'; message: string } | null>(null);
   /** Selected player IDs for bulk delete. Merge is one-at-a-time. */
@@ -133,6 +154,73 @@
   function cancelRename() {
     renamingId = null;
     renameValue = '';
+  }
+
+  // ─── Edit Player dialog ────────────────────────────────────────
+
+  function startEdit(p: Player) {
+    editingId = p.id;
+    editName = p.canonicalName;
+    editCountry = p.country ?? '';
+    editAliasBuffer = '';
+  }
+  function stopEdit() {
+    editingId = null;
+    editName = '';
+    editCountry = '';
+    editAliasBuffer = '';
+  }
+  /** Reactive lookup of the currently-edited player from the store,
+   *  so alias-list additions/removals reflect immediately. */
+  const editingPlayer = $derived<Player | null>(() => {
+    void tick;
+    if (!editingId) return null;
+    return loadAll().find((p) => p.id === editingId) ?? null;
+  });
+
+  async function saveEditName() {
+    if (!editingId) return;
+    const trimmed = editName.trim();
+    const current = editingPlayer();
+    if (!current || trimmed === current.canonicalName) return;
+    saving = true;
+    const outcome = await updatePlayerName(editingId, trimmed);
+    saving = false;
+    if (outcome.ok) flash('ok', 'Name updated');
+    else flash('err', outcome.error);
+  }
+  async function saveEditCountry() {
+    if (!editingId) return;
+    const trimmed = editCountry.trim();
+    const current = editingPlayer();
+    if (!current || trimmed === (current.country ?? '')) return;
+    saving = true;
+    const outcome = await updatePlayerCountry(editingId, trimmed);
+    saving = false;
+    if (outcome.ok) flash('ok', 'Country updated');
+    else flash('err', outcome.error);
+  }
+  async function saveEditAddAlias() {
+    if (!editingId) return;
+    const raw = editAliasBuffer.trim();
+    if (!raw) return;
+    saving = true;
+    const p = addAlias(editingId, raw);
+    saving = false;
+    if (p) {
+      editAliasBuffer = '';
+      flash('ok', 'Alias added');
+    } else {
+      flash('err', 'Could not add alias');
+    }
+  }
+  async function saveEditRemoveAlias(aliasKey: string) {
+    if (!editingId) return;
+    saving = true;
+    const outcome = await removeAlias(editingId, aliasKey);
+    saving = false;
+    if (outcome.ok) flash('ok', 'Alias removed');
+    else flash('err', outcome.error);
   }
 
   function startDelete(id: string) {
@@ -468,34 +556,14 @@
               aria-label={`Select ${p.canonicalName}`}
             />
           </label>
-          {#if renamingId === p.id}
-            <div class="row-edit">
-              <input
-                type="text"
-                bind:value={renameValue}
-                aria-label="New canonical name"
-                maxlength="60"
-              />
-              <button
-                type="button"
-                class="btn btn-primary"
-                onclick={saveRename}
-                disabled={saving || !renameValue.trim()}
-              >Save</button>
-              <button
-                type="button"
-                class="btn"
-                onclick={cancelRename}
-                disabled={saving}
-              >Cancel</button>
-            </div>
-          {:else}
-            <div class="row-name">
+          <div class="row-name">
               <div class="row-name-text">{p.canonicalName}</div>
               <div class="row-name-meta">
                 {#if p.country}
                   <span class="chip chip-country" title={countryName(p.country)}>
-                    <span aria-hidden="true">{flagEmoji(p.country)}</span>
+                    {#if flagEmoji(p.country)}
+                      <span aria-hidden="true">{flagEmoji(p.country)}</span>
+                    {/if}
                     {countryName(p.country)}
                   </span>
                 {/if}
@@ -506,15 +574,13 @@
               </div>
             </div>
             <div class="row-actions">
-              <button type="button" class="btn" onclick={() => startRename(p)}>Rename</button>
-              <button type="button" class="btn" onclick={() => startMerge(p.id)}>Merge…</button>
+              <button type="button" class="btn btn-primary" onclick={() => startEdit(p)}>Edit</button>
               <button
                 type="button"
                 class="btn btn-danger"
                 onclick={() => startDelete(p.id)}
               >Delete</button>
             </div>
-          {/if}
         </li>
       {/each}
     </ul>
@@ -541,6 +607,131 @@
             onclick={confirmDelete}
             disabled={saving || deleteConfirmText.trim().toUpperCase() !== 'DELETE'}
           >{saving ? 'Deleting…' : 'Confirm delete'}</button>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  {#if editingId && editingPlayer()}
+    <!--
+      Edit Player dialog. Three sections:
+        Name     — inline "Save" per-field so partial edits commit
+                   independently.
+        Country  — <CountrySelect>; save button appears when dirty.
+        Aliases  — list of current alias keys with a remove button
+                   per row; free-text input at the bottom to add.
+      Backing store updates fire flash toasts. The dialog stays open
+      after any save so an admin can make several changes in one
+      sitting. Close via the Done button or backdrop click.
+    -->
+    <div
+      class="dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="edit-player-title"
+      onclick={(e) => { if (e.target === e.currentTarget) stopEdit(); }}
+    >
+      <div class="dialog-card dialog-card-wide">
+        <h3 id="edit-player-title">Edit player</h3>
+        <p class="dialog-lead">
+          <code class="edit-id">{editingPlayer()?.id}</code>
+        </p>
+
+        <label class="edit-field">
+          <span>Name</span>
+          <div class="edit-row">
+            <input
+              type="text"
+              bind:value={editName}
+              aria-label="Player name"
+              maxlength="60"
+            />
+            <button
+              type="button"
+              class="btn"
+              onclick={saveEditName}
+              disabled={saving || !editName.trim() || editName.trim() === (editingPlayer()?.canonicalName ?? '')}
+            >Save</button>
+          </div>
+        </label>
+
+        <label class="edit-field">
+          <span>Country</span>
+          <div class="edit-row">
+            <CountrySelect bind:value={editCountry} ariaLabel="Player country" />
+            <button
+              type="button"
+              class="btn"
+              onclick={saveEditCountry}
+              disabled={saving || editCountry.trim() === (editingPlayer()?.country ?? '')}
+            >Save</button>
+          </div>
+        </label>
+
+        {#if editingPlayer()}
+          {@const aliasKeys = Object.keys(editingPlayer()?.aliases ?? {})}
+          <div class="edit-field">
+            <span>Aliases</span>
+            {#if aliasKeys.length === 0}
+              <p class="edit-empty">
+                No aliases yet. Aliases are alternate spellings that
+                resolve to this player during match Setup.
+              </p>
+            {:else}
+              <ul class="edit-alias-list">
+                {#each aliasKeys as key (key)}
+                  <li class="edit-alias-row">
+                    <code>{key}</code>
+                    <button
+                      type="button"
+                      class="btn btn-sm btn-danger"
+                      onclick={() => saveEditRemoveAlias(key)}
+                      disabled={saving}
+                    >Remove</button>
+                  </li>
+                {/each}
+              </ul>
+            {/if}
+            <div class="edit-row">
+              <input
+                type="text"
+                bind:value={editAliasBuffer}
+                placeholder="Add alias (typed form)"
+                aria-label="New alias"
+                maxlength="60"
+              />
+              <button
+                type="button"
+                class="btn"
+                onclick={saveEditAddAlias}
+                disabled={saving || !editAliasBuffer.trim()}
+              >Add</button>
+            </div>
+          </div>
+        {/if}
+
+        <div class="edit-danger">
+          <!--
+            Merge lives inside Edit rather than as a top-level row
+            action from v3.1 forward — the home-form auto-create is
+            off since v3.0, so duplicates are rare (only two admins
+            adding the same player simultaneously). Kept here for
+            legacy clean-up + those rare races.
+          -->
+          <button
+            type="button"
+            class="btn"
+            onclick={() => {
+              const id = editingId;
+              stopEdit();
+              if (id) startMerge(id);
+            }}
+            disabled={saving}
+          >Merge this player into another…</button>
+        </div>
+
+        <div class="dialog-actions">
+          <button type="button" class="btn" onclick={stopEdit} disabled={saving}>Done</button>
         </div>
       </div>
     </div>
@@ -990,6 +1181,95 @@
     gap: 0.5rem;
     justify-content: flex-end;
     margin-top: 0.5rem;
+  }
+
+  /* Edit Player dialog. Three sections: Name, Country, Aliases —
+     each self-contained with an inline Save button that only enables
+     when the field is dirty. */
+  .dialog-lead {
+    margin: 0.25rem 0 0.75rem;
+    font-size: 0.75rem;
+    color: var(--muted);
+  }
+  .edit-id {
+    background: rgba(255, 255, 255, 0.05);
+    padding: 0.1rem 0.4rem;
+    border-radius: 0.3rem;
+    font-size: 0.8em;
+  }
+  .edit-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    margin: 0.5rem 0 0.85rem;
+    font-size: 0.85rem;
+    color: var(--muted);
+  }
+  .edit-field > span:first-child {
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-size: 0.7rem;
+  }
+  .edit-row {
+    display: flex;
+    gap: 0.35rem;
+    align-items: center;
+    min-width: 0;
+  }
+  .edit-row input {
+    flex: 1;
+    min-width: 0;
+    background: #0f0f0f;
+    color: var(--fg);
+    border: 1px solid #2a2a2a;
+    border-radius: 0.4rem;
+    padding: 0.45rem 0.55rem;
+    font: inherit;
+    font-size: 0.9rem;
+  }
+  .edit-row input:focus {
+    outline: none;
+    border-color: var(--accent, #ffd54a);
+  }
+  .edit-empty {
+    color: var(--muted);
+    font-size: 0.8rem;
+    font-style: italic;
+    margin: 0.1rem 0 0.35rem;
+  }
+  .edit-alias-list {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 0.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+  .edit-alias-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.35rem 0.55rem;
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: 0.4rem;
+  }
+  .edit-alias-row code {
+    flex: 1;
+    color: var(--fg);
+    font-size: 0.8rem;
+  }
+  .btn-sm {
+    padding: 0.25rem 0.6rem;
+    font-size: 0.72rem;
+  }
+  /* Bottom section of the Edit dialog for rare / legacy operations
+     (merge into another player). Visually separated with a subtle
+     top divider so it reads as an "advanced" area rather than a
+     primary action. */
+  .edit-danger {
+    margin: 0.75rem 0 0.5rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
   }
 
   /* Batch-country label above the textarea. Same spacing as the

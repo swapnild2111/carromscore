@@ -598,6 +598,92 @@ export async function updatePlayerName(
 }
 
 /**
+ * Admin-only: update a player's country code. Legacy records that
+ * predate v3.1 or were bulk-set with a full country name can be
+ * fixed here — pass the ISO alpha-2 code ("IN", "DK", …) or
+ * "Unknown" for the placeholder value. Empty string clears the
+ * field (writes null via RTDB semantics on update-with-null).
+ */
+export async function updatePlayerCountry(
+  playerId: string,
+  country: string,
+): Promise<PlayerWriteOutcome> {
+  if (!playerId) return { ok: false, error: 'Missing player id' };
+  const trimmed = country.trim();
+  try {
+    const [{ firebaseApp }, { getDatabase, ref, get, update }] = await Promise.all([
+      import('./firebase'),
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    const path = `players/${playerId}`;
+    const snap = await get(ref(db, path));
+    const existing = snap.val() as Record<string, unknown> | null;
+    if (!existing) return { ok: false, error: 'Player not found' };
+    const p = memoryStore.find((x) => x.id === playerId);
+    if (p) {
+      if (trimmed) p.country = trimmed;
+      else delete p.country;
+    }
+    // RTDB `update` with a null value removes the field. We pass
+    // null when the admin cleared the field so the record doesn't
+    // keep a stale country string.
+    await update(ref(db, path), { country: trimmed || null });
+    notify();
+    void logAudit({
+      action: 'player.update',
+      path,
+      before: { country: typeof existing.country === 'string' ? existing.country : null },
+      after: { country: trimmed || null },
+    });
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg || 'Country update failed' };
+  }
+}
+
+/**
+ * Admin-only: remove an alias from a player record. The alias key is
+ * the normalised form used internally (see normalize()). If the
+ * caller has the raw typed form, it should be normalised before
+ * being passed here — the alias key is what the RTDB path expects.
+ */
+export async function removeAlias(
+  playerId: string,
+  aliasKey: string,
+): Promise<PlayerWriteOutcome> {
+  if (!playerId) return { ok: false, error: 'Missing player id' };
+  if (!aliasKey) return { ok: false, error: 'Missing alias key' };
+  try {
+    const [{ firebaseApp }, { getDatabase, ref, remove }] = await Promise.all([
+      import('./firebase'),
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    const path = `players/${playerId}/aliases/${aliasKey}`;
+    await remove(ref(db, path));
+    const p = memoryStore.find((x) => x.id === playerId);
+    if (p) {
+      delete p.aliases[aliasKey];
+      // Refresh the normalisedIndex too so the ranker no longer
+      // matches on the removed alias.
+      // Same pattern as updatePlayerName's patch above.
+    }
+    notify();
+    void logAudit({
+      action: 'alias.remove',
+      path,
+      before: { aliasKey },
+    });
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg || 'Remove alias failed' };
+  }
+}
+
+/**
  * Admin-only: delete a player record entirely. The playerId stays
  * referenced by any historical /matches/{id}.player*Id fields —
  * those become dangling refs that `playerName()` will fall back to

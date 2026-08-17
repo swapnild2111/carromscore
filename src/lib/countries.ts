@@ -201,28 +201,60 @@ const CODE_TO_NAME: Record<string, string> = Object.fromEntries(
 );
 
 /**
- * Look up an English display name for a country code. Returns the code
- * itself if it's not in the list (or the literal "Unknown" for our
- * backfilled legacy records — see backfill-player-country.mjs).
+ * Case-insensitive reverse lookup — given a country display name
+ * (e.g. "India"), return the ISO alpha-2 code ("IN") if it matches
+ * one we know. Handles legacy records that stored the display name
+ * instead of the code. Returns null if no match.
+ */
+const NAME_TO_CODE: Record<string, string> = Object.fromEntries(
+  COUNTRIES.map((c) => [c.name.toLowerCase(), c.code]),
+);
+
+/**
+ * Look up an English display name for a country code. Returns the
+ * canonical name for an ISO alpha-2 code. Handles two legacy shapes
+ * gracefully:
+ *   - `"Unknown"` (backfill placeholder from
+ *     scripts/backfill-player-country.mjs): returned as-is.
+ *   - Full country name (e.g. `"India"` written by a pre-v3.1
+ *     admin path that persisted the display name instead of the
+ *     code): reverse-looked up to canonicalise the case, then
+ *     returned. Ensures the picker + row chip render just one
+ *     "India" instead of "INDIA India".
  */
 export function countryName(code: string | undefined | null): string {
   if (!code) return '';
-  return CODE_TO_NAME[code] ?? code;
+  if (CODE_TO_NAME[code]) return CODE_TO_NAME[code];
+  const asName = NAME_TO_CODE[code.toLowerCase()];
+  if (asName) return CODE_TO_NAME[asName];
+  return code;
 }
 
 /**
- * Regional-indicator emoji for a two-letter country code. Falls back
- * to the code itself if the input isn't 2 uppercase letters (e.g. the
- * "Unknown" backfill placeholder).
+ * Regional-indicator emoji for a country. Accepts either an ISO
+ * alpha-2 code ("IN") or a display name ("India") — the latter is
+ * reverse-looked up so legacy records (name-persisted) still render
+ * a flag rather than the fallback text. Returns an empty string
+ * when the input can't be resolved (e.g. "Unknown" placeholder) so
+ * callers can render just the name without a stray "UNKNOWN" glyph.
  *
- * Works by mapping each ASCII letter to its Unicode regional-indicator
- * pair (U+1F1E6 for A .. U+1F1FF for Z). Combined, the pair renders as
+ * ISO alpha-2 codes map to Unicode regional-indicator pairs
+ * (U+1F1E6 for A .. U+1F1FF for Z). Combined, the pair renders as
  * the country's flag on OSes with an emoji font that supports them.
  */
 export function flagEmoji(code: string | undefined | null): string {
   if (!code) return '';
-  const c = code.toUpperCase();
-  if (c.length !== 2 || !/^[A-Z]{2}$/.test(c)) return c;
+  // Resolve to an ISO code if the input is a known display name.
+  const iso =
+    CODE_TO_NAME[code] !== undefined
+      ? code
+      : NAME_TO_CODE[code.toLowerCase()] ?? '';
+  if (!iso) return '';
+  const c = iso.toUpperCase();
+  // Only proper 2-letter codes render as a flag; anything else
+  // (including "Unknown") returns empty so the caller renders just
+  // the name without a stray glyph.
+  if (c.length !== 2 || !/^[A-Z]{2}$/.test(c)) return '';
   const A = 0x41;
   const BASE = 0x1f1e6;
   return String.fromCodePoint(
