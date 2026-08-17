@@ -1029,10 +1029,50 @@
       window.setTimeout(() => { matchDecidedToast = false; }, 2500);
       return;
     }
+    const prev = queenHolder;
     if (queenHolder === side) {
       queenHolder = null;
     } else {
       queenHolder = side;
+    }
+    // Real-carrom queen credit: covering the queen is worth
+    // QUEEN_VALUE (3) points on the board it was pocketed. Instead
+    // of leaving the umpire to remember to tap POINTS+3, adjust the
+    // running-board delta automatically:
+    //   - side A claimed queen (was null): +3 to sideA if not locked
+    //   - side A released queen (was 'a'): -3 from sideA if it had 3+
+    //   - transfer 'a' → 'b': -3 from A, +3 to B (same conditions)
+    // "Locked" = the pre-current-board cumulative is already within
+    // a queen's worth of pointsTarget (ICF advantage rule) — queen
+    // then scores 0, and we skip the auto-bump both ways.
+    if (isPractice) return;
+    if (prev === side && queenHolder === null) {
+      // Untick: undo the +3 if it was applied
+      const s = side === 'a' ? sideA : sideB;
+      const perBoard = s.points - (side === 'a' ? pointsAtBoardStart.a : pointsAtBoardStart.b);
+      if (perBoard >= QUEEN_VALUE) {
+        s.points = Math.max(0, s.points - QUEEN_VALUE);
+      }
+      return;
+    }
+    if (queenHolder !== null) {
+      // Newly claimed (from null) or transferred from the other side.
+      // If transferred, subtract from the previous holder first.
+      if (prev && prev !== queenHolder) {
+        const pSide = prev === 'a' ? sideA : sideB;
+        const pBaseline = prev === 'a' ? pointsAtBoardStart.a : pointsAtBoardStart.b;
+        const pPerBoard = pSide.points - pBaseline;
+        if (pPerBoard >= QUEEN_VALUE) {
+          pSide.points = Math.max(0, pSide.points - QUEEN_VALUE);
+        }
+      }
+      // Add to the new holder if not locked at start-of-board.
+      const s = queenHolder === 'a' ? sideA : sideB;
+      const baseline = queenHolder === 'a' ? pointsAtBoardStart.a : pointsAtBoardStart.b;
+      const lockedAtBoardStart = baseline >= queenLockThreshold;
+      if (!lockedAtBoardStart) {
+        s.points = Math.min(cfg.pointsTarget, s.points + QUEEN_VALUE);
+      }
     }
   }
 
@@ -2250,11 +2290,17 @@
   {#if confirmExit}
     <div class="dialog" role="dialog" aria-modal="true">
       <div class="dialog-card exit">
-        <h2>Exit match?</h2>
-        <p class="who">Current score will be discarded.</p>
+        <h2>{matchResult ? 'Close match?' : 'Exit match?'}</h2>
+        <p class="who">
+          {#if matchResult}
+            Match is already saved. Closing returns to the home screen.
+          {:else}
+            Current score will be discarded.
+          {/if}
+        </p>
         <div class="dialog-actions">
-          <button class="cancel" onclick={() => (confirmExit = false)}>Keep playing</button>
-          <button class="danger" onclick={exit}>Exit</button>
+          <button class="cancel" onclick={() => (confirmExit = false)}>{matchResult ? 'Cancel' : 'Keep playing'}</button>
+          <button class="danger" onclick={exit}>{matchResult ? 'Close' : 'Exit'}</button>
         </div>
       </div>
     </div>
