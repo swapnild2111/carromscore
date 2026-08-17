@@ -145,6 +145,23 @@
    */
   let setLoserToast = $state(false);
   /**
+   * Fires when a POINTS tap would push this side past the per-board
+   * ICF cap of 12 points (maximum theoretical single-board score:
+   * 9 pucks × 1 + queen 3 = 12). The umpire is probably meaning to
+   * tap BOARD +1 to move to the next board. Auto-dismisses.
+   */
+  let boardCapToast = $state(false);
+  /**
+   * Fires when the umpire tries to score points on side B after
+   * side A has already scored on the current board (or vice versa).
+   * Real carrom: only ONE side scores per board — whoever pockets
+   * the last coin (with the queen covered) claims that board's
+   * points. If both sides seem to have scored, the umpire has
+   * probably mistapped and needs to swipe-right on the other side
+   * to correct. Auto-dismisses.
+   */
+  let singleScorerToast = $state(false);
+  /**
    * Set to true when finishMatch() failed to reach Firebase (network
    * dead, rules denied). Surfaces as a small non-blocking toast so
    * the umpire knows the archive attempt failed rather than
@@ -616,6 +633,10 @@
     return matchResult !== null;
   }
 
+  /** Max points a single board can score in ICF-rules carrom:
+   *  9 opponent-side pucks × 1 point + queen coverage 3 = 12. */
+  const BOARD_POINT_CAP = 12;
+
   function adjustPoints(side: 'a' | 'b', delta: number) {
     void tryLockLandscape();
     // Post-endMatch lockout: don't accept positive deltas. Negatives
@@ -627,6 +648,31 @@
       return;
     }
     const s = side === 'a' ? sideA : sideB;
+    // Rule 4 (single-scorer-per-board): if the OTHER side has already
+    // scored on this board, block the tap. Real carrom: only one side
+    // pockets pucks on any given board — the umpire has probably
+    // mistapped. To correct, they need to swipe-right on the other
+    // side first. Negatives (undo) always allowed.
+    if (delta > 0) {
+      const startA = pointsAtBoardStart.a;
+      const startB = pointsAtBoardStart.b;
+      const otherScored = side === 'a'
+        ? sideB.points > startB
+        : sideA.points > startA;
+      if (otherScored) {
+        singleScorerToast = true;
+        window.setTimeout(() => { singleScorerToast = false; }, 2500);
+        return;
+      }
+      // Rule 1 (per-board cap 12): block a tap that would push this
+      // side's per-board delta past 12. Negatives never trip it.
+      const perBoard = s.points - (side === 'a' ? startA : startB);
+      if (perBoard + delta > BOARD_POINT_CAP) {
+        boardCapToast = true;
+        window.setTimeout(() => { boardCapToast = false; }, 2500);
+        return;
+      }
+    }
     s.points = Math.min(cfg.pointsTarget, Math.max(0, s.points + delta));
   }
   function adjustSets(side: 'a' | 'b', delta: number) {
@@ -1433,8 +1479,23 @@
     return pips;
   });
 
-  const queenLockedA = $derived(sideA.points >= 22);
-  const queenLockedB = $derived(sideB.points >= 22);
+  /**
+   * Queen advantage-lockout threshold: from (pointsTarget − queenValue)
+   * onward, the queen can no longer be claimed by the leading side.
+   * ICF rule: if you're within a queen's worth of winning, covering
+   * the queen doesn't credit — otherwise the queen's 3 points could
+   * push a side past target without their needing to pocket the
+   * last coin.
+   *
+   * Derived from cfg.pointsTarget so any target works correctly:
+   *   25 → lockout at 22; 20 → at 17; 15 → at 12.
+   * Previously hardcoded to 22, only correct for the default
+   * 25-point target.
+   */
+  const QUEEN_VALUE = 3;
+  const queenLockThreshold = $derived(cfg.pointsTarget - QUEEN_VALUE);
+  const queenLockedA = $derived(sideA.points >= queenLockThreshold);
+  const queenLockedB = $derived(sideB.points >= queenLockThreshold);
 
 </script>
 
@@ -2084,6 +2145,31 @@
     -->
     <div class="queen-toast" role="status" aria-live="polite">
       Match ended — score is locked. Use Reset to start over.
+    </div>
+  {/if}
+
+  {#if boardCapToast}
+    <!--
+      Fires when a POINTS tap would take this side past 12 on the
+      current board. ICF-rules ceiling: 9 opponent-side pucks × 1 pt
+      + queen coverage 3 = 12. Umpire probably means BOARD +1.
+    -->
+    <div class="queen-toast" role="status" aria-live="polite">
+      Max 12 points per board — tap BOARD +1 for the next board
+    </div>
+  {/if}
+
+  {#if singleScorerToast}
+    <!--
+      Fires when the umpire tries to score points on side B after
+      side A has already scored on this board (or vice versa). Real
+      carrom: only ONE side scores per board — the pockets belong
+      to whoever finishes with the queen covered. To correct a
+      mistap, swipe right on the other side to zero out its
+      per-board delta first.
+    -->
+    <div class="queen-toast" role="status" aria-live="polite">
+      Only one side scores per board — swipe right on the other side to correct
     </div>
   {/if}
 
