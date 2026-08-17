@@ -59,6 +59,20 @@
    *  per-record edit dialog (v3.2). Mandatory; blocks the Add button
    *  when empty. */
   let addingCountry = $state('');
+  /**
+   * Optional per-batch metadata. The bulk-add flow was designed as
+   * "one country per batch"; the optional age/email/phone fields
+   * follow the same "if you enter it, it applies to every player in
+   * the batch" rule. Rare use case (usually blank on a bulk paste
+   * from a delegation roster), so the fields are collapsed by
+   * default behind a "More details" toggle to keep the fast path
+   * fast. All three are optional; email + phone are strings, age is
+   * a number 0-120.
+   */
+  let addingMoreOpen = $state(false);
+  let addingAge = $state<string>('');
+  let addingEmail = $state('');
+  let addingPhone = $state('');
 
   /** One decision the admin has to make about a candidate name that
    *  matches an existing player. */
@@ -233,6 +247,10 @@
     addingOpen = true;
     addingInput = '';
     addingCountry = '';
+    addingMoreOpen = false;
+    addingAge = '';
+    addingEmail = '';
+    addingPhone = '';
     conflicts = [];
     cleanCandidates = [];
     addStep = 'input';
@@ -241,6 +259,10 @@
     addingOpen = false;
     addingInput = '';
     addingCountry = '';
+    addingMoreOpen = false;
+    addingAge = '';
+    addingEmail = '';
+    addingPhone = '';
     conflicts = [];
     cleanCandidates = [];
     addStep = 'input';
@@ -345,8 +367,28 @@
     saving = true;
     // Snapshot the batch-shared country at commit time so a race with
     // a follow-up dialog change can't leak between batches.
+    // Snapshot the batch metadata at commit time so a race with a
+    // follow-up dialog change can't leak between batches. Country
+    // is mandatory; the optional fields land on every player in the
+    // batch only when the "More details" toggle is used AND the
+    // field has a value.
     const batchCountry = addingCountry;
-    const meta = batchCountry ? { country: batchCountry } : {};
+    const batchAgeRaw = addingAge.trim();
+    const batchAgeNum = batchAgeRaw ? Number(batchAgeRaw) : NaN;
+    const batchEmail = addingEmail.trim();
+    const batchPhone = addingPhone.trim();
+    const meta: {
+      country?: string;
+      age?: number;
+      email?: string;
+      phone?: string;
+    } = {};
+    if (batchCountry) meta.country = batchCountry;
+    if (Number.isFinite(batchAgeNum) && batchAgeNum >= 0 && batchAgeNum <= 120) {
+      meta.age = batchAgeNum;
+    }
+    if (batchEmail) meta.email = batchEmail;
+    if (batchPhone) meta.phone = batchPhone;
     let created = 0;
     let aliased = 0;
     let skipped = 0;
@@ -617,6 +659,50 @@
             aria-label="Player names"
             rows="5"
           ></textarea>
+          <button
+            type="button"
+            class="more-details-toggle"
+            onclick={() => (addingMoreOpen = !addingMoreOpen)}
+          >
+            {addingMoreOpen ? '▾' : '▸'} More details (age / email / phone — applied to every player in this batch)
+          </button>
+          {#if addingMoreOpen}
+            <div class="more-details">
+              <label class="more-field">
+                <span>Age</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="120"
+                  bind:value={addingAge}
+                  aria-label="Batch age"
+                />
+              </label>
+              <label class="more-field">
+                <span>Email</span>
+                <input
+                  type="email"
+                  bind:value={addingEmail}
+                  maxlength="128"
+                  aria-label="Batch email"
+                />
+              </label>
+              <label class="more-field">
+                <span>Phone</span>
+                <input
+                  type="tel"
+                  bind:value={addingPhone}
+                  maxlength="32"
+                  aria-label="Batch phone"
+                />
+              </label>
+              <p class="more-hint">
+                Optional. Only fill these when the batch is a single
+                person — otherwise leave blank and edit per record
+                later.
+              </p>
+            </div>
+          {/if}
           <div class="dialog-actions">
             <button type="button" class="btn" onclick={closeAdd} disabled={saving}>Cancel</button>
             <button
@@ -995,6 +1081,56 @@
     margin: 0.5rem 0 0.75rem;
     font-size: 0.85rem;
     color: var(--muted);
+  }
+  /* Collapsed "More details" toggle above the textarea's action row.
+     Discloses the optional age/email/phone fields when expanded. */
+  .more-details-toggle {
+    background: transparent;
+    border: 0;
+    padding: 0.4rem 0;
+    color: var(--muted);
+    font: inherit;
+    font-size: 0.78rem;
+    text-align: left;
+    cursor: pointer;
+    width: 100%;
+  }
+  .more-details-toggle:hover { color: var(--fg); }
+  .more-details {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 0.5rem 0.7rem;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 0.4rem;
+    margin: 0 0 0.5rem;
+  }
+  .more-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    font-size: 0.8rem;
+    color: var(--muted);
+  }
+  .more-field input {
+    background: #0f0f0f;
+    color: var(--fg);
+    border: 1px solid #2a2a2a;
+    border-radius: 0.4rem;
+    padding: 0.4rem 0.55rem;
+    font: inherit;
+    font-size: 0.85rem;
+  }
+  .more-field input:focus {
+    outline: none;
+    border-color: var(--accent, #ffd54a);
+  }
+  .more-hint {
+    font-size: 0.72rem;
+    color: var(--muted);
+    margin: 0;
+    line-height: 1.4;
   }
   /* Bulk-add textarea. Same visual language as .dialog-card input[type=text];
      multi-line so it fits comma + newline batches without a scroll bar. */

@@ -39,6 +39,7 @@
     subscribeStore as subscribePlayersStore,
     type Player,
   } from '../lib/players';
+  import { loadAllUsers, type UserRecord } from '../lib/users';
   import AdminBulkBar from './AdminBulkBar.svelte';
   import CountrySelect from './CountrySelect.svelte';
   import { countryName, flagEmoji } from '../lib/countries';
@@ -72,7 +73,22 @@
   let managingKey = $state<string | null>(null);
   let organiserUids = $state<string[]>([]);
   let organiserLoading = $state(false);
+  /** Legacy free-text UID input — kept as an escape hatch when the
+   *  target hasn't signed in yet (so they're not in /users). Hidden
+   *  behind a toggle; the primary path is the user-picker below. */
   let addUidValue = $state('');
+  let addUidRawOpen = $state(false);
+  /**
+   * Cached /users map: uid → email/displayName. Loaded once on first
+   *  Organisers-dialog open per session; refreshed on demand via the
+   *  "Reload users" button in the dialog when a newly-signed-in user
+   *  should appear. Super-read gated by RTDB rules; empty for
+   *  organisers, which is fine because we only reach this code path
+   *  from the super-only Roles surface / super's own admin panel.
+   */
+  let usersMap = $state<Record<string, { uid: string; email: string; displayName?: string }>>({});
+  let usersLoading = $state(false);
+  let userPickerValue = $state('');
   let saving = $state(false);
   let banner = $state<{ kind: 'ok' | 'err'; message: string } | null>(null);
   /** Selected tournament keys for bulk delete. */
@@ -203,8 +219,33 @@
     }
   }
 
+  async function loadUsers() {
+    usersLoading = true;
+    try {
+      const raw = await loadAllUsers();
+      // Slim the type — the dialog only needs uid/email/displayName.
+      const slim: Record<string, { uid: string; email: string; displayName?: string }> = {};
+      for (const [uid, u] of Object.entries(raw)) {
+        slim[uid] = {
+          uid,
+          email: u.email ?? '',
+          ...(u.displayName ? { displayName: u.displayName } : {}),
+        };
+      }
+      usersMap = slim;
+    } finally {
+      usersLoading = false;
+    }
+  }
+
   async function startManage(t: Tournament) {
     managingKey = t.key;
+    // Load /users map the first time the dialog opens. Cached across
+    // subsequent Organisers-dialog opens in the session; refreshable
+    // via the Reload users button.
+    if (Object.keys(usersMap).length === 0) void loadUsers();
+    userPickerValue = '';
+    addUidRawOpen = false;
     organiserLoading = true;
     organiserUids = await loadOrganisers(t.key);
     organiserLoading = false;
@@ -214,11 +255,81 @@
     managingKey = null;
     organiserUids = [];
     addUidValue = '';
+    userPickerValue = '';
+    addUidRawOpen = false;
   }
+
+  /**
+   * Add an organiser by user-picker selection. `userPickerValue` is
+   * a uid picked from the /users dropdown. Preferred path — no
+   * copy-paste of an opaque uid required.
+   */
+  async function addUidFromPicker() {
+    if (!managingKey || !userPickerValue) return;
+    const uid = userPickerValue;
+    if (organiserUids.includes(uid)) {
+      flash('err', 'That user is already an organiser');
+      return;
+    }
+    saving = true;
+    const outcome = await addOrganiser(managingKey, uid);
+    saving = false;
+    if (outcome.ok) {
+      organiserUids = [...organiserUids, uid];
+      userPickerValue = '';
+      flash('ok', 'Organiser added');
+    } else {
+      flash('err', outcome.error);
+    }
+  }
+
+  /**
+   * Format a uid → friendly label for the picker + organiser-row
+   * chips. Prefers displayName, falls back to email, then to a
+   * truncated uid slice.
+   */
+  function labelForUid(uid: string): string {
+    const u = usersMap[uid];
+    if (!u) return uid.slice(0, 8) + '…';
+    if (u.displayName) return `${u.displayName} · ${u.email}`;
+    return u.email || uid.slice(0, 8) + '…';
+  }
+
+  /** List of uid options for the picker, excluding already-assigned
+   *  organisers. Alpha-sorted by display label. */
+  const eligibleUsers = $derived(() => {
+    const already = new Set(organiserUids);
+    return Object.values(usersMap)
+      .filter((u) => !already.has(u.uid))
+      .sort((a, b) => {
+        const la = a.displayName ?? a.email ?? a.uid;
+        const lb = b.displayName ?? b.email ?? b.uid;
+        return la.localeCompare(lb);
+      });
+  });
+
   async function addUid() {
     if (!managingKey || !addUidValue.trim()) return;
-    saving = true;
     const uid = addUidValue.trim();
+    // Firebase Auth uids are opaque strings using [A-Za-z0-9] — no
+    // dots, no @, no spaces. Users often paste an email by mistake
+    // (the input's placeholder says "Firebase UID" but Firebase's
+    // own console shows "Email" as the primary display). Reject
+    // early with a helpful hint instead of a cryptic "path must
+    // be a non-empty string and can't contain '.', '#', '$', '[',
+    // or ']'" error from the SDK.
+    if (/[.#$/[\]@\s]/.test(uid) || uid.includes('@')) {
+      flash(
+        'err',
+        'Enter a Firebase UID (not an email). The user signs in and copies their uid from the account menu.',
+      );
+      return;
+    }
+    if (uid.length > 64) {
+      flash('err', 'UID must be 1-64 characters');
+      return;
+    }
+    saving = true;
     const outcome = await addOrganiser(managingKey, uid);
     saving = false;
     if (outcome.ok) {
@@ -574,8 +685,9 @@
         <h3>Manage organisers</h3>
         <p>
           Organisers can edit any match tagged to this tournament.
-          Add by Firebase UID — the recipient signs in, opens their
-          account menu, and shares their UID with you.
+          Pick from the signed-in users list below. If the person
+          hasn't signed in yet, ask them to open the site and sign in
+          once — they'll appear in the dropdown.
         </p>
         {#if organiserLoading}
           <p class="empty">Loading…</p>
@@ -583,7 +695,7 @@
           <ul class="uid-list">
             {#each organiserUids as uid (uid)}
               <li class="uid-row">
-                <code>{uid}</code>
+                <span class="uid-label">{labelForUid(uid)}</span>
                 <button
                   type="button"
                   class="btn btn-danger btn-sm"
@@ -597,21 +709,73 @@
             {/if}
           </ul>
         {/if}
+
         <div class="uid-add">
-          <input
-            type="text"
-            bind:value={addUidValue}
-            placeholder="Firebase UID"
-            aria-label="Firebase UID"
-            maxlength="64"
-          />
+          <select
+            class="user-picker"
+            bind:value={userPickerValue}
+            aria-label="Pick a signed-in user"
+            disabled={usersLoading || saving}
+          >
+            <option value="">
+              {#if usersLoading}Loading users…{:else}Select a signed-in user…{/if}
+            </option>
+            {#each eligibleUsers() as u (u.uid)}
+              <option value={u.uid}>
+                {u.displayName ? `${u.displayName} · ${u.email}` : u.email || u.uid}
+              </option>
+            {/each}
+          </select>
           <button
             type="button"
             class="btn btn-primary"
-            onclick={addUid}
-            disabled={saving || !addUidValue.trim()}
+            onclick={addUidFromPicker}
+            disabled={saving || !userPickerValue}
           >Add</button>
         </div>
+
+        <button
+          type="button"
+          class="user-picker-reload"
+          onclick={loadUsers}
+          disabled={usersLoading || saving}
+        >
+          {usersLoading ? 'Loading users…' : '↻ Reload users list'}
+        </button>
+
+        <!--
+          Escape hatch: paste a raw UID. Hidden behind a toggle so it
+          doesn't distract from the primary picker path. Useful when
+          the target has signed in but they're not showing in the
+          dropdown yet (rare — /users may briefly lag before their
+          record propagates), or for pre-onboarding an organiser
+          whose account will exist shortly.
+        -->
+        <button
+          type="button"
+          class="user-picker-toggle-raw"
+          onclick={() => (addUidRawOpen = !addUidRawOpen)}
+        >
+          {addUidRawOpen ? '▾' : '▸'} Add by UID (advanced)
+        </button>
+        {#if addUidRawOpen}
+          <div class="uid-add">
+            <input
+              type="text"
+              bind:value={addUidValue}
+              placeholder="Firebase UID"
+              aria-label="Firebase UID"
+              maxlength="64"
+            />
+            <button
+              type="button"
+              class="btn"
+              onclick={addUid}
+              disabled={saving || !addUidValue.trim()}
+            >Add</button>
+          </div>
+        {/if}
+
         <div class="dialog-actions">
           <button type="button" class="btn" onclick={stopManage} disabled={saving}>Close</button>
         </div>
@@ -1151,6 +1315,16 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  /* Friendly label (displayName · email) shown per organiser row —
+     replaces the raw uid code once we can resolve it via /users. */
+  .uid-label {
+    flex: 1;
+    font-size: 0.85rem;
+    color: var(--fg);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .uid-add {
     display: flex;
     gap: 0.35rem;
@@ -1159,5 +1333,37 @@
   .uid-add input {
     flex: 1;
     margin: 0;
+  }
+  .user-picker {
+    flex: 1;
+    background: #0f0f0f;
+    color: var(--fg);
+    border: 1px solid #2a2a2a;
+    border-radius: 0.4rem;
+    padding: 0.45rem 0.55rem;
+    font: inherit;
+    font-size: 0.85rem;
+  }
+  .user-picker:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  .user-picker-reload,
+  .user-picker-toggle-raw {
+    background: transparent;
+    border: 0;
+    padding: 0.25rem 0;
+    color: var(--muted);
+    font: inherit;
+    font-size: 0.75rem;
+    cursor: pointer;
+    text-align: left;
+  }
+  .user-picker-reload:hover,
+  .user-picker-toggle-raw:hover {
+    color: var(--fg);
+  }
+  .user-picker-toggle-raw {
+    margin-top: 0.35rem;
   }
 </style>
