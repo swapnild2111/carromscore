@@ -1168,7 +1168,33 @@
     }
     let winner: 'a' | 'b' | 'draw' | null = null;
     let awardExtraSet = false;
-    if (sideA.sets > sideB.sets) {
+    // Match-clinch check first: has one side reached ⌈bestOf/2⌉ sets
+    // BEFORE this End was tapped? If so, the match is genuinely over
+    // and the set-lead is the match winner. In bo3 that's 2 sets.
+    // Without this gate, End on a tied set 2 (sets 0-1) would declare
+    // the 1-set-leader as match winner and skip the decider prompt
+    // (bug reported 2026-08-18: Set 2 tied 6-6 at cap, End declared
+    // "wins 0-1" instead of asking for a deciding board).
+    const winThreshold = Math.ceil(cfg.bestOf / 2);
+    const clinched = sideA.sets >= winThreshold || sideB.sets >= winThreshold;
+    if (clinched && sideA.sets > sideB.sets) {
+      winner = 'a';
+    } else if (clinched && sideB.sets > sideA.sets) {
+      winner = 'b';
+    } else if (sideA.points === sideB.points && board >= cfg.maxBoards && !isDecidingBoard) {
+      // At-cap tied current set (below the clinch line) — offer the
+      // deciding-board prompt. This branch fires regardless of the
+      // set-lead: whether sets are 0-0 (set 1), 0-1 (set 2), 1-1
+      // (set 3), the current set is tied at its natural end and
+      // deserves resolution before the match can be called.
+      matchResult = 'draw';
+      pendingDrawChoice = true;
+      showWinnerPopup = true;
+      return;
+    } else if (sideA.sets > sideB.sets) {
+      // Set-lead but not clinched, and current set isn't tied-at-cap.
+      // Umpire ended early (e.g. below points/board cap). Award to
+      // the current set-leader.
       winner = 'a';
     } else if (sideB.sets > sideA.sets) {
       winner = 'b';
@@ -1182,28 +1208,13 @@
       winner = 'b';
       awardExtraSet = true;
     } else {
-      // Fully tied — sets AND points equal. Two paths:
+      // Fully tied — sets AND points equal, but below cap (the at-cap
+      // path was handled above). Auto-commit as draw: umpire chose
+      // to End early on an equal position.
       //
-      // - At the limit AND not already playing the decider: show the
-      //   "Play deciding board / Call it a draw" chooser. Defer the
-      //   archive write until the umpire chooses.
-      // - Otherwise (early End on a tie, or a decider board that also
-      //   tied): auto-commit as draw.
-      //
-      // Consistent rule for BOTH paths: **SETS only ticks up when a
-      // side wins the set**. A tied set has no winner, so neither
-      // sideA.sets nor sideB.sets moves. This keeps the pre-decision
-      // popup (SETS 0-0) and any post-decider popup (SETS 1-0 for
-      // whichever side won the extra board) reading honestly instead
-      // of the previous "1-1 for a draw" quirk which suggested both
-      // sides had won a set.
-      if (board >= cfg.maxBoards && !isDecidingBoard) {
-        matchResult = 'draw';
-        pendingDrawChoice = true;
-        showWinnerPopup = true;
-        return;
-      }
-      // Below limit or decider-also-tied — auto-commit as draw.
+      // Consistent rule: **SETS only ticks up when a side wins the
+      // set**. A tied set has no winner, so neither sideA.sets nor
+      // sideB.sets moves.
       winner = 'draw';
     }
     if (awardExtraSet && (winner === 'a' || winner === 'b')) {
