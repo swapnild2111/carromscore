@@ -69,15 +69,28 @@
       source: 'identity',
       ...(p.country ? { country: p.country } : {}),
     }));
-    const seen = new Set<string>();
-    const out: PlayerRow[] = [];
+    // Merge-dedupe by case-insensitive name. Earlier sources win on
+    // display shape (name/source), but LATER sources fill in fields
+    // the earlier row didn't have — specifically `country`, since
+    // localPlayers has no country column while the identity store
+    // does. Without this merge, a name that first appears in
+    // localPlayers (created by playing a match) would forever render
+    // without a flag, even after an admin sets its country on
+    // Firebase.
+    const byKey = new Map<string, PlayerRow>();
     for (const p of [...seedPlayers, ...localPlayers, ...identityRows]) {
       const key = p.name.toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push(p);
+      const prev = byKey.get(key);
+      if (!prev) {
+        byKey.set(key, p);
+        continue;
+      }
+      // Upgrade fields missing on the earlier row.
+      if (!prev.country && p.country) {
+        byKey.set(key, { ...prev, country: p.country });
+      }
     }
-    return out;
+    return Array.from(byKey.values());
   });
 
   $effect(() => {
