@@ -1329,13 +1329,26 @@
     display: flex;
     gap: 0.35rem;
     margin: 0.75rem 0 0.25rem;
+    /* min-width: 0 lets the flex-1 picker actually shrink when a long
+       option string would otherwise blow the row wider than the dialog
+       card. Without this the select's intrinsic width (widest option's
+       text) pushes the Add button outside the modal. */
+    align-items: center;
+    min-width: 0;
   }
   .uid-add input {
     flex: 1;
     margin: 0;
+    min-width: 0;
   }
   .user-picker {
     flex: 1;
+    /* Cap the picker at 100% of the row and force overflow to ellipsis
+       inside the closed <select>. The open dropdown still shows the
+       full text — this only clips the collapsed representation. */
+    min-width: 0;
+    max-width: 100%;
+    width: 0;   /* let flex-1 alone drive width, ignoring intrinsic content */
     background: #0f0f0f;
     color: var(--fg);
     border: 1px solid #2a2a2a;
@@ -1343,6 +1356,8 @@
     padding: 0.45rem 0.55rem;
     font: inherit;
     font-size: 0.85rem;
+    text-overflow: ellipsis;
+    overflow: hidden;
   }
   .user-picker:disabled {
     opacity: 0.6;
