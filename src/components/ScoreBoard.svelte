@@ -257,6 +257,17 @@
    */
   let isDecidingBoard = $state(false);
   /**
+   * Snapshot of cfg.maxBoards at the moment a decider was chosen —
+   * so when the deciding board completes AND the set transitions
+   * (SET+1 for the winner), cfg.maxBoards can be restored to its
+   * original per-set cap. Without this, cfg.maxBoards accumulates
+   * `+1` for every set that entered a decider, and every subsequent
+   * set inherits the extended cap (bug reported 2026-08-18:
+   * "Set 2 had 3 boards allowed after Set 1's decider").
+   * Null when no decider is active.
+   */
+  let maxBoardsBeforeDecider = $state<number | null>(null);
+  /**
    * Signals the winner popup should render its "Play deciding board /
    * Call it a draw" chooser instead of the normal "View scorecard"
    * single-button path. True only during the brief window between
@@ -813,6 +824,17 @@
       board = 0;
       queenHolder = null;
       pointsAtBoardStart = { a: 0, b: 0 };
+      // Roll back any decider extension from the just-completed set.
+      // isDecidingBoard is per-set state (the banner should not carry
+      // into a new set), and cfg.maxBoards was bumped +1 for the
+      // decider board — restore it so the new set gets the original
+      // per-set cap. Both no-ops when the just-completed set wasn't
+      // a decider.
+      isDecidingBoard = false;
+      if (maxBoardsBeforeDecider !== null) {
+        cfg.maxBoards = maxBoardsBeforeDecider;
+        maxBoardsBeforeDecider = null;
+      }
       // First-break rotates every set: the player who did NOT open
       // the previous set opens the next one. Find the previous set's
       // first-board breaker from the log and flip it. If the log is
@@ -1244,6 +1266,13 @@
       //    computed against the pre-tied-board baseline and produce
       //    wrong per-board deltas in the boardLog.
       matchResult = null;
+      // Save the pre-extension cap so the SET+ transition below can
+      // restore it. Without this, cfg.maxBoards permanently grows +1
+      // per set-that-hit-a-decider, and every subsequent set gets
+      // the extended cap (Set 2 allowed 3 boards after Set 1's decider).
+      if (maxBoardsBeforeDecider === null) {
+        maxBoardsBeforeDecider = cfg.maxBoards;
+      }
       cfg.maxBoards = cfg.maxBoards + 1;
       isDecidingBoard = true;
       currentBreak = currentBreak === 'a' ? 'b' : 'a';
