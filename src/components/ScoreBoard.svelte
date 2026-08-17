@@ -1327,7 +1327,19 @@
       }
       cfg.maxBoards = cfg.maxBoards + 1;
       isDecidingBoard = true;
-      currentBreak = currentBreak === 'a' ? 'b' : 'a';
+      // Decider's opener = opposite of the just-completed board's
+      // breaker. Reading from boardLog is authoritative regardless
+      // of whether the umpire tapped BOARD+1 (which would have
+      // already flipped currentBreak) or End directly (endMatch
+      // snapshots the running board without flipping currentBreak).
+      // Previously this did an unconditional `currentBreak = flip`
+      // which double-flipped when the umpire tapped BOARD+1 before
+      // End — putting the wrong player on the decider break
+      // (reported 2026-08-18).
+      const lastEntry = boardLog[boardLog.length - 1];
+      if (lastEntry) {
+        currentBreak = lastEntry.breakSide === 'a' ? 'b' : 'a';
+      }
       queenHolder = null;
       pointsAtBoardStart = { a: sideA.points, b: sideB.points };
       showWinnerPopup = false;
