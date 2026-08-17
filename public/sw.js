@@ -29,7 +29,7 @@
 // release cycles when a change to this file's byte content matters
 // enough that we want browsers to re-install the SW without waiting
 // for a full deploy — the SDK detects the diff and re-fires install.
-const APP_VERSION = '3.1.0-beta.3';
+const APP_VERSION = '3.1.0-beta.4';
 
 // Base URL is derived from the SW's own location so the same source
 // works on both main (/carromscore/) and beta (/carromscore/beta/).
