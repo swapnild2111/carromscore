@@ -1,41 +1,65 @@
 /**
  * One-shot backfill: write `country: "Unknown"` on every /players/{id}
  * record that doesn't already carry a country. Run once before v3.1's
- * mandatory-country UI ships so legacy records don't strand
- * (closed-tournament country matching sees them as "Unknown" and
- * warns as expected).
+ * mandatory-country UI ships so legacy records don't strand.
  *
- * Uses the Firebase Web SDK signed in as super via a token you supply
- * — same approach as scripts/backfill-tournament-key.js which shipped
- * against v2.2.x. Reads PUBLIC_FIREBASE_API_KEY from .env; requires
- * you to be signed in as a super-admin (paste your ID token below).
+ * Uses RTDB REST directly — no Firebase SDK dependency, no dotenv,
+ * just plain Node fetch. Reads PUBLIC_FIREBASE_API_KEY from .env
+ * (parsed inline) and FIREBASE_ID_TOKEN from the environment.
  *
  * Usage:
- *   1. Sign in as super on the live site, open DevTools → Application
- *      → IndexedDB → firebaseLocalStorageDB → firebaseLocalStorage.
- *      Copy the `accessToken` string for your uid.
- *   2. `FIREBASE_ID_TOKEN=<paste> node scripts/backfill-player-country.mjs`
+ *   1. Sign in as super on the live site. In DevTools →
+ *      Application → IndexedDB → firebaseLocalStorageDB →
+ *      firebaseLocalStorage → your uid entry → expand value →
+ *      value.stsTokenManager.accessToken. Copy the whole string
+ *      (~1000 chars).
+ *   2. From the repo root:
  *
- * Silent-on-single-record-failure: any /players/{id} that fails its
- * update (rules denial, network) is logged but the loop keeps going.
- * At the end you get a summary of skipped / updated / failed counts.
+ *      FIREBASE_ID_TOKEN=<paste> node scripts/backfill-player-country.mjs
  *
- * Idempotent: re-running is safe — records with country already set
- * are skipped.
+ * Idempotent: re-running is safe. Records with a non-empty country
+ * are skipped. Failures on a single record are logged; the loop
+ * continues. Summary at the end.
  */
 
-import { config as dotenvConfig } from 'dotenv';
-import { initializeApp } from 'firebase/app';
-import { getAuth, signInWithCustomToken } from 'firebase/auth';
-import { getDatabase, ref, get, update } from 'firebase/database';
+import { readFileSync, existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 
-dotenvConfig();
+// ─── Config ─────────────────────────────────────────────────────────
 
-const apiKey = process.env.PUBLIC_FIREBASE_API_KEY;
-if (!apiKey) {
-  console.error('PUBLIC_FIREBASE_API_KEY not set in .env — cannot proceed');
-  process.exit(1);
+const DB_URL = 'https://carrom-score-default-rtdb.firebaseio.com';
+
+// ─── Env parsing (inline; no dotenv dep) ────────────────────────────
+
+/**
+ * Parse a minimal `.env` file. Supports KEY=VALUE with optional
+ * surrounding quotes, ignores blank/comment lines. Populates
+ * process.env for any key not already set.
+ */
+function loadDotenv() {
+  const envPath = resolve(process.cwd(), '.env');
+  if (!existsSync(envPath)) return;
+  const raw = readFileSync(envPath, 'utf8');
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eq = trimmed.indexOf('=');
+    if (eq === -1) continue;
+    const key = trimmed.slice(0, eq).trim();
+    if (!key) continue;
+    if (process.env[key] !== undefined) continue;
+    let val = trimmed.slice(eq + 1).trim();
+    if (
+      (val.startsWith('"') && val.endsWith('"')) ||
+      (val.startsWith("'") && val.endsWith("'"))
+    ) {
+      val = val.slice(1, -1);
+    }
+    process.env[key] = val;
+  }
 }
+
+loadDotenv();
 
 const idToken = process.env.FIREBASE_ID_TOKEN;
 if (!idToken) {
@@ -49,22 +73,7 @@ if (!idToken) {
   process.exit(1);
 }
 
-const app = initializeApp({
-  apiKey,
-  authDomain: 'carrom-score.firebaseapp.com',
-  databaseURL: 'https://carrom-score-default-rtdb.firebaseio.com',
-  projectId: 'carrom-score',
-});
-
-// Note: signInWithCustomToken needs a custom token minted by Firebase
-// Admin SDK (server-side). For a client-side ID token, the Firebase
-// Web SDK re-uses it via the internal rest transport when passed as a
-// Bearer header. Simpler path: use the REST API directly since we
-// already have a valid ID token.
-//
-// Path: https://carrom-score-default-rtdb.firebaseio.com/players.json?auth=$idToken
-
-const DB_URL = 'https://carrom-score-default-rtdb.firebaseio.com';
+// ─── RTDB REST helpers ──────────────────────────────────────────────
 
 async function fetchAllPlayers() {
   const res = await fetch(`${DB_URL}/players.json?auth=${idToken}`);
@@ -85,6 +94,8 @@ async function patchPlayer(id, patch) {
   }
   return res.json();
 }
+
+// ─── Main ───────────────────────────────────────────────────────────
 
 async function main() {
   console.log('Loading /players from RTDB…');
