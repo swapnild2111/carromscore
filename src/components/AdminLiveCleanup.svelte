@@ -260,20 +260,34 @@
           {/if}
           <div class="row-name">
             <div class="row-title">
-              <span class="mid">{e.mid}</span>
-              <span class="chip">{e.meta.mode}</span>
+              <span class="chip chip-mode">{e.meta.mode}</span>
               {#if e.meta.tournament}
                 <span class="chip">{e.meta.tournament}</span>
               {/if}
-            </div>
-            <div class="row-sub">
-              {sideName(e, 'a')}
-              {#if sideName(e, 'b')}<span class="vs">vs</span> {sideName(e, 'b')}{/if}
-              <span class="age">· updated {relTime(e.updatedAt)}</span>
+              <span class="row-date">updated {relTime(e.updatedAt)}</span>
               {#if isStuck(e)}
                 <span class="chip chip-warn">stuck</span>
               {:else if !e.liveState.matchResult}
                 <span class="chip chip-live">LIVE</span>
+              {/if}
+            </div>
+            <div class="row-sub">
+              <span class="side-names">
+                {sideName(e, 'a')}
+                {#if sideName(e, 'b')}<span class="vs">vs</span> {sideName(e, 'b')}{/if}
+              </span>
+            </div>
+            <div class="row-meta">
+              <span class="meta-label">mid</span>
+              <code class="mid">{e.mid}</code>
+              <span class="meta-sep">·</span>
+              <span class="meta-label">by</span>
+              {#if e.createdByName}
+                <span class="meta-value">{e.createdByName}</span>
+              {:else if e.createdBy}
+                <code class="meta-uid" title={e.createdBy}>{e.createdBy.slice(0, 8)}…</code>
+              {:else}
+                <span class="meta-anon">anonymous</span>
               {/if}
             </div>
           </div>
@@ -401,11 +415,58 @@
     align-items: center;
     gap: 0.4rem;
   }
-  .mid {
+  /* Row-title now leads with mode + tournament chips + updated
+     timestamp, matching the History tab's shape. Mid is demoted to
+     the row-meta line below (monospace, muted). */
+  .row-date {
+    color: var(--muted);
+    font-size: 0.72rem;
+    margin-left: 0.15rem;
+  }
+  .side-names {
     color: var(--fg);
-    font-weight: 700;
-    font-family: monospace;
+    font-weight: 600;
     font-size: 0.9rem;
+  }
+  /* Mid + createdBy attribution line under the player names. Muted
+     because it's identifying metadata, not the primary read. */
+  .row-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.3rem;
+    color: var(--muted);
+    font-size: 0.72rem;
+    margin-top: 0.25rem;
+  }
+  .meta-label {
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 0.62rem;
+    opacity: 0.7;
+  }
+  .meta-value {
+    color: var(--fg);
+    opacity: 0.85;
+  }
+  .meta-uid {
+    background: rgba(255, 255, 255, 0.05);
+    padding: 0.05rem 0.35rem;
+    border-radius: 0.3rem;
+    font-size: 0.68rem;
+  }
+  .meta-anon {
+    font-style: italic;
+    opacity: 0.7;
+  }
+  .meta-sep { opacity: 0.4; }
+  .mid {
+    background: rgba(255, 255, 255, 0.05);
+    padding: 0.05rem 0.35rem;
+    border-radius: 0.3rem;
+    font-size: 0.68rem;
+    color: var(--fg);
+    opacity: 0.85;
   }
   .chip {
     font-size: 0.7rem;
@@ -414,6 +475,17 @@
     border: 1px solid rgba(255, 255, 255, 0.08);
     padding: 0.1rem 0.4rem;
     border-radius: 999px;
+  }
+  /* Match-mode chip — uses the app accent so the mode reads at a
+     glance without stealing focus from the player names. */
+  .chip-mode {
+    color: var(--accent, #ffd54a);
+    background: rgba(255, 213, 74, 0.08);
+    border-color: rgba(255, 213, 74, 0.3);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 0.65rem;
+    font-weight: 700;
   }
   .chip-warn {
     color: #ffb74d;
@@ -467,12 +539,16 @@
     font-size: 0.72rem;
   }
   .row-sub {
-    color: var(--muted);
-    font-size: 0.8rem;
-    margin-top: 0.25rem;
+    font-size: 0.9rem;
+    margin-top: 0.3rem;
+    color: var(--fg);
   }
-  .vs { opacity: 0.6; margin: 0 0.2rem; }
-  .age { opacity: 0.7; }
+  .vs {
+    color: var(--muted);
+    opacity: 0.6;
+    margin: 0 0.2rem;
+    font-weight: 400;
+  }
 
   .btn {
     background: rgba(255, 255, 255, 0.06);
