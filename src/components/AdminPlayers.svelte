@@ -27,6 +27,8 @@
     type PlayerMatch,
   } from '../lib/players';
   import AdminBulkBar from './AdminBulkBar.svelte';
+  import CountrySelect from './CountrySelect.svelte';
+  import { countryName, flagEmoji } from '../lib/countries';
 
   let tick = $state(0);
   let query = $state('');
@@ -51,6 +53,12 @@
    */
   let addingOpen = $state(false);
   let addingInput = $state('');
+  /** Country applied to every player in the current bulk-add batch.
+   *  Whole-batch scope: a batch is usually a club roster / delegation,
+   *  which share a country. Individual overrides come later via a
+   *  per-record edit dialog (v3.2). Mandatory; blocks the Add button
+   *  when empty. */
+  let addingCountry = $state('');
 
   /** One decision the admin has to make about a candidate name that
    *  matches an existing player. */
@@ -224,6 +232,7 @@
   function openAdd() {
     addingOpen = true;
     addingInput = '';
+    addingCountry = '';
     conflicts = [];
     cleanCandidates = [];
     addStep = 'input';
@@ -231,6 +240,7 @@
   function closeAdd() {
     addingOpen = false;
     addingInput = '';
+    addingCountry = '';
     conflicts = [];
     cleanCandidates = [];
     addStep = 'input';
@@ -267,6 +277,10 @@
    * summarising how many were dropped.
    */
   function analyseAdd() {
+    if (!addingCountry) {
+      flash('err', 'Please select a country');
+      return;
+    }
     const raw = addingInput;
     const parsed = parseCandidates(raw);
     if (parsed.length === 0) {
@@ -329,15 +343,19 @@
    */
   async function commitAdd() {
     saving = true;
+    // Snapshot the batch-shared country at commit time so a race with
+    // a follow-up dialog change can't leak between batches.
+    const batchCountry = addingCountry;
+    const meta = batchCountry ? { country: batchCountry } : {};
     let created = 0;
     let aliased = 0;
     let skipped = 0;
     let failed = 0;
     try {
-      // 1) Clean candidates → straight create.
+      // 1) Clean candidates → straight create (with batch country).
       for (const typed of cleanCandidates) {
         try {
-          createPlayer(typed);
+          createPlayer(typed, meta);
           created += 1;
         } catch {
           failed += 1;
@@ -351,11 +369,13 @@
             continue;
           }
           if (c.action === 'create') {
-            createPlayer(c.typed);
+            createPlayer(c.typed, meta);
             created += 1;
             continue;
           }
-          // action === 'alias'
+          // action === 'alias' — no country on aliases; alias attaches
+          // to an existing canonical player whose country is what
+          // matters.
           const target = c.aliasTargetId;
           if (!target) {
             failed += 1;
@@ -467,6 +487,12 @@
             <div class="row-name">
               <div class="row-name-text">{p.canonicalName}</div>
               <div class="row-name-meta">
+                {#if p.country}
+                  <span class="chip chip-country" title={countryName(p.country)}>
+                    <span aria-hidden="true">{flagEmoji(p.country)}</span>
+                    {countryName(p.country)}
+                  </span>
+                {/if}
                 <span class="chip">id: <code>{p.id}</code></span>
                 {#if Object.keys(p.aliases).length > 0}
                   <span class="chip">{Object.keys(p.aliases).length} alias{Object.keys(p.aliases).length === 1 ? '' : 'es'}</span>
@@ -576,6 +602,14 @@
             screen you'll resolve any names that already exist in the
             roster.
           </p>
+          <label class="add-country-label">
+            <span>Country (applied to every player in this batch)</span>
+            <CountrySelect
+              bind:value={addingCountry}
+              required
+              ariaLabel="Batch country"
+            />
+          </label>
           <textarea
             class="add-textarea"
             bind:value={addingInput}
@@ -589,7 +623,7 @@
               type="button"
               class="btn btn-primary"
               onclick={analyseAdd}
-              disabled={saving || !addingInput.trim()}
+              disabled={saving || !addingInput.trim() || !addingCountry}
             >{saving ? 'Adding…' : 'Add'}</button>
           </div>
         {:else}
@@ -822,6 +856,16 @@
   .chip code {
     font-size: 0.9em;
   }
+  /* Country chip carries a subtle accent tint so it reads as
+     identifying-metadata (higher signal than the id/alias chips). */
+  .chip-country {
+    color: var(--accent, #ffd54a);
+    background: rgba(255, 213, 74, 0.08);
+    border-color: rgba(255, 213, 74, 0.3);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+  }
   .row-actions {
     display: flex;
     gap: 0.35rem;
@@ -942,6 +986,16 @@
     margin-top: 0.5rem;
   }
 
+  /* Batch-country label above the textarea. Same spacing as the
+     dialog's body paragraphs. */
+  .add-country-label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    margin: 0.5rem 0 0.75rem;
+    font-size: 0.85rem;
+    color: var(--muted);
+  }
   /* Bulk-add textarea. Same visual language as .dialog-card input[type=text];
      multi-line so it fits comma + newline batches without a scroll bar. */
   .add-textarea {

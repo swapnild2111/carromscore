@@ -688,7 +688,11 @@
   .board {
     display: grid;
     grid-template-columns: 1fr 1.5fr 1fr 1.5fr 1fr;
-    gap: 0.4rem;
+    /* Wider column gap prevents SET/POINTS visual adjacency issues
+       — a "1" (SETS) next to "23" (POINTS) was reading as "123"
+       when the columns were only 0.4rem apart. 0.9rem gives each
+       cell an unambiguous boundary while keeping the row compact. */
+    gap: 0.9rem;
     padding: 0.5rem 0;
     min-height: 8rem;
   }

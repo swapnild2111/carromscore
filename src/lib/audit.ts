@@ -32,6 +32,8 @@ export type AuditAction =
   | 'tournament.delete'
   | 'organiser.add'
   | 'organiser.remove'
+  | 'player.assign'
+  | 'player.unassign'
   | 'live.delete';
 
 export type AuditEntry = {

@@ -27,10 +27,21 @@
     addOrganiser,
     removeOrganiser,
     loadOrganisers,
+    assignPlayer,
+    unassignPlayer,
+    loadAssignedPlayers,
     type Tournament,
   } from '../lib/tournaments';
   import { subscribeCurrentUserRole, type Role } from '../lib/roles';
+  import {
+    loadAll as loadAllPlayers,
+    subscribePlayers,
+    subscribeStore as subscribePlayersStore,
+    type Player,
+  } from '../lib/players';
   import AdminBulkBar from './AdminBulkBar.svelte';
+  import CountrySelect from './CountrySelect.svelte';
+  import { countryName, flagEmoji } from '../lib/countries';
 
   /**
    * Current-user role gating: super sees every row's actions; a
@@ -75,14 +86,37 @@
    *  flag; validation happens on save. */
   let addingOpen = $state(false);
   let addingName = $state('');
+  let addingType = $state<'open' | 'closed'>('open');
+  /** Country code — only meaningful when addingType === 'closed'.
+   *  Required in that case; blocks Save. */
+  let addingCountry = $state('');
+
+  /** Per-row "Assigned players" dialog state (closed tournaments). */
+  let assignOpen = $state(false);
+  let assignKey = $state<string | null>(null);
+  let assignedIds = $state<Set<string>>(new Set());
+  let assignLoading = $state(false);
+  let assignSaving = $state(false);
+  let assignFilter = $state('');
+  /** When true, the assignment dialog hides players whose country
+   *  doesn't match the tournament's. Off shows every player (guest
+   *  cases). Defaults on for closed tournaments with a country set. */
+  let assignFilterByCountry = $state(true);
+
+  /** Bump on the identity-store change, so the assignment dialog's
+   *  filtered player list re-renders when a player is added elsewhere. */
+  let playersTick = $state(0);
 
   onMount(() => {
     void subscribeTournaments();
+    void subscribePlayers();
     const unsub = subscribeStore(() => (tick += 1));
     const unsubRole = subscribeCurrentUserRole((r) => (role = r));
+    const unsubPlayers = subscribePlayersStore(() => (playersTick += 1));
     return () => {
       unsub();
       unsubRole();
+      unsubPlayers();
     };
   });
 
@@ -273,20 +307,30 @@
   function openAdd() {
     addingOpen = true;
     addingName = '';
+    addingType = 'open';
+    addingCountry = '';
   }
   function closeAdd() {
     addingOpen = false;
     addingName = '';
+    addingType = 'open';
+    addingCountry = '';
   }
   async function saveAdd() {
     const trimmed = addingName.trim();
     if (!trimmed) return;
+    if (addingType === 'closed' && !addingCountry) {
+      flash('err', 'Closed tournaments need a country');
+      return;
+    }
     saving = true;
-    // createOrTouchTournament returns the record or null (only on
-    // empty / unslug-able names, which we already guarded). It writes
-    // to Firebase fire-and-forget; the /tournaments subscription
-    // will pick up the new record within a tick.
-    const rec = createOrTouchTournament(trimmed);
+    // createOrTouchTournament writes to Firebase fire-and-forget; the
+    // /tournaments subscription picks up the new record within a tick.
+    // v3.1: pass type + country meta so open/closed status persists.
+    const rec = createOrTouchTournament(trimmed, {
+      type: addingType,
+      ...(addingType === 'closed' && addingCountry ? { country: addingCountry } : {}),
+    });
     saving = false;
     if (!rec) {
       flash('err', 'Name must include at least one letter or digit');
@@ -295,6 +339,76 @@
     flash('ok', `"${rec.name}" added`);
     closeAdd();
   }
+
+  // ─── Assigned Players dialog (closed tournaments only) ─────────
+
+  async function startAssign(t: Tournament) {
+    assignKey = t.key;
+    assignFilter = '';
+    // Default to country-filtering if the tournament has a country
+    // configured; otherwise show all.
+    assignFilterByCountry = !!t.country;
+    assignOpen = true;
+    assignLoading = true;
+    try {
+      assignedIds = await loadAssignedPlayers(t.key);
+    } finally {
+      assignLoading = false;
+    }
+  }
+  function stopAssign() {
+    assignOpen = false;
+    assignKey = null;
+    assignedIds = new Set();
+    assignFilter = '';
+  }
+  async function togglePlayerAssignment(playerId: string) {
+    if (!assignKey) return;
+    assignSaving = true;
+    try {
+      if (assignedIds.has(playerId)) {
+        const r = await unassignPlayer(assignKey, playerId);
+        if (r.ok) {
+          const next = new Set(assignedIds);
+          next.delete(playerId);
+          assignedIds = next;
+        } else {
+          flash('err', r.error);
+        }
+      } else {
+        const r = await assignPlayer(assignKey, playerId);
+        if (r.ok) {
+          const next = new Set(assignedIds);
+          next.add(playerId);
+          assignedIds = next;
+        } else {
+          flash('err', r.error);
+        }
+      }
+    } finally {
+      assignSaving = false;
+    }
+  }
+
+  /** Filtered player list for the assignment dialog. Reads from the
+   *  identity store, applies the country filter when toggled on, and
+   *  applies the free-text search. */
+  const assignCandidates = $derived(() => {
+    void playersTick;
+    if (!assignKey) return [] as Player[];
+    const tournament = list().find((t) => t.key === assignKey);
+    const country = tournament?.country;
+    const q = assignFilter.trim().toLowerCase();
+    return loadAllPlayers()
+      .filter((p) => {
+        if (assignFilterByCountry && country) {
+          if (p.country !== country) return false;
+        }
+        if (!q) return true;
+        return p.canonicalName.toLowerCase().includes(q);
+      })
+      .slice(0, 200);
+  });
 </script>
 
 <section class="tourns">
@@ -389,6 +503,16 @@
             <div class="row-name">
               <div class="row-name-text">{t.name}</div>
               <div class="row-name-meta">
+                {#if t.type === 'closed'}
+                  <span class="chip chip-closed" title="Closed tournament — country-scoped">
+                    CLOSED
+                  </span>
+                {/if}
+                {#if t.country}
+                  <span class="chip chip-country" title={countryName(t.country)}>
+                    {flagEmoji(t.country)} {countryName(t.country)}
+                  </span>
+                {/if}
                 <span class="chip">key: <code>{t.key}</code></span>
                 <span class="chip">last active {new Date(t.lastActive).toLocaleDateString()}</span>
               </div>
@@ -397,6 +521,9 @@
               <div class="row-actions">
                 <button type="button" class="btn" onclick={() => startRename(t)}>Rename</button>
                 <button type="button" class="btn" onclick={() => startManage(t)}>Organisers</button>
+                {#if t.type === 'closed'}
+                  <button type="button" class="btn" onclick={() => startAssign(t)}>Players</button>
+                {/if}
                 <button
                   type="button"
                   class="btn btn-danger"
@@ -511,8 +638,9 @@
         <h3 id="add-tourn-title">Add tournament</h3>
         <p>
           Tournaments are the top-level bucket for grouping matches.
-          After saving, organisers can be assigned via the Organisers
-          button on the row.
+          Choose <strong>open</strong> for casual events (any player,
+          any umpire) or <strong>closed</strong> for a
+          country-scoped event with an explicit assigned-player roster.
         </p>
         <input
           type="text"
@@ -521,14 +649,127 @@
           aria-label="Tournament name"
           maxlength="60"
         />
+        <fieldset class="add-type">
+          <legend>Type</legend>
+          <label class="add-type-row">
+            <input
+              type="radio"
+              name="add-tournament-type"
+              value="open"
+              bind:group={addingType}
+            />
+            <span>
+              <strong>Open</strong>
+              — casual event, no roster gating.
+            </span>
+          </label>
+          <label class="add-type-row">
+            <input
+              type="radio"
+              name="add-tournament-type"
+              value="closed"
+              bind:group={addingType}
+            />
+            <span>
+              <strong>Closed</strong>
+              — country-scoped, players assigned explicitly.
+            </span>
+          </label>
+        </fieldset>
+        {#if addingType === 'closed'}
+          <label class="add-country-label">
+            <span>Country</span>
+            <CountrySelect
+              bind:value={addingCountry}
+              required
+              ariaLabel="Tournament country"
+            />
+          </label>
+        {/if}
         <div class="dialog-actions">
           <button type="button" class="btn" onclick={closeAdd} disabled={saving}>Cancel</button>
           <button
             type="button"
             class="btn btn-primary"
             onclick={saveAdd}
-            disabled={saving || !addingName.trim()}
+            disabled={saving || !addingName.trim() || (addingType === 'closed' && !addingCountry)}
           >{saving ? 'Adding…' : 'Add'}</button>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  {#if assignOpen && assignKey}
+    <!--
+      Assigned Players dialog. Shows the identity-store roster, filtered
+      by the tournament's country (toggle-off to see all), with a
+      checkbox per row for assign/unassign. Reuses the shared /players
+      subscription established by AdminPlayers, so the list is live-
+      updated when someone adds a player in another tab.
+    -->
+    <div
+      class="dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="assign-title"
+      onclick={(e) => { if (e.target === e.currentTarget) stopAssign(); }}
+    >
+      <div class="dialog-card dialog-card-wide">
+        <h3 id="assign-title">Assigned players</h3>
+        {#await Promise.resolve(list().find((t) => t.key === assignKey)) then tournament}
+          {#if tournament}
+            <p>
+              <strong>{tournament.name}</strong>
+              {#if tournament.country}
+                · {flagEmoji(tournament.country)} {countryName(tournament.country)}
+              {/if}
+              · {assignedIds.size} assigned
+            </p>
+          {/if}
+        {/await}
+        <div class="assign-controls">
+          <input
+            type="search"
+            class="assign-search"
+            bind:value={assignFilter}
+            placeholder="Search players…"
+            aria-label="Search players"
+          />
+          <label class="assign-country-filter">
+            <input type="checkbox" bind:checked={assignFilterByCountry} />
+            Match country only
+          </label>
+        </div>
+        {#if assignLoading}
+          <p class="empty">Loading assigned players…</p>
+        {:else if assignCandidates().length === 0}
+          <p class="empty">
+            No matching players. Add players from the Players tab first.
+          </p>
+        {:else}
+          <ul class="assign-list">
+            {#each assignCandidates() as p (p.id)}
+              <li class="assign-row">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={assignedIds.has(p.id)}
+                    disabled={assignSaving}
+                    onchange={() => togglePlayerAssignment(p.id)}
+                  />
+                  <span class="assign-name">{p.canonicalName}</span>
+                  {#if p.country}
+                    <span class="assign-country" title={countryName(p.country)}>
+                      {flagEmoji(p.country)} {countryName(p.country)}
+                    </span>
+                  {/if}
+                </label>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+        <div class="dialog-actions">
+          <button type="button" class="btn" onclick={stopAssign} disabled={assignSaving}>Done</button>
         </div>
       </div>
     </div>
@@ -669,6 +910,119 @@
     padding: 0.1rem 0.4rem;
     border-radius: 999px;
   }
+  /* Country chip — subtle accent tint, matches AdminPlayers row treatment. */
+  .chip-country {
+    color: var(--accent, #ffd54a);
+    background: rgba(255, 213, 74, 0.08);
+    border-color: rgba(255, 213, 74, 0.3);
+  }
+  /* Closed-tournament chip — reads as identifying metadata alongside
+     the country pill; a stronger accent that says "this tournament
+     has roster gating." */
+  .chip-closed {
+    color: var(--accent, #ffd54a);
+    background: rgba(255, 213, 74, 0.16);
+    border-color: rgba(255, 213, 74, 0.4);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 700;
+  }
+  /* Radio group for open/closed on the add-tournament dialog. */
+  fieldset.add-type {
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 0.45rem;
+    padding: 0.5rem 0.7rem;
+    margin: 0.5rem 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+  fieldset.add-type legend {
+    color: var(--muted);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 0 0.35rem;
+  }
+  .add-type-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+    color: var(--fg);
+    cursor: pointer;
+  }
+  .add-type-row input[type="radio"] {
+    accent-color: var(--accent, #ffd54a);
+    margin-top: 0.2rem;
+  }
+  .add-country-label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    margin: 0 0 0.5rem;
+    font-size: 0.85rem;
+    color: var(--muted);
+  }
+
+  /* Assigned Players dialog */
+  .assign-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+    margin: 0.5rem 0;
+  }
+  .assign-search {
+    flex: 1;
+    min-width: 12rem;
+    background: #0f0f0f;
+    color: var(--fg);
+    border: 1px solid #2a2a2a;
+    border-radius: 0.4rem;
+    padding: 0.4rem 0.55rem;
+    font: inherit;
+    font-size: 0.85rem;
+  }
+  .assign-country-filter {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    color: var(--muted);
+    font-size: 0.8rem;
+    cursor: pointer;
+  }
+  .assign-list {
+    list-style: none;
+    padding: 0;
+    margin: 0.25rem 0;
+    max-height: 55vh;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+  .assign-row label {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0.4rem 0.55rem;
+    border-radius: 0.4rem;
+    cursor: pointer;
+    color: var(--fg);
+    font-size: 0.9rem;
+  }
+  .assign-row label:hover { background: rgba(255, 255, 255, 0.04); }
+  .assign-row input[type="checkbox"] {
+    accent-color: var(--accent, #ffd54a);
+    cursor: pointer;
+  }
+  .assign-name { flex: 1; }
+  .assign-country {
+    color: var(--muted);
+    font-size: 0.75rem;
+  }
+
   .row-actions {
     display: flex;
     gap: 0.35rem;

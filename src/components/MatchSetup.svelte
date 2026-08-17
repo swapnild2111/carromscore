@@ -28,6 +28,9 @@
     rankTournaments,
     subscribeStore as subscribeTournamentsStore,
     subscribeTournaments,
+    loadAll as loadAllTournaments,
+    loadAssignedPlayers,
+    normalizeKey,
     type Tournament,
   } from '../lib/tournaments';
   import {
@@ -40,6 +43,7 @@
   import SignInButton from './SignInButton.svelte';
   import FeedbackPopup from './FeedbackPopup.svelte';
   import HelpTip from './HelpTip.svelte';
+  import { countryName, flagEmoji } from '../lib/countries';
 
   const base: string = import.meta.env.BASE_URL;
 
@@ -101,6 +105,45 @@
     const unsub = subscribeTournamentsStore(() => (tournamentTick += 1));
     void subscribeTournaments();
     return unsub;
+  });
+
+  /**
+   * Resolve the currently-typed tournament string against the shared
+   * store. Returns null when the string doesn't match any known
+   * tournament (free-text tag; open tournament by definition of
+   * v3.1's data model — closed tournaments must be admin-created).
+   */
+  const pickedTournament = $derived<Tournament | null>(() => {
+    void tournamentTick;
+    const raw = cfg.tournament?.trim();
+    if (!raw) return null;
+    const key = normalizeKey(raw);
+    if (!key) return null;
+    return loadAllTournaments().find((t) => t.key === key) ?? null;
+  });
+
+  /**
+   * Assigned-player ids for the picked closed tournament. Loaded
+   * one-shot on tournament-key change. Empty set when the tournament
+   * is open or none is picked. Read by the picker's warning
+   * derivation below.
+   */
+  let assignedPlayerIds = $state<Set<string>>(new Set());
+  let lastLoadedAssignmentKey = $state<string | null>(null);
+  $effect(() => {
+    const t = pickedTournament();
+    const key = t?.type === 'closed' ? t.key : null;
+    if (key === lastLoadedAssignmentKey) return;
+    lastLoadedAssignmentKey = key;
+    if (!key) {
+      assignedPlayerIds = new Set();
+      return;
+    }
+    void loadAssignedPlayers(key).then((set) => {
+      // Guard against a stale key: if the user picked a different
+      // tournament while the fetch was in-flight, drop the result.
+      if (lastLoadedAssignmentKey === key) assignedPlayerIds = set;
+    });
   });
 
   // Resume-match chip. If the last-started match is still ongoing
@@ -260,6 +303,39 @@
     if (!h) return null;
     if (h.rank === 'prefix') return null;
     return h;
+  }
+
+  /**
+   * Closed-tournament pick-warning derivation. Returns a short
+   * warning label (or null) for a given player-input key, checked
+   * against the picked tournament's assignment set and country.
+   *
+   * Non-blocking — the umpire can still Start; the warning is
+   * advisory only. Rendered as a soft amber pill below the picker.
+   * Only fires when the picked tournament is closed and known;
+   * open tournaments and free-text tags produce no warnings.
+   */
+  function pickWarning(key: keyof MatchConfig): string | null {
+    void identityTick;
+    void tournamentTick;
+    const t = pickedTournament();
+    if (!t || t.type !== 'closed') return null;
+    const typed = (cfg[key] as string).trim();
+    if (!typed) return null;
+    const resolvedId = resolvedPlayerIds[key as string];
+    if (!resolvedId) {
+      return 'Not in the roster — closed tournament expects assigned players';
+    }
+    if (!assignedPlayerIds.has(resolvedId)) {
+      return 'Not assigned to this tournament';
+    }
+    if (t.country) {
+      const roster = loadAllPlayers().find((p) => p.id === resolvedId);
+      if (roster && roster.country && roster.country !== t.country) {
+        return `Country mismatch: ${roster.country} vs tournament ${t.country}`;
+      }
+    }
+    return null;
   }
 
   /**
@@ -474,6 +550,11 @@
           <li>
             <button type="button" onclick={() => pick(key, p)}>
               <span class="pname">{p.name}</span>
+              {#if p.country}
+                <span class="pcountry" title={countryName(p.country)} aria-hidden="true">
+                  {flagEmoji(p.country)} {countryName(p.country)}
+                </span>
+              {/if}
             </button>
           </li>
         {/each}
@@ -497,6 +578,14 @@
       >
         Same as <strong>{hit.player.canonicalName}</strong>? Tap to link.
       </button>
+    {/if}
+    {#if !dropdownVisible}
+      {@const warn = pickWarning(key)}
+      {#if warn}
+        <span class="closed-warn" role="status" aria-live="polite">
+          <span aria-hidden="true">⚠</span> {warn}
+        </span>
+      {/if}
     {/if}
   </label>
 {/snippet}
@@ -1116,8 +1205,9 @@
   }
   .suggest button {
     display: flex;
-    flex-direction: column;
-    align-items: flex-start;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.5rem;
     width: 100%;
     padding: 0.55rem 0.75rem;
     background: transparent;
@@ -1130,6 +1220,15 @@
   .suggest button:hover { background: #1c1c1c; }
   .pname { font-size: 0.95rem; }
   .pmeta { color: var(--muted); font-size: 0.75rem; }
+  /* Country pill in the picker dropdown — muted so it doesn't compete
+     with the name. Shown only when the PlayerRow carries a country
+     (seed + local rosters do; identity-store hits don't yet). */
+  .pcountry {
+    margin-left: auto;
+    color: var(--muted);
+    font-size: 0.7rem;
+    opacity: 0.85;
+  }
 
   /* "Same as X? Tap to link" chip below a name input, shown only when
      the ranker finds a fuzzy match the user should confirm. */
@@ -1153,6 +1252,22 @@
   }
   .id-chip-suggest:hover { background: rgba(255, 213, 74, 0.16); }
   .id-chip-suggest strong { color: #ffd54a; }
+  /* Closed-tournament warning pill — advisory only; Start button
+     stays enabled. Amber like the offline banner so umpires who've
+     seen that recognise this as a "heads up" affordance rather than
+     an error. */
+  .closed-warn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin-top: 0.35rem;
+    padding: 0.3rem 0.55rem;
+    border-radius: 0.4rem;
+    font-size: 0.75rem;
+    color: #ffb74d;
+    background: rgba(255, 183, 77, 0.08);
+    border: 1px solid rgba(255, 183, 77, 0.35);
+  }
 
   .start {
     background: var(--accent);

@@ -12,6 +12,10 @@
         "canonicalName": { ".validate": "newData.isString()" },
         "createdAt":     { ".validate": "newData.isNumber()" },
         "createdBy":     { ".validate": "newData.isString() && newData.val().length <= 64" },
+        "country":       { ".validate": "newData.isString() && newData.val().length <= 40" },
+        "age":           { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 120" },
+        "email":         { ".validate": "newData.isString() && newData.val().length <= 128" },
+        "phone":         { ".validate": "newData.isString() && newData.val().length <= 32" },
         "aliases": {
           ".write": "data.parent().exists()",
           "$aliasKey": {
@@ -65,11 +69,19 @@
         "createdAt":  { ".validate": "newData.isNumber()" },
         "lastActive": { ".validate": "newData.isNumber()" },
         "createdBy":  { ".validate": "newData.isString() && newData.val().length <= 64" },
+        "type":       { ".validate": "newData.isString() && (newData.val() == 'open' || newData.val() == 'closed')" },
+        "country":    { ".validate": "newData.isString() && newData.val().length <= 40" },
         "organisers": {
           ".read": "auth != null",
           "$uid": {
             ".write": "auth != null && ((root.child('adminRoles').child(auth.uid).val() == 'super') || (root.child('tournaments').child($key).child('organisers').child(auth.uid).val() == true))",
             ".validate": "newData.isBoolean() && newData.val() == true && $uid.length >= 1 && $uid.length <= 64"
+          }
+        },
+        "assignedPlayerIds": {
+          "$playerId": {
+            ".write": "auth != null && ((root.child('adminRoles').child(auth.uid).val() == 'super') || (root.child('tournaments').child($key).child('organisers').child(auth.uid).val() == true))",
+            ".validate": "newData.isBoolean() && newData.val() == true && $playerId.length >= 1 && $playerId.length <= 64"
           }
         },
         "$other":     { ".validate": false }

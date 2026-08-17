@@ -32,6 +32,31 @@ export type Player = {
   aliases: Record<string, true>;
   createdAt: number;
   createdBy?: string;
+  /**
+   * ISO 3166-1 alpha-2 country code (e.g. "DK", "IN"), or the literal
+   * "Unknown" for legacy records that haven't been backfilled yet.
+   * Required for records created from v3.1 onward. Used by closed
+   * tournaments to warn on player-country mismatches on the home form.
+   */
+  country?: string;
+  /** Optional player metadata — none of these are required or used for
+   *  scoring; they exist for organiser rosters. */
+  age?: number;
+  email?: string;
+  phone?: string;
+};
+
+/**
+ * Meta arg accepted by createPlayer for v3.1+. The legacy 2-arg form
+ * `createPlayer(name, uid)` where the second arg is a plain string
+ * still works — treated as { createdBy: uid } for backwards compat.
+ */
+export type CreatePlayerMeta = {
+  createdBy?: string;
+  country?: string;
+  age?: number;
+  email?: string;
+  phone?: string;
 };
 
 /**
@@ -259,7 +284,10 @@ export function loadAll(): Player[] {
  * is also persisted to /players/{id}. Failures are logged and ignored
  * — the local record still exists and the app keeps working.
  */
-export function createPlayer(canonicalName: string, createdBy?: string): Player {
+export function createPlayer(
+  canonicalName: string,
+  metaOrCreatedBy?: string | CreatePlayerMeta,
+): Player {
   const norm = normalize(canonicalName);
   if (!isPlausibleName(canonicalName)) {
     throw new Error(`Refusing to create player with implausible name: ${canonicalName}`);
@@ -268,15 +296,26 @@ export function createPlayer(canonicalName: string, createdBy?: string): Player 
     (p) => normalize(p.canonicalName) === norm,
   );
   if (existing) return existing;
+  // Backwards-compat: `createPlayer(name, "uid")` legacy form still
+  // works — the second arg is treated as createdBy only. v3.1+ callers
+  // pass the object form with country + optional age/email/phone.
+  const meta: CreatePlayerMeta =
+    typeof metaOrCreatedBy === 'string'
+      ? { createdBy: metaOrCreatedBy }
+      : metaOrCreatedBy ?? {};
   // Stamp `createdBy` with the signed-in user's uid when the caller
   // doesn't override. Anonymous stays anonymous — field simply absent.
-  const finalCreatedBy = createdBy ?? currentUser()?.uid;
+  const finalCreatedBy = meta.createdBy ?? currentUser()?.uid;
   const p: Player = {
     id: playerIdFor(canonicalName),
     canonicalName: canonicalName.trim(),
     aliases: {},
     createdAt: Date.now(),
     ...(finalCreatedBy ? { createdBy: finalCreatedBy } : {}),
+    ...(meta.country ? { country: meta.country } : {}),
+    ...(typeof meta.age === 'number' && Number.isFinite(meta.age) ? { age: meta.age } : {}),
+    ...(meta.email ? { email: meta.email } : {}),
+    ...(meta.phone ? { phone: meta.phone } : {}),
   };
   memoryStore.push(p);
   notify();
@@ -384,11 +423,19 @@ function mergeOneRemotePlayer(id: string, val: unknown): void {
   if (!isPlausibleName(canonicalName)) return;
   const createdAt = typeof v.createdAt === 'number' ? v.createdAt : 0;
   const aliases = parseAliases(v.aliases);
+  const country = typeof v.country === 'string' ? v.country : undefined;
+  const age = typeof v.age === 'number' && Number.isFinite(v.age) ? v.age : undefined;
+  const email = typeof v.email === 'string' ? v.email : undefined;
+  const phone = typeof v.phone === 'string' ? v.phone : undefined;
   const existing = memoryStore.find((p) => p.id === id);
   if (existing) {
     existing.canonicalName = canonicalName;
     existing.aliases = { ...existing.aliases, ...aliases };
     existing.createdAt = createdAt || existing.createdAt;
+    if (country !== undefined) existing.country = country;
+    if (age !== undefined) existing.age = age;
+    if (email !== undefined) existing.email = email;
+    if (phone !== undefined) existing.phone = phone;
     return;
   }
   memoryStore.push({
@@ -397,6 +444,10 @@ function mergeOneRemotePlayer(id: string, val: unknown): void {
     aliases,
     createdAt,
     ...(typeof v.createdBy === 'string' ? { createdBy: v.createdBy } : {}),
+    ...(country ? { country } : {}),
+    ...(age !== undefined ? { age } : {}),
+    ...(email ? { email } : {}),
+    ...(phone ? { phone } : {}),
   });
 }
 
@@ -439,6 +490,10 @@ async function writePlayerToFirebase(p: Player): Promise<void> {
       canonicalName: p.canonicalName,
       createdAt: p.createdAt,
       ...(p.createdBy ? { createdBy: p.createdBy } : {}),
+      ...(p.country ? { country: p.country } : {}),
+      ...(typeof p.age === 'number' && Number.isFinite(p.age) ? { age: p.age } : {}),
+      ...(p.email ? { email: p.email } : {}),
+      ...(p.phone ? { phone: p.phone } : {}),
       aliases: { ...p.aliases },
       normalisedIndex: normalisedIndex(p),
     });

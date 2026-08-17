@@ -27,6 +27,27 @@ export type Tournament = {
    * writeTournamentToFirebase.
    */
   createdBy?: string;
+  /**
+   * Tournament mode. `'open'` (default) — any player, any umpire,
+   * no roster gating; behaves like every tournament did before v3.1.
+   * `'closed'` — the tournament is bound to a specific country and
+   * has an explicit assigned-player list. The home form warns when
+   * a picked player isn't assigned or their country doesn't match.
+   * Absent field = treat as 'open' for backwards compat.
+   */
+  type?: 'open' | 'closed';
+  /**
+   * ISO 3166-1 alpha-2 country code (e.g. "DK"). Only meaningful when
+   * `type === 'closed'`. Used by the home form's warning derivation
+   * on the picked-player-country check.
+   */
+  country?: string;
+};
+
+/** Meta arg accepted by createOrTouchTournament for v3.1+. */
+export type CreateTournamentMeta = {
+  type?: 'open' | 'closed';
+  country?: string;
 };
 
 /**
@@ -94,7 +115,10 @@ export function rankTournaments(query: string, limit = 8): Tournament[] {
  * Returns the resolved Tournament record. Empty / whitespace-only
  * names return null (indicating "no tournament tag").
  */
-export function createOrTouchTournament(name: string): Tournament | null {
+export function createOrTouchTournament(
+  name: string,
+  meta?: CreateTournamentMeta,
+): Tournament | null {
   const trimmed = name.trim();
   if (!trimmed) return null;
   const key = normalizeKey(trimmed);
@@ -105,17 +129,34 @@ export function createOrTouchTournament(name: string): Tournament | null {
   // touches on an existing record must not overwrite the original
   // creator — that field is the record's provenance.
   const creator = currentUser()?.uid;
+  const type = meta?.type;
+  const country = meta?.country;
   const record: Tournament = existing
-    ? { ...existing, name: trimmed, lastActive: now }
+    ? {
+        ...existing,
+        name: trimmed,
+        lastActive: now,
+        // Meta is authoritative when explicitly passed — an admin
+        // switching a tournament open↔closed goes here.
+        ...(type ? { type } : {}),
+        ...(country ? { country } : {}),
+      }
     : {
         key,
         name: trimmed,
         createdAt: now,
         lastActive: now,
         ...(creator ? { createdBy: creator } : {}),
+        ...(type ? { type } : {}),
+        ...(country ? { country } : {}),
       };
   if (existing) {
-    Object.assign(existing, { name: trimmed, lastActive: now });
+    Object.assign(existing, {
+      name: trimmed,
+      lastActive: now,
+      ...(type ? { type } : {}),
+      ...(country ? { country } : {}),
+    });
   } else {
     memoryStore.push(record);
   }
@@ -161,6 +202,9 @@ function mergeRemote(raw: Record<string, unknown>): void {
     const createdAt = typeof v.createdAt === 'number' ? v.createdAt : 0;
     const lastActive = typeof v.lastActive === 'number' ? v.lastActive : 0;
     const createdBy = typeof v.createdBy === 'string' ? v.createdBy : undefined;
+    const type =
+      v.type === 'open' || v.type === 'closed' ? (v.type as 'open' | 'closed') : undefined;
+    const country = typeof v.country === 'string' ? v.country : undefined;
     const existing = memoryStore.find((t) => t.key === key);
     if (existing) {
       existing.name = name;
@@ -169,6 +213,8 @@ function mergeRemote(raw: Record<string, unknown>): void {
       // arrived, so a stale local touch doesn't demote a fresher one.
       existing.lastActive = Math.max(existing.lastActive, lastActive);
       if (createdBy && !existing.createdBy) existing.createdBy = createdBy;
+      if (type) existing.type = type;
+      if (country) existing.country = country;
     } else {
       memoryStore.push({
         key,
@@ -176,6 +222,8 @@ function mergeRemote(raw: Record<string, unknown>): void {
         createdAt,
         lastActive,
         ...(createdBy ? { createdBy } : {}),
+        ...(type ? { type } : {}),
+        ...(country ? { country } : {}),
       });
     }
   }
@@ -199,6 +247,8 @@ async function writeTournamentToFirebase(t: Tournament): Promise<void> {
       lastActive: t.lastActive,
       createdAt: t.createdAt,
       ...(t.createdBy ? { createdBy: t.createdBy } : {}),
+      ...(t.type ? { type: t.type } : {}),
+      ...(t.country ? { country: t.country } : {}),
     });
   } catch {
     // Silent — local record persists.
@@ -635,6 +685,100 @@ export async function loadOrganisers(key: string): Promise<string[]> {
       .map(([uid]) => uid);
   } catch {
     return [];
+  }
+}
+
+// ─── Assigned-players helpers (closed tournaments) ───────────────────
+
+/**
+ * Add a player to a closed tournament's roster. Idempotent — the
+ * write is `set(true)` on `/tournaments/{key}/assignedPlayerIds/{playerId}`.
+ * Auth is enforced by RTDB rules: super OR organiser-of-this-key.
+ */
+export async function assignPlayer(
+  key: string,
+  playerId: string,
+): Promise<TournamentWriteOutcome> {
+  const cleanPid = playerId.trim();
+  if (!key) return { ok: false, error: 'Missing tournament key' };
+  if (!cleanPid || cleanPid.length > 64)
+    return { ok: false, error: 'playerId must be 1-64 characters' };
+  try {
+    const [{ firebaseApp }, { getDatabase, ref, set }] = await Promise.all([
+      import('./firebase'),
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    const path = `tournaments/${key}/assignedPlayerIds/${cleanPid}`;
+    await set(ref(db, path), true);
+    void logAudit({
+      action: 'player.assign',
+      path,
+      after: { playerId: cleanPid, tournament: key },
+    });
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg || 'Assign player failed' };
+  }
+}
+
+/** Remove a player from a closed tournament's roster. Idempotent —
+ *  removing a non-member is a no-op. */
+export async function unassignPlayer(
+  key: string,
+  playerId: string,
+): Promise<TournamentWriteOutcome> {
+  const cleanPid = playerId.trim();
+  if (!key) return { ok: false, error: 'Missing tournament key' };
+  if (!cleanPid) return { ok: false, error: 'Missing playerId' };
+  try {
+    const [{ firebaseApp }, { getDatabase, ref, remove }] = await Promise.all([
+      import('./firebase'),
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    const path = `tournaments/${key}/assignedPlayerIds/${cleanPid}`;
+    await remove(ref(db, path));
+    void logAudit({
+      action: 'player.unassign',
+      path,
+      before: { playerId: cleanPid, tournament: key },
+    });
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg || 'Unassign player failed' };
+  }
+}
+
+/**
+ * One-shot read of every playerId assigned to a tournament. Returns
+ * a Set so caller can O(1) membership-check. Empty set on error /
+ * empty map — silent-on-failure per house style.
+ *
+ * Public read: `/tournaments/$key` is world-readable (`.read: true`
+ * on the tournaments node); this includes the assignedPlayerIds
+ * sub-node.
+ */
+export async function loadAssignedPlayers(key: string): Promise<Set<string>> {
+  if (!key) return new Set();
+  try {
+    const [{ firebaseApp }, { getDatabase, ref, get }] = await Promise.all([
+      import('./firebase'),
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    const snap = await get(ref(db, `tournaments/${key}/assignedPlayerIds`));
+    const val = snap.val() as Record<string, unknown> | null;
+    if (!val) return new Set();
+    const out = new Set<string>();
+    for (const [pid, v] of Object.entries(val)) {
+      if (v === true) out.add(pid);
+    }
+    return out;
+  } catch {
+    return new Set();
   }
 }
 
