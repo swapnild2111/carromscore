@@ -97,6 +97,13 @@ export type LiveRecord = {
    * affordance to non-super users.
    */
   createdBy?: string;
+  /**
+   * Denormalised Google display name of the umpire at publish time.
+   * Mirrors the /matches/{id} pattern. Displayed alongside each row
+   * in AdminLiveCleanup so organisers can see who published what
+   * without needing to read /users (which is super-only).
+   */
+  createdByName?: string;
 };
 
 /**
@@ -170,10 +177,24 @@ export async function publishLive(
     // Stamp `createdBy` when signed in. Anonymous stays anonymous —
     // field absent. RTDB validator on live/$mid/createdBy accepts a
     // string ≤ 64 chars (rules updated 2026-08-09).
-    const createdBy = currentUser()?.uid;
+    //
+    // Also denormalise the caller's Google display name onto the
+    // record as `createdByName`, mirroring what /matches/{id} carries.
+    // Rationale: the admin panel's Live tab shows "Recorded by …"
+    // per row so organisers can tell which umpire published which
+    // record. Without denormalisation, the panel would need to read
+    // /users, which is super-only per RTDB rules. Empty string when
+    // the Google profile has no name; downstream renders fall back
+    // to the uid.
+    const authUser = currentUser();
+    const createdBy = authUser?.uid;
+    const createdByName = createdBy
+      ? (authUser?.displayName ?? '').slice(0, 80)
+      : '';
     await set(ref(db, `live/${mid}`), {
       ...(matchId ? { matchId } : {}),
       ...(createdBy ? { createdBy } : {}),
+      ...(createdByName ? { createdByName } : {}),
       updatedAt: Date.now(),
       meta: metaClean,
       liveState,

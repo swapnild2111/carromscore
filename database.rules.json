@@ -94,6 +94,7 @@
         "meta":      { ".validate": "newData.hasChildren()" },
         "liveState": { ".validate": "newData.hasChildren()" },
         "createdBy": { ".validate": "newData.isString() && newData.val().length <= 64" },
+        "createdByName": { ".validate": "newData.isString() && newData.val().length <= 80" },
         "$other":    { ".validate": false }
       }
     },
