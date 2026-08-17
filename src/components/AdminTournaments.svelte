@@ -21,8 +21,9 @@
     subscribeTournaments,
     createOrTouchTournament,
     renameTournament,
-    deleteTournament,
+    deleteTournamentAndMatches,
     deleteTournaments,
+    countMatchesByTournamentKey,
     addOrganiser,
     removeOrganiser,
     loadOrganisers,
@@ -51,6 +52,12 @@
   let renameValue = $state('');
   let deleteConfirmKey = $state<string | null>(null);
   let deleteConfirmText = $state('');
+  /** Live count of child matches that will be cascade-deleted when
+   *  the confirmation goes through. `null` while the count is
+   *  loading (dialog opens optimistically, count populates async).
+   *  Displayed in the confirmation copy so the admin knows the
+   *  blast radius. */
+  let deleteConfirmChildCount = $state<number | null>(null);
   let managingKey = $state<string | null>(null);
   let organiserUids = $state<string[]>([]);
   let organiserLoading = $state(false);
@@ -124,18 +131,41 @@
   function startDelete(key: string) {
     deleteConfirmKey = key;
     deleteConfirmText = '';
+    deleteConfirmChildCount = null;
+    // Fetch child count in the background so the dialog can surface
+    // the blast radius. Non-blocking — dialog renders immediately;
+    // the "N matches" text just appears when the count is in.
+    void countMatchesByTournamentKey(key).then((n) => {
+      // Guard against a stale response landing after the admin
+      // cancelled and opened a different dialog.
+      if (deleteConfirmKey === key) deleteConfirmChildCount = n;
+    });
   }
   async function confirmDelete() {
     if (!deleteConfirmKey) return;
     if (deleteConfirmText.trim().toUpperCase() !== 'DELETE') return;
     saving = true;
-    const outcome = await deleteTournament(deleteConfirmKey);
+    const outcome = await deleteTournamentAndMatches(deleteConfirmKey);
     saving = false;
     if (outcome.ok) {
-      flash('ok', 'Tournament deleted');
+      const bits = ['Tournament deleted'];
+      if (outcome.matchesDeleted > 0) {
+        bits.push(
+          `${outcome.matchesDeleted} match${outcome.matchesDeleted === 1 ? '' : 'es'} removed`,
+        );
+      }
+      flash('ok', bits.join(' · '));
       deleteConfirmKey = null;
+      deleteConfirmChildCount = null;
     } else {
-      flash('err', outcome.error);
+      // Partial failure — surface counts so the admin knows how much
+      // landed and how much needs a follow-up.
+      const bits: string[] = [];
+      if (outcome.matchesDeleted > 0) bits.push(`${outcome.matchesDeleted} matches deleted`);
+      if (outcome.matchesFailed > 0) bits.push(`${outcome.matchesFailed} matches skipped`);
+      if (!outcome.tournamentDeleted) bits.push('tournament kept');
+      const detail = bits.length ? ` — ${bits.join(', ')}` : '';
+      flash('err', `${outcome.error ?? 'Delete failed'}${detail}`);
     }
   }
 
@@ -197,6 +227,15 @@
   function clearSelection() {
     selected = new Set();
   }
+  /** Reset the single-delete dialog state without triggering the
+   *  delete. Called by the Cancel button and the backdrop-click
+   *  handler. Clears the count so it doesn't leak to the next open. */
+  function cancelDelete() {
+    deleteConfirmKey = null;
+    deleteConfirmText = '';
+    deleteConfirmChildCount = null;
+  }
+
   async function performBulkDelete() {
     const keys = [...selected];
     if (keys.length === 0) return;
@@ -204,15 +243,19 @@
     const outcome = await deleteTournaments(keys);
     saving = false;
     if (outcome.ok) {
-      flash(
-        'ok',
-        `${outcome.deleted} tournament${outcome.deleted === 1 ? '' : 's'} deleted`,
-      );
+      const bits = [`${outcome.deleted} tournament${outcome.deleted === 1 ? '' : 's'} deleted`];
+      if ((outcome.matchesDeleted ?? 0) > 0) {
+        bits.push(
+          `${outcome.matchesDeleted} match${outcome.matchesDeleted === 1 ? '' : 'es'} removed`,
+        );
+      }
+      flash('ok', bits.join(' · '));
     } else {
-      flash(
-        'err',
-        `${outcome.deleted} deleted, ${outcome.failed} failed${outcome.error ? ` — ${outcome.error}` : ''}`,
-      );
+      const bits = [`${outcome.deleted} deleted, ${outcome.failed} failed`];
+      if ((outcome.matchesDeleted ?? 0) > 0) bits.push(`${outcome.matchesDeleted} matches deleted`);
+      if ((outcome.matchesFailed ?? 0) > 0) bits.push(`${outcome.matchesFailed} matches skipped`);
+      const detail = outcome.error ? ` — ${outcome.error}` : '';
+      flash('err', `${bits.join(', ')}${detail}`);
     }
     selected = new Set();
   }
@@ -368,19 +411,25 @@
   {/if}
 
   {#if deleteConfirmKey}
-    <div class="dialog" role="dialog" aria-modal="true" onclick={(e) => { if (e.target === e.currentTarget) (deleteConfirmKey = null); }}>
+    <div class="dialog" role="dialog" aria-modal="true" onclick={(e) => { if (e.target === e.currentTarget) cancelDelete(); }}>
       <div class="dialog-card">
         <h3>Delete tournament?</h3>
         <p>
-          The tournament record is removed. Match records that were
-          tagged with this tournament keep the tag string but fall to
-          the "Default" bucket in the lobby. Retention shortens from
-          1 year → 3 months for those matches.
+          {#if deleteConfirmChildCount === null}
+            Counting matches…
+          {:else if deleteConfirmChildCount === 0}
+            The tournament record will be removed. No matches are tagged under it.
+          {:else}
+            This will delete the tournament record <strong>and
+            {deleteConfirmChildCount} tagged match{deleteConfirmChildCount === 1 ? '' : 'es'}</strong>.
+            Matches you're not authorised to delete (e.g. from other
+            organisers) will be skipped and left in place.
+          {/if}
         </p>
         <p>Type <strong>DELETE</strong> to confirm.</p>
         <input type="text" bind:value={deleteConfirmText} placeholder="DELETE" aria-label="Type DELETE" />
         <div class="dialog-actions">
-          <button type="button" class="btn" onclick={() => (deleteConfirmKey = null)} disabled={saving}>Cancel</button>
+          <button type="button" class="btn" onclick={cancelDelete} disabled={saving}>Cancel</button>
           <button
             type="button"
             class="btn btn-danger"

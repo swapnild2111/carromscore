@@ -368,12 +368,111 @@ export async function renameTournament(
 }
 
 /**
- * Admin-only: delete a tournament. Match records that carry the
- * deleted tournament's display name keep the tag string; the lobby
- * groups them under "Default" because the tournament node no longer
- * exists. This is deliberate — we don't want to silently rewrite
- * historical match records when the admin's intent is "remove the
- * event bucket".
+ * Count of matches currently tagged under this tournament (by
+ * tournamentKey). Used by the admin panel's delete-confirmation
+ * dialog to warn "this will also delete N matches" before the
+ * organiser types DELETE. Silent-on-failure returns 0 — better a
+ * conservative undercount than a scary infrastructure error.
+ */
+export async function countMatchesByTournamentKey(key: string): Promise<number> {
+  if (!key) return 0;
+  try {
+    const [{ firebaseApp }, { getDatabase, ref, get }] = await Promise.all([
+      import('./firebase'),
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    const snap = await get(ref(db, 'matches'));
+    const all = snap.val() as Record<string, { tournamentKey?: string }> | null;
+    if (!all) return 0;
+    let count = 0;
+    for (const m of Object.values(all)) {
+      if (m && typeof m === 'object' && m.tournamentKey === key) count += 1;
+    }
+    return count;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Result of a cascade tournament delete. Includes rolled-up counts
+ * for the match wipe so the admin panel can surface honest feedback
+ * (e.g. "10 matches deleted, 2 skipped — you can't delete matches
+ * created by someone else").
+ */
+export type TournamentCascadeOutcome = {
+  ok: boolean;
+  /** true if the tournament record itself was removed. */
+  tournamentDeleted: boolean;
+  /** Matches successfully wiped. */
+  matchesDeleted: number;
+  /** Matches skipped because RTDB rejected the delete (auth). Left
+   *  in place; the admin can ping a super or the record's creator. */
+  matchesFailed: number;
+  error?: string;
+};
+
+/**
+ * Admin cascade: delete every match tagged under this tournament
+ * (skipping matches the current user isn't authorised on, per the
+ * /matches/{id} .write rules), then delete the tournament record
+ * itself. Auth-skipped matches leave the tournament orphaned in
+ * memory — we still attempt the tournament record delete; if that
+ * also fails due to auth, the outcome reports it.
+ *
+ * The prior "soft" delete (keep matches, drop only the /tournaments
+ * record) is preserved as the default for the singular helper below;
+ * the cascade path is opt-in via `deleteTournamentAndMatches` so
+ * bulk-delete flows stay predictable.
+ */
+export async function deleteTournamentAndMatches(
+  key: string,
+): Promise<TournamentCascadeOutcome> {
+  if (!key) {
+    return {
+      ok: false,
+      tournamentDeleted: false,
+      matchesDeleted: 0,
+      matchesFailed: 0,
+      error: 'Missing tournament key',
+    };
+  }
+  // Lazy-import history's deleteMatch to keep this module tree-shakable
+  // for callers that don't need the cascade. Same trick used elsewhere
+  // in the codebase (see finishMatch → auth import).
+  const { deleteMatch, loadHistory } = await import('./history');
+  const matches = await loadHistory();
+  const toDelete = matches
+    .filter((m) => m.tournamentKey === key)
+    .map((m) => m.id);
+  let deletedCount = 0;
+  let failedCount = 0;
+  for (const id of toDelete) {
+    const r = await deleteMatch(id);
+    if (r.ok) deletedCount += 1;
+    else failedCount += 1;
+  }
+  // Delete the tournament record last so partial failure still
+  // reflects on the tournament's remaining orphan matches. If the
+  // tournament delete itself fails (auth), report that.
+  const tOutcome = await deleteTournament(key);
+  return {
+    ok: tOutcome.ok && failedCount === 0,
+    tournamentDeleted: tOutcome.ok,
+    matchesDeleted: deletedCount,
+    matchesFailed: failedCount,
+    error: tOutcome.ok ? undefined : tOutcome.error,
+  };
+}
+
+/**
+ * Admin-only: delete a tournament record. Match records that carry
+ * the deleted tournament's tag keep it — the lobby still groups
+ * them by that string (grouping is by the match's raw `tournament`
+ * field, not by the /tournaments/{key} node existing). If you want
+ * cascade deletion of the matches too, use
+ * `deleteTournamentAndMatches`.
  */
 export async function deleteTournament(key: string): Promise<TournamentWriteOutcome> {
   if (!key) return { ok: false, error: 'Missing tournament key' };
@@ -401,45 +500,53 @@ export async function deleteTournament(key: string): Promise<TournamentWriteOutc
   }
 }
 
-/** Rolled-up counts for a bulk delete + the first failure message. */
+/** Rolled-up counts for a bulk delete + the first failure message.
+ *  matchesDeleted / matchesFailed reflect the cascade wipe of child
+ *  matches per tournament — see deleteTournaments. */
 export type TournamentBulkOutcome = {
   ok: boolean;
   deleted: number;
   failed: number;
+  matchesDeleted?: number;
+  matchesFailed?: number;
   error?: string;
 };
 
 /**
- * Admin-only: bulk-delete a set of tournaments. Each removal is
- * individually audited (see deleteTournament). Child matches keep
- * their tag string but fall to the "Default" bucket in the lobby
- * — same semantics as the singular helper, times N.
+ * Admin-only: bulk-delete a set of tournaments AND every match
+ * tagged under each. Each cascade is individually audited (see
+ * deleteTournamentAndMatches → deleteMatch → audit; tournament
+ * delete → audit). Auth-rejected match deletes are surfaced in the
+ * outcome as `matchesFailed`.
  *
- * Batches through Promise.all in groups of 25 to avoid fanning
- * out too aggressively against RTDB.
+ * Serial per-tournament rather than Promise.all — a single tournament
+ * with many matches would fan out too aggressively against RTDB if
+ * we parallelised at the tournament level.
  */
 export async function deleteTournaments(keys: string[]): Promise<TournamentBulkOutcome> {
   const clean = keys.filter((k) => typeof k === 'string' && k.length > 0);
   if (clean.length === 0) return { ok: true, deleted: 0, failed: 0 };
-  const BATCH_SIZE = 25;
   let deleted = 0;
   let failed = 0;
+  let matchesDeleted = 0;
+  let matchesFailed = 0;
   let firstError: string | undefined;
-  for (let i = 0; i < clean.length; i += BATCH_SIZE) {
-    const slice = clean.slice(i, i + BATCH_SIZE);
-    const results = await Promise.all(slice.map((k) => deleteTournament(k)));
-    for (const r of results) {
-      if (r.ok) deleted += 1;
-      else {
-        failed += 1;
-        if (!firstError) firstError = r.error;
-      }
+  for (const k of clean) {
+    const r = await deleteTournamentAndMatches(k);
+    if (r.tournamentDeleted) deleted += 1;
+    else {
+      failed += 1;
+      if (!firstError) firstError = r.error;
     }
+    matchesDeleted += r.matchesDeleted;
+    matchesFailed += r.matchesFailed;
   }
   return {
-    ok: failed === 0,
+    ok: failed === 0 && matchesFailed === 0,
     deleted,
     failed,
+    matchesDeleted,
+    matchesFailed,
     ...(firstError ? { error: firstError } : {}),
   };
 }
