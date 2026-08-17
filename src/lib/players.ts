@@ -330,16 +330,21 @@ export function createPlayer(
  * it's the same name).
  */
 export function addAlias(playerId: string, typed: string): Player | null {
-  const p = memoryStore.find((x) => x.id === playerId);
-  if (!p) return null;
+  const idx = memoryStore.findIndex((x) => x.id === playerId);
+  if (idx === -1) return null;
+  const cur = memoryStore[idx]!;
   const key = normalize(typed);
-  if (!key) return p;
-  if (key === normalize(p.canonicalName)) return p;
-  if (p.aliases[key]) return p;
-  p.aliases[key] = true;
+  if (!key) return cur;
+  if (key === normalize(cur.canonicalName)) return cur;
+  if (cur.aliases[key]) return cur;
+  // Fresh object identity so Svelte 5 keyed each blocks see a
+  // change and re-render (in-place `p.aliases[key] = true` is
+  // invisible to keyed diffing).
+  const next: Player = { ...cur, aliases: { ...cur.aliases, [key]: true } };
+  memoryStore[idx] = next;
   notify();
   void writeAliasToFirebase(playerId, key);
-  return p;
+  return next;
 }
 
 /**
@@ -427,15 +432,25 @@ function mergeOneRemotePlayer(id: string, val: unknown): void {
   const age = typeof v.age === 'number' && Number.isFinite(v.age) ? v.age : undefined;
   const email = typeof v.email === 'string' ? v.email : undefined;
   const phone = typeof v.phone === 'string' ? v.phone : undefined;
-  const existing = memoryStore.find((p) => p.id === id);
-  if (existing) {
-    existing.canonicalName = canonicalName;
-    existing.aliases = { ...existing.aliases, ...aliases };
-    existing.createdAt = createdAt || existing.createdAt;
-    if (country !== undefined) existing.country = country;
-    if (age !== undefined) existing.age = age;
-    if (email !== undefined) existing.email = email;
-    if (phone !== undefined) existing.phone = phone;
+  const idx = memoryStore.findIndex((p) => p.id === id);
+  if (idx !== -1) {
+    // Replace with a fresh object so downstream {#each} keyed
+    // renders see a new identity and re-render. In-place mutation
+    // works for the internal ranker (it reads by property lookup
+    // on the next tick), but Svelte 5's keyed each blocks skip
+    // re-render on same-reference values even if a deep property
+    // changed — the field goes stale until a page refresh.
+    const cur = memoryStore[idx]!;
+    memoryStore[idx] = {
+      ...cur,
+      canonicalName,
+      aliases: { ...cur.aliases, ...aliases },
+      createdAt: createdAt || cur.createdAt,
+      ...(country !== undefined ? { country } : cur.country ? { country: cur.country } : {}),
+      ...(age !== undefined ? { age } : cur.age !== undefined ? { age: cur.age } : {}),
+      ...(email !== undefined ? { email } : cur.email ? { email: cur.email } : {}),
+      ...(phone !== undefined ? { phone } : cur.phone ? { phone: cur.phone } : {}),
+    };
     return;
   }
   memoryStore.push({
@@ -576,8 +591,14 @@ export async function updatePlayerName(
     const snap = await get(ref(db, path));
     const existing = snap.val() as Record<string, unknown> | null;
     if (!existing) return { ok: false, error: 'Player not found' };
-    const p = memoryStore.find((x) => x.id === playerId);
-    if (p) p.canonicalName = trimmed;
+    const idx = memoryStore.findIndex((x) => x.id === playerId);
+    let p: Player | null = null;
+    if (idx !== -1) {
+      // Replace with fresh identity — see updatePlayerCountry for why.
+      const cur = memoryStore[idx]!;
+      p = { ...cur, canonicalName: trimmed };
+      memoryStore[idx] = p;
+    }
     const patch = {
       canonicalName: trimmed,
       normalisedIndex: p ? normalisedIndex(p) : [normalize(trimmed)],
@@ -620,10 +641,22 @@ export async function updatePlayerCountry(
     const snap = await get(ref(db, path));
     const existing = snap.val() as Record<string, unknown> | null;
     if (!existing) return { ok: false, error: 'Player not found' };
-    const p = memoryStore.find((x) => x.id === playerId);
-    if (p) {
-      if (trimmed) p.country = trimmed;
-      else delete p.country;
+    // Replace the store item with a fresh object rather than mutating
+    // in place — Svelte 5 derivations that read `loadAll()` compare
+    // by reference at the item level. Without a new object, a
+    // component's row-country chip can stay stale until a full
+    // page refresh even though `notify()` fired. (Same shape as
+    // updatePlayerName's approach post-write.)
+    const idx = memoryStore.findIndex((x) => x.id === playerId);
+    if (idx !== -1) {
+      const cur = memoryStore[idx]!;
+      const next: Player = trimmed
+        ? { ...cur, country: trimmed }
+        : (() => {
+            const { country: _drop, ...rest } = cur;
+            return rest as Player;
+          })();
+      memoryStore[idx] = next;
     }
     // RTDB `update` with a null value removes the field. We pass
     // null when the admin cleared the field so the record doesn't
@@ -663,12 +696,12 @@ export async function removeAlias(
     const db = getDatabase(firebaseApp());
     const path = `players/${playerId}/aliases/${aliasKey}`;
     await remove(ref(db, path));
-    const p = memoryStore.find((x) => x.id === playerId);
-    if (p) {
-      delete p.aliases[aliasKey];
-      // Refresh the normalisedIndex too so the ranker no longer
-      // matches on the removed alias.
-      // Same pattern as updatePlayerName's patch above.
+    const idx = memoryStore.findIndex((x) => x.id === playerId);
+    if (idx !== -1) {
+      const cur = memoryStore[idx]!;
+      const nextAliases = { ...cur.aliases };
+      delete nextAliases[aliasKey];
+      memoryStore[idx] = { ...cur, aliases: nextAliases };
     }
     notify();
     void logAudit({
