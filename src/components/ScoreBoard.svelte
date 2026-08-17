@@ -1436,20 +1436,24 @@
   }
 
   function swapSides() {
-    // Refuse the swap once any board has been recorded. The
-    // boardLog entries carry pointsA/pointsB/breakSide/queen tied
-    // to the pre-swap seats; swapping the live top-row state
-    // without also rewriting the log produces a corrupt-looking
-    // recap (top row says A won 2-1 while the per-set tables say
-    // B won every set). Guard added 2026-08-18 after mid=ais81o
-    // was reported with exactly that inversion.
+    // Refuse a mid-set swap. Physical carrom convention: seats
+    // swap between sets (or at the mid-point of a decider set),
+    // never in the middle of an in-flight board. The boardLog
+    // entries carry pointsA/pointsB tied to the seats-at-that-
+    // moment; swapping the top-row seats WITHOUT any live
+    // scoring in the current set is safe — the log records
+    // completed sets under their pre-swap labels, and the new
+    // set's future entries record under the post-swap labels.
+    // (Original 2026-08-18 guard was too aggressive — it refused
+    // legitimate between-set swaps, reported 2026-08-18.)
     //
-    // If the umpire genuinely needs the players to change seats
-    // mid-match, they should end + restart with the correct
-    // orientation. In practice Swap is only meaningful pre-scoring
-    // (accidental setup mis-order) or during Practice (which has
-    // no boardLog concern — practice mode doesn't append here).
-    if (!isPractice && boardLog.length > 0) {
+    // "Current set has no in-flight scoring" = board counter is
+    // 0 (no board completed yet in this set) AND both sides at
+    // 0 points (no running-board deltas). At set-transition,
+    // adjustSets() resets exactly these values, so a swap
+    // tapped right after crediting SET+1 lands here.
+    const midSet = !isPractice && (board > 0 || sideA.points !== 0 || sideB.points !== 0);
+    if (midSet) {
       swapBlockedToast = true;
       window.setTimeout(() => { swapBlockedToast = false; }, 3000);
       return;
@@ -2332,14 +2336,14 @@
 
   {#if swapBlockedToast}
     <!--
-      Fires when Swap is tapped after any board has been recorded.
-      Swap is only meaningful pre-scoring; a mid-match swap would
-      leave boardLog entries attached to pre-swap A/B labels while
-      the top-row SET/POINTS state flips, producing a corrupt
-      recap (top says A won 2-1, tables say B won every set).
+      Fires when Swap is tapped mid-set (any board or points already
+      recorded in the current set). A mid-set swap would leave the
+      running board attached to pre-swap A/B labels while the top-
+      row flips, producing corrupt recap data. Between-set swaps
+      (fresh set, board=0, points=0) are allowed.
     -->
     <div class="queen-toast" role="status" aria-live="polite">
-      Swap is only allowed before the first board — scores are already recorded
+      Swap only between sets — finish or clear the current board first
     </div>
   {/if}
 
