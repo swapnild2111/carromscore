@@ -400,6 +400,46 @@
     resolvedPlayerIds[key as string] = h && h.rank === 'exact' ? h.player.id : null;
   }
 
+  /**
+   * Duplicate-player detection. A player can't play against themself.
+   * Same-name players from different countries ARE distinct — the
+   * identity store gives them distinct ids, so we key off resolvedId
+   * when available and fall back to case-folded name for typed-but-
+   * unresolved entries.
+   *
+   * Returns a human-readable error string if the current picks would
+   * put the same player in two slots, or null when the lineup is
+   * valid. Wired into canStart and rendered as an inline warning
+   * below the player rows.
+   */
+  let dupError = $derived.by((): string | null => {
+    if (cfg.mode === 'practice') return null;
+    const slots: Array<{ label: string; name: string; key: keyof MatchConfig }> = [
+      { label: cfg.mode === 'singles' ? 'Player A' : 'Player 1 (A)', name: cfg.playerA, key: 'playerA' },
+      { label: cfg.mode === 'singles' ? 'Player B' : 'Player 1 (B)', name: cfg.playerB, key: 'playerB' },
+    ];
+    if (cfg.mode === 'doubles') {
+      slots.push({ label: 'Player 2 (A)', name: cfg.playerA2, key: 'playerA2' });
+      slots.push({ label: 'Player 2 (B)', name: cfg.playerB2, key: 'playerB2' });
+    }
+    // Build the canonical identity for each non-empty slot: resolvedId
+    // if available, otherwise a lowercased trimmed name. Two slots
+    // with the same identity string = the same player.
+    const seen = new Map<string, string>();
+    for (const s of slots) {
+      const name = s.name.trim();
+      if (name.length === 0) continue;
+      const id = resolvedPlayerIds[s.key as string];
+      const identity = id ? `id:${id}` : `name:${name.toLowerCase()}`;
+      const prior = seen.get(identity);
+      if (prior) {
+        return `${prior} and ${s.label} are the same player. Pick a different player.`;
+      }
+      seen.set(identity, s.label);
+    }
+    return null;
+  });
+
   let canStart = $derived(() => {
     const a1 = cfg.playerA.trim().length > 0;
     if (cfg.mode === 'practice') {
@@ -408,8 +448,14 @@
       return a1 && cfg.maxBoards > 0;
     }
     const b1 = cfg.playerB.trim().length > 0;
-    if (cfg.mode === 'singles') return a1 && b1;
-    return a1 && b1 && cfg.playerA2.trim().length > 0 && cfg.playerB2.trim().length > 0;
+    if (cfg.mode === 'singles') return a1 && b1 && !dupError;
+    return (
+      a1 &&
+      b1 &&
+      cfg.playerA2.trim().length > 0 &&
+      cfg.playerB2.trim().length > 0 &&
+      !dupError
+    );
   });
 
   function start(e: Event) {
@@ -794,6 +840,10 @@
       </div>
       {@render noteInput('Team B represents', 'noteB')}
     </div>
+  {/if}
+
+  {#if dupError}
+    <p class="dup-error" role="alert">{dupError}</p>
   {/if}
 
   <button class="start" type="submit" disabled={!canStart()}>
@@ -1307,6 +1357,20 @@
   .start:disabled { opacity: 0.4; cursor: not-allowed; }
 
   .hint { color: var(--muted); text-align: center; margin: 0; font-size: 0.85rem; }
+
+  /* Inline duplicate-player warning above the Start button. Uses the
+     danger tone so it reads as an error, not a hint — matches the
+     disabled Start CTA. */
+  .dup-error {
+    margin: 0;
+    padding: 0.55rem 0.75rem;
+    border-radius: 0.5rem;
+    background: color-mix(in srgb, var(--danger, #d93a3a) 12%, transparent);
+    color: var(--danger, #d93a3a);
+    border: 1px solid color-mix(in srgb, var(--danger, #d93a3a) 40%, transparent);
+    font-size: 0.9rem;
+    text-align: center;
+  }
 
   .install {
     background: transparent;
