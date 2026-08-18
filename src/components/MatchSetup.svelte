@@ -646,7 +646,7 @@
     />
     {#if dropdownVisible}
       <ul class="suggest">
-        {#each suggestions as p (p.name + p.source)}
+        {#each suggestions as p (p.name + '|' + p.source + '|' + (p.country ?? ''))}
           <li>
             <button type="button" onclick={() => pick(key, p)}>
               <span class="pname">{p.name}</span>
