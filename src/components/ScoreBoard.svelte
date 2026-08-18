@@ -1083,8 +1083,16 @@
     if (lockedAtBoardStart) return null;
     const holderSide = queenHolder === 'a' ? sideA : sideB;
     const holderPerBoard = holderSide.points - holderBaseline;
+    // Zero delta = opponent won the board despite the queen chip
+    // being lit (e.g. queen went uncovered and reverted, or the
+    // holder pocketed the queen but the OTHER side finished first —
+    // scored 0 this board is legitimate). Only validate when the
+    // holder actually scored: if they scored anything, they must
+    // have scored at least QUEEN_VALUE (their own puck + queen
+    // cover = 3 minimum in real carrom).
+    if (holderPerBoard === 0) return null;
     if (holderPerBoard < QUEEN_VALUE) {
-      return `Queen holder needs at least ${QUEEN_VALUE} points on this board`;
+      return `Queen holder scored ${holderPerBoard} — needs at least ${QUEEN_VALUE} when marked`;
     }
     return null;
   }
