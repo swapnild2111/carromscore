@@ -55,6 +55,8 @@
         "practiceBoards": { ".validate": "newData.hasChildren()" },
         "tournament": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 60" },
         "tournamentKey": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 60" },
+        "round":      { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 60" },
+        "roundKey":   { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 60" },
         "$other":     { ".validate": false }
       }
     },
@@ -82,6 +84,17 @@
           "$playerId": {
             ".write": "auth != null && ((root.child('adminRoles').child(auth.uid).val() == 'super') || (root.child('tournaments').child($key).child('organisers').child(auth.uid).val() == true))",
             ".validate": "newData.isBoolean() && newData.val() == true && $playerId.length >= 1 && $playerId.length <= 64"
+          }
+        },
+        "rounds": {
+          "$roundKey": {
+            ".write": "$roundKey.length >= 1 && $roundKey.length <= 60 && auth != null && ((root.child('adminRoles').child(auth.uid).val() == 'super') || (root.child('tournaments').child($key).child('organisers').child(auth.uid).val() == true))",
+            ".validate": "!newData.exists() || (newData.hasChildren(['name', 'order', 'state', 'createdAt']) && newData.child('name').isString() && newData.child('name').val().length >= 1 && newData.child('name').val().length <= 60 && newData.child('order').isNumber() && newData.child('state').isString() && (newData.child('state').val() == 'open' || newData.child('state').val() == 'closed') && newData.child('createdAt').isNumber())",
+            "name":      { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 60" },
+            "order":     { ".validate": "newData.isNumber()" },
+            "state":     { ".validate": "newData.isString() && (newData.val() == 'open' || newData.val() == 'closed')" },
+            "createdAt": { ".validate": "newData.isNumber()" },
+            "$other":    { ".validate": false }
           }
         },
         "$other":     { ".validate": false }

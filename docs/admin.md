@@ -138,18 +138,37 @@ value.
 - **Add tournament** — create a new tournament tag ahead of the
   first match. Not required (tags auto-create on match end) but
   useful to pre-populate the picker for organisers.
-- **Open / Closed state** — each tournament carries a state field.
-  **Open** (default) accepts new matches; **Closed** rejects them —
-  the home form warns the umpire that "Silver Cup 2026 is closed"
-  when they pick a closed tournament, though the warning is
-  advisory and can be overridden (physical carrom clubs sometimes
-  reopen a bracket after the closing tap). Toggle state per row.
-  Organiser assignment stays independent of state — closed
-  tournaments can still be edited by their organisers.
-- **Rename** — updates the tournament's display name. If the new
-  name normalises to the same key, we just update `name`. If it
-  normalises differently, we clone to a new key, rewrite every
-  child match's `tournament` field, and delete the old record.
+- **Open / Closed state (v3.1)** — each tournament carries a
+  state field. **Open** (default) accepts new matches;
+  **Closed** rejects them — the home form warns the umpire that
+  "Silver Cup 2026 is closed" when they pick a closed tournament,
+  though the warning is advisory and can be overridden. Toggle
+  state per row. Organiser assignment stays independent of state
+  — closed tournaments can still be edited by their organisers.
+- **Rounds (v3.2)** — every tournament can carry a list of named
+  stages (Round of 16, Quarter-finals, Semi-finals, Final, ...).
+  Umpires pick a round at match setup so History and Reports can
+  group per-stage. Optional — a tournament without any rounds
+  keeps its pre-v3.2 flat match list. The **Rounds** action per
+  row opens a modal with:
+    - **Add round** — creates a round; `order` auto-increments so
+      new rounds append to the end.
+    - **Rename** — updates the display name; if the normalised
+      key changes, every match's `roundKey` field is rewritten
+      atomically so the round tag survives the rename.
+    - **Open / Closed state per round** — a closed round is
+      excluded from the match-setup round picker, so an organiser
+      can seed R16 matches, close R16, and only QF appears in the
+      picker from that point on.
+    - **Delete round** — removes the round record. Matches lose
+      the round tag but stay in the tournament — they appear
+      under an *Unassigned* sub-group in History.
+- **Edit (v3.2)** — one dialog covers name, Open/Closed access,
+  and country. Save applies rename first (if the normalised key
+  changes, we clone to a new record and rewrite every child
+  match's `tournament` / `tournamentKey` fields), then the meta
+  patch for type + country. Rename inside the same modal replaces
+  the pre-v3.2 inline rename affordance.
 - **Delete** / **Bulk delete** — multi-select rows, then delete all
   at once. Cascade rule: deleting a tournament also removes every
   match tagged with its `tournamentKey` (matches you're not

@@ -51,6 +51,15 @@ export type MatchConfig = {
    * Practice mode is always 3-month regardless of tag.
    */
   tournament: string;
+  /**
+   * Optional tournament round. Only meaningful when `tournament` is
+   * non-empty AND the resolved tournament record carries at least
+   * one round in its `/tournaments/{key}/rounds` sub-node. Free-text
+   * at setup with suggestions from the tournament's open rounds;
+   * blank means "no round tag" (falls into an Unassigned bucket
+   * inside the tournament in History/Reports). See v3.2 plan.
+   */
+  round: string;
 };
 
 export const DEFAULT_CONFIG: MatchConfig = {
@@ -72,6 +81,7 @@ export const DEFAULT_CONFIG: MatchConfig = {
   live: false,
   mid: '',
   tournament: '',
+  round: '',
 };
 
 export function formatPreset(format: Format): Partial<MatchConfig> {
@@ -111,6 +121,7 @@ const QUERY_KEYS: (keyof MatchConfig)[] = [
   'live',
   'mid',
   'tournament',
+  'round',
 ];
 
 export function encodeConfig(cfg: MatchConfig): string {
@@ -173,6 +184,12 @@ export function decodeConfig(query: URLSearchParams): MatchConfig {
   // grouped as "Default" in the lobby).
   const tour = (query.get('tournament') ?? '').trim().slice(0, 60);
   if (tour) out.tournament = tour;
+
+  // Optional tournament round tag — same length cap + trim as
+  // tournament. Blank stays blank (→ "Unassigned" sub-bucket
+  // inside the tournament in History/Reports).
+  const round = (query.get('round') ?? '').trim().slice(0, 60);
+  if (round) out.round = round;
 
   return out;
 }

@@ -75,6 +75,11 @@ That's it. No account. No download from an app store.
   can flip a tournament to **Closed** to warn umpires that new
   matches shouldn't be added (advisory — the warning can still be
   overridden if a bracket reopens).
+- 🎯 **Tournament rounds** — a tournament can carry a list of named
+  stages (Round of 16, Quarter-finals, Semi-finals, Final, ...).
+  Umpires pick a round at match setup; the lobby's History tab
+  groups two levels deep (tournament → round) and Reports gets a
+  per-round breakdown alongside the combined view.
 - 📡 **Live broadcast + spectator URL** — toggle "Live" on setup and
   every state change publishes to a shareable URL. Friends and family
   open the URL on any phone; the score updates within a second of

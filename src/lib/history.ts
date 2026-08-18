@@ -80,6 +80,16 @@ export type MatchResultInput = {
    * edited by super-admins, not tournament organisers.
    */
   tournamentKey?: string;
+  /**
+   * Optional tournament round. Only meaningful when `tournament`
+   * is also set AND the parent tournament carries the round in
+   * `/tournaments/{tournamentKey}/rounds/`. Denormalised (display
+   * name + slug) alongside the tournament pair so the History /
+   * Reports views can group without a tournament-record read.
+   * Absent on records from before v3.2.
+   */
+  round?: string;
+  roundKey?: string;
   startedAt: number;
   endedAt: number;
   /**
@@ -236,6 +246,15 @@ export async function finishMatch(
           tournamentKey: normalizeKey(result.tournament),
         }
       : {}),
+    // Round tag rides alongside the tournament pair. Skipped when
+    // the tournament itself is empty (a round tag with no
+    // tournament makes no sense — no parent to hang it off).
+    ...(result.tournament?.trim() && result.round?.trim()
+      ? {
+          round: result.round.trim().slice(0, 60),
+          roundKey: normalizeKey(result.round),
+        }
+      : {}),
     startedAt: result.startedAt,
     endedAt: result.endedAt,
     ...(finalCreatedBy ? { createdBy: finalCreatedBy } : {}),
@@ -316,6 +335,20 @@ export type MatchRecord = {
    * the lobby, and gets the shorter (3-month) retention.
    */
   tournament?: string;
+  /**
+   * Slug form of `tournament`. Written alongside on every archive
+   * write; used by RTDB rules for organiser-edit auth and by lobby
+   * grouping when two tournaments happen to share the same case-
+   * different display name.
+   */
+  tournamentKey?: string;
+  /**
+   * Optional round tag (v3.2). Denormalised (display name + slug)
+   * alongside the tournament pair. Absent on pre-v3.2 records or on
+   * matches under a tournament with no rounds configured.
+   */
+  round?: string;
+  roundKey?: string;
   /**
    * Firebase Auth uid of whichever signed-in user recorded the match
    * (via finishMatch). Absent on records written anonymously or
@@ -454,6 +487,11 @@ export type MatchPatch = {
   };
   notes?: { a?: string; b?: string };
   tournament?: string | null;
+  /**
+   * Optional round retag. Same null-clears / string-sets semantics
+   * as `tournament`. Clearing tournament also clears round.
+   */
+  round?: string | null;
   boardLog?: Array<{
     set: number;
     board: number;
@@ -513,6 +551,7 @@ function applyMatchPatch(
     next.notes = mergeNotes(existing.notes, patch.notes);
   }
   applyTournamentPatch(next, patch.tournament);
+  applyRoundPatch(next, patch.round);
   if (patch.boardLog) {
     applyBoardLogPatch(next, patch.boardLog);
   }
@@ -538,9 +577,12 @@ function applyTournamentPatch(
   if (tournament === null || tournament === '') {
     // Explicit clearing — remove both fields entirely so the
     // retention sweep classifies the match as untagged (3-month TTL)
-    // and no stale tournamentKey survives.
+    // and no stale tournamentKey survives. Also drop the round tag
+    // — a round without a parent tournament is meaningless.
     delete next.tournament;
     delete next.tournamentKey;
+    delete next.round;
+    delete next.roundKey;
     return;
   }
   if (typeof tournament === 'string') {
@@ -552,6 +594,34 @@ function applyTournamentPatch(
     // callers must never write one without the other.
     next.tournamentKey = normalizeKey(trimmed);
   }
+}
+
+/**
+ * Mirror of applyTournamentPatch for the round field pair. Only
+ * fires when the record still has a tournament tag (a round without
+ * a tournament is meaningless — the tournament patch would already
+ * have cleared it above). Callers pass `null` or `''` to clear.
+ */
+function applyRoundPatch(
+  next: Record<string, unknown>,
+  round: MatchPatch['round'],
+): void {
+  if (round === undefined) return;
+  if (round === null || round === '') {
+    delete next.round;
+    delete next.roundKey;
+    return;
+  }
+  if (typeof round !== 'string') return;
+  // No parent tournament → don't stamp a round. This handles the
+  // ordering where the caller passed `tournament: null` in the same
+  // patch: applyTournamentPatch ran first and already dropped both
+  // fields; we defensively bail here so a stale round patch can't
+  // resurrect them.
+  if (typeof next.tournament !== 'string' || !next.tournament) return;
+  const trimmed = round.trim().slice(0, 60);
+  next.round = trimmed;
+  next.roundKey = normalizeKey(trimmed);
 }
 
 function applyBoardLogPatch(

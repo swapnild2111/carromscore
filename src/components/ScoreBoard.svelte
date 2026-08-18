@@ -1280,6 +1280,7 @@
           }
         : {}),
       ...(cfg.tournament ? { tournament: cfg.tournament } : {}),
+      ...(cfg.tournament && cfg.round ? { round: cfg.round } : {}),
     };
   }
 
@@ -1601,6 +1602,11 @@
         },
         notes: { a: sideA.note, b: sideB.note },
         ...(cfg.tournament ? { tournament: cfg.tournament } : {}),
+        // Round tag rides only when its parent tournament is also
+        // set — `finishMatch` defensively drops a round-without-
+        // tournament anyway, but keeping them coupled here avoids
+        // a stray payload field on the wire.
+        ...(cfg.tournament && cfg.round ? { round: cfg.round } : {}),
         startedAt,
         endedAt: Date.now(),
         ...(boardLog.length > 0 ? { boardLog: [...boardLog] } : {}),

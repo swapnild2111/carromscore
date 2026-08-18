@@ -42,6 +42,37 @@ export type Tournament = {
    * on the picked-player-country check.
    */
   country?: string;
+  /**
+   * Rounds carried by this tournament — a real tournament has stages
+   * (Round of 16 → Quarter-finals → Semi-finals → Final). Optional;
+   * a tournament without any rounds behaves like every tournament did
+   * before v3.2 (flat match list). Local mirror of
+   * `/tournaments/{key}/rounds/{roundKey}`; kept sorted by `order`
+   * inside `loadRounds`.
+   */
+  rounds?: Round[];
+};
+
+/**
+ * One stage of a tournament (Round of 16, Final, etc). Matches
+ * optionally carry a `roundKey` that references one of these.
+ *
+ * Data model choice: rounds are first-class children of the parent
+ * tournament, not free-text tags on the match. That gives us:
+ *   - typo-free grouping in History / Reports
+ *   - per-round open/closed state (an organiser can close R16 once
+ *     QF starts so the setup picker only surfaces still-live rounds)
+ *   - a natural place to hang per-round metadata (order for display)
+ *
+ * Labels only — no bracket / auto-advance logic. A round is a named
+ * bucket; the umpire picks it at setup.
+ */
+export type Round = {
+  key: string;             // slug — normalised, safe as a Firebase key
+  name: string;            // display name (what the organiser typed)
+  order: number;           // 1-indexed display order (R16=1, QF=2, …)
+  state: 'open' | 'closed';
+  createdAt: number;
 };
 
 /** Meta arg accepted by createOrTouchTournament for v3.1+. */
@@ -193,6 +224,25 @@ export async function subscribeTournaments(): Promise<void> {
   }
 }
 
+function parseRounds(raw: unknown): Round[] | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const rounds: Round[] = [];
+  for (const [key, val] of Object.entries(raw as Record<string, unknown>)) {
+    if (!val || typeof val !== 'object') continue;
+    const v = val as Record<string, unknown>;
+    const name = typeof v.name === 'string' ? v.name.trim() : '';
+    if (!name) continue;
+    const order = typeof v.order === 'number' && Number.isFinite(v.order) ? v.order : 0;
+    const state = v.state === 'closed' ? 'closed' : 'open';
+    const createdAt = typeof v.createdAt === 'number' ? v.createdAt : 0;
+    rounds.push({ key, name, order, state, createdAt });
+  }
+  // Sort by `order` ascending — that's the display order both in
+  // History (R16 → QF → SF → F) and in the setup round picker.
+  rounds.sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
+  return rounds;
+}
+
 function mergeRemote(raw: Record<string, unknown>): void {
   for (const [key, val] of Object.entries(raw)) {
     if (!val || typeof val !== 'object') continue;
@@ -205,6 +255,7 @@ function mergeRemote(raw: Record<string, unknown>): void {
     const type =
       v.type === 'open' || v.type === 'closed' ? (v.type as 'open' | 'closed') : undefined;
     const country = typeof v.country === 'string' ? v.country : undefined;
+    const rounds = parseRounds(v.rounds);
     const existing = memoryStore.find((t) => t.key === key);
     if (existing) {
       existing.name = name;
@@ -215,6 +266,12 @@ function mergeRemote(raw: Record<string, unknown>): void {
       if (createdBy && !existing.createdBy) existing.createdBy = createdBy;
       if (type) existing.type = type;
       if (country) existing.country = country;
+      // Rounds are authoritative from the snapshot — if the remote
+      // dropped a round, we drop it locally too. `parseRounds` returns
+      // undefined only when the `rounds` sub-node is absent; a present
+      // but empty object still yields `[]`, which correctly wipes any
+      // stale local list.
+      if (rounds !== undefined) existing.rounds = rounds;
     } else {
       memoryStore.push({
         key,
@@ -224,6 +281,7 @@ function mergeRemote(raw: Record<string, unknown>): void {
         ...(createdBy ? { createdBy } : {}),
         ...(type ? { type } : {}),
         ...(country ? { country } : {}),
+        ...(rounds !== undefined ? { rounds } : {}),
       });
     }
   }
@@ -357,6 +415,85 @@ async function renameTournamentToNewKey(
   });
   notify();
   return matchCount;
+}
+
+/**
+ * Admin-only: patch a tournament's type/country/state without
+ * touching its name. Used by the consolidated Edit dialog when the
+ * organiser flips open↔closed or picks a different country.
+ *
+ * `type` and `country` are treated as an atomic pair per the v3.1
+ * data-model shape (a closed tournament always has a country). When
+ * transitioning from closed → open, `country` can be cleared by
+ * passing `null`. Absence of either field in the patch leaves the
+ * existing value untouched.
+ *
+ * Returns the outcome so the dialog can flash inline errors on
+ * rule-denied writes.
+ */
+export async function updateTournamentMeta(
+  key: string,
+  patch: { type?: 'open' | 'closed'; country?: string | null },
+): Promise<TournamentWriteOutcome> {
+  if (!key) return { ok: false, error: 'Missing tournament key' };
+  const t = memoryStore.find((x) => x.key === key);
+  if (!t) return { ok: false, error: 'Tournament not found in local store' };
+  const nextType = patch.type ?? t.type ?? 'open';
+  // Country: explicit null clears; string sets; undefined keeps.
+  const nextCountry =
+    patch.country === null
+      ? undefined
+      : patch.country !== undefined
+        ? patch.country.trim()
+        : t.country;
+  // Consistency guardrail: closed tournaments require a country.
+  // A caller can't ship "closed + no country" — the rule set demands
+  // one, and the assignment UI would blow up trying to filter.
+  if (nextType === 'closed' && !nextCountry) {
+    return { ok: false, error: 'Closed tournaments must have a country' };
+  }
+  try {
+    const [{ firebaseApp }, { getDatabase, ref, update }] = await Promise.all([
+      import('./firebase'),
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    // Multi-path update over the two scalars. We can't use a nested
+    // update object with `country: null` — Firebase treats that as
+    // "delete the child". Use two explicit path writes: one for
+    // type, one for country (delete or set).
+    const payload: Record<string, unknown> = {
+      [`tournaments/${key}/type`]: nextType,
+      [`tournaments/${key}/lastActive`]: Date.now(),
+    };
+    if (patch.country === null) {
+      payload[`tournaments/${key}/country`] = null;
+    } else if (nextCountry !== undefined) {
+      payload[`tournaments/${key}/country`] = nextCountry;
+    }
+    await update(ref(db, '/'), payload);
+    t.type = nextType;
+    if (patch.country === null) delete t.country;
+    else if (nextCountry !== undefined) t.country = nextCountry;
+    t.lastActive = Date.now();
+    notify();
+    void logAudit({
+      action: 'tournament.update',
+      path: `tournaments/${key}`,
+      before: {
+        type: t.type,
+        ...(t.country ? { country: t.country } : {}),
+      },
+      after: {
+        type: nextType,
+        ...(nextCountry ? { country: nextCountry } : {}),
+      },
+    });
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg || 'Update failed' };
+  }
 }
 
 /**
@@ -815,6 +952,343 @@ export async function loadAllOrganisers(): Promise<Record<string, Record<string,
     return out;
   } catch {
     return {};
+  }
+}
+
+// ─── Rounds (v3.2) ─────────────────────────────────────────────────
+
+/**
+ * Read the rounds attached to a tournament from the in-memory store.
+ * Returns `[]` for a tournament with no rounds (or an unknown key) —
+ * callers use `.length === 0` to decide whether to show the round
+ * picker in setup / two-level grouping in History.
+ */
+export function loadRounds(tournamentKey: string): Round[] {
+  if (!tournamentKey) return [];
+  const t = memoryStore.find((x) => x.key === tournamentKey);
+  return t?.rounds ? [...t.rounds] : [];
+}
+
+/**
+ * Rank rounds under one tournament against a typed query, following
+ * the same prefix + substring shape as `rankTournaments`. Closed
+ * rounds are excluded so the setup picker never suggests a round the
+ * organiser has explicitly closed to new matches. Empty query returns
+ * every open round in display order.
+ */
+export function rankRounds(
+  tournamentKey: string,
+  query: string,
+  limit = 8,
+): Round[] {
+  const all = loadRounds(tournamentKey).filter((r) => r.state !== 'closed');
+  const q = query.trim().toLowerCase();
+  if (!q) return all.slice(0, limit);
+  const prefix: Round[] = [];
+  const substring: Round[] = [];
+  for (const r of all) {
+    const n = r.name.toLowerCase();
+    if (n.startsWith(q)) prefix.push(r);
+    else if (n.includes(q)) substring.push(r);
+  }
+  return [...prefix, ...substring].slice(0, limit);
+}
+
+/**
+ * Find a round by its display name inside a tournament. Case-
+ * insensitive on the trimmed name. Used at match Start to resolve
+ * the umpire's typed / picked round to its canonical key.
+ */
+export function findRoundByName(tournamentKey: string, name: string): Round | null {
+  const trimmed = name.trim().toLowerCase();
+  if (!trimmed) return null;
+  const rounds = loadRounds(tournamentKey);
+  return rounds.find((r) => r.name.toLowerCase() === trimmed) ?? null;
+}
+
+/**
+ * Admin-only: create a round under a tournament. Auto-assigns
+ * `order = max(existing) + 1` so rounds append at the end by
+ * default. Idempotent on the (tournamentKey, roundKey) pair — if
+ * the round already exists we just refresh its display name.
+ */
+export async function addRound(
+  tournamentKey: string,
+  name: string,
+): Promise<TournamentWriteOutcome> {
+  const trimmed = name.trim();
+  if (!tournamentKey) return { ok: false, error: 'Missing tournament key' };
+  if (!trimmed || trimmed.length > 60)
+    return { ok: false, error: 'Name must be 1-60 characters' };
+  const roundKey = normalizeKey(trimmed);
+  if (!roundKey) return { ok: false, error: 'Name did not produce a valid key' };
+  try {
+    const [{ firebaseApp }, { getDatabase, ref, update }] = await Promise.all([
+      import('./firebase'),
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    const existingRounds = loadRounds(tournamentKey);
+    const existing = existingRounds.find((r) => r.key === roundKey);
+    const maxOrder = existingRounds.reduce((m, r) => Math.max(m, r.order), 0);
+    const nextRecord: Round = existing
+      ? { ...existing, name: trimmed }
+      : {
+          key: roundKey,
+          name: trimmed,
+          order: maxOrder + 1,
+          state: 'open',
+          createdAt: Date.now(),
+        };
+    await update(ref(db, `tournaments/${tournamentKey}/rounds/${roundKey}`), {
+      name: nextRecord.name,
+      order: nextRecord.order,
+      state: nextRecord.state,
+      createdAt: nextRecord.createdAt,
+    });
+    // Local mirror — the Firebase snapshot listener will eventually
+    // reconcile, but we update in-place so admins see the row appear
+    // immediately without waiting for the round-trip.
+    const local = memoryStore.find((t) => t.key === tournamentKey);
+    if (local) {
+      const rs = local.rounds ? [...local.rounds] : [];
+      const idx = rs.findIndex((r) => r.key === roundKey);
+      if (idx >= 0) rs[idx] = nextRecord;
+      else rs.push(nextRecord);
+      rs.sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
+      local.rounds = rs;
+      notify();
+    }
+    void logAudit({
+      action: existing ? 'round.rename' : 'round.add',
+      path: `tournaments/${tournamentKey}/rounds/${roundKey}`,
+      after: { name: trimmed, order: nextRecord.order, state: nextRecord.state },
+    });
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg || 'Add round failed' };
+  }
+}
+
+/**
+ * Toggle a round's open/closed state. Closed rounds are excluded
+ * from the setup picker so the umpire can't add new matches to a
+ * stage the organiser has moved on from.
+ */
+export async function setRoundState(
+  tournamentKey: string,
+  roundKey: string,
+  state: 'open' | 'closed',
+): Promise<TournamentWriteOutcome> {
+  if (!tournamentKey || !roundKey)
+    return { ok: false, error: 'Missing tournament or round key' };
+  try {
+    const [{ firebaseApp }, { getDatabase, ref, update }] = await Promise.all([
+      import('./firebase'),
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    await update(ref(db, `tournaments/${tournamentKey}/rounds/${roundKey}`), { state });
+    const local = memoryStore.find((t) => t.key === tournamentKey);
+    if (local?.rounds) {
+      const r = local.rounds.find((x) => x.key === roundKey);
+      if (r) {
+        r.state = state;
+        notify();
+      }
+    }
+    void logAudit({
+      action: 'round.state',
+      path: `tournaments/${tournamentKey}/rounds/${roundKey}`,
+      after: { state },
+    });
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg || 'Toggle round state failed' };
+  }
+}
+
+/**
+ * Rename a round. If the new name normalises to the same roundKey,
+ * we just refresh the `name` field. Otherwise we clone to a new
+ * roundKey, rewrite every match whose (tournamentKey, roundKey)
+ * pair pointed at the old key, and delete the old round record.
+ * Multi-path update keeps the rewrite atomic.
+ */
+export async function renameRound(
+  tournamentKey: string,
+  oldRoundKey: string,
+  newName: string,
+): Promise<TournamentWriteOutcome> {
+  const trimmed = newName.trim();
+  if (!tournamentKey || !oldRoundKey)
+    return { ok: false, error: 'Missing tournament or round key' };
+  if (!trimmed || trimmed.length > 60)
+    return { ok: false, error: 'Name must be 1-60 characters' };
+  const newRoundKey = normalizeKey(trimmed);
+  if (!newRoundKey) return { ok: false, error: 'Name did not produce a valid key' };
+  try {
+    const [{ firebaseApp }, { getDatabase, ref, get, update, remove }] = await Promise.all([
+      import('./firebase'),
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    const oldPath = `tournaments/${tournamentKey}/rounds/${oldRoundKey}`;
+    const oldSnap = await get(ref(db, oldPath));
+    if (!oldSnap.exists()) return { ok: false, error: 'Round not found' };
+    const oldRec = oldSnap.val() as Record<string, unknown>;
+    const oldName = typeof oldRec.name === 'string' ? oldRec.name : '';
+
+    if (newRoundKey === oldRoundKey) {
+      await update(ref(db, oldPath), { name: trimmed });
+      const local = memoryStore.find((t) => t.key === tournamentKey);
+      if (local?.rounds) {
+        const r = local.rounds.find((x) => x.key === oldRoundKey);
+        if (r) {
+          r.name = trimmed;
+          notify();
+        }
+      }
+      void logAudit({
+        action: 'round.rename',
+        path: oldPath,
+        before: { name: oldName },
+        after: { name: trimmed },
+      });
+      return { ok: true };
+    }
+
+    // Clone to a new key + rewrite child matches. Multi-path update.
+    const matchesSnap = await get(ref(db, 'matches'));
+    const matches =
+      (matchesSnap.val() as Record<string, Record<string, unknown>> | null) ?? {};
+    const rewrites: Record<string, unknown> = {};
+    let matchCount = 0;
+    for (const [matchId, m] of Object.entries(matches)) {
+      if (
+        typeof m.tournamentKey === 'string' &&
+        m.tournamentKey === tournamentKey &&
+        typeof m.roundKey === 'string' &&
+        m.roundKey === oldRoundKey
+      ) {
+        rewrites[`matches/${matchId}/round`] = trimmed;
+        rewrites[`matches/${matchId}/roundKey`] = newRoundKey;
+        matchCount += 1;
+      }
+    }
+    rewrites[`tournaments/${tournamentKey}/rounds/${newRoundKey}`] = {
+      name: trimmed,
+      order: typeof oldRec.order === 'number' ? oldRec.order : 0,
+      state: oldRec.state === 'closed' ? 'closed' : 'open',
+      createdAt: typeof oldRec.createdAt === 'number' ? oldRec.createdAt : Date.now(),
+    };
+    await update(ref(db, '/'), rewrites);
+    await remove(ref(db, oldPath));
+
+    const local = memoryStore.find((t) => t.key === tournamentKey);
+    if (local?.rounds) {
+      local.rounds = local.rounds
+        .filter((r) => r.key !== oldRoundKey)
+        .concat({
+          key: newRoundKey,
+          name: trimmed,
+          order: typeof oldRec.order === 'number' ? oldRec.order : 0,
+          state: oldRec.state === 'closed' ? 'closed' : 'open',
+          createdAt: typeof oldRec.createdAt === 'number' ? oldRec.createdAt : Date.now(),
+        });
+      local.rounds.sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
+      notify();
+    }
+    void logAudit({
+      action: 'round.rename',
+      path: `${oldPath} → tournaments/${tournamentKey}/rounds/${newRoundKey}`,
+      before: { key: oldRoundKey, name: oldName },
+      after: { key: newRoundKey, name: trimmed, matchesRewritten: matchCount },
+    });
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg || 'Rename round failed' };
+  }
+}
+
+/**
+ * Delete a round from a tournament. Child matches keep their
+ * `round` / `roundKey` fields — they'll render under an
+ * "Unassigned" sub-group in History (round record gone, tag string
+ * survives). Preserves the tag string in case an organiser
+ * accidentally deletes and wants to recover; deleting the round
+ * record is a cheaper action than a cascade wipe.
+ */
+export async function deleteRound(
+  tournamentKey: string,
+  roundKey: string,
+): Promise<TournamentWriteOutcome> {
+  if (!tournamentKey || !roundKey)
+    return { ok: false, error: 'Missing tournament or round key' };
+  try {
+    const [{ firebaseApp }, { getDatabase, ref, get, remove }] = await Promise.all([
+      import('./firebase'),
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    const path = `tournaments/${tournamentKey}/rounds/${roundKey}`;
+    const snap = await get(ref(db, path));
+    const existing = snap.val() as Record<string, unknown> | null;
+    await remove(ref(db, path));
+    const local = memoryStore.find((t) => t.key === tournamentKey);
+    if (local?.rounds) {
+      local.rounds = local.rounds.filter((r) => r.key !== roundKey);
+      notify();
+    }
+    void logAudit({
+      action: 'round.delete',
+      path,
+      before: existing ?? undefined,
+    });
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg || 'Delete round failed' };
+  }
+}
+
+/**
+ * Count matches currently tagged under (tournamentKey, roundKey).
+ * Used by the admin panel's delete-round dialog to warn "this round
+ * has N matches — they'll be un-tagged" before the organiser
+ * confirms. Silent-on-failure returns 0.
+ */
+export async function countMatchesByRoundKey(
+  tournamentKey: string,
+  roundKey: string,
+): Promise<number> {
+  if (!tournamentKey || !roundKey) return 0;
+  try {
+    const [{ firebaseApp }, { getDatabase, ref, get }] = await Promise.all([
+      import('./firebase'),
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    const snap = await get(ref(db, 'matches'));
+    const all = snap.val() as Record<string, { tournamentKey?: string; roundKey?: string }> | null;
+    if (!all) return 0;
+    let count = 0;
+    for (const m of Object.values(all)) {
+      if (
+        m &&
+        typeof m === 'object' &&
+        m.tournamentKey === tournamentKey &&
+        m.roundKey === roundKey
+      ) {
+        count += 1;
+      }
+    }
+    return count;
+  } catch {
+    return 0;
   }
 }
 

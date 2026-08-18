@@ -36,7 +36,13 @@
   import ReportsTab from './reports/ReportsTab.svelte';
   import { subscribeCurrentUserRole, type Role } from '../lib/roles';
   import { currentUser } from '../lib/auth';
-  import { normalizeKey } from '../lib/tournaments';
+  import {
+    normalizeKey,
+    loadRounds,
+    subscribeStore as subscribeTournamentsStore,
+    subscribeTournaments,
+    type Round,
+  } from '../lib/tournaments';
   import { subscribeConnectivity } from '../lib/connectivity';
   import { peekLive, SYNC_QUEUE_STORAGE_KEY } from '../lib/sync-queue';
   import { loadResume } from '../lib/resume';
@@ -89,6 +95,10 @@
   let matches = $state<MatchRecord[]>([]);
   let now = $state(Date.now());
   let identityTick = $state(0);
+  // Tick bumped whenever the /tournaments store notifies (v3.2). Read
+  // by round-grouping derived so History re-renders when a round is
+  // added / renamed / closed / deleted from another device.
+  let tournamentTick = $state(0);
 
   // Collapsed tournament groups, per tab. Persisted in localStorage as
   // an explicit override map: bucket key → true/false where the value
@@ -318,7 +328,13 @@
     // 4h). Killing zombie live records here keeps the Now Playing
     // list honest for casual viewers who never visit /admin/.
     void sweepStaleLive();
+    // Subscribe to /tournaments so the History tab knows about each
+    // tournament's rounds (v3.2). Without this the two-level grouping
+    // would render every match as "Unassigned" because loadRounds()
+    // returns [] against an unhydrated store.
+    void subscribeTournaments();
     const unsubStore = subscribeStore(() => (identityTick += 1));
+    const unsubTournaments = subscribeTournamentsStore(() => (tournamentTick += 1));
 
     const nowTick = window.setInterval(() => (now = Date.now()), 30_000);
     // Role subscription — SignInButton owns the auth ↔ roles wiring
@@ -330,6 +346,7 @@
     return () => {
       unsub?.();
       unsubStore();
+      unsubTournaments();
       unsubRole();
       unsubConn();
       window.removeEventListener('storage', onStorage);
@@ -675,6 +692,92 @@
       .sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0)),
   );
   const historyGroups = $derived(groupByTournament(versusMatches, bucketOfMatch));
+
+  /**
+   * Sentinel key for the "matches without a round" sub-group inside a
+   * tournament. Used both as the round-key returned from
+   * groupByRound() and as the isCollapsed-Map key so the umpire's
+   * "unassigned" fold state is remembered per tournament. `__` prefix
+   * matches the same convention as PRACTICE_BUCKET; normalizeKey
+   * disallows leading/trailing dashes and lowercases everything, so a
+   * real round can never collide.
+   */
+  const UNASSIGNED_ROUND_KEY = '__unassigned__';
+
+  /**
+   * Sub-group matches within a single tournament bucket by their
+   * roundKey. Returned entries are [roundKey, roundName, matches[]]
+   * — the roundKey drives the collapsed-state map + `key=` on the
+   * `{#each}`; roundName is the display header text.
+   *
+   * Ordering rule: rounds defined in the tournament record are
+   * listed in their `order` field's ascending order (R16 → QF → SF
+   * → F). Any un-ordered/unknown round tag lands in a bucket sorted
+   * by first-seen (which mirrors the incoming versusMatches order —
+   * most-recent endedAt first). Unassigned always lands last so the
+   * organiser's structured rounds sit at the top and the loose bits
+   * are visually deprioritised.
+   *
+   * When the tournament has NO rounds at all, returns a single-entry
+   * list with roundKey === UNASSIGNED_ROUND_KEY and roundName === '' —
+   * template detects this shape and falls back to the flat render
+   * (no round sub-headers), preserving pre-v3.2 UX.
+   */
+  function groupByRound(
+    tournamentKey: string,
+    matches: MatchRecord[],
+  ): Array<[string, string, MatchRecord[]]> {
+    void tournamentTick;
+    const roster = loadRounds(tournamentKey);
+    if (roster.length === 0) {
+      return [['', '', matches]];
+    }
+    // rounds arrive already-sorted by `order` from loadRounds
+    const orderMap = new Map<string, { name: string; order: number }>();
+    for (const r of roster) orderMap.set(r.key, { name: r.name, order: r.order });
+    const known = new Map<string, MatchRecord[]>();
+    const unknown = new Map<string, { name: string; items: MatchRecord[] }>();
+    const unassigned: MatchRecord[] = [];
+    for (const m of matches) {
+      const rk = (m.roundKey ?? '').trim();
+      if (!rk) {
+        unassigned.push(m);
+        continue;
+      }
+      if (orderMap.has(rk)) {
+        const list = known.get(rk) ?? [];
+        list.push(m);
+        known.set(rk, list);
+      } else {
+        // A round tag that references a round no longer in the
+        // tournament roster (organiser deleted the round record).
+        // Render under a bucket labelled by whatever the match's
+        // display-name `round` field was — data faithful, and the
+        // umpire can still spot the ghost group.
+        const bucket = unknown.get(rk) ?? { name: (m.round ?? '').trim() || rk, items: [] };
+        bucket.items.push(m);
+        unknown.set(rk, bucket);
+      }
+    }
+    const out: Array<[string, string, MatchRecord[]]> = [];
+    // Known rounds in the tournament's order.
+    for (const r of roster) {
+      const items = known.get(r.key);
+      if (items && items.length > 0) out.push([r.key, r.name, items]);
+    }
+    // Then ghost rounds (deleted from the tournament but still tagged
+    // on matches). Sorted alphabetically for stability.
+    const ghostKeys = Array.from(unknown.keys()).sort();
+    for (const gk of ghostKeys) {
+      const b = unknown.get(gk)!;
+      out.push([gk, b.name, b.items]);
+    }
+    // Unassigned tail.
+    if (unassigned.length > 0) {
+      out.push([UNASSIGNED_ROUND_KEY, 'Unassigned', unassigned]);
+    }
+    return out;
+  }
   // Bucket key reserved for the Practice collapsible section. Not a
   // real tournament name; matched against the same collapsed-state
   // Map so the practice section remembers its open/closed state.
@@ -1080,6 +1183,9 @@
     {:else}
       {#each historyGroups as [bucket, matchesInBucket] (bucket)}
         {@const folded = isCollapsed('history', bucket)}
+        {@const tKey = bucket === DEFAULT_BUCKET ? '' : normalizeKey(bucket)}
+        {@const roundGroups = groupByRound(tKey, matchesInBucket)}
+        {@const hasRounds = roundGroups.length > 1 || (roundGroups[0] && roundGroups[0][0] !== '')}
         <section class="tour-group" class:folded>
           <button
             type="button"
@@ -1092,8 +1198,30 @@
             <span class="tour-count">{matchesInBucket.length}</span>
           </button>
           {#if !folded}
-          <ul class="grid">
-            {#each matchesInBucket as m (m.id)}
+          {#each roundGroups as [roundKey, roundName, roundMatches] (roundKey || 'flat')}
+            {@const showRoundHeader = hasRounds && roundKey !== ''}
+            {@const roundFolded = showRoundHeader && isCollapsed('history', `${bucket}::${roundKey}`)}
+            <section
+              class="round-group"
+              class:round-unassigned={roundKey === UNASSIGNED_ROUND_KEY}
+              class:round-flat={!showRoundHeader}
+              class:folded={roundFolded}
+            >
+              {#if showRoundHeader}
+              <button
+                type="button"
+                class="round-hdr"
+                aria-expanded={!roundFolded}
+                onclick={() => toggleGroup('history', `${bucket}::${roundKey}`)}
+              >
+                <span class="round-caret" class:round-caret-folded={roundFolded} aria-hidden="true">▾</span>
+                <span class="round-name">{roundName}</span>
+                <span class="round-count">{roundMatches.length}</span>
+              </button>
+              {/if}
+              {#if !roundFolded}
+              <ul class="grid">
+            {#each roundMatches as m (m.id)}
               {@const r = m.result}
               {@const winner = r?.winner}
               {@const editable = canEditMatch(m)}
@@ -1202,7 +1330,10 @@
                 </button>
               </li>
             {/each}
-          </ul>
+              </ul>
+              {/if}
+            </section>
+          {/each}
           {/if}
         </section>
       {/each}
@@ -1802,6 +1933,111 @@
      hug the section border. */
   .tour-group .grid {
     padding: 0 0.6rem 0.75rem;
+  }
+
+  /* ─── Round sub-groups inside a tournament (v3.2) ─────────────────
+     A round is rendered as its own bordered card, indented inside
+     the tournament wrapper so the tournament > round nesting reads
+     visually. The card + header combo mirrors the Reports tab's
+     per-round card so both surfaces share one visual language. The
+     `.round-flat` variant (tournament with no rounds configured)
+     drops the wrapper entirely — pre-v3.2 flat render preserved. */
+  .round-group {
+    display: block;
+  }
+  .round-group.folded .grid {
+    display: none;
+  }
+  .round-group.round-flat > .grid {
+    /* No visual box around the flat case — the tour-group wrapper
+       already provides the outer chrome. */
+    padding: 0 0.6rem 0.75rem;
+  }
+  /* Bordered card, only in the has-rounds variant. Left-indented so
+     the nesting under the tournament header reads at a glance. */
+  .round-group:not(.round-flat) {
+    margin: 0.5rem 0.6rem;
+    background: rgba(255, 213, 74, 0.04);
+    border: 1px solid rgba(255, 213, 74, 0.18);
+    border-radius: 0.5rem;
+    overflow: hidden;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  }
+  .round-hdr {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    width: 100%;
+    padding: 0.55rem 0.85rem;
+    background: transparent;
+    color: var(--fg, #f5f5f5);
+    border: 0;
+    font: inherit;
+    font-size: 0.92rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.12s;
+  }
+  .round-hdr:hover { background: rgba(255,213,74,0.08); }
+  .round-hdr:focus-visible {
+    outline: 2px solid var(--accent, #ffd54a);
+    outline-offset: -2px;
+  }
+  /* Round caret: filled ▾ that rotates -90° when the round is
+     folded. Sized to match the tournament caret's chrome so it
+     reads unambiguously as a button — hierarchy is carried by the
+     row height + card treatment, not by shrinking the caret to
+     invisibility. */
+  .round-caret {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.5rem;
+    height: 1.5rem;
+    border-radius: 0.4rem;
+    background: rgba(255,213,74,0.14);
+    color: var(--accent, #ffd54a);
+    font-size: 1rem;
+    line-height: 1;
+    flex: 0 0 auto;
+    transition: transform 0.18s ease, background 0.12s;
+  }
+  .round-caret-folded {
+    transform: rotate(-90deg);
+  }
+  .round-hdr:hover .round-caret {
+    background: rgba(255,213,74,0.24);
+  }
+  .round-name { flex: 1 1 auto; }
+  .round-count {
+    font-size: 0.72rem;
+    font-weight: 500;
+    color: rgba(255,255,255,0.65);
+    background: rgba(255,255,255,0.08);
+    padding: 0.1rem 0.5rem;
+    border-radius: 999px;
+    flex: 0 0 auto;
+  }
+  /* Unassigned bucket rendered at the tail of a rounds-having
+     tournament. Slightly muted vs a real round card to visually
+     deprioritise "these matches lack the structured tag". */
+  .round-group.round-unassigned {
+    background: rgba(255, 255, 255, 0.02);
+    border-color: rgba(255, 255, 255, 0.10);
+  }
+  .round-group.round-unassigned .round-name {
+    color: rgba(255,255,255,0.65);
+    font-style: italic;
+    font-weight: 500;
+  }
+  .round-group.round-unassigned .round-caret {
+    background: rgba(255,255,255,0.08);
+    color: rgba(255,255,255,0.55);
+  }
+  .round-group:not(.round-flat) > .grid {
+    padding: 0 0.6rem 0.5rem;
   }
 
   /* Responsive grid: 1 col on phones, 2 on wider phones/tablets,
