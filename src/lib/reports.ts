@@ -59,7 +59,35 @@ export type TournamentReport = {
   matches: number;
   rows: ReportRow[];
   playerSummary: PlayerSummary[];
+  /**
+   * Per-round breakdowns (v3.2). Empty when the tournament has no
+   * matches with a round tag, so pre-v3.2 tournament reports render
+   * exactly as before (just the combined view). Ordered by the
+   * tournament's `rounds` array from tournaments.ts when available,
+   * falling back to alphabetical for tags that don't map to a known
+   * round record. An "Unassigned" bucket lands at the tail for
+   * matches with a tournament tag but no round tag.
+   */
+  roundReports?: RoundReport[];
 };
+
+/**
+ * One round's slice of the tournament report. `roundKey` matches the
+ * archived match's `roundKey` field (or the sentinel
+ * UNASSIGNED_ROUND_KEY for the tail bucket); `roundName` is the
+ * display header text.
+ */
+export type RoundReport = {
+  roundKey: string;
+  roundName: string;
+  matches: number;
+  rows: ReportRow[];
+  playerSummary: PlayerSummary[];
+};
+
+/** Sentinel roundKey for the "matches under this tournament with no
+ *  round tag" bucket. Mirrors LiveLobby's UNASSIGNED_ROUND_KEY. */
+export const UNASSIGNED_ROUND_KEY = '__unassigned__';
 
 /**
  * Compute per-side boards-won by iterating boardLog.
@@ -230,22 +258,106 @@ export function buildPlayerSummary(matches: MatchRecord[]): PlayerSummary[] {
 /**
  * Top-level: filter matches to a tournament + build both reports.
  * `tournament === null` means untagged matches (Default bucket).
+ *
+ * `roundRoster` (v3.2) is the list of rounds attached to the
+ * tournament record — passed in from the caller (LiveLobby /
+ * ReportsTab reads it via loadRounds). Used to sort roundReports in
+ * the tournament's declared order (R16 → QF → SF → F). Optional; a
+ * missing roster produces reports ordered alphabetically by round
+ * name.
  */
 export function buildTournamentReport(
   allMatches: MatchRecord[],
   tournament: string | null,
+  roundRoster?: Array<{ key: string; name: string; order: number }>,
 ): TournamentReport {
   const filtered = allMatches.filter((m) => {
     if (m.mode === 'practice') return false;
     const tag = (m.tournament ?? '').trim();
     return tournament === null ? tag === '' : tag === tournament;
   });
+  const roundReports = buildRoundReports(filtered, roundRoster ?? []);
   return {
     tournament: tournament ?? 'Default',
     matches: filtered.length,
     rows: buildReportRows(filtered),
     playerSummary: buildPlayerSummary(filtered),
+    ...(roundReports.length > 0 ? { roundReports } : {}),
   };
+}
+
+/**
+ * Group the tournament's filtered matches by roundKey and build a
+ * sub-report per bucket. Rounds present in `roundRoster` appear
+ * first, in the roster's `order` field; ghost rounds (tagged on
+ * matches but absent from the roster — organiser deleted the round)
+ * follow alphabetically; the Unassigned bucket lands last.
+ *
+ * Returns [] when NO match in the input carries a roundKey — that
+ * signals the tournament isn't using rounds at all, and the outer
+ * report should render just its combined view without the accordion.
+ */
+function buildRoundReports(
+  matches: MatchRecord[],
+  roundRoster: Array<{ key: string; name: string; order: number }>,
+): RoundReport[] {
+  const hasAnyRound = matches.some((m) => (m.roundKey ?? '').trim() !== '');
+  if (!hasAnyRound) return [];
+  const rosterMap = new Map(roundRoster.map((r) => [r.key, r]));
+  const known = new Map<string, MatchRecord[]>();
+  const ghost = new Map<string, { name: string; items: MatchRecord[] }>();
+  const unassigned: MatchRecord[] = [];
+  for (const m of matches) {
+    const rk = (m.roundKey ?? '').trim();
+    if (!rk) {
+      unassigned.push(m);
+      continue;
+    }
+    if (rosterMap.has(rk)) {
+      const list = known.get(rk) ?? [];
+      list.push(m);
+      known.set(rk, list);
+    } else {
+      const bucket = ghost.get(rk) ?? { name: (m.round ?? '').trim() || rk, items: [] };
+      bucket.items.push(m);
+      ghost.set(rk, bucket);
+    }
+  }
+  const out: RoundReport[] = [];
+  const rosterSorted = [...roundRoster].sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
+  for (const r of rosterSorted) {
+    const items = known.get(r.key);
+    if (items && items.length > 0) {
+      out.push({
+        roundKey: r.key,
+        roundName: r.name,
+        matches: items.length,
+        rows: buildReportRows(items),
+        playerSummary: buildPlayerSummary(items),
+      });
+    }
+  }
+  const ghostKeys = Array.from(ghost.keys()).sort();
+  for (const gk of ghostKeys) {
+    const b = ghost.get(gk)!;
+    out.push({
+      roundKey: gk,
+      roundName: b.name,
+      matches: b.items.length,
+      rows: buildReportRows(b.items),
+      playerSummary: buildPlayerSummary(b.items),
+    });
+  }
+  if (unassigned.length > 0) {
+    out.push({
+      roundKey: UNASSIGNED_ROUND_KEY,
+      roundName: 'Unassigned',
+      matches: unassigned.length,
+      rows: buildReportRows(unassigned),
+      playerSummary: buildPlayerSummary(unassigned),
+    });
+  }
+  return out;
 }
 
 // ─── Serialisation ──────────────────────────────────────────────

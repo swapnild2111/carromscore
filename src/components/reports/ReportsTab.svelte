@@ -26,6 +26,8 @@
     loadAll as loadAllTournaments,
     subscribeStore as subscribeTournamentsStore,
     subscribeTournaments,
+    loadRounds,
+    normalizeKey,
   } from '../../lib/tournaments';
   import BarChart from './BarChart.svelte';
 
@@ -94,9 +96,47 @@
     initialTournament === undefined ? null : initialTournament,
   );
 
+  // Pass the tournament's round roster into buildTournamentReport so
+  // per-round sub-reports get ordered R16 → QF → SF → F rather than
+  // alphabetically. Empty when the selection is Default (untagged) or
+  // the tournament has no rounds configured — buildTournamentReport
+  // still produces roundReports if any match has a roundKey tag.
+  const currentRoundRoster = $derived(() => {
+    void tournamentTick;
+    if (selection === undefined || selection === null) return [];
+    return loadRounds(normalizeKey(selection));
+  });
+
   const report = $derived<TournamentReport | null>(
-    selection === undefined ? null : buildTournamentReport(matches, selection),
+    selection === undefined
+      ? null
+      : buildTournamentReport(matches, selection, currentRoundRoster()),
   );
+
+  /**
+   * Per-round accordion fold state (v3.2). Session-only Set of
+   * roundKeys the user has explicitly toggled — reset whenever
+   * `selection` changes so switching tournaments starts with a
+   * clean slate. Default open state is "all folded" so a
+   * tournament with four rounds doesn't unfurl into a page-height
+   * scroll on a phone the moment the picker fires.
+   */
+  let collapsedRounds = $state<Set<string>>(new Set());
+  $effect(() => {
+    // Reset whenever the selection changes. Read `selection` so
+    // Svelte tracks it as a dependency of this effect.
+    void selection;
+    collapsedRounds = new Set();
+  });
+  function toggleRound(roundKey: string) {
+    const next = new Set(collapsedRounds);
+    if (next.has(roundKey)) next.delete(roundKey);
+    else next.add(roundKey);
+    collapsedRounds = next;
+  }
+  function isRoundOpen(roundKey: string): boolean {
+    return !collapsedRounds.has(roundKey);
+  }
 
   function pick(key: string | null) {
     selection = key;
@@ -304,6 +344,119 @@
         </tbody>
       </table>
     </div>
+
+    <!--
+      Per-round accordion (v3.2). Only renders when the tournament
+      actually has rounds — buildTournamentReport returns
+      `roundReports` only if at least one match carries a round tag,
+      so pre-v3.2 tournaments (or tournaments an organiser hasn't
+      set up rounds for yet) get the combined view above and nothing
+      else. Each round's card mirrors the shape of the combined view
+      but scoped to that round's matches: player summary + matches
+      table. Charts are deliberately omitted per-round to keep the
+      scroll length sane — the combined view has them.
+    -->
+    {#if report.roundReports && report.roundReports.length > 0}
+      <div class="rounds-section">
+        <h3 class="section-hdr">Per-round breakdown</h3>
+        {#each report.roundReports as rr (rr.roundKey)}
+          {@const open = isRoundOpen(rr.roundKey)}
+          <section
+            class="round-report"
+            class:round-report-unassigned={rr.roundKey === '__unassigned__'}
+            class:round-folded={!open}
+          >
+            <button
+              type="button"
+              class="round-report-hdr"
+              aria-expanded={open}
+              onclick={() => toggleRound(rr.roundKey)}
+            >
+              <span class="round-report-caret" aria-hidden="true">{open ? '▾' : '▸'}</span>
+              <span class="round-report-name">{rr.roundName}</span>
+              <span class="round-report-count">{rr.matches} match{rr.matches === 1 ? '' : 'es'}</span>
+            </button>
+            {#if open}
+              {#if rr.rows.length === 0}
+                <p class="round-report-empty">No matches in this round yet.</p>
+              {:else}
+                <div class="round-report-body">
+                  <div class="summary-scroll">
+                    <table class="summary-tbl">
+                      <thead>
+                        <tr>
+                          <th class="col-name">Player</th>
+                          <th>Matches</th>
+                          <th>W</th>
+                          <th>L</th>
+                          <th>D</th>
+                          <th>Boards</th>
+                          <th>Points</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {#each rr.playerSummary as p (p.playerId)}
+                          <tr>
+                            <td class="col-name">{p.name}</td>
+                            <td>{p.matches}</td>
+                            <td>{p.wins}</td>
+                            <td>{p.losses}</td>
+                            <td>{p.draws}</td>
+                            <td>{p.boardsWon}</td>
+                            <td>{p.pointsScored}</td>
+                          </tr>
+                        {/each}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div class="tbl-scroll">
+                    <table class="matches-tbl">
+                      <thead>
+                        <tr>
+                          <th>Ended</th>
+                          <th>Mode</th>
+                          <th class="col-name">Side A</th>
+                          <th class="col-name">Side B</th>
+                          <th>Sets A</th>
+                          <th>Sets B</th>
+                          <th>Boards A</th>
+                          <th>Boards B</th>
+                          <th>Points A</th>
+                          <th>Points B</th>
+                          <th>Winner</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {#each rr.rows as r (r._matchId)}
+                          <tr>
+                            <td>{r.endedAt}</td>
+                            <td>{r.mode}</td>
+                            <td class="col-name">{r.sideA}</td>
+                            <td class="col-name">{r.sideB}</td>
+                            <td>{r.setsA}</td>
+                            <td>{r.setsB}</td>
+                            <td>{r.boardsWonA}</td>
+                            <td>{r.boardsWonB}</td>
+                            <td>{r.pointsA}</td>
+                            <td>{r.pointsB}</td>
+                            <td class="winner-cell">
+                              {#if r.winner === 'Draw'}<span class="winner-tag winner-draw">Draw</span>
+                              {:else if r.winner === 'A'}<span class="winner-tag winner-a">A</span>
+                              {:else if r.winner === 'B'}<span class="winner-tag winner-b">B</span>
+                              {/if}
+                            </td>
+                          </tr>
+                        {/each}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              {/if}
+            {/if}
+          </section>
+        {/each}
+      </div>
+    {/if}
   {/if}
 </section>
 
@@ -484,5 +637,74 @@
     background: rgba(201, 165, 111, 0.15);
     color: #c9a56f;
     border: 1px solid rgba(201, 165, 111, 0.35);
+  }
+
+  /* ─── Per-round accordion (v3.2) ─────────────────────────────── */
+  .rounds-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    margin-top: 0.5rem;
+  }
+  .round-report {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 0.6rem;
+    overflow: hidden;
+  }
+  .round-report-hdr {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 0.6rem 0.9rem;
+    background: transparent;
+    border: 0;
+    color: var(--fg, #f5f5f5);
+    text-align: left;
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.9rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+  .round-report-hdr:hover { background: rgba(255, 255, 255, 0.03); }
+  .round-report-hdr:focus-visible {
+    outline: 2px solid var(--accent, #ffd54a);
+    outline-offset: -2px;
+  }
+  .round-report-caret {
+    color: rgba(255, 255, 255, 0.5);
+    width: 0.9rem;
+    display: inline-flex;
+    justify-content: center;
+  }
+  .round-report-name { flex: 1 1 auto; }
+  .round-report-count {
+    font-size: 0.72rem;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.55);
+    background: rgba(255, 255, 255, 0.06);
+    padding: 0.1rem 0.5rem;
+    border-radius: 999px;
+    flex: 0 0 auto;
+  }
+  .round-report-unassigned .round-report-name {
+    color: rgba(255, 255, 255, 0.6);
+    font-style: italic;
+    font-weight: 500;
+  }
+  .round-report-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    padding: 0.25rem 0.85rem 0.85rem;
+  }
+  .round-report-empty {
+    margin: 0;
+    padding: 0 0.9rem 0.85rem;
+    color: var(--muted, #9aa0a6);
+    font-size: 0.85rem;
+    font-style: italic;
   }
 </style>
