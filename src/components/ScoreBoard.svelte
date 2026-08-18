@@ -1218,6 +1218,34 @@
     // taps End after the last board without hitting BOARD+1 first.
     const currentBoardHasScore =
       sideA.points > pointsAtBoardStart.a || sideB.points > pointsAtBoardStart.b;
+    // Reconcile the last snapshotted board if the umpire corrected a
+    // score AFTER tapping BOARD+1. In that flow: BOARD+1 snapshots the
+    // board into boardLog and re-baselines pointsAtBoardStart to the
+    // current cumulative totals; a subsequent negative-delta correction
+    // drops sideA.points below pointsAtBoardStart.a. Result: End sees
+    // no "currentBoardHasScore" (since the delta went negative, not
+    // positive), skips the append, and the archive ends up with
+    // sideA.points reflecting the correction but boardLog.last.pointsA
+    // still holding the pre-correction number. Treat End as the commit
+    // point — rewrite the last row's delta so ΣboardLog matches the
+    // current cumulative totals.
+    if (!currentBoardHasScore && boardLog.length > 0) {
+      const sumA = boardLog.reduce((n, e) => n + e.pointsA, 0);
+      const sumB = boardLog.reduce((n, e) => n + e.pointsB, 0);
+      if (sumA !== sideA.points || sumB !== sideB.points) {
+        const last = boardLog[boardLog.length - 1];
+        const adjustedLast: BoardEntry = {
+          ...last,
+          pointsA: last.pointsA + (sideA.points - sumA),
+          pointsB: last.pointsB + (sideB.points - sumB),
+          endedAt: Date.now(),
+        };
+        boardLog = [...boardLog.slice(0, -1), adjustedLast];
+        // Re-baseline so any downstream reads (queenCreditProblem,
+        // subsequent adjustments) see a consistent world.
+        pointsAtBoardStart = { a: sideA.points, b: sideB.points };
+      }
+    }
     if (currentBoardHasScore) {
       // Board-cap safeguard. If the umpire has already completed
       // cfg.maxBoards boards (and this isn't the decider extension),
