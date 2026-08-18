@@ -1262,11 +1262,33 @@
       const atBoardCap =
         !isBoardsUnlimited(cfg) && board >= cfg.maxBoards && !isDecidingBoard;
       if (atBoardCap) {
-        // Roll the running board's points back to the last saved
-        // baseline so the winner comparison sees only the
-        // completed-board totals, and skip the append.
-        sideA.points = pointsAtBoardStart.a;
-        sideB.points = pointsAtBoardStart.b;
+        // We've already completed maxBoards boards, so we can't append
+        // a phantom board (maxBoards+1). But the running delta since
+        // pointsAtBoardStart is legitimate umpire correction to the
+        // LAST snapshotted board, not a new-board score — fold it into
+        // boardLog[last] so archive totals match on-screen totals and
+        // the winner comparison sees the corrected numbers.
+        //
+        // (Prior behaviour rolled sideA/sideB back to baseline and
+        // discarded the delta — reported 2026-08-18: after BOARD+1 on
+        // the last board, correcting Player B from 5 to 6 was reverted
+        // to 5 on End.)
+        if (boardLog.length > 0) {
+          const last = boardLog[boardLog.length - 1];
+          const adjustedLast: BoardEntry = {
+            ...last,
+            pointsA: last.pointsA + (sideA.points - pointsAtBoardStart.a),
+            pointsB: last.pointsB + (sideB.points - pointsAtBoardStart.b),
+            endedAt: Date.now(),
+          };
+          boardLog = [...boardLog.slice(0, -1), adjustedLast];
+          pointsAtBoardStart = { a: sideA.points, b: sideB.points };
+        } else {
+          // No prior board to fold into (shouldn't happen at cap, but
+          // defensive): fall back to the old drop-the-delta behaviour.
+          sideA.points = pointsAtBoardStart.a;
+          sideB.points = pointsAtBoardStart.b;
+        }
       } else {
       if (queenHolder === null) {
         // Real carrom: no board can end without a queen. Block End
