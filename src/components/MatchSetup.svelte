@@ -69,26 +69,39 @@
       source: 'identity',
       ...(p.country ? { country: p.country } : {}),
     }));
-    // Merge-dedupe by case-insensitive name. Earlier sources win on
-    // display shape (name/source), but LATER sources fill in fields
-    // the earlier row didn't have — specifically `country`, since
-    // localPlayers has no country column while the identity store
-    // does. Without this merge, a name that first appears in
-    // localPlayers (created by playing a match) would forever render
-    // without a flag, even after an admin sets its country on
-    // Firebase.
+    // Merge-dedupe. Identity-store rows key by (name + country) so
+    // legitimate namesakes from different countries stay as separate
+    // picker rows (e.g. Swapnil Deshpande from DK vs SE). Seed/local
+    // rows key by name only — those layers have no country column, so
+    // a country-less "Swapnil Deshpande" gets folded into whichever
+    // identity row shares the name AND has a country. Sources are
+    // walked in order [seed, local, identity]: earlier rows win on
+    // display shape, later rows fill in missing country info.
     const byKey = new Map<string, PlayerRow>();
-    for (const p of [...seedPlayers, ...localPlayers, ...identityRows]) {
-      const key = p.name.toLowerCase();
-      const prev = byKey.get(key);
-      if (!prev) {
-        byKey.set(key, p);
+    // Pass 1: seed + local, keyed by name only (they can't distinguish
+    // namesakes anyway).
+    for (const p of [...seedPlayers, ...localPlayers]) {
+      const key = `n:${p.name.toLowerCase()}`;
+      if (!byKey.has(key)) byKey.set(key, p);
+    }
+    // Pass 2: identity rows. Each identity row is unique on
+    // (name, country) — that's how the admin creates namesake records.
+    // Fold country-less name matches from pass 1 into the identity row
+    // when there's exactly one; otherwise leave both.
+    for (const p of identityRows) {
+      const nameKey = `n:${p.name.toLowerCase()}`;
+      const idKey = `i:${p.name.toLowerCase()}|${(p.country ?? '').toLowerCase()}`;
+      const priorByName = byKey.get(nameKey);
+      if (priorByName && !priorByName.country) {
+        // Upgrade the country-less local/seed row to carry the
+        // identity row's country, and re-key it under the id-scoped
+        // key so a second same-named identity row (different country)
+        // lands next to it instead of overwriting.
+        byKey.delete(nameKey);
+        byKey.set(idKey, { ...priorByName, country: p.country });
         continue;
       }
-      // Upgrade fields missing on the earlier row.
-      if (!prev.country && p.country) {
-        byKey.set(key, { ...prev, country: p.country });
-      }
+      if (!byKey.has(idKey)) byKey.set(idKey, p);
     }
     return Array.from(byKey.values());
   });
@@ -392,9 +405,26 @@
     (cfg[key] as string) = row.name;
     openPicker = null;
     // If the picked row corresponds to an identity-store player, resolve
-    // to that id. Otherwise clear — a new player record will be created
-    // when the match ends.
+    // to that id. When the row carries a country, prefer the identity
+    // player with matching (name, country) — otherwise namesakes from
+    // different countries would all resolve to whichever identity row
+    // rankMatches happens to return first. Falls back to name-only
+    // rankMatches when there's no country on the row (seed/local
+    // sources) or no country-matched identity player exists.
     const q = row.name.trim();
+    const qNorm = q.toLowerCase();
+    if (row.country) {
+      const all = loadAllPlayers();
+      const byCountry = all.find(
+        (p) =>
+          p.canonicalName.trim().toLowerCase() === qNorm &&
+          (p.country ?? '').trim() === row.country,
+      );
+      if (byCountry) {
+        resolvedPlayerIds[key as string] = byCountry.id;
+        return;
+      }
+    }
     const hits = rankMatches(loadAllPlayers(), q, 1);
     const h = hits[0];
     resolvedPlayerIds[key as string] = h && h.rank === 'exact' ? h.player.id : null;
