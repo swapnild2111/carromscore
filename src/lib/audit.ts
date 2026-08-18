@@ -26,12 +26,17 @@ export type AuditAction =
   | 'match.delete'
   | 'match.self_delete'
   | 'player.rename'
+  | 'player.update'
+  | 'alias.add'
+  | 'alias.remove'
   | 'player.merge'
   | 'player.delete'
   | 'tournament.rename'
   | 'tournament.delete'
   | 'organiser.add'
   | 'organiser.remove'
+  | 'player.assign'
+  | 'player.unassign'
   | 'live.delete';
 
 export type AuditEntry = {

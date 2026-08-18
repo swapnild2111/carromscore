@@ -28,6 +28,9 @@
     rankTournaments,
     subscribeStore as subscribeTournamentsStore,
     subscribeTournaments,
+    loadAll as loadAllTournaments,
+    loadAssignedPlayers,
+    normalizeKey,
     type Tournament,
   } from '../lib/tournaments';
   import {
@@ -40,6 +43,7 @@
   import SignInButton from './SignInButton.svelte';
   import FeedbackPopup from './FeedbackPopup.svelte';
   import HelpTip from './HelpTip.svelte';
+  import { countryName, flagEmoji } from '../lib/countries';
 
   const base: string = import.meta.env.BASE_URL;
 
@@ -53,16 +57,53 @@
   let loadingPlayers = $state(true);
 
   const players = $derived<PlayerRow[]>(() => {
-    // Concatenate seed + local, then dedupe by case-insensitive name.
-    const seen = new Set<string>();
-    const out: PlayerRow[] = [];
+    // Read the identityTick so this recomputes when the /players
+    // Firebase-backed store changes (admin adds a player etc.).
+    void identityTick;
+    // Concatenate seed + local + identity-store, then dedupe by
+    // case-insensitive name. Identity-store rows are shaped as
+    // PlayerRow with source: 'identity' + their stored country so
+    // the picker shows the flag pill on Firebase-backed players too.
+    const identityRows: PlayerRow[] = loadAllPlayers().map((p) => ({
+      name: p.canonicalName,
+      source: 'identity',
+      ...(p.country ? { country: p.country } : {}),
+    }));
+    // Merge-dedupe. Identity-store rows key by (name + country) so
+    // legitimate namesakes from different countries stay as separate
+    // picker rows (e.g. Swapnil Deshpande from DK vs SE). Seed/local
+    // rows key by name only — those layers have no country column, so
+    // a country-less "Swapnil Deshpande" gets folded into whichever
+    // identity row shares the name AND has a country. Sources are
+    // walked in order [seed, local, identity]: earlier rows win on
+    // display shape, later rows fill in missing country info.
+    const byKey = new Map<string, PlayerRow>();
+    // Pass 1: seed + local, keyed by name only (they can't distinguish
+    // namesakes anyway).
     for (const p of [...seedPlayers, ...localPlayers]) {
-      const key = p.name.toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push(p);
+      const key = `n:${p.name.toLowerCase()}`;
+      if (!byKey.has(key)) byKey.set(key, p);
     }
-    return out;
+    // Pass 2: identity rows. Each identity row is unique on
+    // (name, country) — that's how the admin creates namesake records.
+    // Fold country-less name matches from pass 1 into the identity row
+    // when there's exactly one; otherwise leave both.
+    for (const p of identityRows) {
+      const nameKey = `n:${p.name.toLowerCase()}`;
+      const idKey = `i:${p.name.toLowerCase()}|${(p.country ?? '').toLowerCase()}`;
+      const priorByName = byKey.get(nameKey);
+      if (priorByName && !priorByName.country) {
+        // Upgrade the country-less local/seed row to carry the
+        // identity row's country, and re-key it under the id-scoped
+        // key so a second same-named identity row (different country)
+        // lands next to it instead of overwriting.
+        byKey.delete(nameKey);
+        byKey.set(idKey, { ...priorByName, country: p.country });
+        continue;
+      }
+      if (!byKey.has(idKey)) byKey.set(idKey, p);
+    }
+    return Array.from(byKey.values());
   });
 
   $effect(() => {
@@ -101,6 +142,45 @@
     const unsub = subscribeTournamentsStore(() => (tournamentTick += 1));
     void subscribeTournaments();
     return unsub;
+  });
+
+  /**
+   * Resolve the currently-typed tournament string against the shared
+   * store. Returns null when the string doesn't match any known
+   * tournament (free-text tag; open tournament by definition of
+   * v3.1's data model — closed tournaments must be admin-created).
+   */
+  const pickedTournament = $derived<Tournament | null>(() => {
+    void tournamentTick;
+    const raw = cfg.tournament?.trim();
+    if (!raw) return null;
+    const key = normalizeKey(raw);
+    if (!key) return null;
+    return loadAllTournaments().find((t) => t.key === key) ?? null;
+  });
+
+  /**
+   * Assigned-player ids for the picked closed tournament. Loaded
+   * one-shot on tournament-key change. Empty set when the tournament
+   * is open or none is picked. Read by the picker's warning
+   * derivation below.
+   */
+  let assignedPlayerIds = $state<Set<string>>(new Set());
+  let lastLoadedAssignmentKey = $state<string | null>(null);
+  $effect(() => {
+    const t = pickedTournament();
+    const key = t?.type === 'closed' ? t.key : null;
+    if (key === lastLoadedAssignmentKey) return;
+    lastLoadedAssignmentKey = key;
+    if (!key) {
+      assignedPlayerIds = new Set();
+      return;
+    }
+    void loadAssignedPlayers(key).then((set) => {
+      // Guard against a stale key: if the user picked a different
+      // tournament while the fetch was in-flight, drop the result.
+      if (lastLoadedAssignmentKey === key) assignedPlayerIds = set;
+    });
   });
 
   // Resume-match chip. If the last-started match is still ongoing
@@ -236,6 +316,17 @@
   // which means "create a new player when the match is saved").
   //
   // Keyed by the four possible name-input MatchConfig fields.
+  // Country codes captured alongside the resolved id so ScoreBoard can
+  // render the header flag on first paint without waiting for the
+  // Firebase player-store hydration. Set whenever a picker row is
+  // tapped or an exact-name auto-resolve fires — cleared when the name
+  // no longer resolves.
+  let resolvedPlayerCountries = $state<Record<string, string>>({
+    playerA: '',
+    playerA2: '',
+    playerB: '',
+    playerB2: '',
+  });
   let resolvedPlayerIds = $state<Record<string, string | null>>({
     playerA: null,
     playerA2: null,
@@ -263,6 +354,39 @@
   }
 
   /**
+   * Closed-tournament pick-warning derivation. Returns a short
+   * warning label (or null) for a given player-input key, checked
+   * against the picked tournament's assignment set and country.
+   *
+   * Non-blocking — the umpire can still Start; the warning is
+   * advisory only. Rendered as a soft amber pill below the picker.
+   * Only fires when the picked tournament is closed and known;
+   * open tournaments and free-text tags produce no warnings.
+   */
+  function pickWarning(key: keyof MatchConfig): string | null {
+    void identityTick;
+    void tournamentTick;
+    const t = pickedTournament();
+    if (!t || t.type !== 'closed') return null;
+    const typed = (cfg[key] as string).trim();
+    if (!typed) return null;
+    const resolvedId = resolvedPlayerIds[key as string];
+    if (!resolvedId) {
+      return 'Not in the roster — closed tournament expects assigned players';
+    }
+    if (!assignedPlayerIds.has(resolvedId)) {
+      return 'Not assigned to this tournament';
+    }
+    if (t.country) {
+      const roster = loadAllPlayers().find((p) => p.id === resolvedId);
+      if (roster && roster.country && roster.country !== t.country) {
+        return `Country mismatch: ${roster.country} vs tournament ${t.country}`;
+      }
+    }
+    return null;
+  }
+
+  /**
    * On text change: clear the resolved id (user is editing) and, if the
    * new text is an exact-normalised match, auto-resolve to that player.
    * Fuzzy hits do NOT auto-resolve — the user has to tap the chip.
@@ -272,8 +396,10 @@
     const h = topHit(text);
     if (h && h.rank === 'exact') {
       resolvedPlayerIds[key as string] = h.player.id;
+      resolvedPlayerCountries[key as string] = h.player.country ?? '';
     } else {
       resolvedPlayerIds[key as string] = null;
+      resolvedPlayerCountries[key as string] = '';
     }
   }
 
@@ -286,19 +412,81 @@
   function confirmAlias(key: keyof MatchConfig, hit: PlayerMatch, typed: string): void {
     addAlias(hit.player.id, typed);
     resolvedPlayerIds[key as string] = hit.player.id;
+    resolvedPlayerCountries[key as string] = hit.player.country ?? '';
   }
 
   function pick(key: keyof MatchConfig, row: PlayerRow) {
     (cfg[key] as string) = row.name;
     openPicker = null;
+    // Country from the picker row is the immediate source of truth for
+    // ScoreBoard's header flag — captured here alongside the resolved
+    // id so we don't depend on the async player-store hydration.
+    resolvedPlayerCountries[key as string] = row.country ?? '';
     // If the picked row corresponds to an identity-store player, resolve
-    // to that id. Otherwise clear — a new player record will be created
-    // when the match ends.
+    // to that id. When the row carries a country, prefer the identity
+    // player with matching (name, country) — otherwise namesakes from
+    // different countries would all resolve to whichever identity row
+    // rankMatches happens to return first. Falls back to name-only
+    // rankMatches when there's no country on the row (seed/local
+    // sources) or no country-matched identity player exists.
     const q = row.name.trim();
+    const qNorm = q.toLowerCase();
+    if (row.country) {
+      const all = loadAllPlayers();
+      const byCountry = all.find(
+        (p) =>
+          p.canonicalName.trim().toLowerCase() === qNorm &&
+          (p.country ?? '').trim() === row.country,
+      );
+      if (byCountry) {
+        resolvedPlayerIds[key as string] = byCountry.id;
+        return;
+      }
+    }
     const hits = rankMatches(loadAllPlayers(), q, 1);
     const h = hits[0];
     resolvedPlayerIds[key as string] = h && h.rank === 'exact' ? h.player.id : null;
   }
+
+  /**
+   * Duplicate-player detection. A player can't play against themself.
+   * Same-name players from different countries ARE distinct — the
+   * identity store gives them distinct ids, so we key off resolvedId
+   * when available and fall back to case-folded name for typed-but-
+   * unresolved entries.
+   *
+   * Returns a human-readable error string if the current picks would
+   * put the same player in two slots, or null when the lineup is
+   * valid. Wired into canStart and rendered as an inline warning
+   * below the player rows.
+   */
+  let dupError = $derived.by((): string | null => {
+    if (cfg.mode === 'practice') return null;
+    const slots: Array<{ label: string; name: string; key: keyof MatchConfig }> = [
+      { label: cfg.mode === 'singles' ? 'Player A' : 'Player 1 (A)', name: cfg.playerA, key: 'playerA' },
+      { label: cfg.mode === 'singles' ? 'Player B' : 'Player 1 (B)', name: cfg.playerB, key: 'playerB' },
+    ];
+    if (cfg.mode === 'doubles') {
+      slots.push({ label: 'Player 2 (A)', name: cfg.playerA2, key: 'playerA2' });
+      slots.push({ label: 'Player 2 (B)', name: cfg.playerB2, key: 'playerB2' });
+    }
+    // Build the canonical identity for each non-empty slot: resolvedId
+    // if available, otherwise a lowercased trimmed name. Two slots
+    // with the same identity string = the same player.
+    const seen = new Map<string, string>();
+    for (const s of slots) {
+      const name = s.name.trim();
+      if (name.length === 0) continue;
+      const id = resolvedPlayerIds[s.key as string];
+      const identity = id ? `id:${id}` : `name:${name.toLowerCase()}`;
+      const prior = seen.get(identity);
+      if (prior) {
+        return `${prior} and ${s.label} are the same player. Pick a different player.`;
+      }
+      seen.set(identity, s.label);
+    }
+    return null;
+  });
 
   let canStart = $derived(() => {
     const a1 = cfg.playerA.trim().length > 0;
@@ -308,8 +496,14 @@
       return a1 && cfg.maxBoards > 0;
     }
     const b1 = cfg.playerB.trim().length > 0;
-    if (cfg.mode === 'singles') return a1 && b1;
-    return a1 && b1 && cfg.playerA2.trim().length > 0 && cfg.playerB2.trim().length > 0;
+    if (cfg.mode === 'singles') return a1 && b1 && !dupError;
+    return (
+      a1 &&
+      b1 &&
+      cfg.playerA2.trim().length > 0 &&
+      cfg.playerB2.trim().length > 0 &&
+      !dupError
+    );
   });
 
   function start(e: Event) {
@@ -350,11 +544,22 @@
     // same names, then persist the fresh resolutions + start timestamp
     // so the score screen can pass them into finishMatch() on End.
     clearMatchIdentity(key);
+    // Snapshot the resolved player's country into the identity handoff
+    // so ScoreBoard's header flag renders on first paint — no waiting
+    // for the Firebase player-store hydration. Doubles gets no flag
+    // (team ≠ one person), so we only snapshot for singles. We read
+    // from resolvedPlayerCountries (captured by pick/onNameInput/
+    // confirmAlias) rather than the async player-store, so the flag
+    // survives a Setup → Score handoff on a cold cache.
+    const aCountry = cfg.mode === 'singles' ? resolvedPlayerCountries.playerA : '';
+    const bCountry = cfg.mode === 'singles' ? resolvedPlayerCountries.playerB : '';
     saveMatchIdentity(key, {
       aResolvedId: resolvedPlayerIds.playerA,
       a2ResolvedId: resolvedPlayerIds.playerA2,
       bResolvedId: resolvedPlayerIds.playerB,
       b2ResolvedId: resolvedPlayerIds.playerB2,
+      ...(aCountry ? { aCountry } : {}),
+      ...(bCountry ? { bCountry } : {}),
     });
     saveMatchStart(key, Date.now());
     // Remember these names in the per-device roster so the picker
@@ -470,10 +675,16 @@
     />
     {#if dropdownVisible}
       <ul class="suggest">
-        {#each suggestions as p (p.name + p.source)}
+        {#each suggestions as p (p.name + '|' + p.source + '|' + (p.country ?? ''))}
           <li>
             <button type="button" onclick={() => pick(key, p)}>
               <span class="pname">{p.name}</span>
+              {#if p.country && p.country !== 'Unknown'}
+                <span class="pcountry" title={countryName(p.country)} aria-hidden="true">
+                  {#if flagEmoji(p.country)}{flagEmoji(p.country)}{/if}
+                  {countryName(p.country)}
+                </span>
+              {/if}
             </button>
           </li>
         {/each}
@@ -497,6 +708,14 @@
       >
         Same as <strong>{hit.player.canonicalName}</strong>? Tap to link.
       </button>
+    {/if}
+    {#if !dropdownVisible}
+      {@const warn = pickWarning(key)}
+      {#if warn}
+        <span class="closed-warn" role="status" aria-live="polite">
+          <span aria-hidden="true">⚠</span> {warn}
+        </span>
+      {/if}
     {/if}
   </label>
 {/snippet}
@@ -680,6 +899,10 @@
       </div>
       {@render noteInput('Team B represents', 'noteB')}
     </div>
+  {/if}
+
+  {#if dupError}
+    <p class="dup-error" role="alert">{dupError}</p>
   {/if}
 
   <button class="start" type="submit" disabled={!canStart()}>
@@ -1116,8 +1339,9 @@
   }
   .suggest button {
     display: flex;
-    flex-direction: column;
-    align-items: flex-start;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.5rem;
     width: 100%;
     padding: 0.55rem 0.75rem;
     background: transparent;
@@ -1130,6 +1354,15 @@
   .suggest button:hover { background: #1c1c1c; }
   .pname { font-size: 0.95rem; }
   .pmeta { color: var(--muted); font-size: 0.75rem; }
+  /* Country pill in the picker dropdown — muted so it doesn't compete
+     with the name. Shown only when the PlayerRow carries a country
+     (seed + local rosters do; identity-store hits don't yet). */
+  .pcountry {
+    margin-left: auto;
+    color: var(--muted);
+    font-size: 0.7rem;
+    opacity: 0.85;
+  }
 
   /* "Same as X? Tap to link" chip below a name input, shown only when
      the ranker finds a fuzzy match the user should confirm. */
@@ -1153,6 +1386,22 @@
   }
   .id-chip-suggest:hover { background: rgba(255, 213, 74, 0.16); }
   .id-chip-suggest strong { color: #ffd54a; }
+  /* Closed-tournament warning pill — advisory only; Start button
+     stays enabled. Amber like the offline banner so umpires who've
+     seen that recognise this as a "heads up" affordance rather than
+     an error. */
+  .closed-warn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin-top: 0.35rem;
+    padding: 0.3rem 0.55rem;
+    border-radius: 0.4rem;
+    font-size: 0.75rem;
+    color: #ffb74d;
+    background: rgba(255, 183, 77, 0.08);
+    border: 1px solid rgba(255, 183, 77, 0.35);
+  }
 
   .start {
     background: var(--accent);
@@ -1167,6 +1416,20 @@
   .start:disabled { opacity: 0.4; cursor: not-allowed; }
 
   .hint { color: var(--muted); text-align: center; margin: 0; font-size: 0.85rem; }
+
+  /* Inline duplicate-player warning above the Start button. Uses the
+     danger tone so it reads as an error, not a hint — matches the
+     disabled Start CTA. */
+  .dup-error {
+    margin: 0;
+    padding: 0.55rem 0.75rem;
+    border-radius: 0.5rem;
+    background: color-mix(in srgb, var(--danger, #d93a3a) 12%, transparent);
+    color: var(--danger, #d93a3a);
+    border: 1px solid color-mix(in srgb, var(--danger, #d93a3a) 40%, transparent);
+    font-size: 0.9rem;
+    text-align: center;
+  }
 
   .install {
     background: transparent;

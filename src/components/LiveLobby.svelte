@@ -2135,6 +2135,12 @@
     padding: 0.85rem 1rem 1.1rem;
     max-height: min(90dvh, 44rem);
     overflow-y: auto;
+    /* sheet-inner is the scroll container. Names pill and top-row
+       summary inside LiveScoreboardView are made position: sticky so
+       they pin to the top while per-set tables scroll under them.
+       sheet-hdr uses sticky too so the "Ended · Singles" line + close
+       button stay pinned. */
+    position: relative;
     /* Gold glow ring + hard drop shadow so the popup pops off the
        dimmed lobby behind. Two shadows: the inner amber halo carries
        the "match spotlight" feel; the outer black shadow anchors the
@@ -2153,9 +2159,34 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0.25rem 0 0.75rem;
-    margin: 0 0 0.5rem;
+    padding: 0.5rem 0 0.75rem;
+    margin: 0 -1rem 0.5rem;
+    padding-left: 1rem;
+    padding-right: 1rem;
     border-bottom: 1px solid #1e1e1e;
+    background: #0f0f0f;
+    position: sticky;
+    top: -0.85rem; /* offset the sheet-inner top padding so the header sits flush */
+    z-index: 3;
+  }
+  /* Names pill (.hdr) and top-row summary (.board) inside
+     LiveScoreboardView pinned so long per-set tables scroll behind. */
+  .sheet-body :global(.hdr),
+  .sheet-inner :global(.hdr),
+  .sheet-inner :global(.board) {
+    position: sticky;
+    z-index: 2;
+    background: #0f0f0f;
+  }
+  .sheet-inner :global(.hdr) {
+    top: 2.5rem;
+    padding-top: 0.25rem;
+  }
+  .sheet-inner :global(.board) {
+    top: 5.5rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid #1e1e1e;
+    margin-bottom: 0.25rem;
   }
   .sheet-title {
     color: var(--muted, #9aa0a6);

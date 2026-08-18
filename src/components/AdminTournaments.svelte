@@ -27,10 +27,22 @@
     addOrganiser,
     removeOrganiser,
     loadOrganisers,
+    assignPlayer,
+    unassignPlayer,
+    loadAssignedPlayers,
     type Tournament,
   } from '../lib/tournaments';
   import { subscribeCurrentUserRole, type Role } from '../lib/roles';
+  import {
+    loadAll as loadAllPlayers,
+    subscribePlayers,
+    subscribeStore as subscribePlayersStore,
+    type Player,
+  } from '../lib/players';
+  import { loadAllUsers, type UserRecord } from '../lib/users';
   import AdminBulkBar from './AdminBulkBar.svelte';
+  import CountrySelect from './CountrySelect.svelte';
+  import { countryName, flagEmoji } from '../lib/countries';
 
   /**
    * Current-user role gating: super sees every row's actions; a
@@ -61,7 +73,22 @@
   let managingKey = $state<string | null>(null);
   let organiserUids = $state<string[]>([]);
   let organiserLoading = $state(false);
+  /** Legacy free-text UID input — kept as an escape hatch when the
+   *  target hasn't signed in yet (so they're not in /users). Hidden
+   *  behind a toggle; the primary path is the user-picker below. */
   let addUidValue = $state('');
+  let addUidRawOpen = $state(false);
+  /**
+   * Cached /users map: uid → email/displayName. Loaded once on first
+   *  Organisers-dialog open per session; refreshed on demand via the
+   *  "Reload users" button in the dialog when a newly-signed-in user
+   *  should appear. Super-read gated by RTDB rules; empty for
+   *  organisers, which is fine because we only reach this code path
+   *  from the super-only Roles surface / super's own admin panel.
+   */
+  let usersMap = $state<Record<string, { uid: string; email: string; displayName?: string }>>({});
+  let usersLoading = $state(false);
+  let userPickerValue = $state('');
   let saving = $state(false);
   let banner = $state<{ kind: 'ok' | 'err'; message: string } | null>(null);
   /** Selected tournament keys for bulk delete. */
@@ -75,14 +102,37 @@
    *  flag; validation happens on save. */
   let addingOpen = $state(false);
   let addingName = $state('');
+  let addingType = $state<'open' | 'closed'>('open');
+  /** Country code — only meaningful when addingType === 'closed'.
+   *  Required in that case; blocks Save. */
+  let addingCountry = $state('');
+
+  /** Per-row "Assigned players" dialog state (closed tournaments). */
+  let assignOpen = $state(false);
+  let assignKey = $state<string | null>(null);
+  let assignedIds = $state<Set<string>>(new Set());
+  let assignLoading = $state(false);
+  let assignSaving = $state(false);
+  let assignFilter = $state('');
+  /** When true, the assignment dialog hides players whose country
+   *  doesn't match the tournament's. Off shows every player (guest
+   *  cases). Defaults on for closed tournaments with a country set. */
+  let assignFilterByCountry = $state(true);
+
+  /** Bump on the identity-store change, so the assignment dialog's
+   *  filtered player list re-renders when a player is added elsewhere. */
+  let playersTick = $state(0);
 
   onMount(() => {
     void subscribeTournaments();
+    void subscribePlayers();
     const unsub = subscribeStore(() => (tick += 1));
     const unsubRole = subscribeCurrentUserRole((r) => (role = r));
+    const unsubPlayers = subscribePlayersStore(() => (playersTick += 1));
     return () => {
       unsub();
       unsubRole();
+      unsubPlayers();
     };
   });
 
@@ -169,8 +219,33 @@
     }
   }
 
+  async function loadUsers() {
+    usersLoading = true;
+    try {
+      const raw = await loadAllUsers();
+      // Slim the type — the dialog only needs uid/email/displayName.
+      const slim: Record<string, { uid: string; email: string; displayName?: string }> = {};
+      for (const [uid, u] of Object.entries(raw)) {
+        slim[uid] = {
+          uid,
+          email: u.email ?? '',
+          ...(u.displayName ? { displayName: u.displayName } : {}),
+        };
+      }
+      usersMap = slim;
+    } finally {
+      usersLoading = false;
+    }
+  }
+
   async function startManage(t: Tournament) {
     managingKey = t.key;
+    // Load /users map the first time the dialog opens. Cached across
+    // subsequent Organisers-dialog opens in the session; refreshable
+    // via the Reload users button.
+    if (Object.keys(usersMap).length === 0) void loadUsers();
+    userPickerValue = '';
+    addUidRawOpen = false;
     organiserLoading = true;
     organiserUids = await loadOrganisers(t.key);
     organiserLoading = false;
@@ -180,11 +255,81 @@
     managingKey = null;
     organiserUids = [];
     addUidValue = '';
+    userPickerValue = '';
+    addUidRawOpen = false;
   }
+
+  /**
+   * Add an organiser by user-picker selection. `userPickerValue` is
+   * a uid picked from the /users dropdown. Preferred path — no
+   * copy-paste of an opaque uid required.
+   */
+  async function addUidFromPicker() {
+    if (!managingKey || !userPickerValue) return;
+    const uid = userPickerValue;
+    if (organiserUids.includes(uid)) {
+      flash('err', 'That user is already an organiser');
+      return;
+    }
+    saving = true;
+    const outcome = await addOrganiser(managingKey, uid);
+    saving = false;
+    if (outcome.ok) {
+      organiserUids = [...organiserUids, uid];
+      userPickerValue = '';
+      flash('ok', 'Organiser added');
+    } else {
+      flash('err', outcome.error);
+    }
+  }
+
+  /**
+   * Format a uid → friendly label for the picker + organiser-row
+   * chips. Prefers displayName, falls back to email, then to a
+   * truncated uid slice.
+   */
+  function labelForUid(uid: string): string {
+    const u = usersMap[uid];
+    if (!u) return uid.slice(0, 8) + '…';
+    if (u.displayName) return `${u.displayName} · ${u.email}`;
+    return u.email || uid.slice(0, 8) + '…';
+  }
+
+  /** List of uid options for the picker, excluding already-assigned
+   *  organisers. Alpha-sorted by display label. */
+  const eligibleUsers = $derived(() => {
+    const already = new Set(organiserUids);
+    return Object.values(usersMap)
+      .filter((u) => !already.has(u.uid))
+      .sort((a, b) => {
+        const la = a.displayName ?? a.email ?? a.uid;
+        const lb = b.displayName ?? b.email ?? b.uid;
+        return la.localeCompare(lb);
+      });
+  });
+
   async function addUid() {
     if (!managingKey || !addUidValue.trim()) return;
-    saving = true;
     const uid = addUidValue.trim();
+    // Firebase Auth uids are opaque strings using [A-Za-z0-9] — no
+    // dots, no @, no spaces. Users often paste an email by mistake
+    // (the input's placeholder says "Firebase UID" but Firebase's
+    // own console shows "Email" as the primary display). Reject
+    // early with a helpful hint instead of a cryptic "path must
+    // be a non-empty string and can't contain '.', '#', '$', '[',
+    // or ']'" error from the SDK.
+    if (/[.#$/[\]@\s]/.test(uid) || uid.includes('@')) {
+      flash(
+        'err',
+        'Enter a Firebase UID (not an email). The user signs in and copies their uid from the account menu.',
+      );
+      return;
+    }
+    if (uid.length > 64) {
+      flash('err', 'UID must be 1-64 characters');
+      return;
+    }
+    saving = true;
     const outcome = await addOrganiser(managingKey, uid);
     saving = false;
     if (outcome.ok) {
@@ -273,20 +418,30 @@
   function openAdd() {
     addingOpen = true;
     addingName = '';
+    addingType = 'open';
+    addingCountry = '';
   }
   function closeAdd() {
     addingOpen = false;
     addingName = '';
+    addingType = 'open';
+    addingCountry = '';
   }
   async function saveAdd() {
     const trimmed = addingName.trim();
     if (!trimmed) return;
+    if (addingType === 'closed' && !addingCountry) {
+      flash('err', 'Closed tournaments need a country');
+      return;
+    }
     saving = true;
-    // createOrTouchTournament returns the record or null (only on
-    // empty / unslug-able names, which we already guarded). It writes
-    // to Firebase fire-and-forget; the /tournaments subscription
-    // will pick up the new record within a tick.
-    const rec = createOrTouchTournament(trimmed);
+    // createOrTouchTournament writes to Firebase fire-and-forget; the
+    // /tournaments subscription picks up the new record within a tick.
+    // v3.1: pass type + country meta so open/closed status persists.
+    const rec = createOrTouchTournament(trimmed, {
+      type: addingType,
+      ...(addingType === 'closed' && addingCountry ? { country: addingCountry } : {}),
+    });
     saving = false;
     if (!rec) {
       flash('err', 'Name must include at least one letter or digit');
@@ -295,6 +450,76 @@
     flash('ok', `"${rec.name}" added`);
     closeAdd();
   }
+
+  // ─── Assigned Players dialog (closed tournaments only) ─────────
+
+  async function startAssign(t: Tournament) {
+    assignKey = t.key;
+    assignFilter = '';
+    // Default to country-filtering if the tournament has a country
+    // configured; otherwise show all.
+    assignFilterByCountry = !!t.country;
+    assignOpen = true;
+    assignLoading = true;
+    try {
+      assignedIds = await loadAssignedPlayers(t.key);
+    } finally {
+      assignLoading = false;
+    }
+  }
+  function stopAssign() {
+    assignOpen = false;
+    assignKey = null;
+    assignedIds = new Set();
+    assignFilter = '';
+  }
+  async function togglePlayerAssignment(playerId: string) {
+    if (!assignKey) return;
+    assignSaving = true;
+    try {
+      if (assignedIds.has(playerId)) {
+        const r = await unassignPlayer(assignKey, playerId);
+        if (r.ok) {
+          const next = new Set(assignedIds);
+          next.delete(playerId);
+          assignedIds = next;
+        } else {
+          flash('err', r.error);
+        }
+      } else {
+        const r = await assignPlayer(assignKey, playerId);
+        if (r.ok) {
+          const next = new Set(assignedIds);
+          next.add(playerId);
+          assignedIds = next;
+        } else {
+          flash('err', r.error);
+        }
+      }
+    } finally {
+      assignSaving = false;
+    }
+  }
+
+  /** Filtered player list for the assignment dialog. Reads from the
+   *  identity store, applies the country filter when toggled on, and
+   *  applies the free-text search. */
+  const assignCandidates = $derived(() => {
+    void playersTick;
+    if (!assignKey) return [] as Player[];
+    const tournament = list().find((t) => t.key === assignKey);
+    const country = tournament?.country;
+    const q = assignFilter.trim().toLowerCase();
+    return loadAllPlayers()
+      .filter((p) => {
+        if (assignFilterByCountry && country) {
+          if (p.country !== country) return false;
+        }
+        if (!q) return true;
+        return p.canonicalName.toLowerCase().includes(q);
+      })
+      .slice(0, 200);
+  });
 </script>
 
 <section class="tourns">
@@ -389,6 +614,16 @@
             <div class="row-name">
               <div class="row-name-text">{t.name}</div>
               <div class="row-name-meta">
+                {#if t.type === 'closed'}
+                  <span class="chip chip-closed" title="Closed tournament — country-scoped">
+                    CLOSED
+                  </span>
+                {/if}
+                {#if t.country}
+                  <span class="chip chip-country" title={countryName(t.country)}>
+                    {flagEmoji(t.country)} {countryName(t.country)}
+                  </span>
+                {/if}
                 <span class="chip">key: <code>{t.key}</code></span>
                 <span class="chip">last active {new Date(t.lastActive).toLocaleDateString()}</span>
               </div>
@@ -397,6 +632,9 @@
               <div class="row-actions">
                 <button type="button" class="btn" onclick={() => startRename(t)}>Rename</button>
                 <button type="button" class="btn" onclick={() => startManage(t)}>Organisers</button>
+                {#if t.type === 'closed'}
+                  <button type="button" class="btn" onclick={() => startAssign(t)}>Players</button>
+                {/if}
                 <button
                   type="button"
                   class="btn btn-danger"
@@ -447,8 +685,9 @@
         <h3>Manage organisers</h3>
         <p>
           Organisers can edit any match tagged to this tournament.
-          Add by Firebase UID — the recipient signs in, opens their
-          account menu, and shares their UID with you.
+          Pick from the signed-in users list below. If the person
+          hasn't signed in yet, ask them to open the site and sign in
+          once — they'll appear in the dropdown.
         </p>
         {#if organiserLoading}
           <p class="empty">Loading…</p>
@@ -456,7 +695,7 @@
           <ul class="uid-list">
             {#each organiserUids as uid (uid)}
               <li class="uid-row">
-                <code>{uid}</code>
+                <span class="uid-label">{labelForUid(uid)}</span>
                 <button
                   type="button"
                   class="btn btn-danger btn-sm"
@@ -470,21 +709,73 @@
             {/if}
           </ul>
         {/if}
+
         <div class="uid-add">
-          <input
-            type="text"
-            bind:value={addUidValue}
-            placeholder="Firebase UID"
-            aria-label="Firebase UID"
-            maxlength="64"
-          />
+          <select
+            class="user-picker"
+            bind:value={userPickerValue}
+            aria-label="Pick a signed-in user"
+            disabled={usersLoading || saving}
+          >
+            <option value="">
+              {#if usersLoading}Loading users…{:else}Select a signed-in user…{/if}
+            </option>
+            {#each eligibleUsers() as u (u.uid)}
+              <option value={u.uid}>
+                {u.displayName ? `${u.displayName} · ${u.email}` : u.email || u.uid}
+              </option>
+            {/each}
+          </select>
           <button
             type="button"
             class="btn btn-primary"
-            onclick={addUid}
-            disabled={saving || !addUidValue.trim()}
+            onclick={addUidFromPicker}
+            disabled={saving || !userPickerValue}
           >Add</button>
         </div>
+
+        <button
+          type="button"
+          class="user-picker-reload"
+          onclick={loadUsers}
+          disabled={usersLoading || saving}
+        >
+          {usersLoading ? 'Loading users…' : '↻ Reload users list'}
+        </button>
+
+        <!--
+          Escape hatch: paste a raw UID. Hidden behind a toggle so it
+          doesn't distract from the primary picker path. Useful when
+          the target has signed in but they're not showing in the
+          dropdown yet (rare — /users may briefly lag before their
+          record propagates), or for pre-onboarding an organiser
+          whose account will exist shortly.
+        -->
+        <button
+          type="button"
+          class="user-picker-toggle-raw"
+          onclick={() => (addUidRawOpen = !addUidRawOpen)}
+        >
+          {addUidRawOpen ? '▾' : '▸'} Add by UID (advanced)
+        </button>
+        {#if addUidRawOpen}
+          <div class="uid-add">
+            <input
+              type="text"
+              bind:value={addUidValue}
+              placeholder="Firebase UID"
+              aria-label="Firebase UID"
+              maxlength="64"
+            />
+            <button
+              type="button"
+              class="btn"
+              onclick={addUid}
+              disabled={saving || !addUidValue.trim()}
+            >Add</button>
+          </div>
+        {/if}
+
         <div class="dialog-actions">
           <button type="button" class="btn" onclick={stopManage} disabled={saving}>Close</button>
         </div>
@@ -511,8 +802,9 @@
         <h3 id="add-tourn-title">Add tournament</h3>
         <p>
           Tournaments are the top-level bucket for grouping matches.
-          After saving, organisers can be assigned via the Organisers
-          button on the row.
+          Choose <strong>open</strong> for casual events (any player,
+          any umpire) or <strong>closed</strong> for a
+          country-scoped event with an explicit assigned-player roster.
         </p>
         <input
           type="text"
@@ -521,14 +813,127 @@
           aria-label="Tournament name"
           maxlength="60"
         />
+        <fieldset class="add-type">
+          <legend>Type</legend>
+          <label class="add-type-row">
+            <input
+              type="radio"
+              name="add-tournament-type"
+              value="open"
+              bind:group={addingType}
+            />
+            <span>
+              <strong>Open</strong>
+              — casual event, no roster gating.
+            </span>
+          </label>
+          <label class="add-type-row">
+            <input
+              type="radio"
+              name="add-tournament-type"
+              value="closed"
+              bind:group={addingType}
+            />
+            <span>
+              <strong>Closed</strong>
+              — country-scoped, players assigned explicitly.
+            </span>
+          </label>
+        </fieldset>
+        {#if addingType === 'closed'}
+          <label class="add-country-label">
+            <span>Country</span>
+            <CountrySelect
+              bind:value={addingCountry}
+              required
+              ariaLabel="Tournament country"
+            />
+          </label>
+        {/if}
         <div class="dialog-actions">
           <button type="button" class="btn" onclick={closeAdd} disabled={saving}>Cancel</button>
           <button
             type="button"
             class="btn btn-primary"
             onclick={saveAdd}
-            disabled={saving || !addingName.trim()}
+            disabled={saving || !addingName.trim() || (addingType === 'closed' && !addingCountry)}
           >{saving ? 'Adding…' : 'Add'}</button>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  {#if assignOpen && assignKey}
+    <!--
+      Assigned Players dialog. Shows the identity-store roster, filtered
+      by the tournament's country (toggle-off to see all), with a
+      checkbox per row for assign/unassign. Reuses the shared /players
+      subscription established by AdminPlayers, so the list is live-
+      updated when someone adds a player in another tab.
+    -->
+    <div
+      class="dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="assign-title"
+      onclick={(e) => { if (e.target === e.currentTarget) stopAssign(); }}
+    >
+      <div class="dialog-card dialog-card-wide">
+        <h3 id="assign-title">Assigned players</h3>
+        {#await Promise.resolve(list().find((t) => t.key === assignKey)) then tournament}
+          {#if tournament}
+            <p>
+              <strong>{tournament.name}</strong>
+              {#if tournament.country}
+                · {flagEmoji(tournament.country)} {countryName(tournament.country)}
+              {/if}
+              · {assignedIds.size} assigned
+            </p>
+          {/if}
+        {/await}
+        <div class="assign-controls">
+          <input
+            type="search"
+            class="assign-search"
+            bind:value={assignFilter}
+            placeholder="Search players…"
+            aria-label="Search players"
+          />
+          <label class="assign-country-filter">
+            <input type="checkbox" bind:checked={assignFilterByCountry} />
+            Match country only
+          </label>
+        </div>
+        {#if assignLoading}
+          <p class="empty">Loading assigned players…</p>
+        {:else if assignCandidates().length === 0}
+          <p class="empty">
+            No matching players. Add players from the Players tab first.
+          </p>
+        {:else}
+          <ul class="assign-list">
+            {#each assignCandidates() as p (p.id)}
+              <li class="assign-row">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={assignedIds.has(p.id)}
+                    disabled={assignSaving}
+                    onchange={() => togglePlayerAssignment(p.id)}
+                  />
+                  <span class="assign-name">{p.canonicalName}</span>
+                  {#if p.country}
+                    <span class="assign-country" title={countryName(p.country)}>
+                      {flagEmoji(p.country)} {countryName(p.country)}
+                    </span>
+                  {/if}
+                </label>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+        <div class="dialog-actions">
+          <button type="button" class="btn" onclick={stopAssign} disabled={assignSaving}>Done</button>
         </div>
       </div>
     </div>
@@ -669,6 +1074,119 @@
     padding: 0.1rem 0.4rem;
     border-radius: 999px;
   }
+  /* Country chip — subtle accent tint, matches AdminPlayers row treatment. */
+  .chip-country {
+    color: var(--accent, #ffd54a);
+    background: rgba(255, 213, 74, 0.08);
+    border-color: rgba(255, 213, 74, 0.3);
+  }
+  /* Closed-tournament chip — reads as identifying metadata alongside
+     the country pill; a stronger accent that says "this tournament
+     has roster gating." */
+  .chip-closed {
+    color: var(--accent, #ffd54a);
+    background: rgba(255, 213, 74, 0.16);
+    border-color: rgba(255, 213, 74, 0.4);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 700;
+  }
+  /* Radio group for open/closed on the add-tournament dialog. */
+  fieldset.add-type {
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 0.45rem;
+    padding: 0.5rem 0.7rem;
+    margin: 0.5rem 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+  fieldset.add-type legend {
+    color: var(--muted);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 0 0.35rem;
+  }
+  .add-type-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+    color: var(--fg);
+    cursor: pointer;
+  }
+  .add-type-row input[type="radio"] {
+    accent-color: var(--accent, #ffd54a);
+    margin-top: 0.2rem;
+  }
+  .add-country-label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    margin: 0 0 0.5rem;
+    font-size: 0.85rem;
+    color: var(--muted);
+  }
+
+  /* Assigned Players dialog */
+  .assign-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+    margin: 0.5rem 0;
+  }
+  .assign-search {
+    flex: 1;
+    min-width: 12rem;
+    background: #0f0f0f;
+    color: var(--fg);
+    border: 1px solid #2a2a2a;
+    border-radius: 0.4rem;
+    padding: 0.4rem 0.55rem;
+    font: inherit;
+    font-size: 0.85rem;
+  }
+  .assign-country-filter {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    color: var(--muted);
+    font-size: 0.8rem;
+    cursor: pointer;
+  }
+  .assign-list {
+    list-style: none;
+    padding: 0;
+    margin: 0.25rem 0;
+    max-height: 55vh;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+  .assign-row label {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0.4rem 0.55rem;
+    border-radius: 0.4rem;
+    cursor: pointer;
+    color: var(--fg);
+    font-size: 0.9rem;
+  }
+  .assign-row label:hover { background: rgba(255, 255, 255, 0.04); }
+  .assign-row input[type="checkbox"] {
+    accent-color: var(--accent, #ffd54a);
+    cursor: pointer;
+  }
+  .assign-name { flex: 1; }
+  .assign-country {
+    color: var(--muted);
+    font-size: 0.75rem;
+  }
+
   .row-actions {
     display: flex;
     gap: 0.35rem;
@@ -797,13 +1315,70 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  /* Friendly label (displayName · email) shown per organiser row —
+     replaces the raw uid code once we can resolve it via /users. */
+  .uid-label {
+    flex: 1;
+    font-size: 0.85rem;
+    color: var(--fg);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .uid-add {
     display: flex;
     gap: 0.35rem;
     margin: 0.75rem 0 0.25rem;
+    /* min-width: 0 lets the flex-1 picker actually shrink when a long
+       option string would otherwise blow the row wider than the dialog
+       card. Without this the select's intrinsic width (widest option's
+       text) pushes the Add button outside the modal. */
+    align-items: center;
+    min-width: 0;
   }
   .uid-add input {
     flex: 1;
     margin: 0;
+    min-width: 0;
+  }
+  .user-picker {
+    flex: 1;
+    /* Cap the picker at 100% of the row and force overflow to ellipsis
+       inside the closed <select>. The open dropdown still shows the
+       full text — this only clips the collapsed representation. */
+    min-width: 0;
+    max-width: 100%;
+    width: 0;   /* let flex-1 alone drive width, ignoring intrinsic content */
+    background: #0f0f0f;
+    color: var(--fg);
+    border: 1px solid #2a2a2a;
+    border-radius: 0.4rem;
+    padding: 0.45rem 0.55rem;
+    font: inherit;
+    font-size: 0.85rem;
+    text-overflow: ellipsis;
+    overflow: hidden;
+  }
+  .user-picker:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  .user-picker-reload,
+  .user-picker-toggle-raw {
+    background: transparent;
+    border: 0;
+    padding: 0.25rem 0;
+    color: var(--muted);
+    font: inherit;
+    font-size: 0.75rem;
+    cursor: pointer;
+    text-align: left;
+  }
+  .user-picker-reload:hover,
+  .user-picker-toggle-raw:hover {
+    color: var(--fg);
+  }
+  .user-picker-toggle-raw {
+    margin-top: 0.35rem;
   }
 </style>

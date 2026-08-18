@@ -32,6 +32,31 @@ export type Player = {
   aliases: Record<string, true>;
   createdAt: number;
   createdBy?: string;
+  /**
+   * ISO 3166-1 alpha-2 country code (e.g. "DK", "IN"), or the literal
+   * "Unknown" for legacy records that haven't been backfilled yet.
+   * Required for records created from v3.1 onward. Used by closed
+   * tournaments to warn on player-country mismatches on the home form.
+   */
+  country?: string;
+  /** Optional player metadata — none of these are required or used for
+   *  scoring; they exist for organiser rosters. */
+  age?: number;
+  email?: string;
+  phone?: string;
+};
+
+/**
+ * Meta arg accepted by createPlayer for v3.1+. The legacy 2-arg form
+ * `createPlayer(name, uid)` where the second arg is a plain string
+ * still works — treated as { createdBy: uid } for backwards compat.
+ */
+export type CreatePlayerMeta = {
+  createdBy?: string;
+  country?: string;
+  age?: number;
+  email?: string;
+  phone?: string;
 };
 
 /**
@@ -259,24 +284,48 @@ export function loadAll(): Player[] {
  * is also persisted to /players/{id}. Failures are logged and ignored
  * — the local record still exists and the app keeps working.
  */
-export function createPlayer(canonicalName: string, createdBy?: string): Player {
+export function createPlayer(
+  canonicalName: string,
+  metaOrCreatedBy?: string | CreatePlayerMeta,
+): Player {
   const norm = normalize(canonicalName);
   if (!isPlausibleName(canonicalName)) {
     throw new Error(`Refusing to create player with implausible name: ${canonicalName}`);
   }
-  const existing = memoryStore.find(
-    (p) => normalize(p.canonicalName) === norm,
-  );
+  // Backwards-compat: `createPlayer(name, "uid")` legacy form still
+  // works — the second arg is treated as createdBy only. v3.1+ callers
+  // pass the object form with country + optional age/email/phone.
+  const meta: CreatePlayerMeta =
+    typeof metaOrCreatedBy === 'string'
+      ? { createdBy: metaOrCreatedBy }
+      : metaOrCreatedBy ?? {};
+  // Dedup key: when the caller specifies a country, two players are
+  // considered the "same" only if BOTH name and country match. This
+  // lets legitimate namesakes from different countries coexist
+  // ("Swapnil Deshpande" from DK vs SE vs IN are three distinct
+  // records). When no country is supplied, fall back to name-only
+  // dedup — preserves legacy behaviour for pre-v3.1 callers.
+  const metaCountry = meta.country ? meta.country.trim() : '';
+  const existing = memoryStore.find((p) => {
+    if (normalize(p.canonicalName) !== norm) return false;
+    if (!metaCountry) return true; // legacy: name-only match
+    const pCountry = p.country ? p.country.trim() : '';
+    return pCountry === metaCountry;
+  });
   if (existing) return existing;
   // Stamp `createdBy` with the signed-in user's uid when the caller
   // doesn't override. Anonymous stays anonymous — field simply absent.
-  const finalCreatedBy = createdBy ?? currentUser()?.uid;
+  const finalCreatedBy = meta.createdBy ?? currentUser()?.uid;
   const p: Player = {
     id: playerIdFor(canonicalName),
     canonicalName: canonicalName.trim(),
     aliases: {},
     createdAt: Date.now(),
     ...(finalCreatedBy ? { createdBy: finalCreatedBy } : {}),
+    ...(meta.country ? { country: meta.country } : {}),
+    ...(typeof meta.age === 'number' && Number.isFinite(meta.age) ? { age: meta.age } : {}),
+    ...(meta.email ? { email: meta.email } : {}),
+    ...(meta.phone ? { phone: meta.phone } : {}),
   };
   memoryStore.push(p);
   notify();
@@ -291,16 +340,21 @@ export function createPlayer(canonicalName: string, createdBy?: string): Player 
  * it's the same name).
  */
 export function addAlias(playerId: string, typed: string): Player | null {
-  const p = memoryStore.find((x) => x.id === playerId);
-  if (!p) return null;
+  const idx = memoryStore.findIndex((x) => x.id === playerId);
+  if (idx === -1) return null;
+  const cur = memoryStore[idx]!;
   const key = normalize(typed);
-  if (!key) return p;
-  if (key === normalize(p.canonicalName)) return p;
-  if (p.aliases[key]) return p;
-  p.aliases[key] = true;
+  if (!key) return cur;
+  if (key === normalize(cur.canonicalName)) return cur;
+  if (cur.aliases[key]) return cur;
+  // Fresh object identity so Svelte 5 keyed each blocks see a
+  // change and re-render (in-place `p.aliases[key] = true` is
+  // invisible to keyed diffing).
+  const next: Player = { ...cur, aliases: { ...cur.aliases, [key]: true } };
+  memoryStore[idx] = next;
   notify();
   void writeAliasToFirebase(playerId, key);
-  return p;
+  return next;
 }
 
 /**
@@ -384,11 +438,29 @@ function mergeOneRemotePlayer(id: string, val: unknown): void {
   if (!isPlausibleName(canonicalName)) return;
   const createdAt = typeof v.createdAt === 'number' ? v.createdAt : 0;
   const aliases = parseAliases(v.aliases);
-  const existing = memoryStore.find((p) => p.id === id);
-  if (existing) {
-    existing.canonicalName = canonicalName;
-    existing.aliases = { ...existing.aliases, ...aliases };
-    existing.createdAt = createdAt || existing.createdAt;
+  const country = typeof v.country === 'string' ? v.country : undefined;
+  const age = typeof v.age === 'number' && Number.isFinite(v.age) ? v.age : undefined;
+  const email = typeof v.email === 'string' ? v.email : undefined;
+  const phone = typeof v.phone === 'string' ? v.phone : undefined;
+  const idx = memoryStore.findIndex((p) => p.id === id);
+  if (idx !== -1) {
+    // Replace with a fresh object so downstream {#each} keyed
+    // renders see a new identity and re-render. In-place mutation
+    // works for the internal ranker (it reads by property lookup
+    // on the next tick), but Svelte 5's keyed each blocks skip
+    // re-render on same-reference values even if a deep property
+    // changed — the field goes stale until a page refresh.
+    const cur = memoryStore[idx]!;
+    memoryStore[idx] = {
+      ...cur,
+      canonicalName,
+      aliases: { ...cur.aliases, ...aliases },
+      createdAt: createdAt || cur.createdAt,
+      ...(country !== undefined ? { country } : cur.country ? { country: cur.country } : {}),
+      ...(age !== undefined ? { age } : cur.age !== undefined ? { age: cur.age } : {}),
+      ...(email !== undefined ? { email } : cur.email ? { email: cur.email } : {}),
+      ...(phone !== undefined ? { phone } : cur.phone ? { phone: cur.phone } : {}),
+    };
     return;
   }
   memoryStore.push({
@@ -397,6 +469,10 @@ function mergeOneRemotePlayer(id: string, val: unknown): void {
     aliases,
     createdAt,
     ...(typeof v.createdBy === 'string' ? { createdBy: v.createdBy } : {}),
+    ...(country ? { country } : {}),
+    ...(age !== undefined ? { age } : {}),
+    ...(email ? { email } : {}),
+    ...(phone ? { phone } : {}),
   });
 }
 
@@ -439,6 +515,10 @@ async function writePlayerToFirebase(p: Player): Promise<void> {
       canonicalName: p.canonicalName,
       createdAt: p.createdAt,
       ...(p.createdBy ? { createdBy: p.createdBy } : {}),
+      ...(p.country ? { country: p.country } : {}),
+      ...(typeof p.age === 'number' && Number.isFinite(p.age) ? { age: p.age } : {}),
+      ...(p.email ? { email: p.email } : {}),
+      ...(p.phone ? { phone: p.phone } : {}),
       aliases: { ...p.aliases },
       normalisedIndex: normalisedIndex(p),
     });
@@ -521,8 +601,14 @@ export async function updatePlayerName(
     const snap = await get(ref(db, path));
     const existing = snap.val() as Record<string, unknown> | null;
     if (!existing) return { ok: false, error: 'Player not found' };
-    const p = memoryStore.find((x) => x.id === playerId);
-    if (p) p.canonicalName = trimmed;
+    const idx = memoryStore.findIndex((x) => x.id === playerId);
+    let p: Player | null = null;
+    if (idx !== -1) {
+      // Replace with fresh identity — see updatePlayerCountry for why.
+      const cur = memoryStore[idx]!;
+      p = { ...cur, canonicalName: trimmed };
+      memoryStore[idx] = p;
+    }
     const patch = {
       canonicalName: trimmed,
       normalisedIndex: p ? normalisedIndex(p) : [normalize(trimmed)],
@@ -539,6 +625,104 @@ export async function updatePlayerName(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return { ok: false, error: msg || 'Rename failed' };
+  }
+}
+
+/**
+ * Admin-only: update a player's country code. Legacy records that
+ * predate v3.1 or were bulk-set with a full country name can be
+ * fixed here — pass the ISO alpha-2 code ("IN", "DK", …) or
+ * "Unknown" for the placeholder value. Empty string clears the
+ * field (writes null via RTDB semantics on update-with-null).
+ */
+export async function updatePlayerCountry(
+  playerId: string,
+  country: string,
+): Promise<PlayerWriteOutcome> {
+  if (!playerId) return { ok: false, error: 'Missing player id' };
+  const trimmed = country.trim();
+  try {
+    const [{ firebaseApp }, { getDatabase, ref, get, update }] = await Promise.all([
+      import('./firebase'),
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    const path = `players/${playerId}`;
+    const snap = await get(ref(db, path));
+    const existing = snap.val() as Record<string, unknown> | null;
+    if (!existing) return { ok: false, error: 'Player not found' };
+    // Replace the store item with a fresh object rather than mutating
+    // in place — Svelte 5 derivations that read `loadAll()` compare
+    // by reference at the item level. Without a new object, a
+    // component's row-country chip can stay stale until a full
+    // page refresh even though `notify()` fired. (Same shape as
+    // updatePlayerName's approach post-write.)
+    const idx = memoryStore.findIndex((x) => x.id === playerId);
+    if (idx !== -1) {
+      const cur = memoryStore[idx]!;
+      const next: Player = trimmed
+        ? { ...cur, country: trimmed }
+        : (() => {
+            const { country: _drop, ...rest } = cur;
+            return rest as Player;
+          })();
+      memoryStore[idx] = next;
+    }
+    // RTDB `update` with a null value removes the field. We pass
+    // null when the admin cleared the field so the record doesn't
+    // keep a stale country string.
+    await update(ref(db, path), { country: trimmed || null });
+    notify();
+    void logAudit({
+      action: 'player.update',
+      path,
+      before: { country: typeof existing.country === 'string' ? existing.country : null },
+      after: { country: trimmed || null },
+    });
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg || 'Country update failed' };
+  }
+}
+
+/**
+ * Admin-only: remove an alias from a player record. The alias key is
+ * the normalised form used internally (see normalize()). If the
+ * caller has the raw typed form, it should be normalised before
+ * being passed here — the alias key is what the RTDB path expects.
+ */
+export async function removeAlias(
+  playerId: string,
+  aliasKey: string,
+): Promise<PlayerWriteOutcome> {
+  if (!playerId) return { ok: false, error: 'Missing player id' };
+  if (!aliasKey) return { ok: false, error: 'Missing alias key' };
+  try {
+    const [{ firebaseApp }, { getDatabase, ref, remove }] = await Promise.all([
+      import('./firebase'),
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    const path = `players/${playerId}/aliases/${aliasKey}`;
+    await remove(ref(db, path));
+    const idx = memoryStore.findIndex((x) => x.id === playerId);
+    if (idx !== -1) {
+      const cur = memoryStore[idx]!;
+      const nextAliases = { ...cur.aliases };
+      delete nextAliases[aliasKey];
+      memoryStore[idx] = { ...cur, aliases: nextAliases };
+    }
+    notify();
+    void logAudit({
+      action: 'alias.remove',
+      path,
+      before: { aliasKey },
+    });
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg || 'Remove alias failed' };
   }
 }
 

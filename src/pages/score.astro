@@ -2,11 +2,28 @@
 import BaseLayout from '../layouts/BaseLayout.astro';
 import ScoreBoard from '../components/ScoreBoard.svelte';
 import OverlayBoard from '../components/OverlayBoard.svelte';
+// Preload the DSEG7 7-segment digit font so it's fetched in parallel
+// with the HTML/JS bundle — otherwise the Svelte component's inline
+// `@fontsource` CSS import (see ScoreBoard.svelte L3) doesn't fire the
+// font fetch until the JS bundle is parsed and executed, which lands
+// AFTER first paint. Result on a cold hard-refresh: digits render in
+// Courier New for ~200ms, then swap to DSEG7. Preloading it here means
+// the browser starts the woff2 fetch on the same round-trip as the
+// HTML, so by the time first paint runs the file's already in cache.
+import dseg7WoffUrl from '@fontsource/dseg7-classic/files/dseg7-classic-latin-700-normal.woff2';
 
 // We can't read the query string at build time; both islands mount and one
 // hides itself. Overlay unmounts the player view via a top-level class.
 ---
 <BaseLayout title="Carromscore — live">
+  <link
+    slot="head"
+    rel="preload"
+    as="font"
+    type="font/woff2"
+    href={dseg7WoffUrl}
+    crossorigin="anonymous"
+  />
   <div id="app-root">
     <div class="player-only">
       <ScoreBoard client:only="svelte" />

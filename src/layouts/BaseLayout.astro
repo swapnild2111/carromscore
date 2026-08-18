@@ -14,6 +14,18 @@ const base = import.meta.env.BASE_URL;
     <link rel="icon" type="image/svg+xml" href={`${base}favicon.svg`} />
     <link rel="manifest" href={`${base}manifest.webmanifest`} />
     <title>{title}</title>
+    <!--
+      Page-scoped head slot. Used by score.astro to <link rel="preload">
+      the DSEG7 woff2 so the digit font renders in the correct face on
+      first paint — no FOUC swap from Courier New. See score.astro.
+    -->
+    <slot name="head" />
+    <!--
+      Removed the earlier BaseLayout-level dseg7 preload attempt (it
+      would preload the woff for every page, including home/admin,
+      which don't render seven-segment digits and pay the ~15KB cost
+      for nothing).
+    -->
     <style is:global>
       :root {
         color-scheme: dark;

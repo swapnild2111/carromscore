@@ -800,6 +800,12 @@ export type MatchIdentityState = {
   a2ResolvedId: string | null;
   bResolvedId: string | null;
   b2ResolvedId: string | null;
+  // Optional country snapshots — captured at Setup so the ScoreBoard
+  // can render the header flag on first paint without waiting for the
+  // async Firebase player-store hydration. Empty string == no country
+  // (unresolved player, or record without a country field).
+  aCountry?: string;
+  bCountry?: string;
 };
 
 /** Save the resolved ids from Setup so the Score screen can read them. */
@@ -823,6 +829,8 @@ export function loadMatchIdentity(matchStateKey: string): MatchIdentityState {
       a2ResolvedId: typeof parsed.a2ResolvedId === 'string' ? parsed.a2ResolvedId : null,
       bResolvedId: typeof parsed.bResolvedId === 'string' ? parsed.bResolvedId : null,
       b2ResolvedId: typeof parsed.b2ResolvedId === 'string' ? parsed.b2ResolvedId : null,
+      ...(typeof parsed.aCountry === 'string' ? { aCountry: parsed.aCountry } : {}),
+      ...(typeof parsed.bCountry === 'string' ? { bCountry: parsed.bCountry } : {}),
     };
   } catch {
     return blankIdentity();

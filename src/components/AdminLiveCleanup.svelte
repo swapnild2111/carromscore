@@ -267,7 +267,17 @@
               <span class="row-date">updated {relTime(e.updatedAt)}</span>
               {#if isStuck(e)}
                 <span class="chip chip-warn">stuck</span>
-              {:else if !e.liveState.matchResult}
+              {:else if e.liveState.matchResult}
+                <!--
+                  Explicit "ended" state — the umpire tapped End so the
+                  match has a winner, but the /live/{mid} record wasn't
+                  cleaned up. Public lobby's Now Playing filters these
+                  OUT (only matches with !matchResult show). Surface it
+                  here so admins understand why these rows don't appear
+                  on the umpire-facing lobby.
+                -->
+                <span class="chip chip-ended">ended</span>
+              {:else}
                 <span class="chip chip-live">LIVE</span>
               {/if}
             </div>
@@ -500,6 +510,17 @@
     border-color: rgba(239, 83, 80, 0.3);
     font-weight: 700;
     letter-spacing: 0.06em;
+  }
+  /* Ended chip: muted grey. These records have a matchResult set so
+     the public lobby filters them out; they're only visible here
+     for admin cleanup. */
+  .chip-ended {
+    color: var(--muted);
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.12);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 700;
   }
 
   /* Filter tabs — bar of tab-like chips above the bulk bar. */

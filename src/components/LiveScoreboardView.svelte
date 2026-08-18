@@ -74,21 +74,16 @@
   };
   const setGroups = $derived<SetGroup[]>(() => {
     const rawLog = state.boardLog ?? [];
-    // Trim overshoot: a very small number of legacy records
-    // (pre-2026-08-09 fix) captured a phantom last board when the
-    // umpire tapped BOARD+1 after a set was already decided. The
-    // finished-match record's `boardCount` is authoritative; if the
-    // stored boardLog exceeds it, drop the tail so the recap reads
-    // the same number as the match's board counter. Live records
-    // (still-in-flight) have no matchResult so we leave those
-    // untrimmed — the boardLog is the source of truth in flight.
-    const capped =
-      state.matchResult !== null &&
-      typeof state.board === 'number' &&
-      rawLog.length > state.board
-        ? rawLog.slice(0, state.board)
-        : rawLog;
-    const log = capped;
+    // Historically this trimmed `rawLog` to `state.board` to strip a
+    // phantom last row from a pre-2026-08-09 finishMatch bug. That
+    // trim assumed `state.board` was a match-total counter, but it
+    // has since become a per-set counter (resets to 0 each set
+    // transition) — so on a 3-set match `state.board` was tiny and
+    // the trim silently dropped every set except the last, showing
+    // only SET 1 with a garbled rowset (reported 2026-08-18).
+    // boardLog is now authoritative in both live and finished paths;
+    // no trim needed.
+    const log = rawLog;
     if (log.length === 0) return [];
     const bySet = new Map<number, BoardEntry[]>();
     for (const entry of log) {
@@ -688,7 +683,11 @@
   .board {
     display: grid;
     grid-template-columns: 1fr 1.5fr 1fr 1.5fr 1fr;
-    gap: 0.4rem;
+    /* Wider column gap prevents SET/POINTS visual adjacency issues
+       — a "1" (SETS) next to "23" (POINTS) was reading as "123"
+       when the columns were only 0.4rem apart. 0.9rem gives each
+       cell an unambiguous boundary while keeping the row compact. */
+    gap: 0.9rem;
     padding: 0.5rem 0;
     min-height: 8rem;
   }

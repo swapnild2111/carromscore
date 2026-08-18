@@ -17,7 +17,8 @@
     loadMatchStart,
     clearMatchIdentity,
   } from '../lib/history';
-  import { subscribePlayers } from '../lib/players';
+  import { subscribePlayers, subscribeStore as subscribePlayerStore, loadAll as loadAllPlayers } from '../lib/players';
+  import { flagEmoji, countryName } from '../lib/countries';
   import {
     deleteLive,
     nudgeFirebaseReconnect,
@@ -122,6 +123,15 @@
   let pointsAtBoardStart = $state<{ a: number; b: number }>({ a: 0, b: 0 });
   let queenRequiredToast = $state(false);
   /**
+   * Fires when board is closed (BOARD+1 / SET+ / End) with a queen
+   * marked but the queen-holder's per-board score is < QUEEN_VALUE.
+   * Real-carrom rule: covering the queen requires the holder to
+   * pocket at least 3 points on that board (their own pucks + queen
+   * = 3 minimum). If short, umpire either hasn't finished entering
+   * points, or the queen wasn't actually covered (transfer or untap).
+   */
+  let queenCreditToast = $state('');
+  /**
    * Fires when the umpire taps BOARD+1 after a side has already
    * reached pointsTarget in the current set. Added 2026-08-09
    * after Prem/Yash's test session recorded a phantom 9th board on
@@ -145,6 +155,14 @@
    */
   let setLoserToast = $state(false);
   /**
+   * Fires when SET+1 is tapped on a tied set (per-set points equal on
+   * both sides). Unlike setLoserToast (points strictly lower), a tied
+   * set has NO winner — the umpire needs to route through End Match,
+   * which detects the tie-at-cap and opens the deciding-board chooser.
+   * Copy tells them exactly that so they don't feel stuck.
+   */
+  let setTiedToast = $state(false);
+  /**
    * Fires when a POINTS tap would push this side past the per-board
    * ICF cap of 12 points (maximum theoretical single-board score:
    * 9 pucks × 1 + queen 3 = 12). The umpire is probably meaning to
@@ -161,6 +179,21 @@
    * to correct. Auto-dismisses.
    */
   let singleScorerToast = $state(false);
+  /**
+   * Fires when the umpire taps Swap after any board has been
+   * recorded in the current match. Real carrom seat-swaps happen
+   * pre-scoring; swapping mid-match would corrupt the boardLog's
+   * A/B attribution (see the swapSides guard added 2026-08-18).
+   * Auto-dismisses.
+   */
+  let swapBlockedToast = $state(false);
+  /**
+   * Fires when SET+ is tapped after the OTHER side has already
+   * reached the match-winning set count (⌈bestOf/2⌉). Blocking
+   * this stops phantom sets after the match is mathematically
+   * decided — see adjustSets's match-clinch guard added 2026-08-18.
+   */
+  let matchClinchedToast = $state(false);
   /**
    * Set to true when finishMatch() failed to reach Firebase (network
    * dead, rules denied). Surfaces as a small non-blocking toast so
@@ -184,6 +217,33 @@
    * further down) so the grid tracks the URL config even after edits.
    */
   const isPractice = $derived(cfg.mode === 'practice');
+  /*
+   * Country codes for the header flag chip. Only surface a flag in
+   * singles mode where "the player" is a single person — doubles has
+   * two players per side and one flag would be misleading. Reads the
+   * player identity store via the resolved-id handoff MatchSetup wrote
+   * at match start; recomputes on playerStoreTick so a late RTDB
+   * snapshot (fresh tab, offline→online) fills in the flag once the
+   * country field lands.
+   */
+  const countryA = $derived.by((): string => {
+    void playerStoreTick;
+    if (cfg.mode !== 'singles') return '';
+    if (aResolvedId) {
+      const p = loadAllPlayers().find((x) => x.id === aResolvedId);
+      if (p?.country) return p.country;
+    }
+    return aCountrySeed;
+  });
+  const countryB = $derived.by((): string => {
+    void playerStoreTick;
+    if (cfg.mode !== 'singles') return '';
+    if (bResolvedId) {
+      const p = loadAllPlayers().find((x) => x.id === bResolvedId);
+      if (p?.country) return p.country;
+    }
+    return bCountrySeed;
+  });
   let practiceBoards = $state<number[][]>([]);
   // Currently-visible set in Practice mode. Paginated: one set on screen
   // at a time, "next" / "prev" buttons advance the view. Zero-indexed.
@@ -242,6 +302,17 @@
    */
   let isDecidingBoard = $state(false);
   /**
+   * Snapshot of cfg.maxBoards at the moment a decider was chosen —
+   * so when the deciding board completes AND the set transitions
+   * (SET+1 for the winner), cfg.maxBoards can be restored to its
+   * original per-set cap. Without this, cfg.maxBoards accumulates
+   * `+1` for every set that entered a decider, and every subsequent
+   * set inherits the extended cap (bug reported 2026-08-18:
+   * "Set 2 had 3 boards allowed after Set 1's decider").
+   * Null when no decider is active.
+   */
+  let maxBoardsBeforeDecider = $state<number | null>(null);
+  /**
    * Signals the winner popup should render its "Play deciding board /
    * Call it a draw" chooser instead of the normal "View scorecard"
    * single-button path. True only during the brief window between
@@ -251,6 +322,58 @@
   let confirmExit = $state(false);
   let isPortrait = $state(false);
   let storageKey = $state<string | null>(null);
+  // Resolved player ids for the current match — read from the identity
+  // handoff MatchSetup saves at match start. Used to look up country
+  // codes for the flag chip beside each header name. Doubles carries
+  // A2/B2 too but we only surface a flag in singles mode where "the
+  // player" is a single person.
+  // Read the identity handoff synchronously at script init (before the
+  // first render), not in onMount — otherwise the header flag would
+  // paint empty for one frame and then swap in once onMount fires. We
+  // need the URL params + matchStateKey right now, so parse them here.
+  // Guarded on typeof window for SSR-safety even though this component
+  // is client:only ("belt + braces": prevents build-time crashes if
+  // someone changes the hydration mode).
+  function readIdentitySeed(): {
+    aId: string | null;
+    bId: string | null;
+    aCountry: string;
+    bCountry: string;
+  } {
+    if (typeof window === 'undefined') return { aId: null, bId: null, aCountry: '', bCountry: '' };
+    try {
+      const q = new URLSearchParams(window.location.search);
+      const mode = q.get('mode') ?? 'singles';
+      const key = matchStateKey(
+        mode === 'doubles' || mode === 'practice' ? mode : 'singles',
+        q.get('playerA') ?? '',
+        q.get('playerB') ?? '',
+      );
+      const identity = loadMatchIdentity(key);
+      return {
+        aId: identity.aResolvedId ?? null,
+        bId: identity.bResolvedId ?? null,
+        aCountry: identity.aCountry ?? '',
+        bCountry: identity.bCountry ?? '',
+      };
+    } catch {
+      return { aId: null, bId: null, aCountry: '', bCountry: '' };
+    }
+  }
+  const _identitySeed = readIdentitySeed();
+  let aResolvedId = $state<string | null>(_identitySeed.aId);
+  let bResolvedId = $state<string | null>(_identitySeed.bId);
+  // Country codes snapshotted at Setup so the flag renders on first
+  // paint — no waiting for the Firebase player-store to hydrate.
+  // Overridden by the derived below once the store has the resolved
+  // player's current country field.
+  let aCountrySeed = $state(_identitySeed.aCountry);
+  let bCountrySeed = $state(_identitySeed.bCountry);
+  // Bumped whenever the /players Firebase snapshot refreshes so
+  // countryA/countryB re-derive when a late-arriving player record
+  // brings its country field. subscribeStore fires the callback on
+  // every store notify.
+  let playerStoreTick = $state(0);
 
   onMount(() => {
     const q = new URLSearchParams(window.location.search);
@@ -260,11 +383,22 @@
     sideA.note = cfg.noteA;
     sideB.note = cfg.noteB;
     storageKey = matchStateKey(cfg.mode, q.get('playerA') ?? '', q.get('playerB') ?? '');
+    // Pull the identity handoff MatchSetup wrote at match start so we
+    // can surface country flags on the header. If there's no handoff
+    // (mid-match refresh, no identity resolved, practice mode) these
+    // stay null and no flag renders.
+    // Identity handoff already read at script init (see
+    // readIdentitySeed above) so first render paints with the correct
+    // flag. Nothing to do here.
     // Populate the Player identity store from Firebase so endMatch()'s
     // finishMatch() call can resolve existing player IDs (rather than
     // forking identity on a page-refreshed-mid-match device).
     // Silent-on-failure inside the module.
     void subscribePlayers();
+    // Bump the reactivity tick whenever the identity store changes so
+    // the flag-country derived recomputes when the RTDB snapshot lands
+    // after mount (fresh-tab load, offline-to-online reconnect).
+    unsubPlayerStore = subscribePlayerStore(() => (playerStoreTick += 1));
     // NOTE: armLiveCleanup was previously called here to register a
     // Firebase onDisconnect().remove() so the /live/{mid} record
     // vanished when the umpire's tab closed. In practice mobile
@@ -356,6 +490,7 @@
       releaseLandscape();
       unsubRole?.();
       unsubAuth?.();
+      unsubPlayerStore?.();
       unsubConnectivity?.();
       if (flushIntervalId !== null) {
         window.clearInterval(flushIntervalId);
@@ -684,6 +819,22 @@
       window.setTimeout(() => { matchDecidedToast = false; }, 2500);
       return;
     }
+    // Match-clinch guard: refuse SET+X when the OTHER side has
+    // already reached ⌈bestOf/2⌉ sets. In bo3 that's 2 — a 0-2 or
+    // 2-0 score means the match is mathematically decided; the
+    // umpire should tap End rather than keep playing. Without this,
+    // a phantom set can be played and its SET+ credit accepted
+    // (bug reported 2026-08-17, mid=ais81o).
+    // Applies to versus modes only.
+    if (delta > 0 && !isPractice) {
+      const winThreshold = Math.ceil(cfg.bestOf / 2);
+      const otherSideSets = side === 'a' ? sideB.sets : sideA.sets;
+      if (otherSideSets >= winThreshold) {
+        matchClinchedToast = true;
+        window.setTimeout(() => { matchClinchedToast = false; }, 3000);
+        return;
+      }
+    }
     // Real-carrom rule: SET+1 can only credit the side that WON the
     // set (more per-set points). Tapping SET+ on the losing side
     // used to silently credit them anyway (bug reported 2026-08-14:
@@ -697,7 +848,15 @@
     if (delta > 0 && !isPractice) {
       const tappedPts = side === 'a' ? sideA.points : sideB.points;
       const otherPts = side === 'a' ? sideB.points : sideA.points;
-      if (tappedPts <= otherPts) {
+      if (tappedPts === otherPts) {
+        // Tied set — neither side has won. Point the umpire at End
+        // Match; endMatch() will pop the deciding-board chooser when
+        // the set is at cap, and let them commit as a draw otherwise.
+        setTiedToast = true;
+        window.setTimeout(() => { setTiedToast = false; }, 3500);
+        return;
+      }
+      if (tappedPts < otherPts) {
         setLoserToast = true;
         window.setTimeout(() => { setLoserToast = false; }, 3000);
         return;
@@ -732,6 +891,12 @@
           // no board can end without a queen result.
           queenRequiredToast = true;
           window.setTimeout(() => { queenRequiredToast = false; }, 2500);
+          return;
+        }
+        const qProblem = queenCreditProblem();
+        if (qProblem) {
+          queenCreditToast = qProblem;
+          window.setTimeout(() => { queenCreditToast = ''; }, 3500);
           return;
         }
         const entry: BoardEntry = {
@@ -772,7 +937,14 @@
     // credits the last set and preserves the points that decided it,
     // so End can render "wins 25-18" honestly instead of "0-0".
     const totalPlayed = sideA.sets + sideB.sets;
-    const anotherSetRemains = delta > 0 && totalPlayed < cfg.bestOf;
+    // Skip the fresh-set setup when THIS SET+1 clinches the match.
+    // The final-set points/board need to persist so the winner
+    // popup can render "Final board X–Y" honestly. The auto-clinch
+    // block below then declares the match. Practice mode has no
+    // clinch, so this reduces to the original condition.
+    const clinchWinThreshold = Math.ceil(cfg.bestOf / 2);
+    const willClinch = !isPractice && delta > 0 && s.sets >= clinchWinThreshold;
+    const anotherSetRemains = delta > 0 && totalPlayed < cfg.bestOf && !willClinch;
     if (anotherSetRemains) {
       sideA.points = 0;
       sideB.points = 0;
@@ -782,6 +954,17 @@
       board = 0;
       queenHolder = null;
       pointsAtBoardStart = { a: 0, b: 0 };
+      // Roll back any decider extension from the just-completed set.
+      // isDecidingBoard is per-set state (the banner should not carry
+      // into a new set), and cfg.maxBoards was bumped +1 for the
+      // decider board — restore it so the new set gets the original
+      // per-set cap. Both no-ops when the just-completed set wasn't
+      // a decider.
+      isDecidingBoard = false;
+      if (maxBoardsBeforeDecider !== null) {
+        cfg.maxBoards = maxBoardsBeforeDecider;
+        maxBoardsBeforeDecider = null;
+      }
       // First-break rotates every set: the player who did NOT open
       // the previous set opens the next one. Find the previous set's
       // first-board breaker from the log and flip it. If the log is
@@ -793,8 +976,26 @@
         currentBreak = prevSetOpener === 'a' ? 'b' : 'a';
       }
     }
+    // Auto-clinch: if this SET+1 credit takes the side to the
+    // match-winning threshold (⌈bestOf/2⌉), the match is over —
+    // don't make the umpire hunt for End Match. Set matchResult,
+    // pop the winner ribbon, and archive. Fires only on positive
+    // delta so SET-1 undos never trigger the popup. Skipped in
+    // practice mode (no winner concept). Guarded on matchResult
+    // being null so an already-decided match doesn't re-fire.
+    if (delta > 0 && !isPractice && matchResult === null) {
+      const winThreshold = Math.ceil(cfg.bestOf / 2);
+      if (s.sets >= winThreshold) {
+        matchResult = side;
+        showWinnerPopup = true;
+        recordFinishedMatch(side);
+        clearResume();
+        return;
+      }
+    }
     // matchResult stays untouched: the WINNER ribbon only appears when the
-    // organiser taps End Match, never on a SET +/- alone.
+    // organiser taps End Match, never on a SET +/- alone (except the
+    // auto-clinch case above).
   }
   function adjustBoard(delta: number) {
     void tryLockLandscape();
@@ -841,6 +1042,12 @@
       if (queenHolder === null) {
         queenRequiredToast = true;
         window.setTimeout(() => { queenRequiredToast = false; }, 2500);
+        return;
+      }
+      const qProblem = queenCreditProblem();
+      if (qProblem) {
+        queenCreditToast = qProblem;
+        window.setTimeout(() => { queenCreditToast = ''; }, 3500);
         return;
       }
       // Snapshot the completed board. `set` is 0-indexed for the
@@ -942,6 +1149,46 @@
     }
   }
 
+  /**
+   * Real-carrom queen-credit validator. When a side has claimed the
+   * queen on the running board, ICF rules say they must ALSO have
+   * pocketed enough of their own pucks that their per-board score is
+   * at least QUEEN_VALUE (3). If it isn't, either the umpire hasn't
+   * finished entering points OR the queen didn't actually stay
+   * covered (should be transferred to the opponent or untapped).
+   * Returns null when the running board is OK to close, or a toast
+   * message describing what's wrong.
+   *
+   * Skipped when:
+   *   - the queen-holder side was locked-at-board-start (already
+   *     within a queen's worth of pointsTarget): queen scores 0
+   *     anyway, so the >=3 minimum doesn't apply.
+   *   - practice mode: no queen concept in the running-board sense.
+   *   - no queenHolder (edge cases: nobody covered the queen, End
+   *     path handles this via queenRequiredToast separately).
+   */
+  function queenCreditProblem(): string | null {
+    if (isPractice) return null;
+    if (queenHolder === null) return null;
+    const holderBaseline = queenHolder === 'a' ? pointsAtBoardStart.a : pointsAtBoardStart.b;
+    const lockedAtBoardStart = holderBaseline >= queenLockThreshold;
+    if (lockedAtBoardStart) return null;
+    const holderSide = queenHolder === 'a' ? sideA : sideB;
+    const holderPerBoard = holderSide.points - holderBaseline;
+    // Zero delta = opponent won the board despite the queen chip
+    // being lit (e.g. queen went uncovered and reverted, or the
+    // holder pocketed the queen but the OTHER side finished first —
+    // scored 0 this board is legitimate). Only validate when the
+    // holder actually scored: if they scored anything, they must
+    // have scored at least QUEEN_VALUE (their own puck + queen
+    // cover = 3 minimum in real carrom).
+    if (holderPerBoard === 0) return null;
+    if (holderPerBoard < QUEEN_VALUE) {
+      return `Queen holder scored ${holderPerBoard} — needs at least ${QUEEN_VALUE} when marked`;
+    }
+    return null;
+  }
+
   function adjustPracticeBoard(setIdx: number, boardIdx: number, delta: number) {
     void tryLockLandscape();
     const row = practiceBoards[setIdx];
@@ -991,6 +1238,7 @@
   let role = $state<Role | null>(null);
   let unsubRole: (() => void) | null = null;
   let unsubAuth: (() => void) | null = null;
+  let unsubPlayerStore: (() => void) | null = null;
 
   /**
    * Synthesise a MatchRecord snapshot for the edit modal from the
@@ -1063,6 +1311,34 @@
     // taps End after the last board without hitting BOARD+1 first.
     const currentBoardHasScore =
       sideA.points > pointsAtBoardStart.a || sideB.points > pointsAtBoardStart.b;
+    // Reconcile the last snapshotted board if the umpire corrected a
+    // score AFTER tapping BOARD+1. In that flow: BOARD+1 snapshots the
+    // board into boardLog and re-baselines pointsAtBoardStart to the
+    // current cumulative totals; a subsequent negative-delta correction
+    // drops sideA.points below pointsAtBoardStart.a. Result: End sees
+    // no "currentBoardHasScore" (since the delta went negative, not
+    // positive), skips the append, and the archive ends up with
+    // sideA.points reflecting the correction but boardLog.last.pointsA
+    // still holding the pre-correction number. Treat End as the commit
+    // point — rewrite the last row's delta so ΣboardLog matches the
+    // current cumulative totals.
+    if (!currentBoardHasScore && boardLog.length > 0) {
+      const sumA = boardLog.reduce((n, e) => n + e.pointsA, 0);
+      const sumB = boardLog.reduce((n, e) => n + e.pointsB, 0);
+      if (sumA !== sideA.points || sumB !== sideB.points) {
+        const last = boardLog[boardLog.length - 1];
+        const adjustedLast: BoardEntry = {
+          ...last,
+          pointsA: last.pointsA + (sideA.points - sumA),
+          pointsB: last.pointsB + (sideB.points - sumB),
+          endedAt: Date.now(),
+        };
+        boardLog = [...boardLog.slice(0, -1), adjustedLast];
+        // Re-baseline so any downstream reads (queenCreditProblem,
+        // subsequent adjustments) see a consistent world.
+        pointsAtBoardStart = { a: sideA.points, b: sideB.points };
+      }
+    }
     if (currentBoardHasScore) {
       // Board-cap safeguard. If the umpire has already completed
       // cfg.maxBoards boards (and this isn't the decider extension),
@@ -1079,17 +1355,45 @@
       const atBoardCap =
         !isBoardsUnlimited(cfg) && board >= cfg.maxBoards && !isDecidingBoard;
       if (atBoardCap) {
-        // Roll the running board's points back to the last saved
-        // baseline so the winner comparison sees only the
-        // completed-board totals, and skip the append.
-        sideA.points = pointsAtBoardStart.a;
-        sideB.points = pointsAtBoardStart.b;
+        // We've already completed maxBoards boards, so we can't append
+        // a phantom board (maxBoards+1). But the running delta since
+        // pointsAtBoardStart is legitimate umpire correction to the
+        // LAST snapshotted board, not a new-board score — fold it into
+        // boardLog[last] so archive totals match on-screen totals and
+        // the winner comparison sees the corrected numbers.
+        //
+        // (Prior behaviour rolled sideA/sideB back to baseline and
+        // discarded the delta — reported 2026-08-18: after BOARD+1 on
+        // the last board, correcting Player B from 5 to 6 was reverted
+        // to 5 on End.)
+        if (boardLog.length > 0) {
+          const last = boardLog[boardLog.length - 1];
+          const adjustedLast: BoardEntry = {
+            ...last,
+            pointsA: last.pointsA + (sideA.points - pointsAtBoardStart.a),
+            pointsB: last.pointsB + (sideB.points - pointsAtBoardStart.b),
+            endedAt: Date.now(),
+          };
+          boardLog = [...boardLog.slice(0, -1), adjustedLast];
+          pointsAtBoardStart = { a: sideA.points, b: sideB.points };
+        } else {
+          // No prior board to fold into (shouldn't happen at cap, but
+          // defensive): fall back to the old drop-the-delta behaviour.
+          sideA.points = pointsAtBoardStart.a;
+          sideB.points = pointsAtBoardStart.b;
+        }
       } else {
       if (queenHolder === null) {
         // Real carrom: no board can end without a queen. Block End
         // with the same toast that adjustBoard(+1) uses.
         queenRequiredToast = true;
         window.setTimeout(() => { queenRequiredToast = false; }, 2500);
+        return;
+      }
+      const qProblem = queenCreditProblem();
+      if (qProblem) {
+        queenCreditToast = qProblem;
+        window.setTimeout(() => { queenCreditToast = ''; }, 3500);
         return;
       }
       const entry: BoardEntry = {
@@ -1115,7 +1419,33 @@
     }
     let winner: 'a' | 'b' | 'draw' | null = null;
     let awardExtraSet = false;
-    if (sideA.sets > sideB.sets) {
+    // Match-clinch check first: has one side reached ⌈bestOf/2⌉ sets
+    // BEFORE this End was tapped? If so, the match is genuinely over
+    // and the set-lead is the match winner. In bo3 that's 2 sets.
+    // Without this gate, End on a tied set 2 (sets 0-1) would declare
+    // the 1-set-leader as match winner and skip the decider prompt
+    // (bug reported 2026-08-18: Set 2 tied 6-6 at cap, End declared
+    // "wins 0-1" instead of asking for a deciding board).
+    const winThreshold = Math.ceil(cfg.bestOf / 2);
+    const clinched = sideA.sets >= winThreshold || sideB.sets >= winThreshold;
+    if (clinched && sideA.sets > sideB.sets) {
+      winner = 'a';
+    } else if (clinched && sideB.sets > sideA.sets) {
+      winner = 'b';
+    } else if (sideA.points === sideB.points && board >= cfg.maxBoards && !isDecidingBoard) {
+      // At-cap tied current set (below the clinch line) — offer the
+      // deciding-board prompt. This branch fires regardless of the
+      // set-lead: whether sets are 0-0 (set 1), 0-1 (set 2), 1-1
+      // (set 3), the current set is tied at its natural end and
+      // deserves resolution before the match can be called.
+      matchResult = 'draw';
+      pendingDrawChoice = true;
+      showWinnerPopup = true;
+      return;
+    } else if (sideA.sets > sideB.sets) {
+      // Set-lead but not clinched, and current set isn't tied-at-cap.
+      // Umpire ended early (e.g. below points/board cap). Award to
+      // the current set-leader.
       winner = 'a';
     } else if (sideB.sets > sideA.sets) {
       winner = 'b';
@@ -1129,28 +1459,13 @@
       winner = 'b';
       awardExtraSet = true;
     } else {
-      // Fully tied — sets AND points equal. Two paths:
+      // Fully tied — sets AND points equal, but below cap (the at-cap
+      // path was handled above). Auto-commit as draw: umpire chose
+      // to End early on an equal position.
       //
-      // - At the limit AND not already playing the decider: show the
-      //   "Play deciding board / Call it a draw" chooser. Defer the
-      //   archive write until the umpire chooses.
-      // - Otherwise (early End on a tie, or a decider board that also
-      //   tied): auto-commit as draw.
-      //
-      // Consistent rule for BOTH paths: **SETS only ticks up when a
-      // side wins the set**. A tied set has no winner, so neither
-      // sideA.sets nor sideB.sets moves. This keeps the pre-decision
-      // popup (SETS 0-0) and any post-decider popup (SETS 1-0 for
-      // whichever side won the extra board) reading honestly instead
-      // of the previous "1-1 for a draw" quirk which suggested both
-      // sides had won a set.
-      if (board >= cfg.maxBoards && !isDecidingBoard) {
-        matchResult = 'draw';
-        pendingDrawChoice = true;
-        showWinnerPopup = true;
-        return;
-      }
-      // Below limit or decider-also-tied — auto-commit as draw.
+      // Consistent rule: **SETS only ticks up when a side wins the
+      // set**. A tied set has no winner, so neither sideA.sets nor
+      // sideB.sets moves.
       winner = 'draw';
     }
     if (awardExtraSet && (winner === 'a' || winner === 'b')) {
@@ -1213,9 +1528,28 @@
       //    computed against the pre-tied-board baseline and produce
       //    wrong per-board deltas in the boardLog.
       matchResult = null;
+      // Save the pre-extension cap so the SET+ transition below can
+      // restore it. Without this, cfg.maxBoards permanently grows +1
+      // per set-that-hit-a-decider, and every subsequent set gets
+      // the extended cap (Set 2 allowed 3 boards after Set 1's decider).
+      if (maxBoardsBeforeDecider === null) {
+        maxBoardsBeforeDecider = cfg.maxBoards;
+      }
       cfg.maxBoards = cfg.maxBoards + 1;
       isDecidingBoard = true;
-      currentBreak = currentBreak === 'a' ? 'b' : 'a';
+      // Decider's opener = opposite of the just-completed board's
+      // breaker. Reading from boardLog is authoritative regardless
+      // of whether the umpire tapped BOARD+1 (which would have
+      // already flipped currentBreak) or End directly (endMatch
+      // snapshots the running board without flipping currentBreak).
+      // Previously this did an unconditional `currentBreak = flip`
+      // which double-flipped when the umpire tapped BOARD+1 before
+      // End — putting the wrong player on the decider break
+      // (reported 2026-08-18).
+      const lastEntry = boardLog[boardLog.length - 1];
+      if (lastEntry) {
+        currentBreak = lastEntry.breakSide === 'a' ? 'b' : 'a';
+      }
       queenHolder = null;
       pointsAtBoardStart = { a: sideA.points, b: sideB.points };
       showWinnerPopup = false;
@@ -1324,9 +1658,17 @@
   }
 
   function swapSides() {
-    // Physical seat swap: every per-player attribute travels with the player,
-    // so their names, notes, colours, SET counts, AND current-set POINTS all
-    // move together. BOARD stays put — it belongs to the match, not a player.
+    // Physical seat swap: every per-player attribute travels with
+    // the player, so their names, notes, colours, SET counts, AND
+    // current-set POINTS all move together. BOARD stays put — it
+    // belongs to the match, not a player.
+    //
+    // Allowed at any point in the match per user rule (2026-08-18):
+    // physical carrom seat-swaps happen between sets, at the halfway
+    // point of a decider set, or when players just decide to swap.
+    // All three cases produce the same top-row swap; the boardLog
+    // entries already recorded remain honest under their pre-swap
+    // labels (they carry the seat that was scoring at THAT time).
     const tmpName = sideA.name;
     sideA.name = sideB.name;
     sideB.name = tmpName;
@@ -1339,17 +1681,29 @@
     const tmpPoints = sideA.points;
     sideA.points = sideB.points;
     sideB.points = tmpPoints;
+    // Also swap the per-board baseline so the running-board delta
+    // (sideA.points - pointsAtBoardStart.a) is preserved for the
+    // player who scored it. Without this, a mid-board swap would
+    // corrupt the delta when BOARD+1 finally captures the row.
+    const tmpBaseline = pointsAtBoardStart.a;
+    pointsAtBoardStart = { a: pointsAtBoardStart.b, b: tmpBaseline };
     const tmpColour = colourA;
     colourA = colourB;
     colourB = tmpColour;
     // BREAK belongs to a player (match-long assignment), so flip it so
     // the chip visually stays with the same person after the seat swap.
     currentBreak = currentBreak === 'a' ? 'b' : 'a';
-    // QUEEN is per-board and often re-negotiated after a swap-sides
-    // (players re-position, previous board's queen is no longer the
-    // authoritative state). Clear it to grey on both sides — organiser
-    // can tap either coin to re-mark once play resumes.
-    queenHolder = null;
+    // QUEEN also travels with the player who covered it.
+    if (queenHolder === 'a') queenHolder = 'b';
+    else if (queenHolder === 'b') queenHolder = 'a';
+    // Identity handoff travels with the player too, so the header flag
+    // chip stays anchored to the correct person after the swap.
+    const tmpResolved = aResolvedId;
+    aResolvedId = bResolvedId;
+    bResolvedId = tmpResolved;
+    const tmpCountrySeed = aCountrySeed;
+    aCountrySeed = bCountrySeed;
+    bCountrySeed = tmpCountrySeed;
   }
 
   function resetScores() {
@@ -1667,6 +2021,9 @@
               <span class="medal-label">DRAW</span>
             </span>
           {/if}
+          {#if countryA && flagEmoji(countryA)}
+            <span class="hn-flag" title={countryName(countryA)} aria-label={countryName(countryA)}>{flagEmoji(countryA)}</span>
+          {/if}
           <span class="hn-name">{sideA.name}</span>
         </span>
         {#if sideA.note}<span class="hn-note">{sideA.note}</span>{/if}
@@ -1756,6 +2113,9 @@
            class:draw={matchResult === 'draw'}>
         <span class="hn-row">
           <span class="hn-name">{sideB.name}</span>
+          {#if countryB && flagEmoji(countryB)}
+            <span class="hn-flag" title={countryName(countryB)} aria-label={countryName(countryB)}>{flagEmoji(countryB)}</span>
+          {/if}
           {#if matchResult === 'b'}
             <span class="medal" aria-label="First place">
               <span class="medal-icon" aria-hidden="true">🥇</span>
@@ -1866,9 +2226,24 @@
           <span class="foot-ico" aria-hidden="true">⇄</span><span class="foot-lbl">Swap</span>
         </button>
       {/if}
+      <!--
+        Reset button hidden 2026-08-17: umpires kept tapping this
+        thinking it would undo the last board / roll back a stray
+        credit, but Reset wipes everything back to 0-0-0. The correct
+        undo path is a right-swipe on the individual digit (POINTS-/
+        BOARD- / SET-). Bringing Reset back requires a clearer
+        distinction (naming, confirmation copy, or a "roll back last
+        board" affordance).
+
+        The confirmReset state machine + resetScores() function are
+        still wired — the toast "Match ended — score is locked. Use
+        Reset to start over." references Reset. Left in place so a
+        future re-introduction is a one-line uncomment.
       <button type="button" class="foot-btn reset" onclick={requestReset} disabled={!hasProgress} aria-label="Reset scores">
         <span class="foot-ico" aria-hidden="true">↻</span><span class="foot-lbl">Reset</span>
       </button>
+      -->
+
       <button type="button" class="foot-btn endm" onclick={endMatch} aria-label="End match">
         <span class="foot-ico" aria-hidden="true">🏁</span><span class="foot-lbl">End</span>
       </button>
@@ -2089,11 +2464,17 @@
   {#if confirmExit}
     <div class="dialog" role="dialog" aria-modal="true">
       <div class="dialog-card exit">
-        <h2>Exit match?</h2>
-        <p class="who">Current score will be discarded.</p>
+        <h2>{matchResult ? 'Close match?' : 'Exit match?'}</h2>
+        <p class="who">
+          {#if matchResult}
+            Match is already saved. Closing returns to the home screen.
+          {:else}
+            Current score will be discarded.
+          {/if}
+        </p>
         <div class="dialog-actions">
-          <button class="cancel" onclick={() => (confirmExit = false)}>Keep playing</button>
-          <button class="danger" onclick={exit}>Exit</button>
+          <button class="cancel" onclick={() => (confirmExit = false)}>{matchResult ? 'Cancel' : 'Keep playing'}</button>
+          <button class="danger" onclick={exit}>{matchResult ? 'Close' : 'Exit'}</button>
         </div>
       </div>
     </div>
@@ -2126,12 +2507,24 @@
   {#if setLoserToast}
     <!--
       Surfaced when SET+1 is tapped on the losing side (per-set
-      points not strictly higher than the opponent). Real carrom:
-      only the winning side can credit a set. Prevents the umpire
-      from accidentally awarding a set to the wrong player.
+      points strictly lower than the opponent). Real carrom: only
+      the winning side can credit a set. Prevents the umpire from
+      accidentally awarding a set to the wrong player.
     -->
     <div class="queen-toast" role="status" aria-live="polite">
       Only the leading side can be credited a set
+    </div>
+  {/if}
+
+  {#if setTiedToast}
+    <!--
+      Surfaced when SET+1 is tapped on a tied set (per-set points
+      equal). A tied set has no winner; the umpire needs to tap
+      End Match, which detects the tie-at-cap and pops the
+      deciding-board chooser.
+    -->
+    <div class="queen-toast" role="status" aria-live="polite">
+      Set is tied — tap End Match to play a deciding board
     </div>
   {/if}
 
@@ -2173,6 +2566,31 @@
     </div>
   {/if}
 
+  {#if swapBlockedToast}
+    <!--
+      Fires when Swap is tapped mid-set (any board or points already
+      recorded in the current set). A mid-set swap would leave the
+      running board attached to pre-swap A/B labels while the top-
+      row flips, producing corrupt recap data. Between-set swaps
+      (fresh set, board=0, points=0) are allowed.
+    -->
+    <div class="queen-toast" role="status" aria-live="polite">
+      Swap only between sets — finish or clear the current board first
+    </div>
+  {/if}
+
+  {#if matchClinchedToast}
+    <!--
+      Fires when SET+ is tapped on either side after the OTHER
+      side has already clinched the match (⌈bestOf/2⌉ sets won).
+      Prevents phantom sets played post-match-decision — a bo3
+      match with sets 0-2 for side B cannot legally continue.
+    -->
+    <div class="queen-toast" role="status" aria-live="polite">
+      Match already decided — tap End to finalise
+    </div>
+  {/if}
+
   {#if archiveFailedToast}
     <!--
       Surfaced when the Firebase write of the finished match failed
@@ -2182,6 +2600,20 @@
     -->
     <div class="queen-toast archive-toast" role="status" aria-live="polite">
       Match archive failed — score visible on this device only
+    </div>
+  {/if}
+
+  {#if queenCreditToast}
+    <!--
+      Fires when BOARD+1 / SET+1 / End tries to close a board where
+      the queen-holder has fewer than 3 per-board points. Real
+      carrom: queen cover requires the holder to also pocket enough
+      of their own pucks (3 minimum). Message tells the umpire what
+      the ceiling is so they can adjust POINTS+ or transfer/untap
+      the queen if it didn't actually stay covered.
+    -->
+    <div class="queen-toast" role="status" aria-live="polite">
+      {queenCreditToast}
     </div>
   {/if}
 
@@ -2339,6 +2771,15 @@
     white-space: nowrap;
     min-width: 0;
     line-height: 1.05;
+  }
+  /* Country flag emoji beside the player name. Sits inline with the
+     name — small enough not to compete with the name, large enough to
+     read the flag glyph. Fixed-width so ellipsis on long names still
+     works predictably. */
+  .head-name .hn-flag {
+    font-size: 1.15em;
+    line-height: 1;
+    flex-shrink: 0;
   }
   /* Country / region / club chip. Sits below the player name so the
      name has the full width to itself and won't be squeezed by the
@@ -2972,6 +3413,33 @@
     overflow-y: auto;
     padding: 0.9rem 0.9rem 1rem;
     text-align: left;
+    position: relative;
+  }
+  /* Names pill and top-row score summary pinned to the top of the
+     scorecard modal so long per-set tables scroll behind them.
+     .scorecard-card is the scroll container; sticky children latch
+     to its top edge. */
+  .scorecard-card :global(.hdr),
+  .scorecard-card :global(.board) {
+    position: sticky;
+    z-index: 2;
+    background: #0f0f0f;
+  }
+  .scorecard-card :global(.hdr) {
+    top: 0;
+    padding-top: 0.25rem;
+  }
+  .scorecard-card :global(.board) {
+    top: 3rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid #1e1e1e;
+    margin-bottom: 0.25rem;
+  }
+  /* Close ✕ button sits absolute in scorecard-card top-right; make
+     sure it stays above the sticky sections when they scroll into
+     the pinned zone. */
+  .scorecard-card .dialog-close {
+    z-index: 3;
   }
   /* "Fix this match" admin surface at the bottom of the scorecard
      modal. Only rendered for authorised users (super OR organiser
