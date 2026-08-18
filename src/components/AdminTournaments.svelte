@@ -30,6 +30,13 @@
     assignPlayer,
     unassignPlayer,
     loadAssignedPlayers,
+    loadRounds,
+    addRound,
+    renameRound,
+    setRoundState,
+    deleteRound,
+    countMatchesByRoundKey,
+    type Round,
     type Tournament,
   } from '../lib/tournaments';
   import { subscribeCurrentUserRole, type Role } from '../lib/roles';
@@ -122,6 +129,24 @@
   /** Bump on the identity-store change, so the assignment dialog's
    *  filtered player list re-renders when a player is added elsewhere. */
   let playersTick = $state(0);
+
+  /**
+   * Per-row Rounds modal state (v3.2). Modal lists the tournament's
+   * rounds, per-row Rename / Toggle-state / Delete. New rounds append
+   * to the bottom of the list with order = max(existing) + 1.
+   *
+   * `roundsKey` is the currently-open tournament's key; null closes
+   * the modal. `rounds` mirrors the tournament's live list from the
+   * subscribeStore tick — kept in local state so the modal can render
+   * a saving/error banner without also re-fetching on every keystroke.
+   */
+  let roundsKey = $state<string | null>(null);
+  let roundsAddName = $state('');
+  let roundsRenamingKey = $state<string | null>(null);
+  let roundsRenameValue = $state('');
+  let roundsDeletingKey = $state<string | null>(null);
+  let roundsDeletingCount = $state<number | null>(null);
+  let roundsSaving = $state(false);
 
   onMount(() => {
     void subscribeTournaments();
@@ -520,6 +545,106 @@
       })
       .slice(0, 200);
   });
+
+  // ─── Rounds modal (v3.2) ────────────────────────────────────────
+
+  /** Rounds for the currently-open modal, live from the store. */
+  const currentRounds = $derived<Round[]>(() => {
+    void tick;
+    if (!roundsKey) return [];
+    return loadRounds(roundsKey);
+  });
+
+  function startRounds(t: Tournament) {
+    roundsKey = t.key;
+    roundsAddName = '';
+    roundsRenamingKey = null;
+    roundsRenameValue = '';
+    roundsDeletingKey = null;
+    roundsDeletingCount = null;
+  }
+  function stopRounds() {
+    roundsKey = null;
+    roundsAddName = '';
+    roundsRenamingKey = null;
+    roundsRenameValue = '';
+    roundsDeletingKey = null;
+    roundsDeletingCount = null;
+  }
+
+  async function saveAddRound() {
+    if (!roundsKey) return;
+    const name = roundsAddName.trim();
+    if (!name) return;
+    roundsSaving = true;
+    const outcome = await addRound(roundsKey, name);
+    roundsSaving = false;
+    if (outcome.ok) {
+      roundsAddName = '';
+      flash('ok', 'Round added');
+    } else {
+      flash('err', outcome.error);
+    }
+  }
+
+  function startRenameRound(r: Round) {
+    roundsRenamingKey = r.key;
+    roundsRenameValue = r.name;
+  }
+  function cancelRenameRound() {
+    roundsRenamingKey = null;
+    roundsRenameValue = '';
+  }
+  async function saveRenameRound() {
+    if (!roundsKey || !roundsRenamingKey) return;
+    const name = roundsRenameValue.trim();
+    if (!name) return;
+    roundsSaving = true;
+    const outcome = await renameRound(roundsKey, roundsRenamingKey, name);
+    roundsSaving = false;
+    if (outcome.ok) {
+      roundsRenamingKey = null;
+      roundsRenameValue = '';
+      flash('ok', 'Round renamed');
+    } else {
+      flash('err', outcome.error);
+    }
+  }
+
+  async function toggleRoundState(r: Round) {
+    if (!roundsKey) return;
+    const next = r.state === 'closed' ? 'open' : 'closed';
+    roundsSaving = true;
+    const outcome = await setRoundState(roundsKey, r.key, next);
+    roundsSaving = false;
+    if (!outcome.ok) flash('err', outcome.error);
+  }
+
+  async function startDeleteRound(r: Round) {
+    if (!roundsKey) return;
+    roundsDeletingKey = r.key;
+    // Load the child-match count so the confirmation banner shows
+    // "N matches are tagged; they will be un-tagged, not deleted".
+    roundsDeletingCount = null;
+    roundsDeletingCount = await countMatchesByRoundKey(roundsKey, r.key);
+  }
+  function cancelDeleteRound() {
+    roundsDeletingKey = null;
+    roundsDeletingCount = null;
+  }
+  async function confirmDeleteRound() {
+    if (!roundsKey || !roundsDeletingKey) return;
+    roundsSaving = true;
+    const outcome = await deleteRound(roundsKey, roundsDeletingKey);
+    roundsSaving = false;
+    if (outcome.ok) {
+      roundsDeletingKey = null;
+      roundsDeletingCount = null;
+      flash('ok', 'Round deleted');
+    } else {
+      flash('err', outcome.error);
+    }
+  }
 </script>
 
 <section class="tourns">
@@ -631,6 +756,9 @@
             {#if canManageTournament(t)}
               <div class="row-actions">
                 <button type="button" class="btn" onclick={() => startRename(t)}>Rename</button>
+                <button type="button" class="btn" onclick={() => startRounds(t)}>
+                  Rounds{t.rounds && t.rounds.length > 0 ? ` (${t.rounds.length})` : ''}
+                </button>
                 <button type="button" class="btn" onclick={() => startManage(t)}>Organisers</button>
                 {#if t.type === 'closed'}
                   <button type="button" class="btn" onclick={() => startAssign(t)}>Players</button>
@@ -938,6 +1066,161 @@
       </div>
     </div>
   {/if}
+
+  <!--
+    Rounds modal (v3.2). Nested dialog: the round-delete confirmation
+    layers on top of this one. Both are simple `.dialog` overlays so
+    the topmost card visually stacks; the outer stopRounds handler
+    stays gated on the delete confirmation being closed.
+  -->
+  {#if roundsKey}
+    <div
+      class="dialog"
+      role="dialog"
+      aria-modal="true"
+      onclick={(e) => {
+        if (e.target !== e.currentTarget) return;
+        if (roundsDeletingKey) return; // don't close outer while confirm is up
+        stopRounds();
+      }}
+    >
+      <div class="dialog-card">
+        <h3>Rounds</h3>
+        <p class="dialog-help">
+          Give this tournament its rounds — Round of 16, Quarter-finals,
+          Semi-finals, Final. Umpires pick one at match setup. Close a
+          round when you're done seeding matches into it so the picker
+          stops suggesting it.
+        </p>
+
+        <!-- Add-round row -->
+        <div class="add-round-row">
+          <input
+            type="text"
+            bind:value={roundsAddName}
+            placeholder="Round of 16, Quarter-finals, …"
+            aria-label="New round name"
+            maxlength="60"
+            disabled={roundsSaving}
+            onkeydown={(e) => {
+              if (e.key === 'Enter' && roundsAddName.trim() && !roundsSaving) {
+                e.preventDefault();
+                void saveAddRound();
+              }
+            }}
+          />
+          <button
+            type="button"
+            class="btn btn-primary"
+            onclick={saveAddRound}
+            disabled={roundsSaving || !roundsAddName.trim()}
+          >Add</button>
+        </div>
+
+        {#if currentRounds().length === 0}
+          <p class="empty">No rounds yet. Add the first one above.</p>
+        {:else}
+          <ul class="round-list">
+            {#each currentRounds() as r (r.key)}
+              <li class="round-row" class:round-closed={r.state === 'closed'}>
+                {#if roundsRenamingKey === r.key}
+                  <div class="row-edit">
+                    <input
+                      type="text"
+                      bind:value={roundsRenameValue}
+                      aria-label="New round name"
+                      maxlength="60"
+                      disabled={roundsSaving}
+                    />
+                    <button
+                      type="button"
+                      class="btn btn-primary"
+                      onclick={saveRenameRound}
+                      disabled={roundsSaving || !roundsRenameValue.trim()}
+                    >Save</button>
+                    <button
+                      type="button"
+                      class="btn"
+                      onclick={cancelRenameRound}
+                      disabled={roundsSaving}
+                    >Cancel</button>
+                  </div>
+                {:else}
+                  <div class="round-name">
+                    <div class="round-name-text">{r.name}</div>
+                    <div class="round-name-meta">
+                      <span class="chip">order {r.order}</span>
+                      <span class="chip">key: <code>{r.key}</code></span>
+                      {#if r.state === 'closed'}
+                        <span class="chip chip-closed" title="Closed — not offered to umpires">
+                          CLOSED
+                        </span>
+                      {/if}
+                    </div>
+                  </div>
+                  <div class="round-actions">
+                    <button
+                      type="button"
+                      class="btn"
+                      onclick={() => startRenameRound(r)}
+                      disabled={roundsSaving}
+                    >Rename</button>
+                    <button
+                      type="button"
+                      class="btn"
+                      onclick={() => toggleRoundState(r)}
+                      disabled={roundsSaving}
+                    >{r.state === 'closed' ? 'Reopen' : 'Close'}</button>
+                    <button
+                      type="button"
+                      class="btn btn-danger"
+                      onclick={() => startDeleteRound(r)}
+                      disabled={roundsSaving}
+                    >Delete</button>
+                  </div>
+                {/if}
+              </li>
+            {/each}
+          </ul>
+        {/if}
+
+        <div class="dialog-actions">
+          <button type="button" class="btn" onclick={stopRounds} disabled={roundsSaving}>Done</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Nested round-delete confirmation -->
+    {#if roundsDeletingKey}
+      <div class="dialog" role="dialog" aria-modal="true" onclick={(e) => { if (e.target === e.currentTarget) cancelDeleteRound(); }}>
+        <div class="dialog-card">
+          <h3>Delete round?</h3>
+          <p>
+            {#if roundsDeletingCount === null}
+              Counting matches…
+            {:else if roundsDeletingCount === 0}
+              The round record will be removed. No matches are tagged under it.
+            {:else}
+              The round record will be removed.
+              <strong>{roundsDeletingCount} match{roundsDeletingCount === 1 ? '' : 'es'}</strong>
+              currently tagged with this round will lose the round tag but
+              stay in the tournament — they'll appear under an
+              <em>Unassigned</em> sub-group in History.
+            {/if}
+          </p>
+          <div class="dialog-actions">
+            <button type="button" class="btn" onclick={cancelDeleteRound} disabled={roundsSaving}>Cancel</button>
+            <button
+              type="button"
+              class="btn btn-danger"
+              onclick={confirmDeleteRound}
+              disabled={roundsSaving}
+            >{roundsSaving ? 'Deleting…' : 'Delete round'}</button>
+          </div>
+        </div>
+      </div>
+    {/if}
+  {/if}
 </section>
 
 <style>
@@ -1185,6 +1468,66 @@
   .assign-country {
     color: var(--muted);
     font-size: 0.75rem;
+  }
+
+  /* ─── Rounds modal (v3.2) ────────────────────────────────────── */
+  .add-round-row {
+    display: flex;
+    gap: 0.4rem;
+    align-items: center;
+    margin: 0.35rem 0 0.75rem;
+  }
+  .add-round-row input[type="text"] {
+    flex: 1;
+  }
+  .round-list {
+    list-style: none;
+    padding: 0;
+    margin: 0.25rem 0;
+    max-height: 55vh;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+  .round-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.5rem 0.6rem;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 0.45rem;
+    background: rgba(255, 255, 255, 0.02);
+  }
+  /* Closed rounds render dimmed so the umpire's picker mental model
+     — "these are the rounds still accepting matches" — is mirrored
+     in the admin list itself. */
+  .round-row.round-closed {
+    opacity: 0.6;
+  }
+  .round-name { flex: 1; min-width: 0; }
+  .round-name-text {
+    color: var(--fg);
+    font-weight: 600;
+    line-height: 1.1;
+  }
+  .round-name-meta {
+    display: flex;
+    gap: 0.4rem;
+    margin-top: 0.25rem;
+    flex-wrap: wrap;
+  }
+  .round-actions {
+    display: flex;
+    gap: 0.3rem;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+  }
+  .empty {
+    color: var(--muted);
+    font-size: 0.85rem;
+    text-align: center;
+    padding: 1rem;
   }
 
   .row-actions {
