@@ -101,9 +101,19 @@ Both go through `updateMatch` / `deleteMatch` / `deleteMatches` in
 
 ### Players (`/admin/` → Players tab)
 
-- **Add player** — create a new player record with a display name +
-  optional aliases. Rare; usually the roster grows organically at
-  match end.
+- **Add player** — create one or many player records. Enter names
+  comma-separated (`Ravi K, Priya M, Nirmal S`) or one per line;
+  mix both if easier. A **country** applies to every player in the
+  batch (mandatory field). The next screen resolves any names that
+  already exist in the roster: choose per-row between _Create as
+  new_, _Add as alias of an existing player_, or _Skip_. Namesakes
+  from different countries are legitimately distinct records —
+  when the exact-name match's country doesn't match the batch
+  country, the default action is _Create as new_.
+- **Edit player** — the pencil chip on any row opens a dialog that
+  lets you correct or add a country and manage the player's alias
+  list. Single **Save** button at the bottom commits everything at
+  once — no per-field save.
 - **Rename** — update the display name; playerId stays the same, so
   every historical match still resolves correctly.
 - **Delete** / **Bulk delete** — multi-select rows, then delete all
@@ -118,19 +128,34 @@ Both go through `updateMatch` / `deleteMatch` / `deleteMatches` in
 Merge is the most valuable admin action — use it whenever you spot
 "M. Ilyas" and "Ilyas Khan" as separate entries.
 
+Country flags surface on the home picker (beside each suggestion)
+and on the singles-mode scoreboard header (beside each player's
+name), so keeping the country field accurate has real user-facing
+value.
+
 ### Tournaments (`/admin/` → Tournaments tab)
 
 - **Add tournament** — create a new tournament tag ahead of the
   first match. Not required (tags auto-create on match end) but
   useful to pre-populate the picker for organisers.
+- **Open / Closed state** — each tournament carries a state field.
+  **Open** (default) accepts new matches; **Closed** rejects them —
+  the home form warns the umpire that "Silver Cup 2026 is closed"
+  when they pick a closed tournament, though the warning is
+  advisory and can be overridden (physical carrom clubs sometimes
+  reopen a bracket after the closing tap). Toggle state per row.
+  Organiser assignment stays independent of state — closed
+  tournaments can still be edited by their organisers.
 - **Rename** — updates the tournament's display name. If the new
   name normalises to the same key, we just update `name`. If it
   normalises differently, we clone to a new key, rewrite every
   child match's `tournament` field, and delete the old record.
 - **Delete** / **Bulk delete** — multi-select rows, then delete all
-  at once. Child matches keep their tag string but fall to the
-  "Default" bucket. Retention shortens from 1 year → 3 months for
-  those matches.
+  at once. Cascade rule: deleting a tournament also removes every
+  match tagged with its `tournamentKey` (matches you're not
+  authorised to delete are silently skipped and reported in the
+  outcome summary). Confirmation dialog shows the child-match count
+  before DELETE.
 
 ### Live matches (`/admin/` → Live matches tab)
 

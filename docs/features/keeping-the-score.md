@@ -84,7 +84,7 @@ Five buttons across the bottom, always visible in landscape:
 | Button | What it does |
 |---|---|
 | **⧉ Share** | Opens a popup with the spectator URL and OBS overlay URL for OBS/Prism. See [Share URL](./share-url.md). |
-| **⇄ Swap** | Physical swap-sides between sets. Names, notes, colours, sets, and current points travel with the players. Board stays put. Queen resets to grey. |
+| **⇄ Swap** | Physical swap-sides. Tappable **any time** — between sets, at the halfway point of a decider, or mid-board when players just want to change chairs. Names, notes, colours, sets, current points, per-board running points, the queen chip, and the BREAK chip all travel with the player, so the record stays honest whichever seat they scored from. Board number stays put — it belongs to the match, not a player. |
 | **↻ Reset** | Zero everything: sets, points, board, queen. Asks for confirmation. |
 | **🏁 End** | Ends the match. Recap dialog opens with the paper-scorecard matrix; medals lock onto pills. |
 | **✕ Close** | Quit the match and return to the setup screen. Asks for confirmation. |
