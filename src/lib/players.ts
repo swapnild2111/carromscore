@@ -313,9 +313,16 @@ export function createPlayer(
     return pCountry === metaCountry;
   });
   if (existing) return existing;
-  // Stamp `createdBy` with the signed-in user's uid when the caller
-  // doesn't override. Anonymous stays anonymous — field simply absent.
+  // v3.3 auth guard: fresh creates require a signed-in user so
+  // `createdBy` can be stamped and the RTDB rule accepts the write.
+  // The admin panel is the only creation surface in v3.3+ (the
+  // match-end auto-create was already retired in v3.0-B2), and the
+  // admin panel is auth-gated, so this branch fires only on
+  // pathological callers (test hooks, off-flow tools).
   const finalCreatedBy = meta.createdBy ?? currentUser()?.uid;
+  if (!finalCreatedBy) {
+    throw new Error('Refusing to create player without an authenticated caller');
+  }
   const p: Player = {
     id: playerIdFor(canonicalName),
     canonicalName: canonicalName.trim(),

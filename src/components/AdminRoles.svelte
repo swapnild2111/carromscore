@@ -25,52 +25,44 @@
    * fall back to raw UID display.
    */
   import { onMount } from 'svelte';
-  import { loadAllAdminRoles, subscribeCurrentUserRole, type Role } from '../lib/roles';
   import {
-    loadAll as loadAllTournaments,
-    subscribeStore as subscribeTournamentsStore,
-    subscribeTournaments,
-    loadAllOrganisers,
-    addOrganiser,
-    removeOrganiser,
-    type Tournament,
-  } from '../lib/tournaments';
+    loadAllAdminRoles,
+    loadAllOrganiserRoles,
+    addOrganiserRole,
+    removeOrganiserRole,
+  } from '../lib/roles';
+  // v3.3: dropped the tournament chip picker for organiser onboarding.
+  // Tournaments store no longer needed here — the Organisers section
+  // just lists uids from /organiserRoles.
   import { loadAllUsers, type UserRecord } from '../lib/users';
   import { currentUser } from '../lib/auth';
 
   let supers = $state<Record<string, 'super'>>({});
-  let organisersByUid = $state<Record<string, Record<string, true>>>({});
+  let organiserUids = $state<Set<string>>(new Set());
   let users = $state<Record<string, UserRecord>>({});
   let loading = $state(true);
   let saving = $state(false);
   let banner = $state<{ kind: 'ok' | 'err'; message: string } | null>(null);
-  let tournamentTick = $state(0);
-  let role = $state<Role | null>(null);
 
-  // Add-organiser form
+  // Onboard-organiser form
   let addEmail = $state('');
-  let addTournaments = $state<Set<string>>(new Set());
+  // Per-row revoke confirmation state — reveals a "Confirm" button
+  // inline for the uid the super is about to revoke.
+  let confirmingRevokeUid = $state<string | null>(null);
 
   onMount(() => {
-    void subscribeTournaments();
-    const unsubStore = subscribeTournamentsStore(() => (tournamentTick += 1));
-    const unsubRole = subscribeCurrentUserRole((r) => (role = r));
     void reload();
-    return () => {
-      unsubStore();
-      unsubRole();
-    };
   });
 
   async function reload() {
     loading = true;
     const [s, o, u] = await Promise.all([
       loadAllAdminRoles(),
-      loadAllOrganisers(),
+      loadAllOrganiserRoles(),
       loadAllUsers(),
     ]);
     supers = s;
-    organisersByUid = o;
+    organiserUids = o;
     users = u;
     loading = false;
   }
@@ -78,16 +70,6 @@
   function flash(kind: 'ok' | 'err', message: string) {
     banner = { kind, message };
     window.setTimeout(() => (banner = null), 5000);
-  }
-
-  const tournaments = $derived<Tournament[]>(() => {
-    void tournamentTick;
-    return loadAllTournaments();
-  });
-
-  function tournamentName(key: string): string {
-    const t = tournaments().find((x) => x.key === key);
-    return t?.name ?? key;
   }
 
   /**
@@ -100,12 +82,6 @@
     const u = users[uid];
     if (!u) return { name: '', email: '', hasMirror: false };
     return { name: u.displayName ?? '', email: u.email ?? '', hasMirror: true };
-  }
-
-  function toggleAddTournament(key: string) {
-    if (addTournaments.has(key)) addTournaments.delete(key);
-    else addTournaments.add(key);
-    addTournaments = new Set(addTournaments);
   }
 
   /**
@@ -121,14 +97,16 @@
     return null;
   }
 
-  async function assignOrganiser() {
+  /**
+   * v3.3: onboard someone as a global organiser. The chip picker
+   * for tournaments is gone — an organiser creates their own
+   * tournaments once onboarded. Idempotent: rewriting a uid that's
+   * already in /organiserRoles is a no-op.
+   */
+  async function onboardOrganiser() {
     const email = addEmail.trim();
     if (!email) {
       flash('err', 'Enter an email address');
-      return;
-    }
-    if (addTournaments.size === 0) {
-      flash('err', 'Pick at least one tournament');
       return;
     }
     const uid = findUidByEmail(email);
@@ -139,42 +117,37 @@
       );
       return;
     }
-    saving = true;
-    const keys = [...addTournaments];
-    let ok = 0;
-    let failed = 0;
-    let firstError: string | undefined;
-    for (const k of keys) {
-      const r = await addOrganiser(k, uid);
-      if (r.ok) ok += 1;
-      else {
-        failed += 1;
-        if (!firstError) firstError = r.error;
-      }
+    if (organiserUids.has(uid)) {
+      flash('err', `${email} is already an organiser`);
+      return;
     }
+    saving = true;
+    const r = await addOrganiserRole(uid);
     saving = false;
-    if (failed === 0) {
-      flash('ok', `Assigned ${email} to ${ok} tournament${ok === 1 ? '' : 's'}`);
+    if (r.ok) {
+      flash('ok', `Onboarded ${email} as organiser`);
       addEmail = '';
-      addTournaments = new Set();
       await reload();
     } else {
-      flash(
-        'err',
-        `${ok} assigned, ${failed} failed${firstError ? ` — ${firstError}` : ''}`,
-      );
-      await reload();
+      flash('err', r.error);
     }
   }
 
-  async function revokeOrganiser(uid: string, key: string) {
+  function startRevoke(uid: string) {
+    confirmingRevokeUid = uid;
+  }
+  function cancelRevoke() {
+    confirmingRevokeUid = null;
+  }
+  async function confirmRevoke(uid: string) {
     saving = true;
-    const r = await removeOrganiser(key, uid);
+    const r = await removeOrganiserRole(uid);
     saving = false;
     if (r.ok) {
       const lbl = userLabel(uid);
       const who = lbl.name || lbl.email || `${uid.slice(0, 8)}…`;
-      flash('ok', `Removed ${who} from ${tournamentName(key)}`);
+      flash('ok', `Revoked ${who} — their existing tournaments become super-only`);
+      confirmingRevokeUid = null;
       await reload();
     } else {
       flash('err', r.error);
@@ -241,6 +214,12 @@
   {/if}
 
   <h3 class="section-hdr">Organisers</h3>
+  <p class="lead-sub">
+    Onboard someone as an organiser once. From then on they can
+    create their own tournaments + players and manage what they
+    created. Revoking their role doesn't delete anything they made
+    — those records become super-only from then on.
+  </p>
   <div class="add-form">
     <label class="add-uid">
       <span>Gmail address</span>
@@ -252,42 +231,21 @@
         maxlength="128"
       />
     </label>
-    <div class="add-tournaments">
-      <span class="add-tournaments-lbl">Tournaments</span>
-      {#if tournaments().length === 0}
-        <p class="empty empty-inline">
-          No tournaments yet. Add one on the Tournaments tab first.
-        </p>
-      {:else}
-        <div class="tournament-picker">
-          {#each tournaments() as t (t.key)}
-            <label class="chip-pick" class:chip-pick-on={addTournaments.has(t.key)}>
-              <input
-                type="checkbox"
-                checked={addTournaments.has(t.key)}
-                onchange={() => toggleAddTournament(t.key)}
-              />
-              {t.name}
-            </label>
-          {/each}
-        </div>
-      {/if}
-    </div>
     <button
       type="button"
       class="btn btn-primary"
-      onclick={assignOrganiser}
-      disabled={saving || !addEmail.trim() || addTournaments.size === 0}
-    >{saving ? 'Assigning…' : 'Assign organiser'}</button>
+      onclick={onboardOrganiser}
+      disabled={saving || !addEmail.trim()}
+    >{saving ? 'Onboarding…' : 'Onboard as organiser'}</button>
   </div>
 
   {#if loading}
     <p class="empty">Loading…</p>
-  {:else if Object.keys(organisersByUid).length === 0}
-    <p class="empty">No organisers assigned yet.</p>
+  {:else if organiserUids.size === 0}
+    <p class="empty">No organisers onboarded yet.</p>
   {:else}
     <ul class="list">
-      {#each Object.entries(organisersByUid) as [uid, keys] (uid)}
+      {#each [...organiserUids] as uid (uid)}
         {@const lbl = userLabel(uid)}
         <li class="row row-org">
           <div class="row-name">
@@ -300,22 +258,32 @@
               {:else if !lbl.hasMirror}
                 <code class="uid">{uid}</code>
               {/if}
-              <span class="chip">{Object.keys(keys).length} tournament{Object.keys(keys).length === 1 ? '' : 's'}</span>
+              <span class="badge badge-organiser">ORGANISER</span>
             </div>
-            <div class="org-tags">
-              {#each Object.keys(keys) as k (k)}
-                <span class="tag">
-                  {tournamentName(k)}
-                  <button
-                    type="button"
-                    class="tag-x"
-                    onclick={() => revokeOrganiser(uid, k)}
-                    disabled={saving}
-                    aria-label={`Remove from ${tournamentName(k)}`}
-                  >✕</button>
-                </span>
-              {/each}
-            </div>
+          </div>
+          <div class="row-actions">
+            {#if confirmingRevokeUid === uid}
+              <span class="revoke-hint">Revoke this organiser?</span>
+              <button
+                type="button"
+                class="btn btn-danger"
+                onclick={() => confirmRevoke(uid)}
+                disabled={saving}
+              >{saving ? 'Revoking…' : 'Confirm revoke'}</button>
+              <button
+                type="button"
+                class="btn"
+                onclick={cancelRevoke}
+                disabled={saving}
+              >Cancel</button>
+            {:else}
+              <button
+                type="button"
+                class="btn btn-danger"
+                onclick={() => startRevoke(uid)}
+                disabled={saving}
+              >Revoke</button>
+            {/if}
           </div>
         </li>
       {/each}
@@ -455,6 +423,25 @@
     color: var(--accent);
     background: rgba(255, 213, 74, 0.14);
     border: 1px solid rgba(255, 213, 74, 0.4);
+  }
+  .badge-organiser {
+    color: var(--side-a);
+    background: rgba(79, 195, 247, 0.14);
+    border: 1px solid rgba(79, 195, 247, 0.4);
+  }
+
+  /* Per-row Revoke button + inline confirmation strip. Compact and
+     right-aligned to match the AdminPlayers row-actions pattern. */
+  .row-actions {
+    display: flex;
+    gap: 0.4rem;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .revoke-hint {
+    font-size: 0.8rem;
+    color: var(--muted, #9aa0a6);
+    padding: 0 0.4rem;
   }
 
   .org-tags {

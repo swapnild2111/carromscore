@@ -31,7 +31,7 @@
   import { subscribeCurrentUserRole, type Role } from '../lib/roles';
   import { subscribeAuth, currentUser } from '../lib/auth';
   import { clearResume } from '../lib/resume';
-  import { normalizeKey } from '../lib/tournaments';
+  import { normalizeKey, findByKey } from '../lib/tournaments';
   import type { MatchRecord } from '../lib/history';
   import { subscribeConnectivity, getConnectivity } from '../lib/connectivity';
   import { enqueueLive, enqueueMatch, dropLive, flushQueue } from '../lib/sync-queue';
@@ -1288,9 +1288,16 @@
   const canEditArchived = $derived(() => {
     if (!archivedMatchId || !role) return false;
     if (role.isSuper) return true;
+    if (!role.isOrganiser) return false;
     const key = normalizeKey(cfg.tournament ?? '');
     if (!key) return false;
-    return role.organiserOf.has(key);
+    // v3.3: own-only auth. Look up the tournament record and check
+    // createdBy matches the current uid. If the record isn't in the
+    // local store yet the gate stays closed until it hydrates.
+    const t = findByKey(key);
+    if (!t) return false;
+    const myUid = currentUser()?.uid;
+    return !!(myUid && t.createdBy === myUid);
   });
   // Fixed array of spark indices for the fireworks each-loop.
   const SPARK_INDICES = Array.from({ length: 20 }, (_, i) => i);

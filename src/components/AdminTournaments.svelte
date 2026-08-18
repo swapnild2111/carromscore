@@ -41,6 +41,7 @@
     type Tournament,
   } from '../lib/tournaments';
   import { subscribeCurrentUserRole, type Role } from '../lib/roles';
+  import { currentUser } from '../lib/auth';
   import {
     loadAll as loadAllPlayers,
     subscribePlayers,
@@ -64,7 +65,13 @@
   function canManageTournament(t: Tournament): boolean {
     if (!role) return false;
     if (role.isSuper) return true;
-    return role.organiserOf.has(t.key);
+    // Own-only auth (v3.3): an organiser can manage tournaments they
+    // created. `createdBy` was stamped at creation time by
+    // createOrTouchTournament; records without it (legacy anonymous
+    // creates) fall through to super-only management.
+    if (!role.isOrganiser) return false;
+    const myUid = currentUser()?.uid;
+    return !!(myUid && t.createdBy === myUid);
   }
 
   let tick = $state(0);
@@ -177,7 +184,17 @@
 
   const list = $derived(() => {
     void tick;
-    return loadAll();
+    const all = loadAll();
+    // v3.3: organisers see only tournaments they created. Super sees
+    // everything. Reads on /tournaments are public in RTDB (so other
+    // clients can render the picker + lobby), but the admin list is
+    // scoped to "records you can act on" — otherwise the surface is
+    // noisy and misleading.
+    if (!role || role.isSuper) return all;
+    if (!role.isOrganiser) return [];
+    const myUid = currentUser()?.uid;
+    if (!myUid) return [];
+    return all.filter((t) => t.createdBy === myUid);
   });
 
   /** Search-filtered view of `list()`. Empty query = full list.
@@ -833,14 +850,7 @@
             </div>
             {#if canManageTournament(t)}
               <div class="row-actions">
-                <button type="button" class="btn" onclick={() => startEdit(t)}>Edit</button>
-                <button type="button" class="btn" onclick={() => startRounds(t)}>
-                  Rounds{t.rounds && t.rounds.length > 0 ? ` (${t.rounds.length})` : ''}
-                </button>
-                <button type="button" class="btn" onclick={() => startManage(t)}>Organisers</button>
-                {#if t.type === 'closed'}
-                  <button type="button" class="btn" onclick={() => startAssign(t)}>Players</button>
-                {/if}
+                <button type="button" class="btn btn-primary" onclick={() => startEdit(t)}>Edit</button>
                 <button
                   type="button"
                   class="btn btn-danger"
@@ -861,9 +871,35 @@
     dialog so the pattern stays consistent.
   -->
   {#if editingKey}
+    {@const editingTournament = list().find((t) => t.key === editingKey) ?? null}
     <div class="dialog" role="dialog" aria-modal="true" onclick={(e) => { if (e.target === e.currentTarget) cancelEdit(); }}>
       <div class="dialog-card dialog-card-wide">
         <h3>Edit tournament</h3>
+
+        <!--
+          v3.3: absorb the standalone Rounds and Players affordances
+          into the Edit dialog as launch buttons. Each opens the
+          existing modal on top of this one — nested dialogs are fine
+          per the existing pattern (see Delete confirmation inside
+          Rounds modal). Cancel here still closes both.
+        -->
+        <div class="edit-section-nav">
+          <button
+            type="button"
+            class="btn"
+            onclick={() => editingTournament && startRounds(editingTournament)}
+            disabled={saving || !editingTournament}
+          >Rounds{editingTournament?.rounds && editingTournament.rounds.length > 0 ? ` (${editingTournament.rounds.length})` : ''}</button>
+          {#if editingType === 'closed' && editingTournament}
+            <button
+              type="button"
+              class="btn"
+              onclick={() => startAssign(editingTournament)}
+              disabled={saving}
+            >Assigned players</button>
+          {/if}
+        </div>
+
         <label class="edit-field">
           <span>Name</span>
           <input
@@ -1553,6 +1589,21 @@
   /* Edit-dialog rows share the label-above / input-below shape used
      by the add dialog. Kept as a separate class so the vertical
      rhythm reads cleanly inside the wider Edit modal. */
+  /* Section-launch row inside the Edit dialog (v3.3). Groups the
+     buttons that open sibling modals — Rounds, Assigned players —
+     so the Edit dialog itself covers Details only. Border keeps the
+     buttons visually separate from the field stack below. */
+  .edit-section-nav {
+    display: flex;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+    margin: 0.25rem 0 0.75rem;
+    padding: 0.5rem;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 0.5rem;
+  }
+
   .edit-field {
     display: flex;
     flex-direction: column;

@@ -121,6 +121,21 @@ export function loadAll(): Tournament[] {
 }
 
 /**
+ * Find a tournament by its key in the local memoryStore. Returns
+ * null when the key is unknown or the store hasn't hydrated yet.
+ * Cheap: memoryStore is an array of at most a few hundred records
+ * so a linear scan is fine.
+ *
+ * Used by v3.3's own-only auth gates — callers know a match's
+ * tournamentKey and need to look up the tournament's `createdBy`
+ * to decide "can this user edit this match?".
+ */
+export function findByKey(key: string): Tournament | null {
+  if (!key) return null;
+  return memoryStore.find((t) => t.key === key) ?? null;
+}
+
+/**
  * Rank tournaments against a typed query. Simple prefix + substring
  * match on the normalised name. Empty query returns the whole list
  * (sorted by recent activity via loadAll). Case-insensitive.
@@ -145,6 +160,15 @@ export function rankTournaments(query: string, limit = 8): Tournament[] {
  * store + Firebase. Idempotent — repeat calls just bump lastActive.
  * Returns the resolved Tournament record. Empty / whitespace-only
  * names return null (indicating "no tournament tag").
+ *
+ * v3.3: creating a NEW tournament requires an authenticated user —
+ * the RTDB rule for `/tournaments/{key}` now demands
+ * `newData.createdBy == auth.uid` on the fresh-create branch, and
+ * an anonymous write would be denied server-side. We short-circuit
+ * client-side to give the caller a clear null and avoid a silent
+ * partial state (a local record that the fire-and-forget Firebase
+ * write can't land). Touching an EXISTING record is still allowed
+ * without auth — that path just bumps `lastActive`.
  */
 export function createOrTouchTournament(
   name: string,
@@ -156,10 +180,10 @@ export function createOrTouchTournament(
   if (!key) return null;
   const now = Date.now();
   const existing = memoryStore.find((t) => t.key === key);
-  // Stamp `createdBy` only on the fresh-creation path. Subsequent
-  // touches on an existing record must not overwrite the original
-  // creator — that field is the record's provenance.
   const creator = currentUser()?.uid;
+  // v3.3 auth guard: fresh creates require a signed-in user so
+  // `createdBy` gets stamped and the RTDB rule accepts the write.
+  if (!existing && !creator) return null;
   const type = meta?.type;
   const country = meta?.country;
   const record: Tournament = existing
