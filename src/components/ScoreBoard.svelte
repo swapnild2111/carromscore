@@ -17,7 +17,8 @@
     loadMatchStart,
     clearMatchIdentity,
   } from '../lib/history';
-  import { subscribePlayers } from '../lib/players';
+  import { subscribePlayers, subscribeStore as subscribePlayerStore, loadAll as loadAllPlayers } from '../lib/players';
+  import { flagEmoji, countryName } from '../lib/countries';
   import {
     deleteLive,
     nudgeFirebaseReconnect,
@@ -216,6 +217,27 @@
    * further down) so the grid tracks the URL config even after edits.
    */
   const isPractice = $derived(cfg.mode === 'practice');
+  /*
+   * Country codes for the header flag chip. Only surface a flag in
+   * singles mode where "the player" is a single person — doubles has
+   * two players per side and one flag would be misleading. Reads the
+   * player identity store via the resolved-id handoff MatchSetup wrote
+   * at match start; recomputes on playerStoreTick so a late RTDB
+   * snapshot (fresh tab, offline→online) fills in the flag once the
+   * country field lands.
+   */
+  const countryA = $derived.by((): string => {
+    void playerStoreTick;
+    if (cfg.mode !== 'singles' || !aResolvedId) return '';
+    const p = loadAllPlayers().find((x) => x.id === aResolvedId);
+    return p?.country ?? '';
+  });
+  const countryB = $derived.by((): string => {
+    void playerStoreTick;
+    if (cfg.mode !== 'singles' || !bResolvedId) return '';
+    const p = loadAllPlayers().find((x) => x.id === bResolvedId);
+    return p?.country ?? '';
+  });
   let practiceBoards = $state<number[][]>([]);
   // Currently-visible set in Practice mode. Paginated: one set on screen
   // at a time, "next" / "prev" buttons advance the view. Zero-indexed.
@@ -294,6 +316,18 @@
   let confirmExit = $state(false);
   let isPortrait = $state(false);
   let storageKey = $state<string | null>(null);
+  // Resolved player ids for the current match — read from the identity
+  // handoff MatchSetup saves at match start. Used to look up country
+  // codes for the flag chip beside each header name. Doubles carries
+  // A2/B2 too but we only surface a flag in singles mode where "the
+  // player" is a single person.
+  let aResolvedId = $state<string | null>(null);
+  let bResolvedId = $state<string | null>(null);
+  // Bumped whenever the /players Firebase snapshot refreshes so
+  // countryA/countryB re-derive when a late-arriving player record
+  // brings its country field. subscribeStore fires the callback on
+  // every store notify.
+  let playerStoreTick = $state(0);
 
   onMount(() => {
     const q = new URLSearchParams(window.location.search);
@@ -303,11 +337,27 @@
     sideA.note = cfg.noteA;
     sideB.note = cfg.noteB;
     storageKey = matchStateKey(cfg.mode, q.get('playerA') ?? '', q.get('playerB') ?? '');
+    // Pull the identity handoff MatchSetup wrote at match start so we
+    // can surface country flags on the header. If there's no handoff
+    // (mid-match refresh, no identity resolved, practice mode) these
+    // stay null and no flag renders.
+    try {
+      const identity = loadMatchIdentity(storageKey);
+      aResolvedId = identity.aResolvedId ?? null;
+      bResolvedId = identity.bResolvedId ?? null;
+    } catch {
+      aResolvedId = null;
+      bResolvedId = null;
+    }
     // Populate the Player identity store from Firebase so endMatch()'s
     // finishMatch() call can resolve existing player IDs (rather than
     // forking identity on a page-refreshed-mid-match device).
     // Silent-on-failure inside the module.
     void subscribePlayers();
+    // Bump the reactivity tick whenever the identity store changes so
+    // the flag-country derived recomputes when the RTDB snapshot lands
+    // after mount (fresh-tab load, offline-to-online reconnect).
+    unsubPlayerStore = subscribePlayerStore(() => (playerStoreTick += 1));
     // NOTE: armLiveCleanup was previously called here to register a
     // Firebase onDisconnect().remove() so the /live/{mid} record
     // vanished when the umpire's tab closed. In practice mobile
@@ -399,6 +449,7 @@
       releaseLandscape();
       unsubRole?.();
       unsubAuth?.();
+      unsubPlayerStore?.();
       unsubConnectivity?.();
       if (flushIntervalId !== null) {
         window.clearInterval(flushIntervalId);
@@ -1146,6 +1197,7 @@
   let role = $state<Role | null>(null);
   let unsubRole: (() => void) | null = null;
   let unsubAuth: (() => void) | null = null;
+  let unsubPlayerStore: (() => void) | null = null;
 
   /**
    * Synthesise a MatchRecord snapshot for the edit modal from the
@@ -1603,6 +1655,11 @@
     // QUEEN also travels with the player who covered it.
     if (queenHolder === 'a') queenHolder = 'b';
     else if (queenHolder === 'b') queenHolder = 'a';
+    // Identity handoff travels with the player too, so the header flag
+    // chip stays anchored to the correct person after the swap.
+    const tmpResolved = aResolvedId;
+    aResolvedId = bResolvedId;
+    bResolvedId = tmpResolved;
   }
 
   function resetScores() {
@@ -1920,6 +1977,9 @@
               <span class="medal-label">DRAW</span>
             </span>
           {/if}
+          {#if countryA && flagEmoji(countryA)}
+            <span class="hn-flag" title={countryName(countryA)} aria-label={countryName(countryA)}>{flagEmoji(countryA)}</span>
+          {/if}
           <span class="hn-name">{sideA.name}</span>
         </span>
         {#if sideA.note}<span class="hn-note">{sideA.note}</span>{/if}
@@ -2009,6 +2069,9 @@
            class:draw={matchResult === 'draw'}>
         <span class="hn-row">
           <span class="hn-name">{sideB.name}</span>
+          {#if countryB && flagEmoji(countryB)}
+            <span class="hn-flag" title={countryName(countryB)} aria-label={countryName(countryB)}>{flagEmoji(countryB)}</span>
+          {/if}
           {#if matchResult === 'b'}
             <span class="medal" aria-label="First place">
               <span class="medal-icon" aria-hidden="true">🥇</span>
@@ -2664,6 +2727,15 @@
     white-space: nowrap;
     min-width: 0;
     line-height: 1.05;
+  }
+  /* Country flag emoji beside the player name. Sits inline with the
+     name — small enough not to compete with the name, large enough to
+     read the flag glyph. Fixed-width so ellipsis on long names still
+     works predictably. */
+  .head-name .hn-flag {
+    font-size: 1.15em;
+    line-height: 1;
+    flex-shrink: 0;
   }
   /* Country / region / club chip. Sits below the player name so the
      name has the full width to itself and won't be squeezed by the
