@@ -1956,45 +1956,50 @@
   .round-hdr {
     display: flex;
     align-items: center;
-    gap: 0.4rem;
+    gap: 0.5rem;
     width: 100%;
-    padding: 0.35rem 0.85rem 0.35rem 1.5rem;
-    background: transparent;
-    color: rgba(255,255,255,0.75);
+    padding: 0.45rem 0.85rem 0.45rem 1.5rem;
+    /* Subtle tinted strip so the row reads as clickable even before
+       hover. Half the accent weight of the tournament header so the
+       hierarchy still reads clearly (tournament > round). */
+    background: rgba(255,213,74,0.03);
+    color: rgba(255,255,255,0.9);
     border: 0;
-    border-top: 1px dashed rgba(255,255,255,0.06);
-    font-size: 0.82rem;
+    border-top: 1px solid rgba(255,213,74,0.10);
+    font-size: 0.85rem;
     letter-spacing: 0.02em;
     cursor: pointer;
     text-align: left;
   }
-  .round-hdr:hover { background: rgba(255,255,255,0.03); }
+  .round-hdr:hover { background: rgba(255,213,74,0.08); }
   .round-hdr:focus-visible {
     outline: 2px solid var(--accent, #ffd54a);
     outline-offset: -2px;
   }
   /* Round caret: same "▾ open / rotated-90° folded" convention as the
-     tournament caret, but at a smaller size and without a pill
-     background so it reads as visually subordinate. Filled triangle
-     (▾) rotates cleanly on its centre — no diagonal-baseline artefact
-     that the outline ▸ glyph had in v3.2.0-beta.6. */
+     tournament caret. Gets a subtle pill background at ~half the
+     visual weight of the tournament caret — enough to read as a
+     button, not so much that hierarchy is lost. Filled triangle
+     (▾) rotates cleanly on its centre. */
   .round-caret {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 1rem;
-    height: 1rem;
-    color: rgba(255,213,74,0.72);
-    font-size: 0.75rem;
+    width: 1.3rem;
+    height: 1.3rem;
+    border-radius: 0.35rem;
+    background: rgba(255,213,74,0.10);
+    color: var(--accent, #ffd54a);
+    font-size: 0.85rem;
     line-height: 1;
     flex: 0 0 auto;
-    transition: transform 0.18s ease, color 0.12s;
+    transition: transform 0.18s ease, background 0.12s;
   }
   .round-caret-folded {
     transform: rotate(-90deg);
   }
   .round-hdr:hover .round-caret {
-    color: var(--accent, #ffd54a);
+    background: rgba(255,213,74,0.20);
   }
   .round-name { flex: 1 1 auto; font-weight: 600; }
   .round-count {

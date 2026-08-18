@@ -676,24 +676,27 @@
   /* Caret uses the same rotate-when-folded convention as the History
      tab's round caret, plus the parent tournament caret. Filled
      triangle glyph so the rotation lands on its geometric centre
-     with no diagonal-baseline artefact. */
+     with no diagonal-baseline artefact. Chip background so the
+     control reads as clickable, not decorative. */
   .round-report-caret {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 1rem;
-    height: 1rem;
-    color: rgba(255, 213, 74, 0.72);
-    font-size: 0.75rem;
+    width: 1.3rem;
+    height: 1.3rem;
+    border-radius: 0.35rem;
+    background: rgba(255, 213, 74, 0.10);
+    color: var(--accent, #ffd54a);
+    font-size: 0.85rem;
     line-height: 1;
     flex: 0 0 auto;
-    transition: transform 0.18s ease, color 0.12s;
+    transition: transform 0.18s ease, background 0.12s;
   }
   .round-report-caret-folded {
     transform: rotate(-90deg);
   }
   .round-report-hdr:hover .round-report-caret {
-    color: var(--accent, #ffd54a);
+    background: rgba(255, 213, 74, 0.20);
   }
   .round-report-name { flex: 1 1 auto; }
   .round-report-count {
