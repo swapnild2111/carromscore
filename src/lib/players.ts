@@ -292,10 +292,6 @@ export function createPlayer(
   if (!isPlausibleName(canonicalName)) {
     throw new Error(`Refusing to create player with implausible name: ${canonicalName}`);
   }
-  const existing = memoryStore.find(
-    (p) => normalize(p.canonicalName) === norm,
-  );
-  if (existing) return existing;
   // Backwards-compat: `createPlayer(name, "uid")` legacy form still
   // works — the second arg is treated as createdBy only. v3.1+ callers
   // pass the object form with country + optional age/email/phone.
@@ -303,6 +299,20 @@ export function createPlayer(
     typeof metaOrCreatedBy === 'string'
       ? { createdBy: metaOrCreatedBy }
       : metaOrCreatedBy ?? {};
+  // Dedup key: when the caller specifies a country, two players are
+  // considered the "same" only if BOTH name and country match. This
+  // lets legitimate namesakes from different countries coexist
+  // ("Swapnil Deshpande" from DK vs SE vs IN are three distinct
+  // records). When no country is supplied, fall back to name-only
+  // dedup — preserves legacy behaviour for pre-v3.1 callers.
+  const metaCountry = meta.country ? meta.country.trim() : '';
+  const existing = memoryStore.find((p) => {
+    if (normalize(p.canonicalName) !== norm) return false;
+    if (!metaCountry) return true; // legacy: name-only match
+    const pCountry = p.country ? p.country.trim() : '';
+    return pCountry === metaCountry;
+  });
+  if (existing) return existing;
   // Stamp `createdBy` with the signed-in user's uid when the caller
   // doesn't override. Anonymous stays anonymous — field simply absent.
   const finalCreatedBy = meta.createdBy ?? currentUser()?.uid;

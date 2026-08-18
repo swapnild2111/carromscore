@@ -428,13 +428,21 @@
         continue;
       }
       const top = hits[0];
-      // Default action: exact match → alias (safe merge — the
-      // umpire typed a name identical after normalisation to an
-      // existing player, so we should link, not duplicate). Fuzzy
-      // and prefix → create (safer to keep separate; admin flips
-      // to alias explicitly when they know it's the same person).
+      // Default action:
+      //   - Exact match with a country mismatch → create (they're
+      //     namesakes from different countries — legitimately distinct
+      //     records. Reported 2026-08-18: adding "Swapnil Deshpande" (SE)
+      //     when DK/IN already existed silently aliased into the first
+      //     match and never became its own record).
+      //   - Exact match with same-or-blank country → alias (safe merge).
+      //   - Fuzzy / prefix → create (admin flips to alias explicitly
+      //     when they know it's the same person).
+      const topCountry = top.player.country ? top.player.country.trim() : '';
+      const batchCountry = addingCountry ? addingCountry.trim() : '';
+      const countryMismatch =
+        top.rank === 'exact' && batchCountry !== '' && topCountry !== '' && batchCountry !== topCountry;
       const defaultAction: ConflictAction =
-        top.rank === 'exact' ? 'alias' : 'create';
+        top.rank === 'exact' && !countryMismatch ? 'alias' : 'create';
       nextConflicts.push({
         typed,
         match: top,
