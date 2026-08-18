@@ -385,8 +385,31 @@
     // Read the tick so the derivation depends on it — Svelte's reactivity
     // then re-runs this on every subscribeStore() notify.
     void identityTick;
+    void tournamentTick;
     const q = text.trim();
     if (!q) return null;
+    // When the picked tournament has a country (a closed tournament,
+    // typically), prefer an exact identity player whose country
+    // matches the tournament's — otherwise a namesake with a
+    // different country gets auto-resolved and lands in the "not
+    // assigned" warning even though the DK-side namesake is
+    // legitimately on the roster. Reported 2026-08-18: Denmark
+    // Ranking Tournament + typed "Swapnil Deshpande" auto-resolved
+    // to the Sweden player id.
+    const t = pickedTournament();
+    const preferredCountry = t?.country ?? '';
+    if (preferredCountry) {
+      const all = loadAllPlayers();
+      const norm = q.toLowerCase();
+      const country = all.find(
+        (p) =>
+          p.canonicalName.trim().toLowerCase() === norm &&
+          (p.country ?? '').trim() === preferredCountry,
+      );
+      if (country) {
+        return { player: country, rank: 'exact', matchedOn: country.canonicalName };
+      }
+    }
     const hits = rankMatches(loadAllPlayers(), q, 1);
     const h = hits[0];
     if (!h) return null;
