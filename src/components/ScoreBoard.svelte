@@ -327,14 +327,48 @@
   // codes for the flag chip beside each header name. Doubles carries
   // A2/B2 too but we only surface a flag in singles mode where "the
   // player" is a single person.
-  let aResolvedId = $state<string | null>(null);
-  let bResolvedId = $state<string | null>(null);
+  // Read the identity handoff synchronously at script init (before the
+  // first render), not in onMount — otherwise the header flag would
+  // paint empty for one frame and then swap in once onMount fires. We
+  // need the URL params + matchStateKey right now, so parse them here.
+  // Guarded on typeof window for SSR-safety even though this component
+  // is client:only ("belt + braces": prevents build-time crashes if
+  // someone changes the hydration mode).
+  function readIdentitySeed(): {
+    aId: string | null;
+    bId: string | null;
+    aCountry: string;
+    bCountry: string;
+  } {
+    if (typeof window === 'undefined') return { aId: null, bId: null, aCountry: '', bCountry: '' };
+    try {
+      const q = new URLSearchParams(window.location.search);
+      const mode = q.get('mode') ?? 'singles';
+      const key = matchStateKey(
+        mode === 'doubles' || mode === 'practice' ? mode : 'singles',
+        q.get('playerA') ?? '',
+        q.get('playerB') ?? '',
+      );
+      const identity = loadMatchIdentity(key);
+      return {
+        aId: identity.aResolvedId ?? null,
+        bId: identity.bResolvedId ?? null,
+        aCountry: identity.aCountry ?? '',
+        bCountry: identity.bCountry ?? '',
+      };
+    } catch {
+      return { aId: null, bId: null, aCountry: '', bCountry: '' };
+    }
+  }
+  const _identitySeed = readIdentitySeed();
+  let aResolvedId = $state<string | null>(_identitySeed.aId);
+  let bResolvedId = $state<string | null>(_identitySeed.bId);
   // Country codes snapshotted at Setup so the flag renders on first
   // paint — no waiting for the Firebase player-store to hydrate.
   // Overridden by the derived below once the store has the resolved
   // player's current country field.
-  let aCountrySeed = $state('');
-  let bCountrySeed = $state('');
+  let aCountrySeed = $state(_identitySeed.aCountry);
+  let bCountrySeed = $state(_identitySeed.bCountry);
   // Bumped whenever the /players Firebase snapshot refreshes so
   // countryA/countryB re-derive when a late-arriving player record
   // brings its country field. subscribeStore fires the callback on
@@ -353,18 +387,9 @@
     // can surface country flags on the header. If there's no handoff
     // (mid-match refresh, no identity resolved, practice mode) these
     // stay null and no flag renders.
-    try {
-      const identity = loadMatchIdentity(storageKey);
-      aResolvedId = identity.aResolvedId ?? null;
-      bResolvedId = identity.bResolvedId ?? null;
-      aCountrySeed = identity.aCountry ?? '';
-      bCountrySeed = identity.bCountry ?? '';
-    } catch {
-      aResolvedId = null;
-      bResolvedId = null;
-      aCountrySeed = '';
-      bCountrySeed = '';
-    }
+    // Identity handoff already read at script init (see
+    // readIdentitySeed above) so first render paints with the correct
+    // flag. Nothing to do here.
     // Populate the Player identity store from Firebase so endMatch()'s
     // finishMatch() call can resolve existing player IDs (rather than
     // forking identity on a page-refreshed-mid-match device).

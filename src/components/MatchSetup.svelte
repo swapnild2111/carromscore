@@ -316,6 +316,17 @@
   // which means "create a new player when the match is saved").
   //
   // Keyed by the four possible name-input MatchConfig fields.
+  // Country codes captured alongside the resolved id so ScoreBoard can
+  // render the header flag on first paint without waiting for the
+  // Firebase player-store hydration. Set whenever a picker row is
+  // tapped or an exact-name auto-resolve fires — cleared when the name
+  // no longer resolves.
+  let resolvedPlayerCountries = $state<Record<string, string>>({
+    playerA: '',
+    playerA2: '',
+    playerB: '',
+    playerB2: '',
+  });
   let resolvedPlayerIds = $state<Record<string, string | null>>({
     playerA: null,
     playerA2: null,
@@ -385,8 +396,10 @@
     const h = topHit(text);
     if (h && h.rank === 'exact') {
       resolvedPlayerIds[key as string] = h.player.id;
+      resolvedPlayerCountries[key as string] = h.player.country ?? '';
     } else {
       resolvedPlayerIds[key as string] = null;
+      resolvedPlayerCountries[key as string] = '';
     }
   }
 
@@ -399,11 +412,16 @@
   function confirmAlias(key: keyof MatchConfig, hit: PlayerMatch, typed: string): void {
     addAlias(hit.player.id, typed);
     resolvedPlayerIds[key as string] = hit.player.id;
+    resolvedPlayerCountries[key as string] = hit.player.country ?? '';
   }
 
   function pick(key: keyof MatchConfig, row: PlayerRow) {
     (cfg[key] as string) = row.name;
     openPicker = null;
+    // Country from the picker row is the immediate source of truth for
+    // ScoreBoard's header flag — captured here alongside the resolved
+    // id so we don't depend on the async player-store hydration.
+    resolvedPlayerCountries[key as string] = row.country ?? '';
     // If the picked row corresponds to an identity-store player, resolve
     // to that id. When the row carries a country, prefer the identity
     // player with matching (name, country) — otherwise namesakes from
@@ -529,16 +547,12 @@
     // Snapshot the resolved player's country into the identity handoff
     // so ScoreBoard's header flag renders on first paint — no waiting
     // for the Firebase player-store hydration. Doubles gets no flag
-    // (team ≠ one person), so we only snapshot for singles.
-    const roster = loadAllPlayers();
-    const aCountry =
-      cfg.mode === 'singles' && resolvedPlayerIds.playerA
-        ? roster.find((p) => p.id === resolvedPlayerIds.playerA)?.country ?? ''
-        : '';
-    const bCountry =
-      cfg.mode === 'singles' && resolvedPlayerIds.playerB
-        ? roster.find((p) => p.id === resolvedPlayerIds.playerB)?.country ?? ''
-        : '';
+    // (team ≠ one person), so we only snapshot for singles. We read
+    // from resolvedPlayerCountries (captured by pick/onNameInput/
+    // confirmAlias) rather than the async player-store, so the flag
+    // survives a Setup → Score handoff on a cold cache.
+    const aCountry = cfg.mode === 'singles' ? resolvedPlayerCountries.playerA : '';
+    const bCountry = cfg.mode === 'singles' ? resolvedPlayerCountries.playerB : '';
     saveMatchIdentity(key, {
       aResolvedId: resolvedPlayerIds.playerA,
       a2ResolvedId: resolvedPlayerIds.playerA2,
