@@ -31,6 +31,9 @@
     loadAll as loadAllTournaments,
     loadAssignedPlayers,
     normalizeKey,
+    loadRounds,
+    rankRounds,
+    type Round,
     type Tournament,
   } from '../lib/tournaments';
   import {
@@ -265,6 +268,44 @@
   function pickTournament(name: string): void {
     cfg.tournament = name;
     showTournamentPicker = false;
+    // Reset the round tag whenever the tournament changes — a round
+    // is scoped to a specific tournament (its slug), so carrying the
+    // old round string into a new tournament would archive a
+    // round/roundKey pair that doesn't exist under the new parent.
+    cfg.round = '';
+  }
+
+  /**
+   * Round-picker plumbing (v3.2). Mirrors the tournament picker
+   * pattern above — free-text with dropdown suggestions ranked over
+   * the tournament's open rounds. Free-text is preserved even when
+   * no suggestion matches (same posture as tournament today) so the
+   * umpire can type a round the admin hasn't set up yet — the
+   * denormalised (round, roundKey) pair still lands on the archive
+   * and appears under an Unassigned sub-group in History.
+   */
+  let showRoundPicker = $state(false);
+  const currentTournamentKey = $derived(() => {
+    const raw = cfg.tournament.trim();
+    return raw ? normalizeKey(raw) : '';
+  });
+  /** Rounds attached to the currently-typed tournament, refreshed on
+   *  every tournament-store notify. Empty array when the tournament
+   *  is blank or has no rounds — used by the template to hide the
+   *  entire round-picker field. */
+  const currentTournamentRounds = $derived<Round[]>(() => {
+    void tournamentTick;
+    const key = currentTournamentKey();
+    return key ? loadRounds(key) : [];
+  });
+  function roundSuggestions(q: string): Round[] {
+    void tournamentTick;
+    const key = currentTournamentKey();
+    return key ? rankRounds(key, q, 8) : [];
+  }
+  function pickRound(name: string): void {
+    cfg.round = name;
+    showRoundPicker = false;
   }
 
   function setMode(m: Mode) {
@@ -839,7 +880,17 @@
       autocomplete="off"
       placeholder="Event name — Silver Cup 2026, Sunday Club Night, …"
       value={cfg.tournament}
-      oninput={(e) => (cfg.tournament = (e.currentTarget as HTMLInputElement).value)}
+      oninput={(e) => {
+        const nextValue = (e.currentTarget as HTMLInputElement).value;
+        // Clear the round tag whenever the tournament identity might
+        // change (either the raw text or the resolved key). A round is
+        // scoped to a specific tournament — carrying an old round
+        // string into a new one would archive a mismatched pair.
+        const prevKey = normalizeKey(cfg.tournament.trim());
+        const nextKey = normalizeKey(nextValue.trim());
+        if (prevKey !== nextKey) cfg.round = '';
+        cfg.tournament = nextValue;
+      }}
       onfocus={() => (showTournamentPicker = true)}
       onblur={() => setTimeout(() => (showTournamentPicker = false), 200)}
       maxlength="60"
@@ -859,6 +910,50 @@
       {/if}
     {/if}
   </label>
+
+  <!--
+    Round picker (v3.2). Only shown when the resolved tournament
+    carries at least one round. Free-text with dropdown suggestions
+    ranked over the tournament's open rounds; closed rounds are
+    filtered out at the rankRounds source so the umpire can't
+    accidentally add a match to a stage the organiser has closed.
+    Missing rounds field on a legacy tournament → dropdown is empty
+    → the whole picker hides.
+  -->
+  {#if currentTournamentRounds().length > 0}
+  <label class="tournament-input">
+    <span>
+      Round <em class="hint-inline">(optional)</em>
+      <HelpTip label="Help: round">
+        Which stage of the tournament this match belongs to — Round of 16, Quarter-finals, Semi-finals, Final, etc. Rounds are set up per tournament by the organiser. Leave blank if the tournament doesn't have named stages.
+      </HelpTip>
+    </span>
+    <input
+      type="text"
+      autocomplete="off"
+      placeholder="Round of 16, Quarter-finals, …"
+      value={cfg.round}
+      oninput={(e) => (cfg.round = (e.currentTarget as HTMLInputElement).value)}
+      onfocus={() => (showRoundPicker = true)}
+      onblur={() => setTimeout(() => (showRoundPicker = false), 200)}
+      maxlength="60"
+    />
+    {#if showRoundPicker}
+      {@const rSuggestions = roundSuggestions(cfg.round)}
+      {#if rSuggestions.length > 0}
+        <ul class="suggest">
+          {#each rSuggestions as r (r.key)}
+            <li>
+              <button type="button" onclick={() => pickRound(r.name)}>
+                <span class="pname">{r.name}</span>
+              </button>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    {/if}
+  </label>
+  {/if}
   {/if}
 
   {#if cfg.mode === 'singles'}
