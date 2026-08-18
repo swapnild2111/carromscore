@@ -1936,12 +1936,12 @@
   }
 
   /* ─── Round sub-groups inside a tournament (v3.2) ─────────────────
-     The round header sits inside a `.tour-group` and is styled at
-     ~80% of the tour-hdr weight so it reads as a subordinate
-     hierarchy without introducing a whole new visual language. When
-     a tournament has no rounds, `.round-flat` strips the wrapping
-     visual entirely so the pre-v3.2 flat render is preserved
-     pixel-perfect. */
+     A round is rendered as its own bordered card, indented inside
+     the tournament wrapper so the tournament > round nesting reads
+     visually. The card + header combo mirrors the Reports tab's
+     per-round card so both surfaces share one visual language. The
+     `.round-flat` variant (tournament with no rounds configured)
+     drops the wrapper entirely — pre-v3.2 flat render preserved. */
   .round-group {
     display: block;
   }
@@ -1953,44 +1953,53 @@
        already provides the outer chrome. */
     padding: 0 0.6rem 0.75rem;
   }
+  /* Bordered card, only in the has-rounds variant. Left-indented so
+     the nesting under the tournament header reads at a glance. */
+  .round-group:not(.round-flat) {
+    margin: 0.5rem 0.6rem;
+    background: rgba(255, 213, 74, 0.04);
+    border: 1px solid rgba(255, 213, 74, 0.18);
+    border-radius: 0.5rem;
+    overflow: hidden;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  }
   .round-hdr {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: 0.55rem;
     width: 100%;
-    padding: 0.45rem 0.85rem 0.45rem 1.5rem;
-    /* Subtle tinted strip so the row reads as clickable even before
-       hover. Half the accent weight of the tournament header so the
-       hierarchy still reads clearly (tournament > round). */
-    background: rgba(255,213,74,0.03);
-    color: rgba(255,255,255,0.9);
+    padding: 0.55rem 0.85rem;
+    background: transparent;
+    color: var(--fg, #f5f5f5);
     border: 0;
-    border-top: 1px solid rgba(255,213,74,0.10);
-    font-size: 0.85rem;
+    font: inherit;
+    font-size: 0.92rem;
+    font-weight: 600;
     letter-spacing: 0.02em;
     cursor: pointer;
     text-align: left;
+    transition: background 0.12s;
   }
   .round-hdr:hover { background: rgba(255,213,74,0.08); }
   .round-hdr:focus-visible {
     outline: 2px solid var(--accent, #ffd54a);
     outline-offset: -2px;
   }
-  /* Round caret: same "▾ open / rotated-90° folded" convention as the
-     tournament caret. Gets a subtle pill background at ~half the
-     visual weight of the tournament caret — enough to read as a
-     button, not so much that hierarchy is lost. Filled triangle
-     (▾) rotates cleanly on its centre. */
+  /* Round caret: filled ▾ that rotates -90° when the round is
+     folded. Sized to match the tournament caret's chrome so it
+     reads unambiguously as a button — hierarchy is carried by the
+     row height + card treatment, not by shrinking the caret to
+     invisibility. */
   .round-caret {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 1.3rem;
-    height: 1.3rem;
-    border-radius: 0.35rem;
-    background: rgba(255,213,74,0.10);
+    width: 1.5rem;
+    height: 1.5rem;
+    border-radius: 0.4rem;
+    background: rgba(255,213,74,0.14);
     color: var(--accent, #ffd54a);
-    font-size: 0.85rem;
+    font-size: 1rem;
     line-height: 1;
     flex: 0 0 auto;
     transition: transform 0.18s ease, background 0.12s;
@@ -1999,27 +2008,36 @@
     transform: rotate(-90deg);
   }
   .round-hdr:hover .round-caret {
-    background: rgba(255,213,74,0.20);
+    background: rgba(255,213,74,0.24);
   }
-  .round-name { flex: 1 1 auto; font-weight: 600; }
+  .round-name { flex: 1 1 auto; }
   .round-count {
-    font-size: 0.7rem;
+    font-size: 0.72rem;
     font-weight: 500;
-    color: rgba(255,255,255,0.55);
-    background: rgba(255,255,255,0.06);
-    padding: 0.08rem 0.4rem;
+    color: rgba(255,255,255,0.65);
+    background: rgba(255,255,255,0.08);
+    padding: 0.1rem 0.5rem;
     border-radius: 999px;
     flex: 0 0 auto;
   }
   /* Unassigned bucket rendered at the tail of a rounds-having
-     tournament. Slightly muted vs a real round header to visually
+     tournament. Slightly muted vs a real round card to visually
      deprioritise "these matches lack the structured tag". */
-  .round-group.round-unassigned .round-hdr {
-    color: rgba(255,255,255,0.55);
+  .round-group.round-unassigned {
+    background: rgba(255, 255, 255, 0.02);
+    border-color: rgba(255, 255, 255, 0.10);
+  }
+  .round-group.round-unassigned .round-name {
+    color: rgba(255,255,255,0.65);
     font-style: italic;
+    font-weight: 500;
+  }
+  .round-group.round-unassigned .round-caret {
+    background: rgba(255,255,255,0.08);
+    color: rgba(255,255,255,0.55);
   }
   .round-group:not(.round-flat) > .grid {
-    padding: 0 0.6rem 0.5rem 1.5rem;
+    padding: 0 0.6rem 0.5rem;
   }
 
   /* Responsive grid: 1 col on phones, 2 on wider phones/tablets,

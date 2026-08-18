@@ -647,15 +647,16 @@
     margin-top: 0.5rem;
   }
   .round-report {
-    background: rgba(255, 255, 255, 0.02);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 213, 74, 0.04);
+    border: 1px solid rgba(255, 213, 74, 0.18);
     border-radius: 0.6rem;
     overflow: hidden;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
   }
   .round-report-hdr {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: 0.55rem;
     width: 100%;
     padding: 0.6rem 0.9rem;
     background: transparent;
@@ -664,30 +665,30 @@
     text-align: left;
     cursor: pointer;
     font: inherit;
-    font-size: 0.9rem;
+    font-size: 0.92rem;
     font-weight: 600;
     letter-spacing: 0.02em;
+    transition: background 0.12s;
   }
-  .round-report-hdr:hover { background: rgba(255, 255, 255, 0.03); }
+  .round-report-hdr:hover { background: rgba(255, 213, 74, 0.08); }
   .round-report-hdr:focus-visible {
     outline: 2px solid var(--accent, #ffd54a);
     outline-offset: -2px;
   }
-  /* Caret uses the same rotate-when-folded convention as the History
-     tab's round caret, plus the parent tournament caret. Filled
-     triangle glyph so the rotation lands on its geometric centre
-     with no diagonal-baseline artefact. Chip background so the
-     control reads as clickable, not decorative. */
+  /* Caret matches the History tab's round caret + the parent
+     tournament caret. Filled ▾ that rotates -90° when folded;
+     chip background at the same footprint as the tournament caret
+     so the control reads unambiguously as a button. */
   .round-report-caret {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 1.3rem;
-    height: 1.3rem;
-    border-radius: 0.35rem;
-    background: rgba(255, 213, 74, 0.10);
+    width: 1.5rem;
+    height: 1.5rem;
+    border-radius: 0.4rem;
+    background: rgba(255, 213, 74, 0.14);
     color: var(--accent, #ffd54a);
-    font-size: 0.85rem;
+    font-size: 1rem;
     line-height: 1;
     flex: 0 0 auto;
     transition: transform 0.18s ease, background 0.12s;
@@ -696,7 +697,7 @@
     transform: rotate(-90deg);
   }
   .round-report-hdr:hover .round-report-caret {
-    background: rgba(255, 213, 74, 0.20);
+    background: rgba(255, 213, 74, 0.24);
   }
   .round-report-name { flex: 1 1 auto; }
   .round-report-count {
@@ -708,10 +709,19 @@
     border-radius: 999px;
     flex: 0 0 auto;
   }
+  /* Unassigned bucket — visually deprioritised vs a real round. */
+  .round-report.round-report-unassigned {
+    background: rgba(255, 255, 255, 0.02);
+    border-color: rgba(255, 255, 255, 0.10);
+  }
   .round-report-unassigned .round-report-name {
-    color: rgba(255, 255, 255, 0.6);
+    color: rgba(255, 255, 255, 0.65);
     font-style: italic;
     font-weight: 500;
+  }
+  .round-report-unassigned .round-report-caret {
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.55);
   }
   .round-report-body {
     display: flex;
