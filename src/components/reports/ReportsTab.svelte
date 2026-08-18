@@ -372,7 +372,7 @@
               aria-expanded={open}
               onclick={() => toggleRound(rr.roundKey)}
             >
-              <span class="round-report-caret" aria-hidden="true">{open ? '▾' : '▸'}</span>
+              <span class="round-report-caret" class:round-report-caret-folded={!open} aria-hidden="true">▾</span>
               <span class="round-report-name">{rr.roundName}</span>
               <span class="round-report-count">{rr.matches} match{rr.matches === 1 ? '' : 'es'}</span>
             </button>
@@ -673,11 +673,27 @@
     outline: 2px solid var(--accent, #ffd54a);
     outline-offset: -2px;
   }
+  /* Caret uses the same rotate-when-folded convention as the History
+     tab's round caret, plus the parent tournament caret. Filled
+     triangle glyph so the rotation lands on its geometric centre
+     with no diagonal-baseline artefact. */
   .round-report-caret {
-    color: rgba(255, 255, 255, 0.5);
-    width: 0.9rem;
     display: inline-flex;
+    align-items: center;
     justify-content: center;
+    width: 1rem;
+    height: 1rem;
+    color: rgba(255, 213, 74, 0.72);
+    font-size: 0.75rem;
+    line-height: 1;
+    flex: 0 0 auto;
+    transition: transform 0.18s ease, color 0.12s;
+  }
+  .round-report-caret-folded {
+    transform: rotate(-90deg);
+  }
+  .round-report-hdr:hover .round-report-caret {
+    color: var(--accent, #ffd54a);
   }
   .round-report-name { flex: 1 1 auto; }
   .round-report-count {

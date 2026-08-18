@@ -1214,7 +1214,7 @@
                 aria-expanded={!roundFolded}
                 onclick={() => toggleGroup('history', `${bucket}::${roundKey}`)}
               >
-                <span class="round-caret" class:round-caret-folded={roundFolded} aria-hidden="true">▸</span>
+                <span class="round-caret" class:round-caret-folded={roundFolded} aria-hidden="true">▾</span>
                 <span class="round-name">{roundName}</span>
                 <span class="round-count">{roundMatches.length}</span>
               </button>
@@ -1973,17 +1973,28 @@
     outline: 2px solid var(--accent, #ffd54a);
     outline-offset: -2px;
   }
+  /* Round caret: same "▾ open / rotated-90° folded" convention as the
+     tournament caret, but at a smaller size and without a pill
+     background so it reads as visually subordinate. Filled triangle
+     (▾) rotates cleanly on its centre — no diagonal-baseline artefact
+     that the outline ▸ glyph had in v3.2.0-beta.6. */
   .round-caret {
     display: inline-flex;
-    width: 0.9rem;
-    color: rgba(255,255,255,0.4);
-    transition: transform 0.15s ease;
+    align-items: center;
+    justify-content: center;
+    width: 1rem;
+    height: 1rem;
+    color: rgba(255,213,74,0.72);
+    font-size: 0.75rem;
+    line-height: 1;
+    flex: 0 0 auto;
+    transition: transform 0.18s ease, color 0.12s;
   }
   .round-caret-folded {
-    transform: rotate(0deg);
+    transform: rotate(-90deg);
   }
-  .round-caret:not(.round-caret-folded) {
-    transform: rotate(90deg);
+  .round-hdr:hover .round-caret {
+    color: var(--accent, #ffd54a);
   }
   .round-name { flex: 1 1 auto; font-weight: 600; }
   .round-count {
