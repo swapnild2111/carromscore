@@ -122,6 +122,15 @@
   let pointsAtBoardStart = $state<{ a: number; b: number }>({ a: 0, b: 0 });
   let queenRequiredToast = $state(false);
   /**
+   * Fires when board is closed (BOARD+1 / SET+ / End) with a queen
+   * marked but the queen-holder's per-board score is < QUEEN_VALUE.
+   * Real-carrom rule: covering the queen requires the holder to
+   * pocket at least 3 points on that board (their own pucks + queen
+   * = 3 minimum). If short, umpire either hasn't finished entering
+   * points, or the queen wasn't actually covered (transfer or untap).
+   */
+  let queenCreditToast = $state('');
+  /**
    * Fires when the umpire taps BOARD+1 after a side has already
    * reached pointsTarget in the current set. Added 2026-08-09
    * after Prem/Yash's test session recorded a phantom 9th board on
@@ -792,6 +801,12 @@
           window.setTimeout(() => { queenRequiredToast = false; }, 2500);
           return;
         }
+        const qProblem = queenCreditProblem();
+        if (qProblem) {
+          queenCreditToast = qProblem;
+          window.setTimeout(() => { queenCreditToast = ''; }, 3500);
+          return;
+        }
         const entry: BoardEntry = {
           set: sideA.sets + sideB.sets,
           // Snapshot rows are 1-indexed (see comment on `board` state).
@@ -937,6 +952,12 @@
         window.setTimeout(() => { queenRequiredToast = false; }, 2500);
         return;
       }
+      const qProblem = queenCreditProblem();
+      if (qProblem) {
+        queenCreditToast = qProblem;
+        window.setTimeout(() => { queenCreditToast = ''; }, 3500);
+        return;
+      }
       // Snapshot the completed board. `set` is 0-indexed for the
       // current set within the match.
       const entry: BoardEntry = {
@@ -1029,51 +1050,43 @@
       window.setTimeout(() => { matchDecidedToast = false; }, 2500);
       return;
     }
-    const prev = queenHolder;
     if (queenHolder === side) {
       queenHolder = null;
     } else {
       queenHolder = side;
     }
-    // Real-carrom queen credit: covering the queen is worth
-    // QUEEN_VALUE (3) points on the board it was pocketed. Instead
-    // of leaving the umpire to remember to tap POINTS+3, adjust the
-    // running-board delta automatically:
-    //   - side A claimed queen (was null): +3 to sideA if not locked
-    //   - side A released queen (was 'a'): -3 from sideA if it had 3+
-    //   - transfer 'a' → 'b': -3 from A, +3 to B (same conditions)
-    // "Locked" = the pre-current-board cumulative is already within
-    // a queen's worth of pointsTarget (ICF advantage rule) — queen
-    // then scores 0, and we skip the auto-bump both ways.
-    if (isPractice) return;
-    if (prev === side && queenHolder === null) {
-      // Untick: undo the +3 if it was applied
-      const s = side === 'a' ? sideA : sideB;
-      const perBoard = s.points - (side === 'a' ? pointsAtBoardStart.a : pointsAtBoardStart.b);
-      if (perBoard >= QUEEN_VALUE) {
-        s.points = Math.max(0, s.points - QUEEN_VALUE);
-      }
-      return;
+  }
+
+  /**
+   * Real-carrom queen-credit validator. When a side has claimed the
+   * queen on the running board, ICF rules say they must ALSO have
+   * pocketed enough of their own pucks that their per-board score is
+   * at least QUEEN_VALUE (3). If it isn't, either the umpire hasn't
+   * finished entering points OR the queen didn't actually stay
+   * covered (should be transferred to the opponent or untapped).
+   * Returns null when the running board is OK to close, or a toast
+   * message describing what's wrong.
+   *
+   * Skipped when:
+   *   - the queen-holder side was locked-at-board-start (already
+   *     within a queen's worth of pointsTarget): queen scores 0
+   *     anyway, so the >=3 minimum doesn't apply.
+   *   - practice mode: no queen concept in the running-board sense.
+   *   - no queenHolder (edge cases: nobody covered the queen, End
+   *     path handles this via queenRequiredToast separately).
+   */
+  function queenCreditProblem(): string | null {
+    if (isPractice) return null;
+    if (queenHolder === null) return null;
+    const holderBaseline = queenHolder === 'a' ? pointsAtBoardStart.a : pointsAtBoardStart.b;
+    const lockedAtBoardStart = holderBaseline >= queenLockThreshold;
+    if (lockedAtBoardStart) return null;
+    const holderSide = queenHolder === 'a' ? sideA : sideB;
+    const holderPerBoard = holderSide.points - holderBaseline;
+    if (holderPerBoard < QUEEN_VALUE) {
+      return `Queen holder needs at least ${QUEEN_VALUE} points on this board`;
     }
-    if (queenHolder !== null) {
-      // Newly claimed (from null) or transferred from the other side.
-      // If transferred, subtract from the previous holder first.
-      if (prev && prev !== queenHolder) {
-        const pSide = prev === 'a' ? sideA : sideB;
-        const pBaseline = prev === 'a' ? pointsAtBoardStart.a : pointsAtBoardStart.b;
-        const pPerBoard = pSide.points - pBaseline;
-        if (pPerBoard >= QUEEN_VALUE) {
-          pSide.points = Math.max(0, pSide.points - QUEEN_VALUE);
-        }
-      }
-      // Add to the new holder if not locked at start-of-board.
-      const s = queenHolder === 'a' ? sideA : sideB;
-      const baseline = queenHolder === 'a' ? pointsAtBoardStart.a : pointsAtBoardStart.b;
-      const lockedAtBoardStart = baseline >= queenLockThreshold;
-      if (!lockedAtBoardStart) {
-        s.points = Math.min(cfg.pointsTarget, s.points + QUEEN_VALUE);
-      }
-    }
+    return null;
   }
 
   function adjustPracticeBoard(setIdx: number, boardIdx: number, delta: number) {
@@ -1224,6 +1237,12 @@
         // with the same toast that adjustBoard(+1) uses.
         queenRequiredToast = true;
         window.setTimeout(() => { queenRequiredToast = false; }, 2500);
+        return;
+      }
+      const qProblem = queenCreditProblem();
+      if (qProblem) {
+        queenCreditToast = qProblem;
+        window.setTimeout(() => { queenCreditToast = ''; }, 3500);
         return;
       }
       const entry: BoardEntry = {
@@ -1488,31 +1507,17 @@
   }
 
   function swapSides() {
-    // Refuse a mid-set swap. Physical carrom convention: seats
-    // swap between sets (or at the mid-point of a decider set),
-    // never in the middle of an in-flight board. The boardLog
-    // entries carry pointsA/pointsB tied to the seats-at-that-
-    // moment; swapping the top-row seats WITHOUT any live
-    // scoring in the current set is safe — the log records
-    // completed sets under their pre-swap labels, and the new
-    // set's future entries record under the post-swap labels.
-    // (Original 2026-08-18 guard was too aggressive — it refused
-    // legitimate between-set swaps, reported 2026-08-18.)
+    // Physical seat swap: every per-player attribute travels with
+    // the player, so their names, notes, colours, SET counts, AND
+    // current-set POINTS all move together. BOARD stays put — it
+    // belongs to the match, not a player.
     //
-    // "Current set has no in-flight scoring" = board counter is
-    // 0 (no board completed yet in this set) AND both sides at
-    // 0 points (no running-board deltas). At set-transition,
-    // adjustSets() resets exactly these values, so a swap
-    // tapped right after crediting SET+1 lands here.
-    const midSet = !isPractice && (board > 0 || sideA.points !== 0 || sideB.points !== 0);
-    if (midSet) {
-      swapBlockedToast = true;
-      window.setTimeout(() => { swapBlockedToast = false; }, 3000);
-      return;
-    }
-    // Physical seat swap: every per-player attribute travels with the player,
-    // so their names, notes, colours, SET counts, AND current-set POINTS all
-    // move together. BOARD stays put — it belongs to the match, not a player.
+    // Allowed at any point in the match per user rule (2026-08-18):
+    // physical carrom seat-swaps happen between sets, at the halfway
+    // point of a decider set, or when players just decide to swap.
+    // All three cases produce the same top-row swap; the boardLog
+    // entries already recorded remain honest under their pre-swap
+    // labels (they carry the seat that was scoring at THAT time).
     const tmpName = sideA.name;
     sideA.name = sideB.name;
     sideB.name = tmpName;
@@ -1525,17 +1530,21 @@
     const tmpPoints = sideA.points;
     sideA.points = sideB.points;
     sideB.points = tmpPoints;
+    // Also swap the per-board baseline so the running-board delta
+    // (sideA.points - pointsAtBoardStart.a) is preserved for the
+    // player who scored it. Without this, a mid-board swap would
+    // corrupt the delta when BOARD+1 finally captures the row.
+    const tmpBaseline = pointsAtBoardStart.a;
+    pointsAtBoardStart = { a: pointsAtBoardStart.b, b: tmpBaseline };
     const tmpColour = colourA;
     colourA = colourB;
     colourB = tmpColour;
     // BREAK belongs to a player (match-long assignment), so flip it so
     // the chip visually stays with the same person after the seat swap.
     currentBreak = currentBreak === 'a' ? 'b' : 'a';
-    // QUEEN is per-board and often re-negotiated after a swap-sides
-    // (players re-position, previous board's queen is no longer the
-    // authoritative state). Clear it to grey on both sides — organiser
-    // can tap either coin to re-mark once play resumes.
-    queenHolder = null;
+    // QUEEN also travels with the player who covered it.
+    if (queenHolder === 'a') queenHolder = 'b';
+    else if (queenHolder === 'b') queenHolder = 'a';
   }
 
   function resetScores() {
@@ -2429,6 +2438,20 @@
     </div>
   {/if}
 
+  {#if queenCreditToast}
+    <!--
+      Fires when BOARD+1 / SET+1 / End tries to close a board where
+      the queen-holder has fewer than 3 per-board points. Real
+      carrom: queen cover requires the holder to also pocket enough
+      of their own pucks (3 minimum). Message tells the umpire what
+      the ceiling is so they can adjust POINTS+ or transfer/untap
+      the queen if it didn't actually stay covered.
+    -->
+    <div class="queen-toast" role="status" aria-live="polite">
+      {queenCreditToast}
+    </div>
+  {/if}
+
   {#if confirmReset}
     <div class="dialog" role="dialog" aria-modal="true">
       <div class="dialog-card exit">
@@ -3216,6 +3239,33 @@
     overflow-y: auto;
     padding: 0.9rem 0.9rem 1rem;
     text-align: left;
+    position: relative;
+  }
+  /* Names pill and top-row score summary pinned to the top of the
+     scorecard modal so long per-set tables scroll behind them.
+     .scorecard-card is the scroll container; sticky children latch
+     to its top edge. */
+  .scorecard-card :global(.hdr),
+  .scorecard-card :global(.board) {
+    position: sticky;
+    z-index: 2;
+    background: #0f0f0f;
+  }
+  .scorecard-card :global(.hdr) {
+    top: 0;
+    padding-top: 0.25rem;
+  }
+  .scorecard-card :global(.board) {
+    top: 3rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid #1e1e1e;
+    margin-bottom: 0.25rem;
+  }
+  /* Close ✕ button sits absolute in scorecard-card top-right; make
+     sure it stays above the sticky sections when they scroll into
+     the pinned zone. */
+  .scorecard-card .dialog-close {
+    z-index: 3;
   }
   /* "Fix this match" admin surface at the bottom of the scorecard
      modal. Only rendered for authorised users (super OR organiser
