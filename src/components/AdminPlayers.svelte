@@ -143,7 +143,19 @@
   const filtered = $derived(() => {
     void tick;
     const q = query.trim().toLowerCase();
-    const all = loadAll();
+    let all = loadAll();
+    // v3.3: organisers see only players they created. Super sees
+    // everything. Reads on /players are public (the home picker
+    // needs them), but the admin list is scoped to "records you can
+    // act on" so the surface isn't noisy with untouchable rows.
+    if (role && !role.isSuper) {
+      if (!role.isOrganiser) {
+        all = [];
+      } else {
+        const myUid = currentUser()?.uid;
+        all = myUid ? all.filter((p) => p.createdBy === myUid) : [];
+      }
+    }
     if (!q) return all.slice(0, 200);
     return all
       .filter((p) => p.canonicalName.toLowerCase().includes(q))

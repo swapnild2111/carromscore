@@ -184,7 +184,17 @@
 
   const list = $derived(() => {
     void tick;
-    return loadAll();
+    const all = loadAll();
+    // v3.3: organisers see only tournaments they created. Super sees
+    // everything. Reads on /tournaments are public in RTDB (so other
+    // clients can render the picker + lobby), but the admin list is
+    // scoped to "records you can act on" — otherwise the surface is
+    // noisy and misleading.
+    if (!role || role.isSuper) return all;
+    if (!role.isOrganiser) return [];
+    const myUid = currentUser()?.uid;
+    if (!myUid) return [];
+    return all.filter((t) => t.createdBy === myUid);
   });
 
   /** Search-filtered view of `list()`. Empty query = full list.
