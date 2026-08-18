@@ -526,11 +526,26 @@
     // same names, then persist the fresh resolutions + start timestamp
     // so the score screen can pass them into finishMatch() on End.
     clearMatchIdentity(key);
+    // Snapshot the resolved player's country into the identity handoff
+    // so ScoreBoard's header flag renders on first paint — no waiting
+    // for the Firebase player-store hydration. Doubles gets no flag
+    // (team ≠ one person), so we only snapshot for singles.
+    const roster = loadAllPlayers();
+    const aCountry =
+      cfg.mode === 'singles' && resolvedPlayerIds.playerA
+        ? roster.find((p) => p.id === resolvedPlayerIds.playerA)?.country ?? ''
+        : '';
+    const bCountry =
+      cfg.mode === 'singles' && resolvedPlayerIds.playerB
+        ? roster.find((p) => p.id === resolvedPlayerIds.playerB)?.country ?? ''
+        : '';
     saveMatchIdentity(key, {
       aResolvedId: resolvedPlayerIds.playerA,
       a2ResolvedId: resolvedPlayerIds.playerA2,
       bResolvedId: resolvedPlayerIds.playerB,
       b2ResolvedId: resolvedPlayerIds.playerB2,
+      ...(aCountry ? { aCountry } : {}),
+      ...(bCountry ? { bCountry } : {}),
     });
     saveMatchStart(key, Date.now());
     // Remember these names in the per-device roster so the picker

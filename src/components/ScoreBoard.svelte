@@ -228,15 +228,21 @@
    */
   const countryA = $derived.by((): string => {
     void playerStoreTick;
-    if (cfg.mode !== 'singles' || !aResolvedId) return '';
-    const p = loadAllPlayers().find((x) => x.id === aResolvedId);
-    return p?.country ?? '';
+    if (cfg.mode !== 'singles') return '';
+    if (aResolvedId) {
+      const p = loadAllPlayers().find((x) => x.id === aResolvedId);
+      if (p?.country) return p.country;
+    }
+    return aCountrySeed;
   });
   const countryB = $derived.by((): string => {
     void playerStoreTick;
-    if (cfg.mode !== 'singles' || !bResolvedId) return '';
-    const p = loadAllPlayers().find((x) => x.id === bResolvedId);
-    return p?.country ?? '';
+    if (cfg.mode !== 'singles') return '';
+    if (bResolvedId) {
+      const p = loadAllPlayers().find((x) => x.id === bResolvedId);
+      if (p?.country) return p.country;
+    }
+    return bCountrySeed;
   });
   let practiceBoards = $state<number[][]>([]);
   // Currently-visible set in Practice mode. Paginated: one set on screen
@@ -323,6 +329,12 @@
   // player" is a single person.
   let aResolvedId = $state<string | null>(null);
   let bResolvedId = $state<string | null>(null);
+  // Country codes snapshotted at Setup so the flag renders on first
+  // paint — no waiting for the Firebase player-store to hydrate.
+  // Overridden by the derived below once the store has the resolved
+  // player's current country field.
+  let aCountrySeed = $state('');
+  let bCountrySeed = $state('');
   // Bumped whenever the /players Firebase snapshot refreshes so
   // countryA/countryB re-derive when a late-arriving player record
   // brings its country field. subscribeStore fires the callback on
@@ -345,9 +357,13 @@
       const identity = loadMatchIdentity(storageKey);
       aResolvedId = identity.aResolvedId ?? null;
       bResolvedId = identity.bResolvedId ?? null;
+      aCountrySeed = identity.aCountry ?? '';
+      bCountrySeed = identity.bCountry ?? '';
     } catch {
       aResolvedId = null;
       bResolvedId = null;
+      aCountrySeed = '';
+      bCountrySeed = '';
     }
     // Populate the Player identity store from Firebase so endMatch()'s
     // finishMatch() call can resolve existing player IDs (rather than
@@ -1660,6 +1676,9 @@
     const tmpResolved = aResolvedId;
     aResolvedId = bResolvedId;
     bResolvedId = tmpResolved;
+    const tmpCountrySeed = aCountrySeed;
+    aCountrySeed = bCountrySeed;
+    bCountrySeed = tmpCountrySeed;
   }
 
   function resetScores() {
