@@ -162,32 +162,35 @@ Full guide: [Broadcast overlay](./docs/features/broadcast-overlay.md).
 ## Running a tournament
 
 Sign in with Google via the **Sign in** link in any footer. Once
-you're set up as an organiser for a tournament, the account menu
+you're onboarded as an **organiser** (v3.3+), the account menu
 gets an **Open admin panel ⇗** link:
 
-- **Players** — bulk-add rosters (comma-separated or one per line),
-  resolve name conflicts by merging aliases or keeping separate,
-  rename, or remove.
-- **Tournaments** — create, rename, delete, and manage the list of
-  co-organisers for events you organise. Search filters the list.
-- **Live matches** — see every ongoing broadcast, delete
-  yours or your tournament's if it went sideways.
+- **Players** — create players you'll use in your events, edit or
+  delete any you created. Bulk-add rosters (comma-separated or
+  one per line), resolve name conflicts by merging aliases or
+  keeping them separate.
+- **Tournaments** — create your own tournaments, edit them (name,
+  open/closed access, country), and manage their rounds and
+  assigned players from inside the Edit dialog. Full control over
+  events you created.
+- **Live matches** — every ongoing broadcast; delete yours if a
+  match went sideways.
 - **History cleanup** — same treatment for archived matches.
 
-Organisers can also fix or delete any match tagged to their events
-directly from the lobby History tab — a ✎ pencil appears on cards
-they can edit.
+Organisers can also fix or delete any match tagged to a tournament
+they created, directly from the lobby History tab — a ✎ pencil
+appears on cards they can edit.
 
-To become an organiser, share your Firebase UID with the super-admin
-(visible in the "not authorised" dialog on first sign-in) and they'll
-assign you.
+**To become an organiser:** sign in at least once, then ask the
+super-admin (Carromscore's maintainer) to onboard you by Gmail
+address. One-time setup — from then on you self-serve tournaments,
+players, and everything under them.
 
-The super-admin (Carromscore's maintainer) has all of the above plus
-Roles (grant / revoke organiser status by email) and an audit log
-covering every administrative write. See
-[docs/admin.md](./docs/admin.md) for the maintainer guide and
-[docs/admin-verification.md](./docs/admin-verification.md) for the
-E2E verification checklist.
+The super-admin has all of the above plus Roles (onboard / revoke
+organisers by email) and an audit log covering every administrative
+write. See [docs/admin.md](./docs/admin.md) for the maintainer
+guide and [docs/admin-verification.md](./docs/admin-verification.md)
+for the E2E verification checklist.
 
 ## Credits
 

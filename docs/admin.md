@@ -143,9 +143,9 @@ Super sees Edit/Delete on every row.
   state field. **Open** (default) accepts new matches;
   **Closed** rejects them — the home form warns the umpire that
   "Silver Cup 2026 is closed" when they pick a closed tournament,
-  though the warning is advisory and can be overridden. Toggle
-  state per row. Organiser assignment stays independent of state
-  — closed tournaments can still be edited by their organisers.
+  though the warning is advisory and can be overridden. Toggled
+  from the Edit dialog. Closed tournaments stay editable by the
+  organiser who created them (v3.3 own-only auth).
 - **Rounds (v3.2)** — every tournament can carry a list of named
   stages (Round of 16, Quarter-finals, Semi-finals, Final, ...).
   Umpires pick a round at match setup so History and Reports can
