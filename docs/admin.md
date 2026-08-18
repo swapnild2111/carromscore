@@ -15,10 +15,16 @@ Two roles, both stored in RTDB:
 
 - **super** — `/adminRoles/{uid} = "super"`. Full CRUD on every
   data path. Sees the `/admin/` page. That's you (the maintainer).
-- **organiser** — `/tournaments/{key}/organisers/{uid} = true`.
-  Can edit or delete any match whose `tournament` field points at
-  this tournament. Cannot rename or delete the tournament itself
-  (super-only). Cannot access `/admin/`.
+- **organiser (v3.3)** — `/organiserRoles/{uid} = true`. A
+  global role, not scoped to a specific tournament. Once
+  onboarded, an organiser can:
+  - Create tournaments; edit/delete tournaments they created.
+    Full control over rounds, open/closed state, assigned
+    players, and matches inside their own tournaments.
+  - Create players; edit/delete players they created.
+  - Not touch records created by super or by other organisers.
+  Access is derived from `createdBy` on each record — set at
+  creation time from the signed-in caller's uid.
 
 Anyone signed in but without either role gets a "not an admin"
 dialog when they tap the Admin link. Anonymous users see no admin
@@ -43,29 +49,34 @@ mutation rule checks the role. UI gating is UX only.
 
 ---
 
-## Granting organiser rights — by email
-
-As of v2.0, the Roles tab accepts a **Gmail address** directly. No
-more UID sharing.
+## Onboarding an organiser — by email (v3.3)
 
 1. Recipient signs in at `/carromscore/` at least once — even the
    "not authorised" outcome is fine. This writes their
    `{email, displayName}` to `/users/{uid}` (a client-side mirror
    written on every sign-in), which the admin page uses to resolve
    email → UID.
-2. In `/admin/` → **Roles** tab → paste the recipient's Gmail into
-   the email field.
-3. Choose scope:
-   - **Super** — full admin rights. Rare; use only for co-maintainers.
-   - **Organiser of…** — pick one or more tournaments from the chip
-     picker. Chips list every tournament in the DB, most-recent first.
-4. Tap **Add**. The row appears in the "Organisers" (or "Supers")
-   list below with display name + email.
+2. In `/admin/` → **Roles** tab → **Organisers** section → paste the
+   recipient's Gmail into the email field.
+3. Tap **Onboard as organiser**. The row appears in the list
+   below with display name + email + an ORGANISER badge.
+
+From this point on the recipient can sign in and see the admin
+panel (Players / Tournaments / Live matches / History cleanup).
+They can create their own tournaments and players; the app
+enforces own-only mutation via `createdBy` on each record.
 
 **If the email isn't found:** the recipient hasn't signed in yet.
 Ask them to open the Admin link once, then try again.
 
-To revoke: **Remove** button next to their entry.
+**To revoke**: **Revoke** button next to their entry, then
+**Confirm revoke**. Their existing tournaments and players stay
+in the DB but become super-only from then on (no cascade delete;
+history is preserved).
+
+Super role is not grantable from this UI — the maintainer's uid is
+seeded via `PUBLIC_BOOTSTRAP_SUPER_UID` on a fresh install and
+never given to anyone else.
 
 ---
 
@@ -91,10 +102,10 @@ Once any super exists, the bootstrap window closes — subsequent
 
 - **Super:** edit any match, delete any match. Bulk-delete supported
   in History cleanup (multi-select rows → **Delete selected**).
-- **Organiser:** edit or delete only matches whose `tournament`
-  field matches one of their organiser tournaments. Cannot move a
-  match into a different tournament (rule enforces
-  `newData.child('tournament').val() == data.child('tournament').val()`).
+- **Organiser (v3.3):** edit or delete only matches whose
+  parent tournament they created (`tournaments/{key}/createdBy ==
+  auth.uid`). Cannot move a match into a different tournament (the
+  rule pins `tournament` + `tournamentKey` on edit).
 
 Both go through `updateMatch` / `deleteMatch` / `deleteMatches` in
 `src/lib/history.ts`. Every write generates an audit entry.
@@ -117,6 +128,11 @@ Both go through `updateMatch` / `deleteMatch` / `deleteMatches` in
 
 Merge is the most valuable admin action — use it whenever you spot
 "M. Ilyas" and "Ilyas Khan" as separate entries.
+
+**Organiser scope (v3.3):** organisers can Edit / Delete / Merge
+only players they created themselves. Every other player still
+appears in the list (read is public), but the row actions hide.
+Super sees Edit/Delete on every row.
 
 ### Tournaments (`/admin/` → Tournaments tab)
 
@@ -148,17 +164,30 @@ Merge is the most valuable admin action — use it whenever you spot
     - **Delete round** — removes the round record. Matches lose
       the round tag but stay in the tournament — they appear
       under an *Unassigned* sub-group in History.
-- **Edit (v3.2)** — one dialog covers name, Open/Closed access,
-  and country. Save applies rename first (if the normalised key
-  changes, we clone to a new record and rewrite every child
-  match's `tournament` / `tournamentKey` fields), then the meta
-  patch for type + country. Rename inside the same modal replaces
-  the pre-v3.2 inline rename affordance.
+- **Edit (v3.2 / restructured v3.3)** — one dialog is the single
+  entry point for everything about a tournament. Covers:
+    - **Details** — name, Open/Closed access, country. Save applies
+      rename first (if the normalised key changes, we clone to a
+      new record and rewrite every child match's `tournament` /
+      `tournamentKey` fields), then the meta patch for type +
+      country.
+    - **Rounds** button — launches the Rounds modal on top.
+    - **Assigned players** button (closed tournaments only) —
+      launches the assigned-players modal on top.
+  In v3.3 the row itself only shows Edit + Delete buttons; the
+  Rounds and Assigned players actions moved into the Edit dialog.
+  The legacy per-tournament Organisers modal is gone — organisers
+  are now a global role granted from the Roles tab.
 - **Delete** / **Bulk delete** — multi-select rows, then delete all
   at once. Cascade rule: deleting a tournament also removes every
   match tagged with its `tournamentKey` (matches you're not
   authorised to delete are silently skipped and reported in the
   outcome summary).
+
+**Organiser scope (v3.3):** organisers can Edit / Delete only the
+tournaments they created. Someone else's tournaments still appear
+in the list (read is public), but the row actions hide. Super sees
+Edit/Delete on every row.
 
 ### Live matches (`/admin/` → Live matches tab)
 
