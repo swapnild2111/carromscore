@@ -418,6 +418,85 @@ async function renameTournamentToNewKey(
 }
 
 /**
+ * Admin-only: patch a tournament's type/country/state without
+ * touching its name. Used by the consolidated Edit dialog when the
+ * organiser flips open↔closed or picks a different country.
+ *
+ * `type` and `country` are treated as an atomic pair per the v3.1
+ * data-model shape (a closed tournament always has a country). When
+ * transitioning from closed → open, `country` can be cleared by
+ * passing `null`. Absence of either field in the patch leaves the
+ * existing value untouched.
+ *
+ * Returns the outcome so the dialog can flash inline errors on
+ * rule-denied writes.
+ */
+export async function updateTournamentMeta(
+  key: string,
+  patch: { type?: 'open' | 'closed'; country?: string | null },
+): Promise<TournamentWriteOutcome> {
+  if (!key) return { ok: false, error: 'Missing tournament key' };
+  const t = memoryStore.find((x) => x.key === key);
+  if (!t) return { ok: false, error: 'Tournament not found in local store' };
+  const nextType = patch.type ?? t.type ?? 'open';
+  // Country: explicit null clears; string sets; undefined keeps.
+  const nextCountry =
+    patch.country === null
+      ? undefined
+      : patch.country !== undefined
+        ? patch.country.trim()
+        : t.country;
+  // Consistency guardrail: closed tournaments require a country.
+  // A caller can't ship "closed + no country" — the rule set demands
+  // one, and the assignment UI would blow up trying to filter.
+  if (nextType === 'closed' && !nextCountry) {
+    return { ok: false, error: 'Closed tournaments must have a country' };
+  }
+  try {
+    const [{ firebaseApp }, { getDatabase, ref, update }] = await Promise.all([
+      import('./firebase'),
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    // Multi-path update over the two scalars. We can't use a nested
+    // update object with `country: null` — Firebase treats that as
+    // "delete the child". Use two explicit path writes: one for
+    // type, one for country (delete or set).
+    const payload: Record<string, unknown> = {
+      [`tournaments/${key}/type`]: nextType,
+      [`tournaments/${key}/lastActive`]: Date.now(),
+    };
+    if (patch.country === null) {
+      payload[`tournaments/${key}/country`] = null;
+    } else if (nextCountry !== undefined) {
+      payload[`tournaments/${key}/country`] = nextCountry;
+    }
+    await update(ref(db, '/'), payload);
+    t.type = nextType;
+    if (patch.country === null) delete t.country;
+    else if (nextCountry !== undefined) t.country = nextCountry;
+    t.lastActive = Date.now();
+    notify();
+    void logAudit({
+      action: 'tournament.update',
+      path: `tournaments/${key}`,
+      before: {
+        type: t.type,
+        ...(t.country ? { country: t.country } : {}),
+      },
+      after: {
+        type: nextType,
+        ...(nextCountry ? { country: nextCountry } : {}),
+      },
+    });
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg || 'Update failed' };
+  }
+}
+
+/**
  * Admin-only: rename a tournament. If the new name normalises to
  * the same key as the current one (e.g. just a case fix), we update
  * `name` in place. If it normalises to a different key we create

@@ -21,6 +21,7 @@
     subscribeTournaments,
     createOrTouchTournament,
     renameTournament,
+    updateTournamentMeta,
     deleteTournamentAndMatches,
     deleteTournaments,
     countMatchesByTournamentKey,
@@ -69,6 +70,19 @@
   let tick = $state(0);
   let renamingKey = $state<string | null>(null);
   let renameValue = $state('');
+  /**
+   * Edit-tournament modal state (v3.2). Consolidates rename + change
+   * type (open/closed) + change country into a single dialog. Rename
+   * is still the underlying operation for name changes; the type +
+   * country pair goes through updateTournamentMeta.
+   */
+  let editingKey = $state<string | null>(null);
+  let editingName = $state('');
+  let editingType = $state<'open' | 'closed'>('open');
+  let editingCountry = $state('');
+  let editingOriginal = $state<{ name: string; type: 'open' | 'closed'; country: string } | null>(
+    null,
+  );
   let deleteConfirmKey = $state<string | null>(null);
   let deleteConfirmText = $state('');
   /** Live count of child matches that will be cascade-deleted when
@@ -201,6 +215,92 @@
   function cancelRename() {
     renamingKey = null;
     renameValue = '';
+  }
+
+  /**
+   * Open the Edit dialog for a tournament. Snapshots the original
+   * values so Save can compute a minimal patch (skip the rename call
+   * when the name didn't change; skip updateTournamentMeta when type
+   * + country didn't change).
+   */
+  function startEdit(t: Tournament) {
+    editingKey = t.key;
+    editingName = t.name;
+    editingType = t.type ?? 'open';
+    editingCountry = t.country ?? '';
+    editingOriginal = {
+      name: t.name,
+      type: t.type ?? 'open',
+      country: t.country ?? '',
+    };
+  }
+  function cancelEdit() {
+    editingKey = null;
+    editingName = '';
+    editingType = 'open';
+    editingCountry = '';
+    editingOriginal = null;
+  }
+  async function saveEdit() {
+    if (!editingKey || !editingOriginal) return;
+    const trimmedName = editingName.trim();
+    if (!trimmedName) {
+      flash('err', 'Name cannot be blank');
+      return;
+    }
+    // Closed tournaments must have a country per the v3.1 data model.
+    if (editingType === 'closed' && !editingCountry) {
+      flash('err', 'Closed tournaments must have a country');
+      return;
+    }
+    const nameChanged = trimmedName !== editingOriginal.name;
+    const typeChanged = editingType !== editingOriginal.type;
+    // Compare against the empty-string sentinel for "no country".
+    const countryNext = editingCountry;
+    const countryChanged = countryNext !== editingOriginal.country;
+    if (!nameChanged && !typeChanged && !countryChanged) {
+      // No-op — close the dialog quietly. Prevents a bogus audit
+      // entry for a "save with nothing changed" tap.
+      cancelEdit();
+      return;
+    }
+    saving = true;
+    try {
+      // Order matters: rename first (may change the key), THEN meta
+      // patch on the resulting record. If we did meta first and the
+      // rename produced a new key, the meta write would land under
+      // the old key just before it got deleted.
+      if (nameChanged) {
+        const r = await renameTournament(editingKey, trimmedName);
+        if (!r.ok) {
+          flash('err', r.error);
+          return;
+        }
+        // Rename may have produced a new key — resolve it from the
+        // store so the subsequent meta patch targets the right one.
+        const norm = editingName.trim();
+        const nextRec = list().find((x) => x.name === norm);
+        if (nextRec) editingKey = nextRec.key;
+      }
+      if (typeChanged || countryChanged) {
+        // Open + blank country → clear the country field explicitly
+        // (null path) so RTDB drops it. Closed + a country → set.
+        const countryPatch =
+          editingType === 'open' && !countryNext ? null : countryNext;
+        const r = await updateTournamentMeta(editingKey, {
+          type: editingType,
+          country: countryPatch,
+        });
+        if (!r.ok) {
+          flash('err', r.error);
+          return;
+        }
+      }
+      flash('ok', 'Tournament updated');
+      cancelEdit();
+    } finally {
+      saving = false;
+    }
   }
 
   function startDelete(key: string) {
@@ -714,28 +814,6 @@
                  is hidden for tournaments the organiser doesn't manage. -->
             <span class="row-check row-check-spacer" aria-hidden="true"></span>
           {/if}
-          {#if renamingKey === t.key}
-            <div class="row-edit">
-              <input
-                type="text"
-                bind:value={renameValue}
-                aria-label="New tournament name"
-                maxlength="60"
-              />
-              <button
-                type="button"
-                class="btn btn-primary"
-                onclick={saveRename}
-                disabled={saving || !renameValue.trim()}
-              >Save</button>
-              <button
-                type="button"
-                class="btn"
-                onclick={cancelRename}
-                disabled={saving}
-              >Cancel</button>
-            </div>
-          {:else}
             <div class="row-name">
               <div class="row-name-text">{t.name}</div>
               <div class="row-name-meta">
@@ -755,7 +833,7 @@
             </div>
             {#if canManageTournament(t)}
               <div class="row-actions">
-                <button type="button" class="btn" onclick={() => startRename(t)}>Rename</button>
+                <button type="button" class="btn" onclick={() => startEdit(t)}>Edit</button>
                 <button type="button" class="btn" onclick={() => startRounds(t)}>
                   Rounds{t.rounds && t.rounds.length > 0 ? ` (${t.rounds.length})` : ''}
                 </button>
@@ -770,10 +848,79 @@
                 >Delete</button>
               </div>
             {/if}
-          {/if}
         </li>
       {/each}
     </ul>
+  {/if}
+
+  <!--
+    Edit tournament dialog (v3.2). Consolidates rename + type/state
+    + country changes into one modal. Save applies rename first
+    (may change the record key) then the meta patch on the resulting
+    key. Open/Closed radio group is same shape as the add-tournament
+    dialog so the pattern stays consistent.
+  -->
+  {#if editingKey}
+    <div class="dialog" role="dialog" aria-modal="true" onclick={(e) => { if (e.target === e.currentTarget) cancelEdit(); }}>
+      <div class="dialog-card dialog-card-wide">
+        <h3>Edit tournament</h3>
+        <label class="edit-field">
+          <span>Name</span>
+          <input
+            type="text"
+            bind:value={editingName}
+            aria-label="Tournament name"
+            maxlength="60"
+            disabled={saving}
+          />
+        </label>
+        <fieldset class="add-type">
+          <legend>Access</legend>
+          <label>
+            <input
+              type="radio"
+              name="edit-type"
+              value="open"
+              checked={editingType === 'open'}
+              onchange={() => (editingType = 'open')}
+              disabled={saving}
+            />
+            <span>Open — any player, any umpire</span>
+          </label>
+          <label>
+            <input
+              type="radio"
+              name="edit-type"
+              value="closed"
+              checked={editingType === 'closed'}
+              onchange={() => (editingType = 'closed')}
+              disabled={saving}
+            />
+            <span>Closed — country-scoped, assigned roster</span>
+          </label>
+        </fieldset>
+        <label class="edit-field">
+          <span>
+            Country
+            {#if editingType === 'closed'}<em class="hint-inline">(required)</em>{:else}<em class="hint-inline">(optional)</em>{/if}
+          </span>
+          <CountrySelect
+            bind:value={editingCountry}
+            required={editingType === 'closed'}
+            ariaLabel="Tournament country"
+          />
+        </label>
+        <div class="dialog-actions">
+          <button type="button" class="btn" onclick={cancelEdit} disabled={saving}>Cancel</button>
+          <button
+            type="button"
+            class="btn btn-primary"
+            onclick={saveEdit}
+            disabled={saving || !editingName.trim() || (editingType === 'closed' && !editingCountry)}
+          >{saving ? 'Saving…' : 'Save'}</button>
+        </div>
+      </div>
+    </div>
   {/if}
 
   {#if deleteConfirmKey}
@@ -1403,6 +1550,36 @@
     accent-color: var(--accent, #ffd54a);
     margin-top: 0.2rem;
   }
+  /* Edit-dialog rows share the label-above / input-below shape used
+     by the add dialog. Kept as a separate class so the vertical
+     rhythm reads cleanly inside the wider Edit modal. */
+  .edit-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    margin: 0.35rem 0;
+  }
+  .edit-field > span {
+    color: var(--muted);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .edit-field input[type="text"] {
+    background: #0f0f0f;
+    color: var(--fg);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 0.4rem;
+    padding: 0.5rem 0.6rem;
+    font: inherit;
+    font-size: 0.9rem;
+  }
+  .edit-field input[type="text"]:focus-visible {
+    outline: 2px solid var(--accent, #ffd54a);
+    outline-offset: 0;
+    border-color: var(--accent, #ffd54a);
+  }
+
   .add-country-label {
     display: flex;
     flex-direction: column;
