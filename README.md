@@ -54,6 +54,12 @@ That's it. No account. No download from an app store.
 - 🎱 **[Break and queen indicators](./docs/features/break-and-queen.md)** —
   a small chip shows who's breaking; a coloured queen coin shows who
   pocketed it. Never lose track mid-match.
+- 🏳️ **Country identity for players** — each player carries a country;
+  a flag appears beside their name on the home picker and on the
+  singles-mode scoreboard header. Namesakes from different countries
+  (a "Swapnil Deshpande" from DK and another from SE) coexist as
+  distinct records, and the setup form blocks the same person from
+  being picked on both sides of a match.
 - 🏓 **[Practice mode](./docs/features/practice-mode.md)** — solo drill
   format. Track missed shots per board, get a full recap at the end.
   Lower total = better session. Broadcasts to Live like versus matches.
@@ -65,7 +71,10 @@ That's it. No account. No download from an app store.
 - 🏷️ **Tournament tag** — tag a match with an event name and every
   match sharing that tag groups together in the lobby. Auto-suggests
   from your prior tags. Tagged versus matches keep for a year;
-  untagged matches and practice runs keep for 3 months.
+  untagged matches and practice runs keep for 3 months. Organisers
+  can flip a tournament to **Closed** to warn umpires that new
+  matches shouldn't be added (advisory — the warning can still be
+  overridden if a bracket reopens).
 - 📡 **Live broadcast + spectator URL** — toggle "Live" on setup and
   every state change publishes to a shareable URL. Friends and family
   open the URL on any phone; the score updates within a second of
