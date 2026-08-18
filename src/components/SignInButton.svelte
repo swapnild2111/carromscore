@@ -209,13 +209,13 @@
           <div class="dropdown-name">
             {user.displayName || 'Signed in'}
             {#if role?.isSuper}<span class="role-badge role-super">SUPER</span>{/if}
-            {#if role && !role.isSuper && role.organiserOf.size > 0}
-              <span class="role-badge role-organiser">ORGANISER · {role.organiserOf.size}</span>
+            {#if role && !role.isSuper && role.isOrganiser}
+              <span class="role-badge role-organiser">ORGANISER</span>
             {/if}
           </div>
           {#if user.email}<div class="dropdown-email">{user.email}</div>{/if}
         </div>
-        {#if role?.isSuper || (role && role.organiserOf.size > 0)}
+        {#if role?.isSuper || (role && role.isOrganiser)}
           <!--
             Admin-plane users (super OR any tournament organiser) get
             a link to /admin/. AdminHome's gate then serves the tab

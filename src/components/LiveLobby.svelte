@@ -41,6 +41,7 @@
     loadRounds,
     subscribeStore as subscribeTournamentsStore,
     subscribeTournaments,
+    findByKey,
     type Round,
   } from '../lib/tournaments';
   import { subscribeConnectivity } from '../lib/connectivity';
@@ -399,17 +400,17 @@
   function canEditMatch(m: MatchRecord): boolean {
     if (!role) return false;
     if (role.isSuper) return true;
-    // Prefer the record's stored tournamentKey (added 2026-08-13).
-    // Falls back to slugifying the display name for older records
-    // that predate the field. RTDB rules will only authorise
-    // organiser writes when the record has tournamentKey set, so
-    // the fallback here just makes the pencil visible; the actual
-    // save will fail with an auth error for legacy records. That's
-    // acceptable — the modal surfaces the failure and the user can
-    // ping a super-admin to open + resave once.
+    if (!role.isOrganiser) return false;
+    // Own-only auth (v3.3): organiser can edit only when they created
+    // the parent tournament. Look up the tournament record from the
+    // store; if it isn't loaded yet (initial hydration race), the
+    // gate stays false — pencil doesn't render until we know.
     const key = m.tournamentKey ?? normalizeKey(m.tournament ?? '');
     if (!key) return false;
-    return role.organiserOf.has(key);
+    const t = findByKey(key);
+    if (!t) return false;
+    const myUid = currentUser()?.uid;
+    return !!(myUid && t.createdBy === myUid);
   }
 
   /**

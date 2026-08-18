@@ -22,6 +22,7 @@
   import { subscribePlayers, subscribeStore } from '../lib/players';
   import { subscribeCurrentUserRole, type Role } from '../lib/roles';
   import { currentUser } from '../lib/auth';
+  import { findByKey, subscribeStore as subscribeTournamentsStore, subscribeTournaments } from '../lib/tournaments';
   import AdminBulkBar from './AdminBulkBar.svelte';
 
   let matches = $state<MatchRecord[]>([]);
@@ -46,19 +47,29 @@
   function canDeleteMatch(m: MatchRecord): boolean {
     if (!role) return false;
     if (role.isSuper) return true;
-    if (m.tournamentKey && role.organiserOf.has(m.tournamentKey)) return true;
     const uid = currentUser()?.uid;
     if (uid && m.createdBy === uid) return true;
+    // v3.3: organiser role gates on parent tournament's createdBy.
+    if (role.isOrganiser && m.tournamentKey) {
+      const t = findByKey(m.tournamentKey);
+      if (t && uid && t.createdBy === uid) return true;
+    }
     return false;
   }
 
   onMount(() => {
     void subscribePlayers();
+    // Subscribe to tournaments so findByKey() below has the store
+    // populated when canDeleteMatch runs — otherwise organiser
+    // delete affordances stay hidden on first paint.
+    void subscribeTournaments();
     const unsubStore = subscribeStore(() => (identityTick += 1));
+    const unsubTournaments = subscribeTournamentsStore(() => (identityTick += 1));
     const unsubRole = subscribeCurrentUserRole((r) => (role = r));
     void reload();
     return () => {
       unsubStore();
+      unsubTournaments();
       unsubRole();
     };
   });

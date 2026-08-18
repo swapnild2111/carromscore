@@ -32,6 +32,24 @@
   import AdminBulkBar from './AdminBulkBar.svelte';
   import CountrySelect from './CountrySelect.svelte';
   import { countryName, flagEmoji } from '../lib/countries';
+  import { subscribeCurrentUserRole, type Role } from '../lib/roles';
+  import { currentUser } from '../lib/auth';
+
+  /**
+   * Current-user role gating (v3.3). Super sees every player row's
+   * actions; organiser sees actions only on records they created.
+   * `canManagePlayer(p)` mirrors AdminTournaments's
+   * `canManageTournament(t)` pattern — the RTDB rule at
+   * `/players/{id}` is the actual enforcement; UI gating is UX only.
+   */
+  let role = $state<Role | null>(null);
+  function canManagePlayer(p: Player): boolean {
+    if (!role) return false;
+    if (role.isSuper) return true;
+    if (!role.isOrganiser) return false;
+    const myUid = currentUser()?.uid;
+    return !!(myUid && p.createdBy === myUid);
+  }
 
   let tick = $state(0);
   let query = $state('');
@@ -115,7 +133,11 @@
   onMount(() => {
     void subscribePlayers();
     const unsub = subscribeStore(() => (tick += 1));
-    return unsub;
+    const unsubRole = subscribeCurrentUserRole((r) => (role = r));
+    return () => {
+      unsub();
+      unsubRole();
+    };
   });
 
   const filtered = $derived(() => {
@@ -322,7 +344,10 @@
     selected = new Set(selected);
   }
   function toggleSelectAll() {
-    const rows = filtered();
+    // v3.3: restrict select-all to rows the current user can actually
+    // delete — otherwise bulk-delete would partial-fail on records
+    // super or another organiser created.
+    const rows = filtered().filter((p) => canManagePlayer(p));
     if (rows.length > 0 && rows.every((p) => selected.has(p.id))) {
       selected = new Set();
     } else {
@@ -351,7 +376,9 @@
 
   const allSelected = $derived(() => {
     void tick;
-    const rows = filtered();
+    // Same restriction as toggleSelectAll — the "Select all" checkbox
+    // only reflects state across rows the current user can delete.
+    const rows = filtered().filter((p) => canManagePlayer(p));
     return rows.length > 0 && rows.every((p) => selected.has(p.id));
   });
 
@@ -591,15 +618,23 @@
     </div>
     <ul class="list">
       {#each filtered() as p (p.id)}
+        {@const manageable = canManagePlayer(p)}
         <li class="row" class:row-selected={selected.has(p.id)}>
-          <label class="row-check">
-            <input
-              type="checkbox"
-              checked={selected.has(p.id)}
-              onchange={() => toggleSel(p.id)}
-              aria-label={`Select ${p.canonicalName}`}
-            />
-          </label>
+          {#if manageable}
+            <label class="row-check">
+              <input
+                type="checkbox"
+                checked={selected.has(p.id)}
+                onchange={() => toggleSel(p.id)}
+                aria-label={`Select ${p.canonicalName}`}
+              />
+            </label>
+          {:else}
+            <!-- Placeholder keeps the row grid aligned when the
+                 checkbox is hidden for records the organiser didn't
+                 create (v3.3 own-only auth). -->
+            <span class="row-check row-check-spacer" aria-hidden="true"></span>
+          {/if}
           <div class="row-name">
               <div class="row-name-text">{p.canonicalName}</div>
               <div class="row-name-meta">
@@ -617,14 +652,16 @@
                 {/if}
               </div>
             </div>
-            <div class="row-actions">
-              <button type="button" class="btn btn-primary" onclick={() => startEdit(p)}>Edit</button>
-              <button
-                type="button"
-                class="btn btn-danger"
-                onclick={() => startDelete(p.id)}
-              >Delete</button>
-            </div>
+            {#if manageable}
+              <div class="row-actions">
+                <button type="button" class="btn btn-primary" onclick={() => startEdit(p)}>Edit</button>
+                <button
+                  type="button"
+                  class="btn btn-danger"
+                  onclick={() => startDelete(p.id)}
+                >Delete</button>
+              </div>
+            {/if}
         </li>
       {/each}
     </ul>

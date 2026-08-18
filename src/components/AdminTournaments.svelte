@@ -41,6 +41,7 @@
     type Tournament,
   } from '../lib/tournaments';
   import { subscribeCurrentUserRole, type Role } from '../lib/roles';
+  import { currentUser } from '../lib/auth';
   import {
     loadAll as loadAllPlayers,
     subscribePlayers,
@@ -64,7 +65,13 @@
   function canManageTournament(t: Tournament): boolean {
     if (!role) return false;
     if (role.isSuper) return true;
-    return role.organiserOf.has(t.key);
+    // Own-only auth (v3.3): an organiser can manage tournaments they
+    // created. `createdBy` was stamped at creation time by
+    // createOrTouchTournament; records without it (legacy anonymous
+    // creates) fall through to super-only management.
+    if (!role.isOrganiser) return false;
+    const myUid = currentUser()?.uid;
+    return !!(myUid && t.createdBy === myUid);
   }
 
   let tick = $state(0);

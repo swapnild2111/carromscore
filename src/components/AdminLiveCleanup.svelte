@@ -24,6 +24,7 @@
   } from '../lib/live-sync';
   import { subscribeCurrentUserRole, type Role } from '../lib/roles';
   import { currentUser } from '../lib/auth';
+  import { findByKey, subscribeStore as subscribeTournamentsStore, subscribeTournaments } from '../lib/tournaments';
   import AdminBulkBar from './AdminBulkBar.svelte';
 
   let role = $state<Role | null>(null);
@@ -38,9 +39,13 @@
   function canDeleteLive(e: LobbyEntry): boolean {
     if (!role) return false;
     if (role.isSuper) return true;
-    if (e.meta.tournamentKey && role.organiserOf.has(e.meta.tournamentKey)) return true;
     const uid = currentUser()?.uid;
     if (uid && e.createdBy === uid) return true;
+    // v3.3: organiser role gates on parent tournament's createdBy.
+    if (role.isOrganiser && e.meta.tournamentKey) {
+      const t = findByKey(e.meta.tournamentKey);
+      if (t && uid && t.createdBy === uid) return true;
+    }
     return false;
   }
 
@@ -82,10 +87,20 @@
     void subscribeAllLive((e) => (entries = e)).then((fn) => {
       unsub = fn;
     });
+    // Subscribe to tournaments so findByKey() in canDeleteLive has
+    // the store populated when the check runs (v3.3 own-only auth).
+    void subscribeTournaments();
+    const unsubTournaments = subscribeTournamentsStore(() => {
+      // Trigger a re-render by touching an existing state slot.
+      // entries is the natural pick; assigning it to itself is
+      // effectively a nudge for Svelte's reactivity.
+      entries = entries;
+    });
     const tick = window.setInterval(() => (now = Date.now()), 30_000);
     const unsubRole = subscribeCurrentUserRole((r) => (role = r));
     return () => {
       unsub?.();
+      unsubTournaments();
       window.clearInterval(tick);
       unsubRole();
     };

@@ -52,7 +52,7 @@
    * uses this to decide whether to render the tab bar at all.
    * Individual tabs then check `role.isSuper` for super-only tabs.
    */
-  const hasAdminAccess = $derived(!!(role && (role.isSuper || role.organiserOf.size > 0)));
+  const hasAdminAccess = $derived(!!(role && (role.isSuper || role.isOrganiser)));
 
   /**
    * Which tabs to render. Super-admin gets everything; organisers
@@ -105,7 +105,7 @@
   let landed = $state(false);
   $effect(() => {
     if (!roleLoaded || !role) return;
-    const hasResolvedRole = role.isSuper || role.organiserOf.size > 0;
+    const hasResolvedRole = role.isSuper || role.isOrganiser;
     if (!landed && hasResolvedRole) {
       tab = role.isSuper ? 'roles' : 'tournaments';
       landed = true;
