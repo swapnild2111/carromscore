@@ -148,10 +148,12 @@ Merge is the most valuable admin action — use it whenever you spot
     - **Delete round** — removes the round record. Matches lose
       the round tag but stay in the tournament — they appear
       under an *Unassigned* sub-group in History.
-- **Rename** — updates the tournament's display name. If the new
-  name normalises to the same key, we just update `name`. If it
-  normalises differently, we clone to a new key, rewrite every
-  child match's `tournament` field, and delete the old record.
+- **Edit (v3.2)** — one dialog covers name, Open/Closed access,
+  and country. Save applies rename first (if the normalised key
+  changes, we clone to a new record and rewrite every child
+  match's `tournament` / `tournamentKey` fields), then the meta
+  patch for type + country. Rename inside the same modal replaces
+  the pre-v3.2 inline rename affordance.
 - **Delete** / **Bulk delete** — multi-select rows, then delete all
   at once. Cascade rule: deleting a tournament also removes every
   match tagged with its `tournamentKey` (matches you're not
