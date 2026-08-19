@@ -577,19 +577,20 @@
       return;
     }
     saving = true;
-    // createOrTouchTournament writes to Firebase fire-and-forget; the
-    // /tournaments subscription picks up the new record within a tick.
-    // v3.1: pass type + country meta so open/closed status persists.
-    const rec = createOrTouchTournament(trimmed, {
+    // v3.3: createOrTouchTournament is now async and reports RTDB
+    // outcomes back to the caller. A rule-denied write is rolled
+    // back client-side (the local push is undone) so the admin list
+    // never shows a phantom record that vanishes on next page load.
+    const outcome = await createOrTouchTournament(trimmed, {
       type: addingType,
       ...(addingType === 'closed' && addingCountry ? { country: addingCountry } : {}),
     });
     saving = false;
-    if (!rec) {
-      flash('err', 'Name must include at least one letter or digit');
+    if (!outcome.ok) {
+      flash('err', outcome.error);
       return;
     }
-    flash('ok', `"${rec.name}" added`);
+    flash('ok', `"${outcome.record.name}" added`);
     closeAdd();
   }
 

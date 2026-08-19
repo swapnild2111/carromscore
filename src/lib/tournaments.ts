@@ -156,34 +156,52 @@ export function rankTournaments(query: string, limit = 8): Tournament[] {
 }
 
 /**
+ * Result of a create-or-touch call. `record` is null when the name
+ * failed client-side validation (empty / no signed-in user for a
+ * fresh create). `ok: false` means the RTDB write was rejected —
+ * the local push has already been rolled back and the caller
+ * should surface the error to the umpire.
+ */
+export type CreateTournamentOutcome =
+  | { ok: true; record: Tournament }
+  | { ok: false; record: null; error: string };
+
+/**
  * Ensure a tournament with the given canonical name exists in the
  * store + Firebase. Idempotent — repeat calls just bump lastActive.
- * Returns the resolved Tournament record. Empty / whitespace-only
- * names return null (indicating "no tournament tag").
+ * Empty / whitespace-only names produce a `record: null` outcome
+ * (indicating "no tournament tag").
  *
  * v3.3: creating a NEW tournament requires an authenticated user —
  * the RTDB rule for `/tournaments/{key}` now demands
  * `newData.createdBy == auth.uid` on the fresh-create branch, and
  * an anonymous write would be denied server-side. We short-circuit
- * client-side to give the caller a clear null and avoid a silent
- * partial state (a local record that the fire-and-forget Firebase
- * write can't land). Touching an EXISTING record is still allowed
- * without auth — that path just bumps `lastActive`.
+ * client-side to give the caller a clear failure and avoid a
+ * silent partial state. If the RTDB write fails for any other
+ * reason (rule denied, network dead, quota) we ROLL BACK the local
+ * push before returning so the admin list doesn't show a phantom
+ * record that vanishes on next page load.
  */
-export function createOrTouchTournament(
+export async function createOrTouchTournament(
   name: string,
   meta?: CreateTournamentMeta,
-): Tournament | null {
+): Promise<CreateTournamentOutcome> {
   const trimmed = name.trim();
-  if (!trimmed) return null;
+  if (!trimmed) return { ok: false, record: null, error: 'Name is empty' };
   const key = normalizeKey(trimmed);
-  if (!key) return null;
+  if (!key) return { ok: false, record: null, error: 'Name did not produce a valid key' };
   const now = Date.now();
   const existing = memoryStore.find((t) => t.key === key);
   const creator = currentUser()?.uid;
   // v3.3 auth guard: fresh creates require a signed-in user so
   // `createdBy` gets stamped and the RTDB rule accepts the write.
-  if (!existing && !creator) return null;
+  if (!existing && !creator) {
+    return {
+      ok: false,
+      record: null,
+      error: 'You must be signed in to create a tournament',
+    };
+  }
   const type = meta?.type;
   const country = meta?.country;
   const record: Tournament = existing
@@ -205,6 +223,8 @@ export function createOrTouchTournament(
         ...(type ? { type } : {}),
         ...(country ? { country } : {}),
       };
+  // Snapshot the pre-write state so we can roll back on rule-denial.
+  const priorSnapshot = existing ? { ...existing } : null;
   if (existing) {
     Object.assign(existing, {
       name: trimmed,
@@ -216,8 +236,20 @@ export function createOrTouchTournament(
     memoryStore.push(record);
   }
   notify();
-  void writeTournamentToFirebase(record);
-  return record;
+  const outcome = await writeTournamentToFirebase(record);
+  if (!outcome.ok) {
+    // Roll back — restore the prior state so the admin list doesn't
+    // show a phantom record.
+    if (priorSnapshot && existing) {
+      Object.assign(existing, priorSnapshot);
+    } else {
+      const idx = memoryStore.findIndex((t) => t.key === key);
+      if (idx !== -1) memoryStore.splice(idx, 1);
+    }
+    notify();
+    return { ok: false, record: null, error: outcome.error };
+  }
+  return { ok: true, record };
 }
 
 /**
@@ -312,7 +344,21 @@ function mergeRemote(raw: Record<string, unknown>): void {
   notify();
 }
 
-async function writeTournamentToFirebase(t: Tournament): Promise<void> {
+/**
+ * Returned outcome from writeTournamentToFirebase so callers can
+ * surface a real error to the umpire instead of silent success on a
+ * denied RTDB write. `ok: false` means the local memoryStore push
+ * won't survive a page reload — the caller should undo the local
+ * push and flash an error banner.
+ *
+ * Silent-swallow was the v3.0-v3.2 posture: fire-and-forget with the
+ * assumption that anonymous creates never fail. v3.3's own-only auth
+ * rules can and do deny writes (missing organiser role, missing
+ * createdBy on a legacy record, etc.), so callers need to know.
+ */
+type FirebaseWriteOutcome = { ok: true } | { ok: false; error: string };
+
+async function writeTournamentToFirebase(t: Tournament): Promise<FirebaseWriteOutcome> {
   try {
     const [{ firebaseApp }, { getDatabase, ref, update }] = await Promise.all([
       import('./firebase'),
@@ -332,8 +378,10 @@ async function writeTournamentToFirebase(t: Tournament): Promise<void> {
       ...(t.type ? { type: t.type } : {}),
       ...(t.country ? { country: t.country } : {}),
     });
-  } catch {
-    // Silent — local record persists.
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg || 'Firebase write failed' };
   }
 }
 

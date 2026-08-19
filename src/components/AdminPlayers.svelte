@@ -528,42 +528,48 @@
     let aliased = 0;
     let skipped = 0;
     let failed = 0;
+    // v3.3: createPlayer is async and returns { ok, error }. RTDB
+    // rule denials (organiser without organiserRoles entry, missing
+    // createdBy stamp on legacy record, etc.) flip ok:false and the
+    // local push has already been rolled back — count them as
+    // failed rather than as successful creates.
+    let firstError: string | undefined;
     try {
       // 1) Clean candidates → straight create (with batch country).
       for (const typed of cleanCandidates) {
-        try {
-          createPlayer(typed, meta);
-          created += 1;
-        } catch {
+        const r = await createPlayer(typed, meta);
+        if (r.ok) created += 1;
+        else {
           failed += 1;
+          if (!firstError) firstError = r.error;
         }
       }
       // 2) Resolved conflicts.
       for (const c of conflicts) {
-        try {
-          if (c.action === 'skip') {
-            skipped += 1;
-            continue;
-          }
-          if (c.action === 'create') {
-            createPlayer(c.typed, meta);
-            created += 1;
-            continue;
-          }
-          // action === 'alias' — no country on aliases; alias attaches
-          // to an existing canonical player whose country is what
-          // matters.
-          const target = c.aliasTargetId;
-          if (!target) {
-            failed += 1;
-            continue;
-          }
-          const p = addAlias(target, c.typed);
-          if (p) aliased += 1;
-          else failed += 1;
-        } catch {
-          failed += 1;
+        if (c.action === 'skip') {
+          skipped += 1;
+          continue;
         }
+        if (c.action === 'create') {
+          const r = await createPlayer(c.typed, meta);
+          if (r.ok) created += 1;
+          else {
+            failed += 1;
+            if (!firstError) firstError = r.error;
+          }
+          continue;
+        }
+        // action === 'alias' — no country on aliases; alias attaches
+        // to an existing canonical player whose country is what
+        // matters.
+        const target = c.aliasTargetId;
+        if (!target) {
+          failed += 1;
+          continue;
+        }
+        const p = addAlias(target, c.typed);
+        if (p) aliased += 1;
+        else failed += 1;
       }
     } finally {
       saving = false;
@@ -573,7 +579,9 @@
     if (aliased) parts.push(`${aliased} aliased`);
     if (skipped) parts.push(`${skipped} skipped`);
     if (failed) parts.push(`${failed} failed`);
-    flash(failed ? 'err' : 'ok', parts.length ? parts.join(', ') : 'Nothing to do');
+    const summary = parts.length ? parts.join(', ') : 'Nothing to do';
+    const message = failed && firstError ? `${summary} — ${firstError}` : summary;
+    flash(failed ? 'err' : 'ok', message);
     closeAdd();
   }
 </script>
