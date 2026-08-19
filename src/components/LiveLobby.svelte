@@ -779,6 +779,65 @@
     }
     return out;
   }
+
+  /**
+   * v3.3.5: live-side counterpart of groupByRound. Same logic —
+   * split entries into (known rounds in tournament order, ghost
+   * rounds alphabetically, unassigned tail) — but keyed on the
+   * live entry's meta.round / meta.roundKey. Returned as the same
+   * `[roundKey, roundName, entries]` shape so the render template
+   * can iterate uniformly.
+   *
+   * Returns `[['', '', entries]]` when the tournament has no rounds
+   * roster loaded — the render template detects this and skips the
+   * round sub-header, keeping the pre-v3.3.5 flat layout intact
+   * for tournaments that don't use rounds.
+   */
+  function groupLiveByRound(
+    tournamentKey: string,
+    entries: LobbyEntry[],
+  ): Array<[string, string, LobbyEntry[]]> {
+    void tournamentTick;
+    const roster = loadRounds(tournamentKey);
+    if (roster.length === 0) {
+      return [['', '', entries]];
+    }
+    const orderMap = new Map<string, { name: string; order: number }>();
+    for (const r of roster) orderMap.set(r.key, { name: r.name, order: r.order });
+    const known = new Map<string, LobbyEntry[]>();
+    const unknown = new Map<string, { name: string; items: LobbyEntry[] }>();
+    const unassigned: LobbyEntry[] = [];
+    for (const e of entries) {
+      const rk = (e.meta.roundKey ?? '').trim();
+      if (!rk) {
+        unassigned.push(e);
+        continue;
+      }
+      if (orderMap.has(rk)) {
+        const list = known.get(rk) ?? [];
+        list.push(e);
+        known.set(rk, list);
+      } else {
+        const bucket = unknown.get(rk) ?? { name: (e.meta.round ?? '').trim() || rk, items: [] };
+        bucket.items.push(e);
+        unknown.set(rk, bucket);
+      }
+    }
+    const out: Array<[string, string, LobbyEntry[]]> = [];
+    for (const r of roster) {
+      const items = known.get(r.key);
+      if (items && items.length > 0) out.push([r.key, r.name, items]);
+    }
+    const ghostKeys = Array.from(unknown.keys()).sort();
+    for (const gk of ghostKeys) {
+      const b = unknown.get(gk)!;
+      out.push([gk, b.name, b.items]);
+    }
+    if (unassigned.length > 0) {
+      out.push([UNASSIGNED_ROUND_KEY, 'Unassigned', unassigned]);
+    }
+    return out;
+  }
   // Bucket key reserved for the Practice collapsible section. Not a
   // real tournament name; matched against the same collapsed-state
   // Map so the practice section remembers its open/closed state.
@@ -1066,6 +1125,9 @@
     {:else}
       {#each liveGroups as [bucket, entriesInBucket] (bucket)}
         {@const folded = isCollapsed('live', bucket)}
+        {@const tKey = bucket === DEFAULT_BUCKET ? '' : normalizeKey(bucket)}
+        {@const roundGroups = groupLiveByRound(tKey, entriesInBucket)}
+        {@const hasRounds = roundGroups.length > 1 || (roundGroups[0] && roundGroups[0][0] !== '')}
         <section class="tour-group" class:folded>
           <button
             type="button"
@@ -1078,9 +1140,31 @@
             <span class="tour-count">{entriesInBucket.length}</span>
           </button>
           {#if !folded}
-          <ul class="grid">
-            {#each entriesInBucket as e (e.mid)}
-              {@const s = e.liveState}
+          {#each roundGroups as [roundKey, roundName, roundEntries] (roundKey || 'flat')}
+            {@const showRoundHeader = hasRounds && roundKey !== ''}
+            {@const roundFolded = showRoundHeader && isCollapsed('live', `${bucket}::${roundKey}`)}
+            <section
+              class="round-group"
+              class:round-unassigned={roundKey === UNASSIGNED_ROUND_KEY}
+              class:round-flat={!showRoundHeader}
+              class:folded={roundFolded}
+            >
+              {#if showRoundHeader}
+              <button
+                type="button"
+                class="round-hdr"
+                aria-expanded={!roundFolded}
+                onclick={() => toggleGroup('live', `${bucket}::${roundKey}`)}
+              >
+                <span class="round-caret" class:round-caret-folded={roundFolded} aria-hidden="true">▾</span>
+                <span class="round-name">{roundName}</span>
+                <span class="round-count">{roundEntries.length}</span>
+              </button>
+              {/if}
+              {#if !roundFolded}
+              <ul class="grid">
+                {#each roundEntries as e (e.mid)}
+                  {@const s = e.liveState}
               <li class="card-li">
                 <button
                   type="button"
@@ -1184,8 +1268,11 @@
               </div>
                 </button>
               </li>
-            {/each}
-          </ul>
+                {/each}
+              </ul>
+              {/if}
+            </section>
+          {/each}
           {/if}
         </section>
       {/each}
