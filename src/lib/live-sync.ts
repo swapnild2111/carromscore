@@ -133,13 +133,27 @@ export function newMid(): string {
  * clock, which prevents replay of stale writes but leaves a
  * comfortable window for clock skew.
  */
+/**
+ * Outcome of a publishLive call. `ok: false` means the RTDB write
+ * was rejected (rule denial, clock skew past the 60-second
+ * updatedAt window, network gone). Previously this was a
+ * silent-swallow returning void; v3.3.2 flips it so callers can
+ * surface the actual error to the umpire.
+ *
+ * Reported 2026-08-19: organiser set up a match under a closed
+ * tournament, played locally, and no `/live/{mid}` record ever
+ * appeared for the spectator URL to render. Silent failure on
+ * publish was the culprit; this outcome is the diagnostic.
+ */
+export type PublishLiveOutcome = { ok: true } | { ok: false; error: string };
+
 export async function publishLive(
   mid: string,
   meta: LiveMeta,
   payload: LivePayload,
   matchId?: string,
-): Promise<void> {
-  if (!mid || mid.length < 4) return;
+): Promise<PublishLiveOutcome> {
+  if (!mid || mid.length < 4) return { ok: false, error: 'Missing or too-short mid' };
   try {
     const [{ firebaseApp }, { getDatabase, ref, set }] = await Promise.all([
       import('./firebase'),
@@ -199,8 +213,10 @@ export async function publishLive(
       meta: metaClean,
       liveState,
     });
-  } catch {
-    // Silent-on-failure — publisher keeps playing.
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg || 'Live publish failed' };
   }
 }
 
