@@ -33,19 +33,24 @@
    * Mirrors the /live/{mid} delete rule for UI gating (see rules
    * for the canonical expression): super, or organiser of the
    * record's meta.tournamentKey, or the umpire who stamped
-   * createdBy on publish. Anonymous live records (no createdBy)
-   * can only be deleted by super — UI honours that.
+   * createdBy on publish. Plus a v3.3.6 fallback: any organiser
+   * can delete a STUCK record (updatedAt older than STALE_WINDOW_MS),
+   * matching the passive 4h sweep semantics — stale records are
+   * orphan zombies, and locking their cleanup behind ownership
+   * strands them when the owning tournament predates own-only
+   * stamping or the record has no tournamentKey at all.
    */
   function canDeleteLive(e: LobbyEntry): boolean {
     if (!role) return false;
     if (role.isSuper) return true;
     const uid = currentUser()?.uid;
     if (uid && e.createdBy === uid) return true;
-    // v3.3: organiser role gates on parent tournament's createdBy.
     if (role.isOrganiser && e.meta.tournamentKey) {
       const t = findByKey(e.meta.tournamentKey);
       if (t && uid && t.createdBy === uid) return true;
     }
+    // Stuck-record fallback: any organiser can clean up a stale record.
+    if (role.isOrganiser && now - e.updatedAt >= STALE_WINDOW_MS) return true;
     return false;
   }
 
@@ -279,6 +284,9 @@
               {#if e.meta.tournament}
                 <span class="chip">{e.meta.tournament}</span>
               {/if}
+              {#if e.meta.round}
+                <span class="chip chip-round">{e.meta.round}</span>
+              {/if}
               <span class="row-date">updated {relTime(e.updatedAt)}</span>
               {#if isStuck(e)}
                 <span class="chip chip-warn">stuck</span>
@@ -508,6 +516,15 @@
     letter-spacing: 0.04em;
     font-size: 0.65rem;
     font-weight: 700;
+  }
+  /* Round chip — v3.3.6. Follows the tournament chip visually
+     but sits one step further into the app's blue-ish accent so
+     the round reads at-a-glance next to its parent tournament. */
+  .chip-round {
+    color: #8ab4f8;
+    background: rgba(138, 180, 248, 0.08);
+    border-color: rgba(138, 180, 248, 0.3);
+    letter-spacing: 0.02em;
   }
   .chip-warn {
     color: #ffb74d;

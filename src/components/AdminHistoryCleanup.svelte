@@ -252,6 +252,9 @@
               {#if m.tournament}
                 <span class="chip">{m.tournament}</span>
               {/if}
+              {#if m.round}
+                <span class="chip chip-round">{m.round}</span>
+              {/if}
               <span class="row-date">{fmtDate(m.endedAt)}</span>
             </div>
             <div class="row-sub">
@@ -450,6 +453,14 @@
     letter-spacing: 0.04em;
     font-weight: 700;
     font-size: 0.65rem;
+  }
+  /* Round chip (v3.3.6). Blue-ish accent to sit distinctly next to
+     the tournament chip without reading as the primary label. */
+  .chip-round {
+    color: #8ab4f8;
+    background: rgba(138, 180, 248, 0.08);
+    border-color: rgba(138, 180, 248, 0.3);
+    letter-spacing: 0.02em;
   }
   .row-sub {
     display: flex;

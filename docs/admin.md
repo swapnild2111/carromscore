@@ -154,17 +154,31 @@ player in the list with full row actions.
   first match. Not required (tags auto-create on match end) but
   useful to pre-populate the picker for organisers.
 - **Open / Closed state (v3.1)** — each tournament carries a
-  state field. **Open** (default) accepts new matches;
-  **Closed** rejects them — the home form warns the umpire that
-  "Silver Cup 2026 is closed" when they pick a closed tournament,
-  though the warning is advisory and can be overridden. Toggled
-  from the Edit dialog. Closed tournaments stay editable by the
-  organiser who created them (v3.3 own-only auth).
+  state field. **Open** (default) accepts any typed player name
+  and any round. **Closed** (invite-only) is roster-gated: the
+  organiser assigns players ahead of time via **Assigned players**
+  and only those players can start a match under this tournament.
+  Toggled from the Edit dialog. Closed tournaments stay editable
+  by the organiser who created them (v3.3 own-only auth).
+- **Roster enforcement (v3.3.6)** — for a closed tournament, the
+  home form's Start button stays disabled until every player slot
+  resolves to a roster-assigned player. A free-text name or a
+  typed name that resolves to a non-roster player gets a per-slot
+  amber pill: "Not assigned to this tournament — contact the
+  organiser". Country mismatch stays advisory (a Danish visitor at
+  a Swedish event still gets a warning but Start is not blocked
+  by it). Open tournaments are untouched — walk-in-friendly by
+  design.
 - **Rounds (v3.2)** — every tournament can carry a list of named
   stages (Round of 16, Quarter-finals, Semi-finals, Final, ...).
   Umpires pick a round at match setup so History and Reports can
   group per-stage. Optional — a tournament without any rounds
-  keeps its pre-v3.2 flat match list. The **Rounds** action per
+  keeps its pre-v3.2 flat match list. When a tournament DOES carry
+  rounds (v3.3.6): the match-setup round picker becomes a native
+  dropdown listing only open rounds, and Start is disabled until
+  the umpire picks one. Previously the umpire could leave the round
+  blank and matches would land in a nameless bucket in History and
+  Reports. The **Rounds** action per
   row opens a modal with:
     - **Add round** — creates a round; `order` auto-increments so
       new rounds append to the end.
@@ -218,6 +232,13 @@ Edit/Delete on every row.
   all at once. Only the ephemeral `/live/{mid}` record is removed;
   the archived `/matches` record (if the umpire tapped End) is
   unaffected. To delete archives, use History cleanup.
+- **Delete authority.** Super deletes anything. Organisers delete
+  live records for tournaments they created OR records they
+  themselves published. **From v3.3.6**, an organiser can also
+  delete any stuck record (updatedAt older than 4h) regardless of
+  ownership — the passive 4h sweep semantics extended to the
+  manual path, so orphan / legacy records (no `meta.tournamentKey`,
+  or a tournament with no `createdBy`) don't strand super-only.
 - **Auto-sweep:** in addition to manual cleanup, any signed-in
   admin's page load triggers a passive sweep that batch-deletes
   up to 50 stuck records older than 4h. Cheap; runs silently. See

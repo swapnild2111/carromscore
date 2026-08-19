@@ -62,7 +62,6 @@ src/
     score.astro             # score/overlay route (/score/)
 
 public/
-  data/players.json         # bundled Wikipedia seed of ~10 top players
   sw.js                     # service worker (cache-first, precache shell)
 
 docs/

@@ -339,6 +339,21 @@
   let confirmExit = $state(false);
   let isPortrait = $state(false);
   let storageKey = $state<string | null>(null);
+  /**
+   * v3.3.6 guard: the save $effect at line ~608 tracks reactive
+   * state (points, sets, board, live payload) and writes to
+   * localStorage + publishes to /live/{mid} on every change. Setting
+   * `storageKey` in onMount is itself a reactive change — the
+   * effect fires BEFORE the hydrate block below reads the previous
+   * session's state from localStorage. Result: on Resume, the effect
+   * ran with the default 0-0-0 state and overwrote both localStorage
+   * and RTDB with zeros before the hydrate could restore the real
+   * scores. Reported 2026-08-19.
+   *
+   * `hydrated` gates the save effect until the hydrate block has
+   * finished so the first save carries the actual restored state.
+   */
+  let hydrated = $state(false);
   // Resolved player ids for the current match — read from the identity
   // handoff MatchSetup saves at match start. Used to look up country
   // codes for the flag chip beside each header name. Doubles carries
@@ -488,6 +503,12 @@
     } catch {
       // ignore
     }
+    // v3.3.6: hydrate finished — open the save $effect. The next
+    // reactive tick will write the current (restored) state to
+    // localStorage and /live/{mid}, keeping both in step with the
+    // in-memory model. If localStorage was empty (fresh match) we
+    // still flip this so the score screen's first tap saves.
+    hydrated = true;
 
     updateOrientation();
     requestWakeLock();
@@ -607,6 +628,12 @@
 
   $effect(() => {
     if (!storageKey) return;
+    // v3.3.6 guard against wiping a resumed match — see `hydrated`
+    // declaration for the full write-up. Until the hydrate block in
+    // onMount has run, the reactive state is at default (0-0-0) and
+    // writing that would clobber the previous session's saved
+    // localStorage AND /live/{mid} payload.
+    if (!hydrated) return;
     const s: Record<string, unknown> = {
       sideA: { points: sideA.points, sets: sideA.sets },
       sideB: { points: sideB.points, sets: sideB.sets },
@@ -1802,6 +1829,18 @@
   async function exit() {
     if (storageKey) {
       try { localStorage.removeItem(storageKey); } catch { /* ignore */ }
+    }
+    // v3.3.6: also clear the resume pointer so Home's "Resume
+    // match" chip doesn't linger after the umpire explicitly said
+    // "close and discard". Reported 2026-08-19: close-with-discard
+    // ran, but the chip stayed on Home because clearResume was
+    // never called on the exit path — only on End Match's archive
+    // flow (and Reset). Live broadcast is also torn down so the
+    // /live/{mid} record vanishes from the lobby's Now Playing tab
+    // instead of sitting until the 4h stale sweep.
+    clearResume();
+    if (cfg.live && cfg.mid) {
+      try { await deleteLive(cfg.mid); } catch { /* ignore */ }
     }
     await releaseLandscape();
     window.location.href = import.meta.env.BASE_URL;

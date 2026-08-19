@@ -9,7 +9,6 @@
   } from '../lib/match';
   import { loadKnownPlayers, rememberPlayers } from '../lib/known-players';
   import {
-    seedFromRows as seedPlayerIdentity,
     subscribePlayers,
     subscribeStore,
     rankMatches,
@@ -52,10 +51,9 @@
 
   let cfg = $state<MatchConfig>({ ...DEFAULT_CONFIG });
 
-  // Bundled seed from public/data/players.json (small, Wikipedia-sourced).
-  let seedPlayers = $state<PlayerRow[]>([]);
-  // Per-device roster grown from past match setups. Merged with the seed at
-  // render time so the picker gets more useful the more matches a user plays.
+  // Per-device roster grown from past match setups. Merged with the
+  // Firebase identity store below so a name typed on this device
+  // autocompletes on the next setup even before Firebase is reached.
   let localPlayers = $state<PlayerRow[]>([]);
   let loadingPlayers = $state(true);
 
@@ -63,43 +61,30 @@
     // Read the identityTick so this recomputes when the /players
     // Firebase-backed store changes (admin adds a player etc.).
     void identityTick;
-    // Concatenate seed + local + identity-store, then dedupe by
-    // case-insensitive name. Identity-store rows are shaped as
-    // PlayerRow with source: 'identity' + their stored country so
-    // the picker shows the flag pill on Firebase-backed players too.
+    // Concatenate local + identity-store, dedupe by name+country.
+    // Identity-store rows are shaped as PlayerRow with source: 'identity'
+    // and (when set) their stored country so the picker shows the flag
+    // pill on Firebase-backed players.
     const identityRows: PlayerRow[] = loadAllPlayers().map((p) => ({
       name: p.canonicalName,
       source: 'identity',
       ...(p.country ? { country: p.country } : {}),
     }));
-    // Merge-dedupe. Identity-store rows key by (name + country) so
-    // legitimate namesakes from different countries stay as separate
-    // picker rows (e.g. Swapnil Deshpande from DK vs SE). Seed/local
-    // rows key by name only — those layers have no country column, so
-    // a country-less "Swapnil Deshpande" gets folded into whichever
-    // identity row shares the name AND has a country. Sources are
-    // walked in order [seed, local, identity]: earlier rows win on
-    // display shape, later rows fill in missing country info.
     const byKey = new Map<string, PlayerRow>();
-    // Pass 1: seed + local, keyed by name only (they can't distinguish
-    // namesakes anyway).
-    for (const p of [...seedPlayers, ...localPlayers]) {
+    // Pass 1: local device-history rows, keyed by name only (they have
+    // no country column).
+    for (const p of localPlayers) {
       const key = `n:${p.name.toLowerCase()}`;
       if (!byKey.has(key)) byKey.set(key, p);
     }
-    // Pass 2: identity rows. Each identity row is unique on
-    // (name, country) — that's how the admin creates namesake records.
-    // Fold country-less name matches from pass 1 into the identity row
-    // when there's exactly one; otherwise leave both.
+    // Pass 2: identity rows. Fold country-less local rows into a
+    // matching identity row so it gets a flag; keep namesakes-by-country
+    // (e.g. Swapnil Deshpande from DK vs SE) as separate picker rows.
     for (const p of identityRows) {
       const nameKey = `n:${p.name.toLowerCase()}`;
       const idKey = `i:${p.name.toLowerCase()}|${(p.country ?? '').toLowerCase()}`;
       const priorByName = byKey.get(nameKey);
       if (priorByName && !priorByName.country) {
-        // Upgrade the country-less local/seed row to carry the
-        // identity row's country, and re-key it under the id-scoped
-        // key so a second same-named identity row (different country)
-        // lands next to it instead of overwriting.
         byKey.delete(nameKey);
         byKey.set(idKey, { ...priorByName, country: p.country });
         continue;
@@ -110,22 +95,11 @@
   });
 
   $effect(() => {
-    // Load local roster first — always cheap, never fails hard.
+    // Load device-history roster (localStorage). Bundled seed was
+    // retired in v3.3.6 — Firebase /players is the source of truth
+    // for tournament rosters + display flags.
     localPlayers = loadKnownPlayers();
-    fetch(`${base}data/players.json`)
-      .then((r) => (r.ok ? r.json() : []))
-      .then((rows: PlayerRow[]) => {
-        seedPlayers = rows;
-        // Feed the same seed into the identity store so the fuzzy-match
-        // ranker has something to work with even before Firebase syncs.
-        seedPlayerIdentity(rows);
-      })
-      .catch(() => {
-        seedPlayers = [];
-      })
-      .finally(() => {
-        loadingPlayers = false;
-      });
+    loadingPlayers = false;
   });
 
   // Identity store: subscribe to Firebase-backed /players and bump a
@@ -284,7 +258,6 @@
    * denormalised (round, roundKey) pair still lands on the archive
    * and appears under an Unassigned sub-group in History.
    */
-  let showRoundPicker = $state(false);
   const currentTournamentKey = $derived(() => {
     const raw = cfg.tournament.trim();
     return raw ? normalizeKey(raw) : '';
@@ -298,15 +271,24 @@
     const key = currentTournamentKey();
     return key ? loadRounds(key) : [];
   });
-  function roundSuggestions(q: string): Round[] {
+  /**
+   * v3.3.6: the round picker is a native <select> instead of a
+   * free-text input with autocomplete. Umpires didn't know what
+   * round names existed until they typed a substring — the
+   * dropdown shows every open round explicitly. Closed rounds are
+   * filtered out by rankRounds so an organiser can hide a stage
+   * from new-match creation without renaming or deleting the
+   * round.
+   *
+   * `rankRounds(key, '', N)` with an empty query returns every
+   * open round in `order` ascending — same order the History and
+   * Reports accordions use.
+   */
+  const currentTournamentOpenRounds = $derived<Round[]>(() => {
     void tournamentTick;
     const key = currentTournamentKey();
-    return key ? rankRounds(key, q, 8) : [];
-  }
-  function pickRound(name: string): void {
-    cfg.round = name;
-    showRoundPicker = false;
-  }
+    return key ? rankRounds(key, '', 64) : [];
+  });
 
   function setMode(m: Mode) {
     const wasPractice = cfg.mode === 'practice';
@@ -435,11 +417,10 @@
     const typed = (cfg[key] as string).trim();
     if (!typed) return null;
     const resolvedId = resolvedPlayerIds[key as string];
-    if (!resolvedId) {
-      return 'Not in the roster — invite-only tournament expects assigned players';
-    }
-    if (!assignedPlayerIds.has(resolvedId)) {
-      return 'Not assigned to this tournament';
+    // Free-text (unresolved) and roster-miss collapse to the same
+    // umpire-facing message. The distinction only matters internally.
+    if (!resolvedId || !assignedPlayerIds.has(resolvedId)) {
+      return 'Not assigned to this tournament — contact the organiser';
     }
     if (t.country) {
       const roster = loadAllPlayers().find((p) => p.id === resolvedId);
@@ -552,6 +533,62 @@
     return null;
   });
 
+  /**
+   * v3.3.6: when the picked tournament has rounds configured, the
+   * umpire MUST pick one before starting the match. Prior behaviour
+   * left round blank as an "unassigned" archive tag — that landed
+   * the match in a nameless bucket in History and Reports. The
+   * organiser's request: enforce the round pick client-side so
+   * every match under a rounds-having tournament always carries a
+   * round tag.
+   *
+   * Returns null when the check passes: either the tournament has
+   * no rounds (round is truly optional) or the round input is
+   * non-empty.
+   */
+  let roundError = $derived.by((): string | null => {
+    if (cfg.mode === 'practice') return null;
+    void tournamentTick;
+    if (currentTournamentRounds().length === 0) return null;
+    if (cfg.round.trim().length > 0) return null;
+    return 'Pick a round for this tournament';
+  });
+
+  /**
+   * v3.3.6: for a CLOSED tournament, every active player slot must
+   * resolve to a roster-assigned playerId — a typed free-text name
+   * is rejected. Open tournaments are untouched (their whole point
+   * is walk-in-friendly, no roster).
+   *
+   * Country mismatch stays advisory (the amber pickWarning below);
+   * blocking there would strand a Danish visitor at a Swedish event
+   * with no umpire escape hatch. Roster membership is the hard rule.
+   */
+  let rosterError = $derived.by((): string | null => {
+    if (cfg.mode === 'practice') return null;
+    void identityTick;
+    void tournamentTick;
+    const t = pickedTournament();
+    if (!t || t.type !== 'closed') return null;
+    const slots: Array<{ label: string; name: string; key: keyof MatchConfig }> = [
+      { label: cfg.mode === 'singles' ? 'Player A' : 'Player 1 (A)', name: cfg.playerA, key: 'playerA' },
+      { label: cfg.mode === 'singles' ? 'Player B' : 'Player 1 (B)', name: cfg.playerB, key: 'playerB' },
+    ];
+    if (cfg.mode === 'doubles') {
+      slots.push({ label: 'Player 2 (A)', name: cfg.playerA2, key: 'playerA2' });
+      slots.push({ label: 'Player 2 (B)', name: cfg.playerB2, key: 'playerB2' });
+    }
+    for (const s of slots) {
+      const typed = s.name.trim();
+      if (typed.length === 0) continue;
+      const id = resolvedPlayerIds[s.key as string];
+      if (!id || !assignedPlayerIds.has(id)) {
+        return `${s.label} is not assigned to this tournament. Please contact the organiser.`;
+      }
+    }
+    return null;
+  });
+
   let canStart = $derived(() => {
     const a1 = cfg.playerA.trim().length > 0;
     if (cfg.mode === 'practice') {
@@ -560,13 +597,15 @@
       return a1 && cfg.maxBoards > 0;
     }
     const b1 = cfg.playerB.trim().length > 0;
-    if (cfg.mode === 'singles') return a1 && b1 && !dupError;
+    if (cfg.mode === 'singles') return a1 && b1 && !dupError && !roundError && !rosterError;
     return (
       a1 &&
       b1 &&
       cfg.playerA2.trim().length > 0 &&
       cfg.playerB2.trim().length > 0 &&
-      !dupError
+      !dupError &&
+      !roundError &&
+      !rosterError
     );
   });
 
@@ -786,7 +825,7 @@
 
 {#snippet noteInput(label: string, key: 'noteA' | 'noteB')}
   <label class="note-input">
-    <span>{label}</span>
+    <span>{label} <em class="hint-inline">(optional)</em></span>
     <input
       type="text"
       autocomplete="off"
@@ -935,46 +974,37 @@
   </label>
 
   <!--
-    Round picker (v3.2). Only shown when the resolved tournament
-    carries at least one round. Free-text with dropdown suggestions
-    ranked over the tournament's open rounds; closed rounds are
-    filtered out at the rankRounds source so the umpire can't
-    accidentally add a match to a stage the organiser has closed.
-    Missing rounds field on a legacy tournament → dropdown is empty
-    → the whole picker hides.
+    Round picker (v3.3.6 restyled from v3.2). Native <select>
+    dropdown listing every OPEN round attached to the picked
+    tournament. Closed rounds are filtered out by rankRounds so
+    an organiser can retire a stage without deleting it. Legacy
+    tournaments without any rounds hide the whole field.
+
+    Rationale for switching from free-text-with-autocomplete to a
+    strict <select>: reported 2026-08-19 — umpires didn't know
+    what round names existed until they typed a substring. Native
+    select is instantly discoverable, and the round field is
+    tournament-scoped so a strict list is fine (unlike the
+    tournament input, which stays free-text for casual events).
   -->
   {#if currentTournamentRounds().length > 0}
   <label class="tournament-input">
     <span>
-      Round <em class="hint-inline">(optional)</em>
+      Round <em class="hint-inline">(required)</em>
       <HelpTip label="Help: round">
-        Which stage of the tournament this match belongs to — Round of 16, Quarter-finals, Semi-finals, Final, etc. Rounds are set up per tournament by the organiser. Leave blank if the tournament doesn't have named stages.
+        Which stage of the tournament this match belongs to — Round of 16, Quarter-finals, Semi-finals, Final, etc. This tournament has rounds set up, so pick one before starting the match. History and Reports group matches by round.
       </HelpTip>
     </span>
-    <input
-      type="text"
-      autocomplete="off"
-      placeholder="Round of 16, Quarter-finals, …"
-      value={cfg.round}
-      oninput={(e) => (cfg.round = (e.currentTarget as HTMLInputElement).value)}
-      onfocus={() => (showRoundPicker = true)}
-      onblur={() => setTimeout(() => (showRoundPicker = false), 200)}
-      maxlength="60"
-    />
-    {#if showRoundPicker}
-      {@const rSuggestions = roundSuggestions(cfg.round)}
-      {#if rSuggestions.length > 0}
-        <ul class="suggest">
-          {#each rSuggestions as r (r.key)}
-            <li>
-              <button type="button" onclick={() => pickRound(r.name)}>
-                <span class="pname">{r.name}</span>
-              </button>
-            </li>
-          {/each}
-        </ul>
-      {/if}
-    {/if}
+    <select
+      class="round-select"
+      bind:value={cfg.round}
+      aria-label="Round"
+    >
+      <option value="" disabled>Pick a round…</option>
+      {#each currentTournamentOpenRounds() as r (r.key)}
+        <option value={r.name}>{r.name}</option>
+      {/each}
+    </select>
   </label>
   {/if}
   {/if}
@@ -1023,7 +1053,12 @@
     <p class="dup-error" role="alert">{dupError}</p>
   {/if}
 
-  <button class="start" type="submit" disabled={!canStart()}>
+  <button
+    class="start"
+    type="submit"
+    disabled={!canStart()}
+    title={!canStart() ? (rosterError ?? roundError ?? undefined) : undefined}
+  >
     Start match →
   </button>
 
@@ -1440,6 +1475,35 @@
   }
   input[type='text']:focus, input[type='number']:focus { border-color: var(--accent); }
 
+  /* Round <select> (v3.3.6). Matches the tournament input's field
+     styling so the two rows read as a matched pair. Native select
+     keeps mobile ergonomics — iOS/Android render their own wheel
+     picker with big touch targets. */
+  .round-select {
+    background: #141414;
+    color: var(--fg);
+    border: 1px solid #333;
+    border-radius: 0.6rem;
+    padding: 0.7rem 0.85rem;
+    font-size: 1rem;
+    font-family: inherit;
+    outline: none;
+    width: 100%;
+    min-width: 0;
+    appearance: none;
+    -webkit-appearance: none;
+    /* Chevron drawn via inline SVG data URI so no external asset
+       and works in both dark backdrops. */
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='M2 4 L6 8 L10 4' fill='none' stroke='%239aa0a6' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 0.85rem center;
+    background-size: 0.7rem;
+    padding-right: 2rem;
+    cursor: pointer;
+  }
+  .round-select:focus { border-color: var(--accent); }
+  .round-select option { background: #141414; color: var(--fg); }
+
   .suggest {
     position: absolute;
     top: 100%;
@@ -1520,7 +1584,6 @@
     background: rgba(255, 183, 77, 0.08);
     border: 1px solid rgba(255, 183, 77, 0.35);
   }
-
   .start {
     background: var(--accent);
     color: #0b0b0b;
