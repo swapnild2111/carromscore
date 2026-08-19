@@ -552,6 +552,27 @@
     return null;
   });
 
+  /**
+   * v3.3.6: when the picked tournament has rounds configured, the
+   * umpire MUST pick one before starting the match. Prior behaviour
+   * left round blank as an "unassigned" archive tag — that landed
+   * the match in a nameless bucket in History and Reports. The
+   * organiser's request: enforce the round pick client-side so
+   * every match under a rounds-having tournament always carries a
+   * round tag.
+   *
+   * Returns null when the check passes: either the tournament has
+   * no rounds (round is truly optional) or the round input is
+   * non-empty.
+   */
+  let roundError = $derived.by((): string | null => {
+    if (cfg.mode === 'practice') return null;
+    void tournamentTick;
+    if (currentTournamentRounds().length === 0) return null;
+    if (cfg.round.trim().length > 0) return null;
+    return 'Pick a round for this tournament';
+  });
+
   let canStart = $derived(() => {
     const a1 = cfg.playerA.trim().length > 0;
     if (cfg.mode === 'practice') {
@@ -560,13 +581,14 @@
       return a1 && cfg.maxBoards > 0;
     }
     const b1 = cfg.playerB.trim().length > 0;
-    if (cfg.mode === 'singles') return a1 && b1 && !dupError;
+    if (cfg.mode === 'singles') return a1 && b1 && !dupError && !roundError;
     return (
       a1 &&
       b1 &&
       cfg.playerA2.trim().length > 0 &&
       cfg.playerB2.trim().length > 0 &&
-      !dupError
+      !dupError &&
+      !roundError
     );
   });
 
@@ -946,9 +968,9 @@
   {#if currentTournamentRounds().length > 0}
   <label class="tournament-input">
     <span>
-      Round <em class="hint-inline">(optional)</em>
+      Round <em class="hint-inline">(required)</em>
       <HelpTip label="Help: round">
-        Which stage of the tournament this match belongs to — Round of 16, Quarter-finals, Semi-finals, Final, etc. Rounds are set up per tournament by the organiser. Leave blank if the tournament doesn't have named stages.
+        Which stage of the tournament this match belongs to — Round of 16, Quarter-finals, Semi-finals, Final, etc. This tournament has rounds set up, so pick one before starting the match. History and Reports group matches by round.
       </HelpTip>
     </span>
     <input
@@ -974,6 +996,11 @@
           {/each}
         </ul>
       {/if}
+    {/if}
+    {#if roundError}
+      <span class="round-warn" role="status" aria-live="polite">
+        {roundError}
+      </span>
     {/if}
   </label>
   {/if}
@@ -1519,6 +1546,22 @@
     color: #ffb74d;
     background: rgba(255, 183, 77, 0.08);
     border: 1px solid rgba(255, 183, 77, 0.35);
+  }
+  /* Round-required warning (v3.3.6). Renders below the Round input
+     when the picked tournament has rounds but the umpire hasn't
+     picked one yet. Danger tone rather than amber — this is a hard
+     block on Start, not an advisory. */
+  .round-warn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin-top: 0.35rem;
+    padding: 0.3rem 0.55rem;
+    border-radius: 0.4rem;
+    font-size: 0.75rem;
+    color: var(--danger, #ef5350);
+    background: rgba(239, 83, 80, 0.08);
+    border: 1px solid rgba(239, 83, 80, 0.35);
   }
 
   .start {
