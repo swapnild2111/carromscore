@@ -964,6 +964,16 @@
         ? (openLiveEntry?.meta.tournament ?? '').trim()
         : (openMatchRecord?.tournament ?? '').trim(),
   );
+  /**
+   * Round tag for the popup header. Only archived matches carry a
+   * round (the /live/{mid} payload doesn't — see v3.2 plan). Empty
+   * when the match has no round or the popup is a live entry.
+   */
+  const popupRound = $derived(
+    openPopup === null || openPopup.source === 'live'
+      ? ''
+      : (openMatchRecord?.round ?? '').trim(),
+  );
 
   // In overlay mode, find the target entry from the live subscription
   // whenever it lands. Renders as null until the first snapshot arrives,
@@ -1483,7 +1493,7 @@
       <header class="sheet-hdr">
         <span class="sheet-title">
           {#if popupIsEnded}Ended · {:else}<span class="sheet-live"><span class="dot" aria-hidden="true"></span>LIVE · </span>{/if}
-          {popupMode}{#if popupTournament} · <span class="sheet-tour">{popupTournament}</span>{/if}
+          {popupMode}{#if popupTournament} · <span class="sheet-tour">{popupTournament}</span>{/if}{#if popupRound} · <span class="sheet-round">{popupRound}</span>{/if}
         </span>
         <div class="sheet-actions">
           {#if openPopup?.source === 'live'}
@@ -2454,6 +2464,15 @@
     letter-spacing: 0.02em;
     text-transform: none;
     font-weight: 600;
+  }
+  /* Round tag renders after the tournament, softer weight so the
+     tournament stays primary. Reported 2026-08-19: the popup header
+     showed only the tournament; the round tag was missing. */
+  .sheet-round {
+    color: rgba(255, 213, 74, 0.75);
+    letter-spacing: 0.02em;
+    text-transform: none;
+    font-weight: 500;
   }
   .sheet-actions {
     display: flex;
