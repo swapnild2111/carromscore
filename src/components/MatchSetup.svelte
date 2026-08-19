@@ -284,7 +284,6 @@
    * denormalised (round, roundKey) pair still lands on the archive
    * and appears under an Unassigned sub-group in History.
    */
-  let showRoundPicker = $state(false);
   const currentTournamentKey = $derived(() => {
     const raw = cfg.tournament.trim();
     return raw ? normalizeKey(raw) : '';
@@ -298,15 +297,24 @@
     const key = currentTournamentKey();
     return key ? loadRounds(key) : [];
   });
-  function roundSuggestions(q: string): Round[] {
+  /**
+   * v3.3.6: the round picker is a native <select> instead of a
+   * free-text input with autocomplete. Umpires didn't know what
+   * round names existed until they typed a substring — the
+   * dropdown shows every open round explicitly. Closed rounds are
+   * filtered out by rankRounds so an organiser can hide a stage
+   * from new-match creation without renaming or deleting the
+   * round.
+   *
+   * `rankRounds(key, '', N)` with an empty query returns every
+   * open round in `order` ascending — same order the History and
+   * Reports accordions use.
+   */
+  const currentTournamentOpenRounds = $derived<Round[]>(() => {
     void tournamentTick;
     const key = currentTournamentKey();
-    return key ? rankRounds(key, q, 8) : [];
-  }
-  function pickRound(name: string): void {
-    cfg.round = name;
-    showRoundPicker = false;
-  }
+    return key ? rankRounds(key, '', 64) : [];
+  });
 
   function setMode(m: Mode) {
     const wasPractice = cfg.mode === 'practice';
@@ -957,13 +965,18 @@
   </label>
 
   <!--
-    Round picker (v3.2). Only shown when the resolved tournament
-    carries at least one round. Free-text with dropdown suggestions
-    ranked over the tournament's open rounds; closed rounds are
-    filtered out at the rankRounds source so the umpire can't
-    accidentally add a match to a stage the organiser has closed.
-    Missing rounds field on a legacy tournament → dropdown is empty
-    → the whole picker hides.
+    Round picker (v3.3.6 restyled from v3.2). Native <select>
+    dropdown listing every OPEN round attached to the picked
+    tournament. Closed rounds are filtered out by rankRounds so
+    an organiser can retire a stage without deleting it. Legacy
+    tournaments without any rounds hide the whole field.
+
+    Rationale for switching from free-text-with-autocomplete to a
+    strict <select>: reported 2026-08-19 — umpires didn't know
+    what round names existed until they typed a substring. Native
+    select is instantly discoverable, and the round field is
+    tournament-scoped so a strict list is fine (unlike the
+    tournament input, which stays free-text for casual events).
   -->
   {#if currentTournamentRounds().length > 0}
   <label class="tournament-input">
@@ -973,30 +986,16 @@
         Which stage of the tournament this match belongs to — Round of 16, Quarter-finals, Semi-finals, Final, etc. This tournament has rounds set up, so pick one before starting the match. History and Reports group matches by round.
       </HelpTip>
     </span>
-    <input
-      type="text"
-      autocomplete="off"
-      placeholder="Round of 16, Quarter-finals, …"
-      value={cfg.round}
-      oninput={(e) => (cfg.round = (e.currentTarget as HTMLInputElement).value)}
-      onfocus={() => (showRoundPicker = true)}
-      onblur={() => setTimeout(() => (showRoundPicker = false), 200)}
-      maxlength="60"
-    />
-    {#if showRoundPicker}
-      {@const rSuggestions = roundSuggestions(cfg.round)}
-      {#if rSuggestions.length > 0}
-        <ul class="suggest">
-          {#each rSuggestions as r (r.key)}
-            <li>
-              <button type="button" onclick={() => pickRound(r.name)}>
-                <span class="pname">{r.name}</span>
-              </button>
-            </li>
-          {/each}
-        </ul>
-      {/if}
-    {/if}
+    <select
+      class="round-select"
+      bind:value={cfg.round}
+      aria-label="Round"
+    >
+      <option value="" disabled>Pick a round…</option>
+      {#each currentTournamentOpenRounds() as r (r.key)}
+        <option value={r.name}>{r.name}</option>
+      {/each}
+    </select>
     {#if roundError}
       <span class="round-warn" role="status" aria-live="polite">
         {roundError}
@@ -1466,6 +1465,35 @@
     min-width: 0;
   }
   input[type='text']:focus, input[type='number']:focus { border-color: var(--accent); }
+
+  /* Round <select> (v3.3.6). Matches the tournament input's field
+     styling so the two rows read as a matched pair. Native select
+     keeps mobile ergonomics — iOS/Android render their own wheel
+     picker with big touch targets. */
+  .round-select {
+    background: #141414;
+    color: var(--fg);
+    border: 1px solid #333;
+    border-radius: 0.6rem;
+    padding: 0.7rem 0.85rem;
+    font-size: 1rem;
+    font-family: inherit;
+    outline: none;
+    width: 100%;
+    min-width: 0;
+    appearance: none;
+    -webkit-appearance: none;
+    /* Chevron drawn via inline SVG data URI so no external asset
+       and works in both dark backdrops. */
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='M2 4 L6 8 L10 4' fill='none' stroke='%239aa0a6' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 0.85rem center;
+    background-size: 0.7rem;
+    padding-right: 2rem;
+    cursor: pointer;
+  }
+  .round-select:focus { border-color: var(--accent); }
+  .round-select option { background: #141414; color: var(--fg); }
 
   .suggest {
     position: absolute;

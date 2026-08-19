@@ -1830,6 +1830,18 @@
     if (storageKey) {
       try { localStorage.removeItem(storageKey); } catch { /* ignore */ }
     }
+    // v3.3.6: also clear the resume pointer so Home's "Resume
+    // match" chip doesn't linger after the umpire explicitly said
+    // "close and discard". Reported 2026-08-19: close-with-discard
+    // ran, but the chip stayed on Home because clearResume was
+    // never called on the exit path — only on End Match's archive
+    // flow (and Reset). Live broadcast is also torn down so the
+    // /live/{mid} record vanishes from the lobby's Now Playing tab
+    // instead of sitting until the 4h stale sweep.
+    clearResume();
+    if (cfg.live && cfg.mid) {
+      try { await deleteLive(cfg.mid); } catch { /* ignore */ }
+    }
     await releaseLandscape();
     window.location.href = import.meta.env.BASE_URL;
   }
