@@ -91,7 +91,6 @@ function shouldPrecache(abs) {
   if (rel === 'favicon.svg') return true;
   if (rel === 'manifest.webmanifest') return true;
   if (rel === 'icon-192.png' || rel === 'icon-512.png') return true;
-  if (rel === 'data/players.json') return true;
   // Everything else (help screenshots, other misc) — skip. The
   // SW's runtime `cacheFirst` will still cache them on first
   // fetch if the user visits a page that needs them.

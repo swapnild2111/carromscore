@@ -9,7 +9,6 @@
   } from '../lib/match';
   import { loadKnownPlayers, rememberPlayers } from '../lib/known-players';
   import {
-    seedFromRows as seedPlayerIdentity,
     subscribePlayers,
     subscribeStore,
     rankMatches,
@@ -52,10 +51,9 @@
 
   let cfg = $state<MatchConfig>({ ...DEFAULT_CONFIG });
 
-  // Bundled seed from public/data/players.json (small, Wikipedia-sourced).
-  let seedPlayers = $state<PlayerRow[]>([]);
-  // Per-device roster grown from past match setups. Merged with the seed at
-  // render time so the picker gets more useful the more matches a user plays.
+  // Per-device roster grown from past match setups. Merged with the
+  // Firebase identity store below so a name typed on this device
+  // autocompletes on the next setup even before Firebase is reached.
   let localPlayers = $state<PlayerRow[]>([]);
   let loadingPlayers = $state(true);
 
@@ -63,43 +61,30 @@
     // Read the identityTick so this recomputes when the /players
     // Firebase-backed store changes (admin adds a player etc.).
     void identityTick;
-    // Concatenate seed + local + identity-store, then dedupe by
-    // case-insensitive name. Identity-store rows are shaped as
-    // PlayerRow with source: 'identity' + their stored country so
-    // the picker shows the flag pill on Firebase-backed players too.
+    // Concatenate local + identity-store, dedupe by name+country.
+    // Identity-store rows are shaped as PlayerRow with source: 'identity'
+    // and (when set) their stored country so the picker shows the flag
+    // pill on Firebase-backed players.
     const identityRows: PlayerRow[] = loadAllPlayers().map((p) => ({
       name: p.canonicalName,
       source: 'identity',
       ...(p.country ? { country: p.country } : {}),
     }));
-    // Merge-dedupe. Identity-store rows key by (name + country) so
-    // legitimate namesakes from different countries stay as separate
-    // picker rows (e.g. Swapnil Deshpande from DK vs SE). Seed/local
-    // rows key by name only — those layers have no country column, so
-    // a country-less "Swapnil Deshpande" gets folded into whichever
-    // identity row shares the name AND has a country. Sources are
-    // walked in order [seed, local, identity]: earlier rows win on
-    // display shape, later rows fill in missing country info.
     const byKey = new Map<string, PlayerRow>();
-    // Pass 1: seed + local, keyed by name only (they can't distinguish
-    // namesakes anyway).
-    for (const p of [...seedPlayers, ...localPlayers]) {
+    // Pass 1: local device-history rows, keyed by name only (they have
+    // no country column).
+    for (const p of localPlayers) {
       const key = `n:${p.name.toLowerCase()}`;
       if (!byKey.has(key)) byKey.set(key, p);
     }
-    // Pass 2: identity rows. Each identity row is unique on
-    // (name, country) — that's how the admin creates namesake records.
-    // Fold country-less name matches from pass 1 into the identity row
-    // when there's exactly one; otherwise leave both.
+    // Pass 2: identity rows. Fold country-less local rows into a
+    // matching identity row so it gets a flag; keep namesakes-by-country
+    // (e.g. Swapnil Deshpande from DK vs SE) as separate picker rows.
     for (const p of identityRows) {
       const nameKey = `n:${p.name.toLowerCase()}`;
       const idKey = `i:${p.name.toLowerCase()}|${(p.country ?? '').toLowerCase()}`;
       const priorByName = byKey.get(nameKey);
       if (priorByName && !priorByName.country) {
-        // Upgrade the country-less local/seed row to carry the
-        // identity row's country, and re-key it under the id-scoped
-        // key so a second same-named identity row (different country)
-        // lands next to it instead of overwriting.
         byKey.delete(nameKey);
         byKey.set(idKey, { ...priorByName, country: p.country });
         continue;
@@ -110,22 +95,11 @@
   });
 
   $effect(() => {
-    // Load local roster first — always cheap, never fails hard.
+    // Load device-history roster (localStorage). Bundled seed was
+    // retired in v3.3.6 — Firebase /players is the source of truth
+    // for tournament rosters + display flags.
     localPlayers = loadKnownPlayers();
-    fetch(`${base}data/players.json`)
-      .then((r) => (r.ok ? r.json() : []))
-      .then((rows: PlayerRow[]) => {
-        seedPlayers = rows;
-        // Feed the same seed into the identity store so the fuzzy-match
-        // ranker has something to work with even before Firebase syncs.
-        seedPlayerIdentity(rows);
-      })
-      .catch(() => {
-        seedPlayers = [];
-      })
-      .finally(() => {
-        loadingPlayers = false;
-      });
+    loadingPlayers = false;
   });
 
   // Identity store: subscribe to Firebase-backed /players and bump a
