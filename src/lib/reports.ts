@@ -130,15 +130,18 @@ function formatDate(endedAt: number | undefined): string {
 
 /**
  * Combined side name for a match record. Singles → single name;
- * doubles → 'Alice & Bob'. Falls back to 'Side A' / 'Side B' when
- * the player identity store hasn't hydrated yet (unusual because
- * LiveLobby primes it on mount).
+ * doubles → 'Alice & Bob'. Uses the denormalised aName/bName/a2Name/
+ * b2Name stamped on the match record as fallback so a record whose
+ * playerId points at a deleted or unhydrated player still renders
+ * the umpire-typed name — matching what the History card shows.
  */
 function teamName(m: MatchRecord, side: 'a' | 'b'): string {
   const p1Id = side === 'a' ? m.playerAId : m.playerBId;
   const p2Id = side === 'a' ? m.playerA2Id : m.playerB2Id;
-  const n1 = p1Id ? playerName(p1Id) : '';
-  const n2 = m.mode === 'doubles' && p2Id ? playerName(p2Id) : '';
+  const fb1 = side === 'a' ? m.aName : m.bName;
+  const fb2 = side === 'a' ? m.a2Name : m.b2Name;
+  const n1 = playerName(p1Id, fb1);
+  const n2 = m.mode === 'doubles' ? playerName(p2Id, fb2) : '';
   if (n1 && n2) return `${n1} & ${n2}`;
   return n1 || n2 || (side === 'a' ? 'Side A' : 'Side B');
 }
