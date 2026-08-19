@@ -858,7 +858,6 @@
                     {flagEmoji(t.country)} {countryName(t.country)}
                   </span>
                 {/if}
-                <span class="chip">key: <code>{t.key}</code></span>
                 <span class="chip">last active {new Date(t.lastActive).toLocaleDateString()}</span>
               </div>
             </div>
@@ -1347,7 +1346,6 @@
                     <div class="round-name-text">{r.name}</div>
                     <div class="round-name-meta">
                       <span class="chip">order {r.order}</span>
-                      <span class="chip">key: <code>{r.key}</code></span>
                       {#if r.state === 'closed'}
                         <span class="chip chip-closed" title="Closed — not offered to umpires">
                           CLOSED
