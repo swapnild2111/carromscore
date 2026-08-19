@@ -581,6 +581,41 @@
     return 'Pick a round for this tournament';
   });
 
+  /**
+   * v3.3.6: for a CLOSED tournament, every active player slot must
+   * resolve to a roster-assigned playerId — a typed free-text name
+   * is rejected. Open tournaments are untouched (their whole point
+   * is walk-in-friendly, no roster).
+   *
+   * Country mismatch stays advisory (the amber pickWarning below);
+   * blocking there would strand a Danish visitor at a Swedish event
+   * with no umpire escape hatch. Roster membership is the hard rule.
+   */
+  let rosterError = $derived.by((): string | null => {
+    if (cfg.mode === 'practice') return null;
+    void identityTick;
+    void tournamentTick;
+    const t = pickedTournament();
+    if (!t || t.type !== 'closed') return null;
+    const slots: Array<{ label: string; name: string; key: keyof MatchConfig }> = [
+      { label: cfg.mode === 'singles' ? 'Player A' : 'Player 1 (A)', name: cfg.playerA, key: 'playerA' },
+      { label: cfg.mode === 'singles' ? 'Player B' : 'Player 1 (B)', name: cfg.playerB, key: 'playerB' },
+    ];
+    if (cfg.mode === 'doubles') {
+      slots.push({ label: 'Player 2 (A)', name: cfg.playerA2, key: 'playerA2' });
+      slots.push({ label: 'Player 2 (B)', name: cfg.playerB2, key: 'playerB2' });
+    }
+    for (const s of slots) {
+      const typed = s.name.trim();
+      if (typed.length === 0) continue;
+      const id = resolvedPlayerIds[s.key as string];
+      if (!id || !assignedPlayerIds.has(id)) {
+        return `${s.label} isn’t on ${t.name}’s roster. Pick from the list or add them under Admin → Tournaments → Assigned players.`;
+      }
+    }
+    return null;
+  });
+
   let canStart = $derived(() => {
     const a1 = cfg.playerA.trim().length > 0;
     if (cfg.mode === 'practice') {
@@ -589,14 +624,15 @@
       return a1 && cfg.maxBoards > 0;
     }
     const b1 = cfg.playerB.trim().length > 0;
-    if (cfg.mode === 'singles') return a1 && b1 && !dupError && !roundError;
+    if (cfg.mode === 'singles') return a1 && b1 && !dupError && !roundError && !rosterError;
     return (
       a1 &&
       b1 &&
       cfg.playerA2.trim().length > 0 &&
       cfg.playerB2.trim().length > 0 &&
       !dupError &&
-      !roundError
+      !roundError &&
+      !rosterError
     );
   });
 
@@ -1043,12 +1079,15 @@
   {#if dupError}
     <p class="dup-error" role="alert">{dupError}</p>
   {/if}
+  {#if rosterError}
+    <p class="dup-error" role="alert">{rosterError}</p>
+  {/if}
 
   <button
     class="start"
     type="submit"
     disabled={!canStart()}
-    title={!canStart() && roundError ? roundError : undefined}
+    title={!canStart() ? (rosterError ?? roundError ?? undefined) : undefined}
   >
     Start match →
   </button>
