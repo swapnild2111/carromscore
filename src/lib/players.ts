@@ -284,13 +284,27 @@ export function loadAll(): Player[] {
  * is also persisted to /players/{id}. Failures are logged and ignored
  * — the local record still exists and the app keeps working.
  */
-export function createPlayer(
+/**
+ * Result of a createPlayer call. `ok: false` means the RTDB write
+ * was rejected — the local memoryStore push has been rolled back
+ * before returning so the admin list doesn't show a phantom
+ * record. `ok: true` with a player from the memoryStore covers
+ * both the fresh-create and the return-existing (idempotent) paths.
+ */
+export type CreatePlayerOutcome =
+  | { ok: true; player: Player }
+  | { ok: false; error: string };
+
+export async function createPlayer(
   canonicalName: string,
   metaOrCreatedBy?: string | CreatePlayerMeta,
-): Player {
+): Promise<CreatePlayerOutcome> {
   const norm = normalize(canonicalName);
   if (!isPlausibleName(canonicalName)) {
-    throw new Error(`Refusing to create player with implausible name: ${canonicalName}`);
+    return {
+      ok: false,
+      error: `Refusing to create player with implausible name: ${canonicalName}`,
+    };
   }
   // Backwards-compat: `createPlayer(name, "uid")` legacy form still
   // works — the second arg is treated as createdBy only. v3.1+ callers
@@ -312,16 +326,15 @@ export function createPlayer(
     const pCountry = p.country ? p.country.trim() : '';
     return pCountry === metaCountry;
   });
-  if (existing) return existing;
+  if (existing) return { ok: true, player: existing };
   // v3.3 auth guard: fresh creates require a signed-in user so
   // `createdBy` can be stamped and the RTDB rule accepts the write.
-  // The admin panel is the only creation surface in v3.3+ (the
-  // match-end auto-create was already retired in v3.0-B2), and the
-  // admin panel is auth-gated, so this branch fires only on
-  // pathological callers (test hooks, off-flow tools).
   const finalCreatedBy = meta.createdBy ?? currentUser()?.uid;
   if (!finalCreatedBy) {
-    throw new Error('Refusing to create player without an authenticated caller');
+    return {
+      ok: false,
+      error: 'You must be signed in to create a player',
+    };
   }
   const p: Player = {
     id: playerIdFor(canonicalName),
@@ -336,8 +349,17 @@ export function createPlayer(
   };
   memoryStore.push(p);
   notify();
-  void writePlayerToFirebase(p);
-  return p;
+  // v3.3: await the Firebase write so we can surface rule denials
+  // to the caller. On failure, roll back the local push so the admin
+  // list doesn't show a phantom record that vanishes on next load.
+  const outcome = await writePlayerToFirebase(p);
+  if (!outcome.ok) {
+    const idx = memoryStore.findIndex((x) => x.id === p.id);
+    if (idx !== -1) memoryStore.splice(idx, 1);
+    notify();
+    return { ok: false, error: outcome.error };
+  }
+  return { ok: true, player: p };
 }
 
 /**
@@ -511,7 +533,14 @@ export async function ensurePlayerInFirebase(playerId: string): Promise<void> {
   await writePlayerToFirebase(p);
 }
 
-async function writePlayerToFirebase(p: Player): Promise<void> {
+/**
+ * Returned outcome so createPlayer can surface RTDB rule denials to
+ * the caller and roll back the local push. See tournaments.ts
+ * FirebaseWriteOutcome for the same pattern.
+ */
+type PlayerFirebaseWriteOutcome = { ok: true } | { ok: false; error: string };
+
+async function writePlayerToFirebase(p: Player): Promise<PlayerFirebaseWriteOutcome> {
   try {
     const [{ firebaseApp }, { getDatabase, ref, set }] = await Promise.all([
       import('./firebase'),
@@ -529,8 +558,10 @@ async function writePlayerToFirebase(p: Player): Promise<void> {
       aliases: { ...p.aliases },
       normalisedIndex: normalisedIndex(p),
     });
-  } catch {
-    // Firebase unreachable or rules denied — local record persists.
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg || 'Firebase write failed' };
   }
 }
 
