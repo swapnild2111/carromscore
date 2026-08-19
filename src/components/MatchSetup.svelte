@@ -610,7 +610,7 @@
       if (typed.length === 0) continue;
       const id = resolvedPlayerIds[s.key as string];
       if (!id || !assignedPlayerIds.has(id)) {
-        return `${s.label} isn’t on ${t.name}’s roster. Pick from the list or add them under Admin → Tournaments → Assigned players.`;
+        return `${s.label} is not assigned to this tournament. Please contact the organiser.`;
       }
     }
     return null;
