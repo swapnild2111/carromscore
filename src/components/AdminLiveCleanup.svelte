@@ -279,6 +279,9 @@
               {#if e.meta.tournament}
                 <span class="chip">{e.meta.tournament}</span>
               {/if}
+              {#if e.meta.round}
+                <span class="chip chip-round">{e.meta.round}</span>
+              {/if}
               <span class="row-date">updated {relTime(e.updatedAt)}</span>
               {#if isStuck(e)}
                 <span class="chip chip-warn">stuck</span>
@@ -508,6 +511,15 @@
     letter-spacing: 0.04em;
     font-size: 0.65rem;
     font-weight: 700;
+  }
+  /* Round chip — v3.3.6. Follows the tournament chip visually
+     but sits one step further into the app's blue-ish accent so
+     the round reads at-a-glance next to its parent tournament. */
+  .chip-round {
+    color: #8ab4f8;
+    background: rgba(138, 180, 248, 0.08);
+    border-color: rgba(138, 180, 248, 0.3);
+    letter-spacing: 0.02em;
   }
   .chip-warn {
     color: #ffb74d;

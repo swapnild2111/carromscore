@@ -816,7 +816,7 @@
 
 {#snippet noteInput(label: string, key: 'noteA' | 'noteB')}
   <label class="note-input">
-    <span>{label}</span>
+    <span>{label} <em class="hint-inline">(optional)</em></span>
     <input
       type="text"
       autocomplete="off"
@@ -996,11 +996,6 @@
         <option value={r.name}>{r.name}</option>
       {/each}
     </select>
-    {#if roundError}
-      <span class="round-warn" role="status" aria-live="polite">
-        {roundError}
-      </span>
-    {/if}
   </label>
   {/if}
   {/if}
@@ -1049,7 +1044,12 @@
     <p class="dup-error" role="alert">{dupError}</p>
   {/if}
 
-  <button class="start" type="submit" disabled={!canStart()}>
+  <button
+    class="start"
+    type="submit"
+    disabled={!canStart()}
+    title={!canStart() && roundError ? roundError : undefined}
+  >
     Start match →
   </button>
 
@@ -1575,23 +1575,6 @@
     background: rgba(255, 183, 77, 0.08);
     border: 1px solid rgba(255, 183, 77, 0.35);
   }
-  /* Round-required warning (v3.3.6). Renders below the Round input
-     when the picked tournament has rounds but the umpire hasn't
-     picked one yet. Danger tone rather than amber — this is a hard
-     block on Start, not an advisory. */
-  .round-warn {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-    margin-top: 0.35rem;
-    padding: 0.3rem 0.55rem;
-    border-radius: 0.4rem;
-    font-size: 0.75rem;
-    color: var(--danger, #ef5350);
-    background: rgba(239, 83, 80, 0.08);
-    border: 1px solid rgba(239, 83, 80, 0.35);
-  }
-
   .start {
     background: var(--accent);
     color: #0b0b0b;
