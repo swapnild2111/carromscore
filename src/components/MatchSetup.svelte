@@ -436,7 +436,7 @@
     if (!typed) return null;
     const resolvedId = resolvedPlayerIds[key as string];
     if (!resolvedId) {
-      return 'Not in the roster — closed tournament expects assigned players';
+      return 'Not in the roster — invite-only tournament expects assigned players';
     }
     if (!assignedPlayerIds.has(resolvedId)) {
       return 'Not assigned to this tournament';

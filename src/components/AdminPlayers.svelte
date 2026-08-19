@@ -666,7 +666,6 @@
                     {countryName(p.country)}
                   </span>
                 {/if}
-                <span class="chip">id: <code>{p.id}</code></span>
                 {#if Object.keys(p.aliases).length > 0}
                   <span class="chip">{Object.keys(p.aliases).length} alias{Object.keys(p.aliases).length === 1 ? '' : 'es'}</span>
                 {/if}

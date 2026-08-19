@@ -303,9 +303,6 @@
               </span>
             </div>
             <div class="row-meta">
-              <span class="meta-label">mid</span>
-              <code class="mid">{e.mid}</code>
-              <span class="meta-sep">·</span>
               <span class="meta-label">by</span>
               {#if e.createdByName}
                 <span class="meta-value">{e.createdByName}</span>

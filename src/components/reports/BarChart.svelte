@@ -34,13 +34,20 @@
 
   const shown = $derived(bars.slice(0, maxRows));
   const maxValue = $derived(Math.max(1, ...shown.map((b) => b.value)));
-  const rowHeight = 26;
-  const gap = 6;
-  const labelWidth = 140;
+  // Layout switched to "label above the bar" so long player names
+  // don't clip against the SVG's left edge (reported 2026-08-19:
+  // "Yuvaraj Eshwaramoorthy" rendered as "uvaraj Eshwaramoorthy"
+  // because a right-anchored SVG text at x=labelWidth ran off the
+  // 0-origin viewBox). Each row is now two lines high: name on top,
+  // bar + numeric value below. Reads better on narrow phones too.
+  const labelHeight = 18;
+  const barBandHeight = 20;
+  const rowHeight = labelHeight + barBandHeight;
+  const gap = 8;
   const valueWidth = 44;
   const chartWidth = 380;
   const totalHeight = $derived(shown.length * (rowHeight + gap));
-  const barsPixelWidth = $derived(chartWidth - labelWidth - valueWidth);
+  const barsPixelWidth = $derived(chartWidth - valueWidth);
 
   function fmt(v: number): string {
     return formatValue ? formatValue(v) : String(v);
@@ -66,27 +73,29 @@
         {@const barLen = (bar.value / maxValue) * barsPixelWidth}
         {@const y = i * (rowHeight + gap)}
         {@const colour = bar.colour ?? '#4fc3f7'}
+        {@const labelY = y + labelHeight - 4}
+        {@const barY = y + labelHeight}
         <g>
           <text
-            x={labelWidth - 6}
-            y={y + rowHeight / 2}
+            x="0"
+            y={labelY}
             class="lbl"
-            text-anchor="end"
-            dominant-baseline="middle"
+            text-anchor="start"
+            dominant-baseline="alphabetic"
           >{bar.label}</text>
           <rect
-            x={labelWidth}
-            y={y + 2}
+            x="0"
+            y={barY + 2}
             width={Math.max(2, barLen)}
-            height={rowHeight - 4}
+            height={barBandHeight - 4}
             fill={colour}
             rx="3"
           >
             <title>{bar.label}: {fmt(bar.value)}</title>
           </rect>
           <text
-            x={labelWidth + barLen + 6}
-            y={y + rowHeight / 2}
+            x={barLen + 6}
+            y={barY + barBandHeight / 2}
             class="val"
             text-anchor="start"
             dominant-baseline="middle"

@@ -16,10 +16,9 @@
   import type { MatchRecord } from '../../lib/history';
   import {
     buildTournamentReport,
-    toCSV,
     toTSV,
-    downloadTextFile,
-    slugifyName,
+    type ReportRow,
+    type PlayerSummary,
     type TournamentReport,
   } from '../../lib/reports';
   import {
@@ -77,13 +76,15 @@
   type PickerOption = { key: string | null; label: string };
   const options = $derived<PickerOption[]>(() => {
     void tournamentTick;
-    // Default bucket first (matches how History labels the untagged
-    // group — one consistent term across both tabs). Then real
-    // tournaments most-recently-active first.
-    const opts: PickerOption[] = [{ key: null, label: 'Default' }];
+    // Real tournaments first (most-recently-active), Default last
+    // and de-emphasised — organisers scanning the chip strip should
+    // see their real events at the front. Reported 2026-08-19:
+    // "Default" cluttering the head of the row.
+    const opts: PickerOption[] = [];
     for (const t of loadAllTournaments()) {
       opts.push({ key: t.name, label: t.name });
     }
+    opts.push({ key: null, label: 'Default' });
     return opts;
   });
 
@@ -112,6 +113,83 @@
       ? null
       : buildTournamentReport(matches, selection, currentRoundRoster()),
   );
+
+  /**
+   * Round filter (v3.3.3). Chip strip below the tournament picker
+   * lets the umpire scope the top view (summary tiles, charts,
+   * leaderboard, matches table) to a single round. `null` = All
+   * rounds combined (default). Resets whenever the tournament
+   * selection changes so a stale round key from a previous
+   * tournament doesn't carry over.
+   */
+  let roundFilter = $state<string | null>(null);
+  $effect(() => {
+    void selection;
+    roundFilter = null;
+  });
+
+  /**
+   * The view report — either the combined tournament report or a
+   * specific round's slice. When a round is picked, we synthesise a
+   * lightweight report shape from the matching roundReport so
+   * downstream renders (charts, leaderboard, matches table) don't
+   * branch on filter state. summary tiles read from this too.
+   */
+  const viewReport = $derived<TournamentReport | null>(() => {
+    if (!report) return null;
+    if (roundFilter === null) return report;
+    const rr = report.roundReports?.find((x) => x.roundKey === roundFilter);
+    if (!rr) return report;
+    return {
+      tournament: report.tournament,
+      matches: rr.matches,
+      rows: rr.rows,
+      playerSummary: rr.playerSummary,
+      // Keep roundReports absent on the filtered view — the per-
+      // round accordion should still render the full breakdown
+      // (fed by the unfiltered `report`, not `viewReport`).
+    };
+  });
+
+  /**
+   * Summary-tile stats. Cheap derivations off the current view so
+   * summary + charts + leaderboard all stay in step when the round
+   * filter changes.
+   *
+   * `matchesCount` — total matches under the view scope.
+   * `playersCount` — distinct players who played at least one
+   *   match under the view scope.
+   * `boardsCount` — sum of boardsWonA + boardsWonB across matches
+   *   (i.e. total boards played under the scope).
+   * `topPlayer` — the leader row (already sorted by
+   *   buildPlayerSummary). Tie-broken by boards then points; if
+   *   the top two are truly tied the label reads "Tied".
+   */
+  const summaryStats = $derived(() => {
+    const r = viewReport();
+    if (!r || r.rows.length === 0) return null;
+    const matchesCount = r.matches;
+    const playersCount = r.playerSummary.length;
+    const boardsCount = r.rows.reduce(
+      (n, row) => n + row.boardsWonA + row.boardsWonB,
+      0,
+    );
+    const top = r.playerSummary[0] ?? null;
+    const second = r.playerSummary[1] ?? null;
+    const tiedAtTop =
+      !!top &&
+      !!second &&
+      top.wins === second.wins &&
+      top.boardsWon === second.boardsWon &&
+      top.pointsScored === second.pointsScored;
+    return {
+      matchesCount,
+      playersCount,
+      boardsCount,
+      topPlayer: top,
+      tiedAtTop,
+    };
+  });
 
   /**
    * Per-round accordion fold state (v3.2). Session-only Set of
@@ -143,12 +221,16 @@
     onSelectionChange(key);
   }
 
-  // Copy-to-clipboard state. Ephemeral tick like the /live/ Share
-  // popup uses so the button flashes "✓ Copied" briefly then reverts.
-  let copiedTick = $state(false);
+  // Copy-to-clipboard state. Ephemeral flag keyed by what was
+  // copied — the main tournament table gets `__main__`, each
+  // round's per-round table gets its `roundKey`. That way the
+  // "✓ Copied" flash on one button doesn't light up the others.
+  const MAIN_COPY_KEY = '__main__';
+  let copiedKey = $state<string | null>(null);
   let copyTimer: number | null = null;
-  async function copyTable(rep: TournamentReport) {
-    const tsv = toTSV(rep.rows);
+
+  async function copyRows(rows: ReportRow[], flashKey: string) {
+    const tsv = toTSV(rows);
     try {
       await navigator.clipboard.writeText(tsv);
     } catch {
@@ -163,38 +245,64 @@
       try { document.execCommand('copy'); } catch { /* silent */ }
       el.remove();
     }
-    copiedTick = true;
+    copiedKey = flashKey;
     if (copyTimer !== null) window.clearTimeout(copyTimer);
-    copyTimer = window.setTimeout(() => (copiedTick = false), 1800);
+    copyTimer = window.setTimeout(() => (copiedKey = null), 1800);
   }
 
-  function downloadCSV(rep: TournamentReport) {
-    const csv = toCSV(rep.rows);
-    const filename = `${slugifyName(rep.tournament)}-carromscore.csv`;
-    downloadTextFile(filename, 'text/csv;charset=utf-8', csv);
+  /**
+   * Rank helper mirroring the carrom-thane.web.app leaderboard: the
+   * first row gets its true rank, subsequent tied rows render "—"
+   * so ties visually group. Tie-detection uses the same sort keys
+   * buildPlayerSummary applied: wins DESC, boards DESC, points DESC.
+   */
+  function rankLabel(rows: PlayerSummary[], i: number): string {
+    if (i === 0) return String(i + 1);
+    const prev = rows[i - 1];
+    const cur = rows[i];
+    if (
+      prev.wins === cur.wins &&
+      prev.boardsWon === cur.boardsWon &&
+      prev.pointsScored === cur.pointsScored
+    ) {
+      return '—';
+    }
+    return String(i + 1);
   }
 
   // Player-summary chart data. Ranked list already sorted in
   // buildPlayerSummary() by wins desc → boards desc → points desc.
-  const winsChart = $derived(
-    report ? report.playerSummary.map((p, i) => ({
-      label: p.name,
-      value: p.wins,
-      // Alternate palette between the two side colours so the chart
-      // reads visually distinct from a solid bar block.
-      colour: i % 2 === 0 ? 'var(--side-a, #4fc3f7)' : 'var(--side-b, #ff8a65)',
-    })) : [],
-  );
-  const pointsChart = $derived(
-    report ? report.playerSummary
-      .slice()
-      .sort((a, b) => b.pointsScored - a.pointsScored)
-      .map((p, i) => ({
-        label: p.name,
-        value: p.pointsScored,
-        colour: i % 2 === 0 ? 'var(--side-a, #4fc3f7)' : 'var(--side-b, #ff8a65)',
-      })) : [],
-  );
+  // Reads from `viewReport` so a round filter narrows the charts
+  // alongside the leaderboard.
+  const winsChart = $derived(() => {
+    const r = viewReport();
+    return r
+      ? r.playerSummary.map((p, i) => ({
+          label: p.name,
+          value: p.wins,
+          // Alternate palette between the two side colours so the chart
+          // reads visually distinct from a solid bar block.
+          colour: i % 2 === 0 ? 'var(--side-a, #4fc3f7)' : 'var(--side-b, #ff8a65)',
+        }))
+      : [];
+  });
+  const pointsChart = $derived(() => {
+    const r = viewReport();
+    return r
+      ? r.playerSummary
+          .slice()
+          .sort((a, b) => b.pointsScored - a.pointsScored)
+          .map((p, i) => ({
+            label: p.name,
+            value: p.pointsScored,
+            colour: i % 2 === 0 ? 'var(--side-a, #4fc3f7)' : 'var(--side-b, #ff8a65)',
+          }))
+      : [];
+  });
+  const anyDraws = $derived(() => {
+    const r = viewReport();
+    return !!r && r.playerSummary.some((p) => p.draws > 0);
+  });
 </script>
 
 <section class="reports">
@@ -207,6 +315,7 @@
           role="tab"
           class="chip"
           class:chip-on={selection === opt.key}
+          class:chip-default={opt.key === null}
           aria-selected={selection === opt.key}
           onclick={() => pick(opt.key)}
         >{opt.label}</button>
@@ -214,44 +323,121 @@
     </div>
   </div>
 
-  {#if !report}
+  {#if report && (report.roundReports?.length ?? 0) > 0}
+    <!--
+      Round filter (v3.3.3). Chip strip below the tournament picker
+      when the current tournament has rounds. Scopes summary tiles /
+      charts / leaderboard / matches table to one round. The per-
+      round accordion below is not affected — it always renders the
+      full breakdown so an organiser can jump straight to a stage.
+    -->
+    <div class="picker picker-round">
+      <span class="picker-lbl">Round</span>
+      <div class="chips" role="tablist" aria-label="Filter by round">
+        <button
+          type="button"
+          role="tab"
+          class="chip"
+          class:chip-on={roundFilter === null}
+          aria-selected={roundFilter === null}
+          onclick={() => (roundFilter = null)}
+        >All rounds</button>
+        {#each report.roundReports ?? [] as rr (rr.roundKey)}
+          <button
+            type="button"
+            role="tab"
+            class="chip"
+            class:chip-on={roundFilter === rr.roundKey}
+            aria-selected={roundFilter === rr.roundKey}
+            onclick={() => (roundFilter = rr.roundKey)}
+          >{rr.roundName}</button>
+        {/each}
+      </div>
+    </div>
+  {/if}
+
+  {#if !viewReport()}
     <div class="empty">
       <p><strong>Pick a tournament above.</strong></p>
-      <p class="empty-sub">Every match tagged to that tournament will show up here with per-player summary, charts, and a downloadable CSV.</p>
+      <p class="empty-sub">Every match tagged to that tournament will show up here with per-player summary, charts, and a copy-to-spreadsheet table.</p>
     </div>
-  {:else if report.rows.length === 0}
+  {:else if viewReport()!.rows.length === 0}
     <div class="empty">
-      <p><strong>No matches recorded for this tournament yet.</strong></p>
-      <p class="empty-sub">Score a match on the home screen and tag it with <em>{report.tournament}</em>. It'll appear here as soon as it ends.</p>
+      <p><strong>No matches recorded {roundFilter ? 'in this round' : 'for this tournament'} yet.</strong></p>
+      <p class="empty-sub">
+        {#if roundFilter}
+          Try another round, or clear the filter to see every match.
+        {:else}
+          Score a match on the home screen and tag it with <em>{viewReport()!.tournament}</em>. It'll appear here as soon as it ends.
+        {/if}
+      </p>
     </div>
   {:else}
+    {@const view = viewReport()!}
+    {@const stats = summaryStats()}
+
+    {#if stats}
+      <!--
+        Summary tiles (v3.3.3). One glance tells the umpire what
+        they're looking at: matches, players, boards, and who's
+        leading. Reads from `stats` which reads from viewReport so
+        the round filter reshapes these tiles alongside everything
+        else.
+      -->
+      <div class="stat-row">
+        <div class="stat-tile">
+          <div class="stat-value">{stats.matchesCount}</div>
+          <div class="stat-label">{stats.matchesCount === 1 ? 'Match' : 'Matches'}</div>
+        </div>
+        <div class="stat-tile">
+          <div class="stat-value">{stats.playersCount}</div>
+          <div class="stat-label">{stats.playersCount === 1 ? 'Player' : 'Players'}</div>
+        </div>
+        <div class="stat-tile">
+          <div class="stat-value">{stats.boardsCount}</div>
+          <div class="stat-label">{stats.boardsCount === 1 ? 'Board' : 'Boards'}</div>
+        </div>
+        <div class="stat-tile stat-tile-leader">
+          <div class="stat-value stat-value-name" title={stats.tiedAtTop ? 'Tied for the lead' : stats.topPlayer?.name}>
+            {stats.tiedAtTop ? 'Tied' : stats.topPlayer?.name ?? '—'}
+          </div>
+          <div class="stat-label">Leader</div>
+        </div>
+      </div>
+    {/if}
+
     <div class="charts">
       <BarChart
         title="Wins per player"
-        subtitle="Draws not counted"
-        bars={winsChart}
+        subtitle={anyDraws() ? 'Draws not counted' : undefined}
+        bars={winsChart()}
         formatValue={(v) => (v === 1 ? '1 win' : `${v} wins`)}
       />
       <BarChart
         title="Points scored per player"
-        subtitle="Cumulative across the tournament"
-        bars={pointsChart}
+        subtitle={roundFilter ? 'Cumulative across the round' : 'Cumulative across the tournament'}
+        bars={pointsChart()}
       />
     </div>
 
     <div class="summary">
-      <h3 class="section-hdr">Player summary</h3>
+      <h3 class="section-hdr">Leaderboard</h3>
       <!--
-        Wrap the table in a horizontally-scrollable div so the POINTS
-        column doesn't fall off narrow phones. Long player names in
-        the first column push the numeric columns to the right; on a
-        phone-width viewport, without scroll, the last column clips.
-        Mirrors the .tbl-scroll pattern used by the Matches table.
+        Leaderboard-style player summary. Ranking column mirrors the
+        carrom-thane.web.app layout: first row shows its true rank
+        (1, 2, 3, ...), any subsequent tied row shows "—" so ties
+        visually group. Sort order is baked into buildPlayerSummary
+        (wins DESC → boards DESC → points DESC), so ties = all three
+        keys equal to the row above.
+
+        Horizontal scroll shell preserves the POINTS column on
+        narrow phones with long player names.
       -->
       <div class="summary-scroll">
-        <table class="summary-tbl">
+        <table class="summary-tbl leaderboard-tbl">
           <thead>
             <tr>
+              <th class="col-rank">#</th>
               <th class="col-name">Player</th>
               <th>Matches</th>
               <th>W</th>
@@ -262,15 +448,17 @@
             </tr>
           </thead>
           <tbody>
-            {#each report.playerSummary as p (p.playerId)}
-              <tr>
+            {#each view.playerSummary as p, i (p.playerId)}
+              {@const rank = rankLabel(view.playerSummary, i)}
+              <tr class:leaderboard-top={i === 0}>
+                <td class="col-rank">{rank}</td>
                 <td class="col-name">{p.name}</td>
                 <td>{p.matches}</td>
                 <td>{p.wins}</td>
                 <td>{p.losses}</td>
                 <td>{p.draws}</td>
                 <td>{p.boardsWon}</td>
-                <td>{p.pointsScored}</td>
+                <td class="col-total">{p.pointsScored}</td>
               </tr>
             {/each}
           </tbody>
@@ -279,23 +467,15 @@
     </div>
 
     <div class="tbl-hdr">
-      <h3 class="section-hdr">Matches ({report.matches})</h3>
+      <h3 class="section-hdr">Matches ({view.matches})</h3>
       <div class="tbl-actions">
         <button
           type="button"
           class="btn btn-copy"
-          onclick={() => copyTable(report)}
+          onclick={() => copyRows(view.rows, MAIN_COPY_KEY)}
           aria-label="Copy table to clipboard as tab-separated values"
         >
-          {#if copiedTick}<span aria-hidden="true">✓</span> Copied{:else}<span aria-hidden="true">⧉</span> Copy table{/if}
-        </button>
-        <button
-          type="button"
-          class="btn btn-download"
-          onclick={() => downloadCSV(report)}
-          aria-label="Download as CSV"
-        >
-          <span aria-hidden="true">↓</span> Download CSV
+          {#if copiedKey === MAIN_COPY_KEY}<span aria-hidden="true">✓</span> Copied{:else}<span aria-hidden="true">⧉</span> Copy table{/if}
         </button>
       </div>
     </div>
@@ -321,7 +501,7 @@
           </tr>
         </thead>
         <tbody>
-          {#each report.rows as r (r._matchId)}
+          {#each view.rows as r (r._matchId)}
             <tr>
               <td>{r.endedAt}</td>
               <td>{r.mode}</td>
@@ -356,7 +536,14 @@
       table. Charts are deliberately omitted per-round to keep the
       scroll length sane — the combined view has them.
     -->
-    {#if report.roundReports && report.roundReports.length > 0}
+    {#if roundFilter === null && report.roundReports && report.roundReports.length > 0}
+      <!--
+        Per-round accordion only renders when the round filter is
+        "All rounds" (v3.3.3). If the umpire has narrowed the top
+        view to a single round, the accordion below repeating that
+        one round would be visual noise — the top view already
+        shows exactly that data.
+      -->
       <div class="rounds-section">
         <h3 class="section-hdr">Per-round breakdown</h3>
         {#each report.roundReports as rr (rr.roundKey)}
@@ -382,9 +569,10 @@
               {:else}
                 <div class="round-report-body">
                   <div class="summary-scroll">
-                    <table class="summary-tbl">
+                    <table class="summary-tbl leaderboard-tbl">
                       <thead>
                         <tr>
+                          <th class="col-rank">#</th>
                           <th class="col-name">Player</th>
                           <th>Matches</th>
                           <th>W</th>
@@ -395,19 +583,30 @@
                         </tr>
                       </thead>
                       <tbody>
-                        {#each rr.playerSummary as p (p.playerId)}
-                          <tr>
+                        {#each rr.playerSummary as p, i (p.playerId)}
+                          <tr class:leaderboard-top={i === 0}>
+                            <td class="col-rank">{rankLabel(rr.playerSummary, i)}</td>
                             <td class="col-name">{p.name}</td>
                             <td>{p.matches}</td>
                             <td>{p.wins}</td>
                             <td>{p.losses}</td>
                             <td>{p.draws}</td>
                             <td>{p.boardsWon}</td>
-                            <td>{p.pointsScored}</td>
+                            <td class="col-total">{p.pointsScored}</td>
                           </tr>
                         {/each}
                       </tbody>
                     </table>
+                  </div>
+                  <div class="round-report-actions">
+                    <button
+                      type="button"
+                      class="btn btn-copy"
+                      onclick={() => copyRows(rr.rows, rr.roundKey)}
+                      aria-label="Copy this round's table to clipboard"
+                    >
+                      {#if copiedKey === rr.roundKey}<span aria-hidden="true">✓</span> Copied{:else}<span aria-hidden="true">⧉</span> Copy round table{/if}
+                    </button>
                   </div>
                   <div class="tbl-scroll">
                     <table class="matches-tbl">
@@ -502,6 +701,62 @@
     color: var(--accent, #ffd54a);
     font-weight: 700;
   }
+  /* "Default" bucket sits at the tail of the tournament row and
+     reads as a fallback rather than a real event. Subtler tint so
+     the eye lands on the real tournaments first. */
+  .chip-default:not(.chip-on) {
+    color: rgba(255, 255, 255, 0.4);
+    border-color: rgba(255, 255, 255, 0.08);
+    font-style: italic;
+  }
+  /* Round chip strip sits directly below the tournament strip, so
+     tighten the top margin. */
+  .picker-round {
+    margin-top: -0.35rem;
+  }
+
+  /* ─── Summary tiles (v3.3.3) ─────────────────────────────────── */
+  .stat-row {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.6rem;
+  }
+  @media (min-width: 560px) {
+    .stat-row { grid-template-columns: repeat(4, 1fr); }
+  }
+  .stat-tile {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 0.6rem;
+    padding: 0.75rem 0.9rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    min-width: 0;
+  }
+  .stat-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    line-height: 1.1;
+    color: var(--fg, #f5f5f5);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .stat-value-name {
+    font-size: 1.05rem;
+    color: var(--accent, #ffd54a);
+  }
+  .stat-label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted, #9aa0a6);
+  }
+  .stat-tile-leader {
+    background: rgba(255, 213, 74, 0.05);
+    border-color: rgba(255, 213, 74, 0.22);
+  }
 
   /* Empty states */
   .empty {
@@ -577,6 +832,40 @@
   .col-name { text-align: left !important; }
   .summary-tbl tr:last-child td,
   .matches-tbl tr:last-child td { border-bottom: 0; }
+
+  /* ─── Leaderboard (v3.3.3, restyled off carrom-thane.web.app) ── */
+  .leaderboard-tbl .col-rank {
+    text-align: center !important;
+    width: 2.2rem;
+    color: var(--muted, #9aa0a6);
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .leaderboard-tbl .col-total {
+    font-weight: 700;
+    color: var(--fg, #f5f5f5);
+    font-variant-numeric: tabular-nums;
+  }
+  /* Top row (rank 1) — gets a subtle accent tint so the leader
+     jumps out at a glance. Ties for first also inherit this via the
+     leaderboard-top class on row 0. */
+  .leaderboard-tbl tr.leaderboard-top td {
+    background: rgba(255, 213, 74, 0.06);
+  }
+  .leaderboard-tbl tr.leaderboard-top .col-rank,
+  .leaderboard-tbl tr.leaderboard-top .col-name {
+    color: var(--accent, #ffd54a);
+    font-weight: 700;
+  }
+
+  /* Per-round Copy button strip inside the accordion body. Aligns
+     right so it doesn't crowd the table title. */
+  .round-report-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.4rem;
+    margin: 0.2rem 0 0.5rem;
+  }
 
   /* Matches table + toolbar */
   .tbl-hdr {
