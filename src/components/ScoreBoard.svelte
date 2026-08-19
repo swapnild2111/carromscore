@@ -659,6 +659,7 @@
       // via /tournaments/{tournamentKey}/organisers/{auth.uid} —
       // same pattern used by /matches/{id}.
       const tournamentKey = normalizeKey(cfg.tournament ?? '');
+      const roundKey = cfg.round ? normalizeKey(cfg.round) : '';
       const meta = {
         mode: cfg.mode,
         playerA: cfg.playerA,
@@ -672,6 +673,13 @@
         maxBoards: cfg.maxBoards,
         tournament: cfg.tournament,
         ...(tournamentKey ? { tournamentKey } : {}),
+        // v3.3.5: thread the round tag onto the live payload too so
+        // spectators + the lobby's Now Playing card can show it
+        // alongside the tournament. Only rides when there's a
+        // tournament to belong to — a bare round tag with no
+        // tournament makes no sense.
+        ...(cfg.tournament && cfg.round ? { round: cfg.round } : {}),
+        ...(cfg.tournament && roundKey ? { roundKey } : {}),
       };
       if (getConnectivity().online) {
         // v3.3.2: publishLive now returns { ok, error? }. Surface
