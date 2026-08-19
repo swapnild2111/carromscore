@@ -274,12 +274,18 @@ export async function flushQueue(): Promise<FlushResult> {
       // If we ever see rejects because of drift, the fix is to
       // extend publishLive with an optional `updatedAtOverride`
       // and pass `serverNow()` here.
-      await publishLive(item.mid, item.meta, item.payload);
-      result.liveOk += 1;
+      // v3.3.2: publishLive returns { ok, error? } instead of
+      // silent-swallowing. If the RTDB write is rejected keep the
+      // item queued so the next flush retries — same behaviour as
+      // the pre-v3.3.2 try/catch path, just explicit.
+      const outcome = await publishLive(item.mid, item.meta, item.payload);
+      if (outcome.ok) {
+        result.liveOk += 1;
+      } else {
+        liveRemaining.push(item);
+      }
     } catch {
-      // publishLive is silent-on-failure — it won't throw, so we
-      // should rarely get here. But if it does (import failure,
-      // etc.), keep the item queued.
+      // Import failure or similar — keep the item queued.
       liveRemaining.push(item);
     }
   }

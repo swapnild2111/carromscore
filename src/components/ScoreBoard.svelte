@@ -206,6 +206,23 @@
    * re-published yet.
    */
   let archiveFailedToast = $state(false);
+  /**
+   * v3.3.2: surface `publishLive` failures. Silent-swallow in the
+   * publish path used to hide RTDB rule denials — most commonly the
+   * 60-second `updatedAt` freshness window when the device clock is
+   * off. Reported 2026-08-19: organiser set up a match under a
+   * closed tournament, played locally, and no `/live/{mid}` record
+   * ever appeared for the spectator URL to render.
+   *
+   * The toast is throttled: publishLive fires on every score tap,
+   * so we only ARM the toast on the first failure per session and
+   * suppress subsequent identical failures until the user reloads
+   * or the publish starts succeeding again. `livePublishFailedMsg`
+   * carries the actual RTDB error string.
+   */
+  let livePublishFailedToast = $state(false);
+  let livePublishFailedMsg = $state('');
+  let livePublishFailedSuppressed = $state(false);
 
   /*
    * Practice mode: solo drill. Player runs N sets × M boards and records
@@ -657,7 +674,27 @@
         ...(tournamentKey ? { tournamentKey } : {}),
       };
       if (getConnectivity().online) {
-        void publishLive(cfg.mid, meta, payload);
+        // v3.3.2: publishLive now returns { ok, error? }. Surface
+        // the first failure per session as a toast so the umpire
+        // isn't fooled into thinking the spectator URL is broadcasting
+        // when the RTDB write is being rejected (typically clock-skew
+        // past the 60s updatedAt window). Subsequent identical
+        // failures are suppressed to avoid spamming on every tap.
+        void publishLive(cfg.mid, meta, payload).then((outcome) => {
+          if (outcome.ok) {
+            if (livePublishFailedSuppressed) {
+              // Recovery — a later publish succeeded. Re-arm the
+              // toast so any future denial fires again.
+              livePublishFailedSuppressed = false;
+              livePublishFailedMsg = '';
+            }
+          } else if (!livePublishFailedSuppressed) {
+            livePublishFailedMsg = outcome.error;
+            livePublishFailedToast = true;
+            livePublishFailedSuppressed = true;
+            window.setTimeout(() => { livePublishFailedToast = false; }, 8000);
+          }
+        });
       } else {
         // Offline: keep the state in the queue so it flushes when
         // we reconnect. Coalesced by mid, so this is O(1) storage
@@ -2613,6 +2650,21 @@
     -->
     <div class="queen-toast archive-toast" role="status" aria-live="polite">
       Match archive failed — score visible on this device only
+    </div>
+  {/if}
+
+  {#if livePublishFailedToast}
+    <!--
+      Surfaced when publishLive's first write of the session was
+      rejected (rule denial, network dead, or — most commonly — the
+      device clock is off by more than 60 seconds from the server's
+      updatedAt window). Umpire needs to know because the spectator
+      URL will silently show nothing otherwise. 8s so the error is
+      readable; suppressed after the first hit per session to avoid
+      spamming on every score tap.
+    -->
+    <div class="queen-toast archive-toast" role="status" aria-live="polite">
+      Live broadcast paused — {livePublishFailedMsg || 'RTDB rejected the publish. Check your device clock.'}
     </div>
   {/if}
 
