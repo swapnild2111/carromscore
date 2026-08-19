@@ -81,6 +81,17 @@ export type LiveMeta = {
    * Empty/absent when the umpire didn't tag a tournament (Default bucket).
    */
   tournamentKey?: string;
+  /**
+   * Optional tournament round (v3.3.5). Denormalised alongside
+   * `tournament` so spectator + lobby renders can show "3rd Ranking
+   * · League Round Group A" without a second Firebase read. Absent
+   * when the umpire didn't pick a round or the tournament has none.
+   * The v3.2 plan intentionally skipped this to reduce scope; it
+   * comes back here because the lobby's Now Playing card needs to
+   * display the round tag too.
+   */
+  round?: string;
+  roundKey?: string;
 };
 
 /** Metadata + payload — what actually lives at `/live/{mid}`. */
@@ -188,6 +199,8 @@ export async function publishLive(
     if (meta.noteB) metaClean.noteB = meta.noteB;
     if (meta.tournament) metaClean.tournament = meta.tournament;
     if (meta.tournamentKey) metaClean.tournamentKey = meta.tournamentKey;
+    if (meta.round) metaClean.round = meta.round;
+    if (meta.roundKey) metaClean.roundKey = meta.roundKey;
     // Stamp `createdBy` when signed in. Anonymous stays anonymous —
     // field absent. RTDB validator on live/$mid/createdBy accepts a
     // string ≤ 64 chars (rules updated 2026-08-09).
