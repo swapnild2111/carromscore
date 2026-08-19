@@ -443,11 +443,10 @@
     const typed = (cfg[key] as string).trim();
     if (!typed) return null;
     const resolvedId = resolvedPlayerIds[key as string];
-    if (!resolvedId) {
-      return 'Not in the roster — invite-only tournament expects assigned players';
-    }
-    if (!assignedPlayerIds.has(resolvedId)) {
-      return 'Not assigned to this tournament';
+    // Free-text (unresolved) and roster-miss collapse to the same
+    // umpire-facing message. The distinction only matters internally.
+    if (!resolvedId || !assignedPlayerIds.has(resolvedId)) {
+      return 'Not assigned to this tournament — contact the organiser';
     }
     if (t.country) {
       const roster = loadAllPlayers().find((p) => p.id === resolvedId);
@@ -1078,9 +1077,6 @@
 
   {#if dupError}
     <p class="dup-error" role="alert">{dupError}</p>
-  {/if}
-  {#if rosterError}
-    <p class="dup-error" role="alert">{rosterError}</p>
   {/if}
 
   <button
