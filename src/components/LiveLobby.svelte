@@ -1197,16 +1197,6 @@
                       </span>
                     {/if}
                     <span class="card-mode">{modeLabelLive(e)}</span>
-                    {#if e.meta.round}
-                      <!--
-                        Round tag on the live card (v3.3.5). Only
-                        renders when the umpire tagged the match with
-                        a round at setup; sits between the mode and
-                        the timeago so the card header still reads
-                        left-to-right without wrapping on phones.
-                      -->
-                      <span class="card-round">{e.meta.round}</span>
-                    {/if}
                     <span class="card-meta">{relTime(e.updatedAt)}</span>
                   </div>
 
@@ -2340,23 +2330,6 @@
     text-transform: uppercase;
     letter-spacing: 0.08em;
     font-weight: 700;
-  }
-  /* Round tag pill on the live card header (v3.3.5). Accent-tinted
-     so it reads as tournament context, not chrome. */
-  .card-round {
-    color: var(--accent, #ffd54a);
-    background: rgba(255, 213, 74, 0.08);
-    border: 1px solid rgba(255, 213, 74, 0.28);
-    padding: 0.05rem 0.4rem;
-    border-radius: 999px;
-    font-size: 0.68rem;
-    font-weight: 600;
-    line-height: 1.35;
-    letter-spacing: 0.02em;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 12rem;
   }
   .card-meta {
     margin-left: auto;
