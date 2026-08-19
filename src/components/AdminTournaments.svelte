@@ -265,9 +265,9 @@
       flash('err', 'Name cannot be blank');
       return;
     }
-    // Closed tournaments must have a country per the v3.1 data model.
+    // Invite-only tournaments must have a country per the v3.1 data model.
     if (editingType === 'closed' && !editingCountry) {
-      flash('err', 'Closed tournaments must have a country');
+      flash('err', 'Invite-only tournaments must have a country');
       return;
     }
     const nameChanged = trimmedName !== editingOriginal.name;
@@ -313,6 +313,15 @@
           return;
         }
       }
+      // Reactivity nudge: notify() from within tournaments.ts fires
+      // the subscribeStore callback which increments this tick, but
+      // some paths (updateTournamentMeta mutating in place) don't
+      // change any $state that the derived reads, so Svelte's
+      // reactive graph can miss the update. A defensive bump here
+      // guarantees the row re-renders after every successful save.
+      // Reported 2026-08-19: toggled INVITE-ONLY → OPEN, DB wrote
+      // fine, row still showed the old chip until a full refresh.
+      tick += 1;
       flash('ok', 'Tournament updated');
       cancelEdit();
     } finally {
@@ -573,7 +582,7 @@
     const trimmed = addingName.trim();
     if (!trimmed) return;
     if (addingType === 'closed' && !addingCountry) {
-      flash('err', 'Closed tournaments need a country');
+      flash('err', 'Invite-only tournaments need a country');
       return;
     }
     saving = true;
@@ -836,8 +845,12 @@
               <div class="row-name-text">{t.name}</div>
               <div class="row-name-meta">
                 {#if t.type === 'closed'}
-                  <span class="chip chip-closed" title="Closed tournament — country-scoped">
-                    CLOSED
+                  <span class="chip chip-type chip-invite" title="Invite-only — assigned-roster tournament, country-scoped">
+                    INVITE-ONLY
+                  </span>
+                {:else}
+                  <span class="chip chip-type chip-open" title="Open tournament — any player, any umpire">
+                    OPEN
                   </span>
                 {/if}
                 {#if t.country}
@@ -933,7 +946,7 @@
               onchange={() => (editingType = 'closed')}
               disabled={saving}
             />
-            <span>Closed — country-scoped, assigned roster</span>
+            <span>Invite-only — country-scoped, assigned roster</span>
           </label>
         </fieldset>
         <label class="edit-field">
@@ -1115,7 +1128,7 @@
         <p>
           Tournaments are the top-level bucket for grouping matches.
           Choose <strong>open</strong> for casual events (any player,
-          any umpire) or <strong>closed</strong> for a
+          any umpire) or <strong>invite-only</strong> for a
           country-scoped event with an explicit assigned-player roster.
         </p>
         <input
@@ -1147,7 +1160,7 @@
               bind:group={addingType}
             />
             <span>
-              <strong>Closed</strong>
+              <strong>Invite-only</strong>
               — country-scoped, players assigned explicitly.
             </span>
           </label>
@@ -1534,11 +1547,14 @@
     margin-top: 0.25rem;
   }
   .chip {
+    display: inline-flex;
+    align-items: center;
     font-size: 0.7rem;
+    line-height: 1.4;
     color: var(--muted);
     background: rgba(255, 255, 255, 0.04);
     border: 1px solid rgba(255, 255, 255, 0.08);
-    padding: 0.1rem 0.4rem;
+    padding: 0.15rem 0.55rem;
     border-radius: 999px;
   }
   /* Country chip — subtle accent tint, matches AdminPlayers row treatment. */
@@ -1547,9 +1563,30 @@
     background: rgba(255, 213, 74, 0.08);
     border-color: rgba(255, 213, 74, 0.3);
   }
-  /* Closed-tournament chip — reads as identifying metadata alongside
-     the country pill; a stronger accent that says "this tournament
-     has roster gating." */
+  /* Access-type chips share a shape (uppercase, letter-spaced) so
+     "OPEN" and "INVITE-ONLY" read as a matched pair on the same
+     row. Colour splits them: accent-yellow for invite-only (calls
+     out roster gating), neutral for open. Legacy `.chip-closed`
+     class kept below for the Rounds sub-modal which still uses
+     "CLOSED" for the round-state semantic. */
+  .chip-type {
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-weight: 700;
+  }
+  .chip-invite {
+    color: var(--accent, #ffd54a);
+    background: rgba(255, 213, 74, 0.16);
+    border-color: rgba(255, 213, 74, 0.4);
+  }
+  .chip-open {
+    color: rgba(255, 255, 255, 0.7);
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.14);
+  }
+  /* Legacy chip for the Rounds sub-modal (per-round state), which
+     still uses "CLOSED" as the round-state label. Kept separate
+     so tournament-access wording can diverge from round-state. */
   .chip-closed {
     color: var(--accent, #ffd54a);
     background: rgba(255, 213, 74, 0.16);
