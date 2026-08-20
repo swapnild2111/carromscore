@@ -1387,7 +1387,21 @@
     if (isPractice) {
       showPracticePopup = true;
       recordFinishedMatch(null);
-      if (cfg.live && cfg.mid) void deleteLive(cfg.mid);
+      // Clear the /live/{mid} broadcast slot. Async on purpose so the
+      // popup renders immediately; log failures to console so a rule
+      // regression is noticed on the next dev cycle rather than
+      // discovered as a phantom lobby entry (reported 2026-08-20:
+      // anonymous practice on Xiaomi ended, /live/jps1cy stayed in
+      // Now Playing — root cause: v3.3's /live delete rule required
+      // auth, silently rejecting anonymous cleanup. Rule fixed to
+      // allow anonymous delete when the record has no createdBy).
+      if (cfg.live && cfg.mid) {
+        void deleteLive(cfg.mid).then((outcome) => {
+          if (!outcome.ok) {
+            console.warn('[endMatch/practice] deleteLive failed:', outcome.error);
+          }
+        });
+      }
       clearResume();
       return;
     }
