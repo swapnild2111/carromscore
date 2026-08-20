@@ -109,56 +109,93 @@
 
 <div class="overlay">
   {#if cfg.mode === 'practice'}
+    <!--
+      Practice / solo overlay (v3.4.2). Single-side layout: name on
+      the outer left, big digit centred, MISSED label in place of
+      SETS. Reuses .strip / .team-a / .name-pill / .digit tokens so
+      the visual language matches the 2P/doubles overlay exactly.
+    -->
     <div class="strip practice-strip">
-      <span class="practice-note">Practice mode — no live overlay</span>
+      <div class="team team-a team-inline">
+        <div class="name-pill tone-a">
+          <span class="name-txt">{sideA.name}</span>
+          {#if sideA.note}<span class="name-note">{sideA.note}</span>{/if}
+        </div>
+        <span class="digit digit-a">{pad2(sideA.points)}</span>
+        <span class="sets-chip">
+          <span class="sets-label">MISSED</span>
+        </span>
+      </div>
+      <div class="middle">
+        {#if cfg.bestOf > 1}
+          <div class="pip-strip" aria-label="Set {currentSet} of {cfg.bestOf}">
+            {#each setPips() as pip, i (i)}
+              <span class="pip pip-{pip}" aria-hidden="true">
+                {#if pip === 'a' || pip === 'b'}✓{/if}
+              </span>
+            {/each}
+          </div>
+          <div class="set-caption">SET {ordinal(currentSet)}</div>
+        {:else}
+          <div class="set-caption">SOLO PRACTICE</div>
+        {/if}
+        <div class="board-block">
+          <span class="board-label">BOARD</span>
+          <span class="board-num">{board}</span>
+          {#if !isBoardsUnlimited(cfg)}
+            <span class="board-total">/{cfg.maxBoards}</span>
+          {/if}
+        </div>
+      </div>
     </div>
   {:else}
     <div class="strip">
-      <!-- Left side: player A. Row order [pill] [break] [coin] mirrors the phone. -->
-      <div class="team team-a">
-        <div class="name-row">
-          <div class="name-pill tone-a"
-               class:decided={matchResult !== null}
-               class:gold={matchResult === 'a'}
-               class:silver={matchResult === 'b'}
-               class:draw={matchResult === 'draw'}>
-            {#if matchResult === 'a'}
-              <span class="medal" aria-label="First place">
-                <span class="medal-icon" aria-hidden="true">🥇</span>
-                <span class="medal-label">1ST</span>
-              </span>
-            {:else if matchResult === 'b'}
-              <span class="medal" aria-label="Second place">
-                <span class="medal-icon" aria-hidden="true">🥈</span>
-                <span class="medal-label">2ND</span>
-              </span>
-            {:else if matchResult === 'draw'}
-              <span class="medal" aria-label="Draw">
-                <span class="medal-icon" aria-hidden="true">🤝</span>
-                <span class="medal-label">DRAW</span>
-              </span>
-            {/if}
-            <span class="name-txt">{sideA.name}</span>
-            {#if sideA.note}<span class="name-note">{sideA.note}</span>{/if}
-          </div>
-          {#if !matchResult && currentBreak === 'a'}
-            <span class="mark mark-break tone-a" aria-label="{sideA.name} breaks">
-              <span class="mark-lbl">BREAK</span>
+      <!--
+        Side A. v3.4.2 layout: single horizontal row with the name pill
+        pinned to the OUTER (left) edge, digit next, SETS chip inside.
+        BREAK + coin sit between the name and the digit so the strongest
+        state indicators cluster near the score.
+      -->
+      <div class="team team-a team-inline">
+        <div class="name-pill tone-a"
+             class:decided={matchResult !== null}
+             class:gold={matchResult === 'a'}
+             class:silver={matchResult === 'b'}
+             class:draw={matchResult === 'draw'}>
+          {#if matchResult === 'a'}
+            <span class="medal" aria-label="First place">
+              <span class="medal-icon" aria-hidden="true">🥇</span>
+              <span class="medal-label">1ST</span>
+            </span>
+          {:else if matchResult === 'b'}
+            <span class="medal" aria-label="Second place">
+              <span class="medal-icon" aria-hidden="true">🥈</span>
+              <span class="medal-label">2ND</span>
+            </span>
+          {:else if matchResult === 'draw'}
+            <span class="medal" aria-label="Draw">
+              <span class="medal-icon" aria-hidden="true">🤝</span>
+              <span class="medal-label">DRAW</span>
             </span>
           {/if}
-          {#if !matchResult}
-            <span class="coin" class:coin-red={queenHolder === 'a'} aria-label={queenHolder === 'a' ? `${sideA.name} has queen` : 'Queen not held'}>
-              {@render coinSvg()}
-            </span>
-          {/if}
+          <span class="name-txt">{sideA.name}</span>
+          {#if sideA.note}<span class="name-note">{sideA.note}</span>{/if}
         </div>
-        <div class="score-row">
-          <span class="digit digit-a">{pad2(sideA.points)}</span>
-          <span class="sets-chip">
-            <span class="sets-label">SETS</span>
-            <span class="sets-num">{sideA.sets}</span>
+        {#if !matchResult && currentBreak === 'a'}
+          <span class="mark mark-break tone-a" aria-label="{sideA.name} breaks">
+            <span class="mark-lbl">BREAK</span>
           </span>
-        </div>
+        {/if}
+        {#if !matchResult}
+          <span class="coin" class:coin-red={queenHolder === 'a'} aria-label={queenHolder === 'a' ? `${sideA.name} has queen` : 'Queen not held'}>
+            {@render coinSvg()}
+          </span>
+        {/if}
+        <span class="digit digit-a">{pad2(sideA.points)}</span>
+        <span class="sets-chip">
+          <span class="sets-label">SETS</span>
+          <span class="sets-num">{sideA.sets}</span>
+        </span>
       </div>
 
       <!-- Middle: board + set-pips -->
@@ -184,50 +221,49 @@
         </div>
       </div>
 
-      <!-- Right side: player B. Row order [coin] [break] [pill] mirrors the phone. -->
-      <div class="team team-b">
-        <div class="name-row">
-          {#if !matchResult}
-            <span class="coin" class:coin-red={queenHolder === 'b'} aria-label={queenHolder === 'b' ? `${sideB.name} has queen` : 'Queen not held'}>
-              {@render coinSvg()}
-            </span>
-          {/if}
-          {#if !matchResult && currentBreak === 'b'}
-            <span class="mark mark-break tone-b" aria-label="{sideB.name} breaks">
-              <span class="mark-lbl">BREAK</span>
-            </span>
-          {/if}
-          <div class="name-pill tone-b"
-               class:decided={matchResult !== null}
-               class:gold={matchResult === 'b'}
-               class:silver={matchResult === 'a'}
-               class:draw={matchResult === 'draw'}>
-            <span class="name-txt">{sideB.name}</span>
-            {#if sideB.note}<span class="name-note">{sideB.note}</span>{/if}
-            {#if matchResult === 'b'}
-              <span class="medal" aria-label="First place">
-                <span class="medal-icon" aria-hidden="true">🥇</span>
-                <span class="medal-label">1ST</span>
-              </span>
-            {:else if matchResult === 'a'}
-              <span class="medal" aria-label="Second place">
-                <span class="medal-icon" aria-hidden="true">🥈</span>
-                <span class="medal-label">2ND</span>
-              </span>
-            {:else if matchResult === 'draw'}
-              <span class="medal" aria-label="Draw">
-                <span class="medal-icon" aria-hidden="true">🤝</span>
-                <span class="medal-label">DRAW</span>
-              </span>
-            {/if}
-          </div>
-        </div>
-        <div class="score-row">
-          <span class="sets-chip">
-            <span class="sets-label">SETS</span>
-            <span class="sets-num">{sideB.sets}</span>
+      <!--
+        Side B. Mirror of A: SETS chip → digit → BREAK/coin → name pill
+        pinned to the OUTER (right) edge.
+      -->
+      <div class="team team-b team-inline">
+        <span class="sets-chip">
+          <span class="sets-label">SETS</span>
+          <span class="sets-num">{sideB.sets}</span>
+        </span>
+        <span class="digit digit-b">{pad2(sideB.points)}</span>
+        {#if !matchResult}
+          <span class="coin" class:coin-red={queenHolder === 'b'} aria-label={queenHolder === 'b' ? `${sideB.name} has queen` : 'Queen not held'}>
+            {@render coinSvg()}
           </span>
-          <span class="digit digit-b">{pad2(sideB.points)}</span>
+        {/if}
+        {#if !matchResult && currentBreak === 'b'}
+          <span class="mark mark-break tone-b" aria-label="{sideB.name} breaks">
+            <span class="mark-lbl">BREAK</span>
+          </span>
+        {/if}
+        <div class="name-pill tone-b"
+             class:decided={matchResult !== null}
+             class:gold={matchResult === 'b'}
+             class:silver={matchResult === 'a'}
+             class:draw={matchResult === 'draw'}>
+          <span class="name-txt">{sideB.name}</span>
+          {#if sideB.note}<span class="name-note">{sideB.note}</span>{/if}
+          {#if matchResult === 'b'}
+            <span class="medal" aria-label="First place">
+              <span class="medal-icon" aria-hidden="true">🥇</span>
+              <span class="medal-label">1ST</span>
+            </span>
+          {:else if matchResult === 'a'}
+            <span class="medal" aria-label="Second place">
+              <span class="medal-icon" aria-hidden="true">🥈</span>
+              <span class="medal-label">2ND</span>
+            </span>
+          {:else if matchResult === 'draw'}
+            <span class="medal" aria-label="Draw">
+              <span class="medal-icon" aria-hidden="true">🤝</span>
+              <span class="medal-label">DRAW</span>
+            </span>
+          {/if}
         </div>
       </div>
     </div>
@@ -262,8 +298,8 @@
     display: grid;
     grid-template-columns: 1fr auto 1fr;
     align-items: center;
-    gap: clamp(1rem, 3vw, 2.5rem);
-    padding: 1rem 1.5rem;
+    gap: clamp(1.25rem, 3.5vw, 3rem);
+    padding: 1.4rem 2rem;
     background: linear-gradient(180deg, rgba(11,11,11,0.75), rgba(11,11,11,0.92));
     backdrop-filter: blur(6px);
     -webkit-backdrop-filter: blur(6px);
@@ -280,32 +316,55 @@
   .team { display: flex; flex-direction: column; gap: 0.55rem; min-width: 0; }
   .team-a { align-items: flex-start; }
   .team-b { align-items: flex-end; }
+  /*
+   * Inline layout (v3.4.2): name pill + digit + sets chip on a single
+   * horizontal row. `.team-a.team-inline` reads left→right as
+   * [NAME] [BREAK] [COIN] [DIGIT] [SETS]; `.team-b.team-inline` mirrors
+   * to [SETS] [DIGIT] [COIN] [BREAK] [NAME]. Both anchor the name pill
+   * to the outer edge of the strip so the eye tracks name → score
+   * naturally from each corner of the frame.
+   */
+  .team-inline {
+    flex-direction: row;
+    align-items: center;
+    gap: clamp(0.5rem, 1.2vw, 1rem);
+    min-width: 0;
+  }
+  .team-a.team-inline { justify-content: flex-start; }
+  .team-b.team-inline { justify-content: flex-end; }
+  /* Practice/solo variant: single team-block spans the full strip;
+     centre it so the digit remains the visual anchor. */
+  .practice-strip .team-inline {
+    grid-column: 1 / 2;
+    justify-content: center;
+  }
+  .practice-strip {
+    grid-template-columns: 1fr auto;
+  }
 
   /*
-   * Name row: coloured pill + optional BREAK/QUEEN mark next to it.
-   * Layout mirrors the phone scoreboard so viewers who use the app on
-   * their own device recognise it instantly on-air.
+   * Name pill: coloured background, capped max-width so a very long
+   * doubles-team label (e.g. "SWAPNIL DESHPANDE & YUVARAJ KUMAR") wraps
+   * across two lines instead of squeezing the digit off-screen.
    */
-  .name-row {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.65rem;
-    max-width: 100%;
-  }
-  .team-b .name-row { flex-direction: row; }
   .name-pill {
     display: inline-flex;
     align-items: center;
     gap: 0.4rem;
-    padding: 0.35rem 0.85rem;
-    border-radius: 0.55rem;
-    font-size: clamp(1rem, 1.8vw, 1.4rem);
+    padding: 0.45rem 1rem;
+    border-radius: 0.6rem;
+    font-size: clamp(1.1rem, 2vw, 1.6rem);
     font-weight: 800;
     letter-spacing: 0.06em;
     text-transform: uppercase;
     color: #0b0b0b;
     box-shadow: 0 3px 10px rgba(0,0,0,0.35);
-    max-width: 100%;
+    max-width: min(22ch, 32vw);
+    line-height: 1.15;
+  }
+  .name-pill .name-txt {
+    white-space: normal;
+    word-break: break-word;
   }
   .name-pill.tone-a { background: var(--side-a); }
   .name-pill.tone-b { background: var(--side-b); }
@@ -441,12 +500,6 @@
     opacity: 1;
     filter: drop-shadow(0 0 6px rgba(220, 40, 40, 0.5));
   }
-  .name-txt {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    min-width: 0;
-  }
   .name-note {
     font-size: 0.7em;
     font-weight: 700;
@@ -484,27 +537,23 @@
   .mark-lbl { line-height: 1; }
 
   /*
-   * Score row: big 7-segment digit + a compact SETS chip. Sides mirror
-   * horizontally: A's digit is left, B's is right, so the eye tracks
-   * naturally from the players' seats on-camera.
+   * Broadcast digit size (v3.4.2). Bumped ~1.7× above the earlier clamp
+   * so the score reads at brand-word scale on-camera — comparable to a
+   * board's sponsor logotype (e.g. "PRISM"). The overlay is not
+   * space-constrained: no touch targets, no keyboard, no scroll — the
+   * digits are the point. Line-height stays tight (0.85) so ascender
+   * headroom doesn't push the strip off the bottom third.
    */
-  .score-row {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.75rem;
-  }
-  .team-b .score-row { justify-content: flex-end; }
-
   .digit {
     font-family: 'DSEG7 Classic', 'Courier New', ui-monospace, monospace;
     font-variant-numeric: tabular-nums;
     font-weight: 700;
     line-height: 0.85;
-    font-size: clamp(3.2rem, 6.5vw, 5rem);
+    font-size: clamp(5.5rem, 11vw, 9rem);
     letter-spacing: 0.05em;
   }
-  .digit-a { color: var(--side-a); text-shadow: 0 0 18px rgba(79,195,247,0.5); }
-  .digit-b { color: var(--side-b); text-shadow: 0 0 18px rgba(255,138,101,0.5); }
+  .digit-a { color: var(--side-a); text-shadow: 0 0 24px rgba(79,195,247,0.55); }
+  .digit-b { color: var(--side-b); text-shadow: 0 0 24px rgba(255,138,101,0.55); }
 
   .sets-chip {
     display: inline-flex;
@@ -525,7 +574,7 @@
   }
   .sets-num {
     font-family: 'DSEG7 Classic', 'Courier New', ui-monospace, monospace;
-    font-size: clamp(1.3rem, 2.5vw, 1.8rem);
+    font-size: clamp(2rem, 4vw, 3rem);
     color: #fff;
     line-height: 1;
   }
@@ -602,25 +651,27 @@
   .board-num {
     font-family: 'DSEG7 Classic', 'Courier New', ui-monospace, monospace;
     font-weight: 700;
-    font-size: clamp(2rem, 3.4vw, 2.6rem);
+    font-size: clamp(3.2rem, 5.5vw, 4.4rem);
     color: var(--accent);
     line-height: 1;
-    text-shadow: 0 0 14px rgba(255,213,74,0.45);
+    text-shadow: 0 0 18px rgba(255,213,74,0.5);
   }
   .board-total {
     color: rgba(255,255,255,0.35);
     font-family: 'DSEG7 Classic', 'Courier New', ui-monospace, monospace;
-    font-size: 1rem;
+    font-size: 1.4rem;
     line-height: 1;
   }
 
-  /* Practice mode: overlay isn't meaningful, keep the tiny hint we shipped in v1.7. */
-  .practice-strip { min-width: 0; padding: 0.6rem 1.25rem; }
-  .practice-note {
-    color: rgba(255,255,255,0.55);
-    font-size: 0.85rem;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
+  /*
+   * Practice / solo overlay (v3.4.2): single-side variant. The .strip
+   * grid collapses from 1fr auto 1fr → 1fr auto so the team block
+   * centres against the middle column (SET pips + BOARD). Same tokens
+   * as the two-player strip so brand consistency is free.
+   */
+  .practice-strip .sets-chip .sets-label {
+    color: rgba(255,213,74,0.85);
+    letter-spacing: 0.14em;
   }
 
   /* Tighten spacing on smaller streams (720p windows, tight OBS canvases). */
