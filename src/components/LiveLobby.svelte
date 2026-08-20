@@ -1586,10 +1586,25 @@
   {#if popupRecord}
     <div class="sheet-inner" role="document">
       <header class="sheet-hdr">
-        <span class="sheet-title">
-          {#if popupIsEnded}Ended · {:else}<span class="sheet-live"><span class="dot" aria-hidden="true"></span>LIVE · </span>{/if}
-          {popupMode}{#if popupTournament} · <span class="sheet-tour">{popupTournament}</span>{/if}{#if popupRound} · <span class="sheet-round">{popupRound}</span>{/if}
-        </span>
+        <!--
+          Header title stacks on two rows when there's a tournament
+          or round tag: top row = LIVE/Ended + mode (always short);
+          bottom row = tournament + round tags. Prevents the long
+          single-line title from pushing the Share/OBS action
+          buttons off the right edge on phones (reported 2026-08-20:
+          OBS button hidden behind viewport clip when the popup
+          opened for a live match under a tournament with rounds).
+        -->
+        <div class="sheet-title-wrap">
+          <span class="sheet-title">
+            {#if popupIsEnded}Ended · {:else}<span class="sheet-live"><span class="dot" aria-hidden="true"></span>LIVE · </span>{/if}{popupMode}
+          </span>
+          {#if popupTournament || popupRound}
+            <span class="sheet-subtitle">
+              {#if popupTournament}<span class="sheet-tour">{popupTournament}</span>{/if}{#if popupTournament && popupRound} · {/if}{#if popupRound}<span class="sheet-round">{popupRound}</span>{/if}
+            </span>
+          {/if}
+        </div>
         <div class="sheet-actions">
           {#if openPopup?.source === 'live'}
             <button
@@ -2530,6 +2545,17 @@
     border-bottom: 1px solid #1e1e1e;
     margin-bottom: 0.25rem;
   }
+  /* Two-row title container. First row = LIVE/Ended + mode.
+     Second row = tournament + round tags when present. min-width:0
+     lets the title area shrink instead of pushing the actions
+     off-screen when the tournament name is long. */
+  .sheet-title-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    min-width: 0;
+    flex: 1 1 auto;
+  }
   .sheet-title {
     color: var(--muted, #9aa0a6);
     font-size: 0.75rem;
@@ -2539,6 +2565,16 @@
     display: flex;
     align-items: center;
     gap: 0.25rem;
+  }
+  /* Second-row tags (tournament + round). Wraps within its own row,
+     never crowds the actions strip. Softer weight so mode stays the
+     primary read. */
+  .sheet-subtitle {
+    color: var(--muted, #9aa0a6);
+    font-size: 0.75rem;
+    line-height: 1.25;
+    display: block;
+    overflow-wrap: anywhere;
   }
   .sheet-live {
     display: inline-flex;
@@ -2573,6 +2609,9 @@
     display: flex;
     align-items: center;
     gap: 0.4rem;
+    /* Never shrink — the Share / OBS / Close buttons must stay
+       reachable no matter how long the tournament / round tags are. */
+    flex-shrink: 0;
   }
   .sheet-share {
     background: transparent;
