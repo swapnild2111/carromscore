@@ -63,16 +63,25 @@
   onMount(() => {
     const q = new URLSearchParams(window.location.search);
     cfg = decodeConfig(q);
-    sideA.name = teamLabel(firstName(cfg.playerA), firstName(cfg.playerA2), cfg.mode) || 'Player A';
-    sideB.name = teamLabel(firstName(cfg.playerB), firstName(cfg.playerB2), cfg.mode) || 'Player B';
+    // Solo pills have only one name and now render on their own row
+    // above the tile grid — there's plenty of horizontal room, so
+    // show the full name. Singles/doubles pills sit inline next to
+    // digits with tight width budget → keep first-name-only.
+    const soloName = cfg.mode === 'practice';
+    const nameA1 = soloName ? cfg.playerA : firstName(cfg.playerA);
+    const nameA2 = soloName ? cfg.playerA2 : firstName(cfg.playerA2);
+    const nameB1 = soloName ? cfg.playerB : firstName(cfg.playerB);
+    const nameB2 = soloName ? cfg.playerB2 : firstName(cfg.playerB2);
+    sideA.name = teamLabel(nameA1, nameA2, cfg.mode) || 'Player A';
+    sideB.name = teamLabel(nameB1, nameB2, cfg.mode) || 'Player B';
     // Doubles: split into two parts so the pill can render each partner
     // on its own line with a centred "&" separator between them (three
     // lines total). Singles/practice leave namePartB empty and use the
     // flat `name` string.
-    sideA.namePartA = firstName(cfg.playerA);
-    sideA.namePartB = cfg.mode === 'doubles' ? firstName(cfg.playerA2) : '';
-    sideB.namePartA = firstName(cfg.playerB);
-    sideB.namePartB = cfg.mode === 'doubles' ? firstName(cfg.playerB2) : '';
+    sideA.namePartA = nameA1;
+    sideA.namePartB = cfg.mode === 'doubles' ? nameA2 : '';
+    sideB.namePartA = nameB1;
+    sideB.namePartB = cfg.mode === 'doubles' ? nameB2 : '';
     sideA.note = cfg.noteA;
     sideB.note = cfg.noteB;
 
@@ -151,62 +160,62 @@
 <div class="overlay">
   {#if cfg.mode === 'practice'}
     <!--
-      Practice / solo overlay (v3.4.2). Single-side layout: name on
-      the outer left, big digit centred, MISSED label in place of
-      SETS. Reuses .strip / .team-a / .name-pill / .digit tokens so
-      the visual language matches the 2P/doubles overlay exactly.
+      Practice / solo overlay (v3.4.8). Layout mirrors the production
+      LiveScoreboardView practice grid: name pill on the left, then
+      one equal-sized digit tile per board, and a TOTAL tile on the
+      right — every tile the same big DSEG7 clamp so the row reads
+      as one uniform score line rather than "one big score + tiny
+      per-board footnotes".
     -->
-    <div class="strip practice-strip">
+    <!--
+      `--tile-count` = boards + 1 (TOTAL). Drives per-tile width AND
+      the digit clamp so fewer boards → bigger digits, and the strip
+      always fills the horizontal budget instead of huddling in the
+      middle.
+    -->
+    <div
+      class="strip practice-strip"
+      style="--tile-count: {isBoardsUnlimited(cfg) ? 2 : cfg.maxBoards + 1};"
+    >
       <div class="team team-a team-inline">
         <div class="name-pill tone-a">
           {@render nameTxt(sideA)}
           {#if sideA.note}<span class="name-note">{sideA.note}</span>{/if}
         </div>
-        <span class="digit digit-a">{pad2(sideA.points)}</span>
-        <span class="sets-chip">
-          <span class="sets-label">MISSED</span>
-        </span>
       </div>
-      <div class="middle">
-        {#if cfg.bestOf > 1}
-          <div class="pip-strip" aria-label="Set {currentSet} of {cfg.bestOf}">
-            {#each setPips() as pip, i (i)}
-              <span class="pip pip-{pip}" aria-hidden="true">
-                {#if pip === 'a' || pip === 'b'}✓{/if}
-              </span>
-            {/each}
+      {#if !isBoardsUnlimited(cfg)}
+        {@const row = practiceBoards[practiceSetIdx] ?? []}
+        {@const setTotal = row.reduce((s, v) => s + (v ?? 0), 0)}
+        <div class="board-tiles" aria-label="Boards in this set">
+          {#each Array(cfg.maxBoards) as _, boardIdx (boardIdx)}
+            {@const missed = row[boardIdx] ?? 0}
+            {@const isCurrent = boardIdx === Math.min(board, cfg.maxBoards - 1)}
+            <div class="board-tile" class:board-tile-current={isCurrent}>
+              <span class="board-tile-lbl">B{boardIdx + 1}</span>
+              <span class="digit digit-a board-tile-digit">{missed}</span>
+            </div>
+          {/each}
+          <div class="board-tile board-tile-total">
+            <span class="board-tile-lbl">TOTAL</span>
+            <span class="digit digit-mid board-tile-digit">{setTotal}</span>
           </div>
-          <div class="set-caption">SET {ordinal(currentSet)}</div>
-        {:else}
-          <div class="set-caption">SOLO PRACTICE</div>
-        {/if}
+        </div>
+      {:else}
         <!--
-          Per-board missed-shot strip. Each cell corresponds to one
-          board in the active set; the current board glows in the
-          accent colour. Unlimited-boards mode falls back to a single
-          rolling BOARD n block since there's no fixed board count to
-          render. Reads practiceBoards[practiceSetIdx] published by
-          ScoreBoard's writeLocalStorage.
+          Unlimited-boards fallback: no fixed count to enumerate,
+          so show the rolling BOARD digit + running MISSED total.
         -->
-        {#if !isBoardsUnlimited(cfg)}
-          {@const row = practiceBoards[practiceSetIdx] ?? []}
-          <div class="board-strip" aria-label="Boards in this set">
-            {#each Array(cfg.maxBoards) as _, boardIdx (boardIdx)}
-              {@const missed = row[boardIdx] ?? 0}
-              {@const isCurrent = boardIdx === Math.min(board, cfg.maxBoards - 1)}
-              <span class="board-cell" class:board-cell-current={isCurrent}>
-                <span class="board-cell-idx">B{boardIdx + 1}</span>
-                <span class="board-cell-val">{missed}</span>
-              </span>
-            {/each}
+        <div class="board-tiles" aria-label="Solo practice">
+          <div class="board-tile">
+            <span class="board-tile-lbl">BOARD</span>
+            <span class="digit digit-mid board-tile-digit">{board}</span>
           </div>
-        {:else}
-          <div class="board-block">
-            <span class="board-label">BOARD</span>
-            <span class="board-num">{board}</span>
+          <div class="board-tile board-tile-total">
+            <span class="board-tile-lbl">MISSED</span>
+            <span class="digit digit-a board-tile-digit">{pad2(sideA.points)}</span>
           </div>
-        {/if}
-      </div>
+        </div>
+      {/if}
     </div>
   {:else}
     <div class="strip">
@@ -409,14 +418,36 @@
   }
   .team-a.team-inline { justify-content: flex-start; }
   .team-b.team-inline { justify-content: flex-end; }
-  /* Practice/solo variant: single team-block + centre column, both
-     auto-sized so the strip shrinks to its actual content and doesn't
-     reserve the old empty right column (v3.4.4). */
+  /*
+   * Practice/solo variant (v3.4.10). Two-row stack: name pill on
+   * top, tiles below at full width. Matches the production
+   * LiveScoreboardView layout — the name is a header, not a
+   * side-anchor, so the digit tiles get both the full horizontal
+   * budget and their own row of vertical space.
+   */
+  .practice-strip {
+    grid-template-columns: 1fr;
+    grid-auto-rows: auto;
+    row-gap: 0.7rem;
+    align-items: center;
+    justify-items: center;
+    width: 96vw;
+  }
   .practice-strip .team-inline {
     justify-content: center;
   }
-  .practice-strip {
-    grid-template-columns: auto auto;
+  /*
+   * Solo pill: single-row horizontal layout — [NAME] [COUNTRY].
+   * Overrides the vertical stack that singles/doubles use, because
+   * solo has only one player so there's no need to stack the note
+   * under the name to save width.
+   */
+  .practice-strip .name-pill {
+    flex-direction: row;
+    align-items: center;
+    gap: 0.55rem;
+    max-width: none;
+    text-align: left;
   }
 
   /*
@@ -425,9 +456,17 @@
    * across two lines instead of squeezing the digit off-screen.
    */
   .name-pill {
+    /*
+     * v3.4.7: pill is a vertical stack so the country/region note
+     * (`.name-note`) sits BELOW the player name instead of trailing
+     * inline. Doubles pill's three-line "A / & / B" stack is a
+     * single flex-column child of this pill, so it renders as one
+     * unit centred above the note.
+     */
     display: inline-flex;
+    flex-direction: column;
     align-items: center;
-    gap: 0.4rem;
+    gap: 0.25rem;
     padding: 0.45rem 1rem;
     border-radius: 0.6rem;
     font-size: clamp(1.1rem, 2vw, 1.6rem);
@@ -438,6 +477,7 @@
     box-shadow: 0 3px 10px rgba(0,0,0,0.35);
     max-width: min(22ch, 32vw);
     line-height: 1.15;
+    text-align: center;
   }
   .name-pill .name-txt {
     white-space: normal;
@@ -656,13 +696,18 @@
   }
   .digit-a { color: var(--side-a); text-shadow: 0 0 24px rgba(79,195,247,0.55); }
   .digit-b { color: var(--side-b); text-shadow: 0 0 24px rgba(255,138,101,0.55); }
+  .digit-mid { color: var(--accent); text-shadow: 0 0 20px rgba(255,213,74,0.45); }
   /*
-   * Solo/practice: the strip only carries one team, so the score digit
-   * can grow well past the 2P clamp without pushing anything else
-   * off-frame. Bump ~1.55x vs the 2P digit (v3.4.4 feedback).
+   * Solo/practice tile digits (v3.4.10). Now that the name pill
+   * lives on its own row above the tiles, the full 96vw goes to
+   * tiles. Formula: 96vw shared across N tiles → each tile
+   * ~(96/N)vw wide → digit ~65% of that → font-size ≈
+   * (0.65 * 96 / N)vw ≈ 62vw / N. Clamped [3.5rem, 12rem] so a
+   * 2-tile fallback stays legible without blowing off the strip
+   * and a 12-tile config still reads.
    */
   .practice-strip .digit {
-    font-size: clamp(8.5rem, 17vw, 14rem);
+    font-size: clamp(3.5rem, calc(62vw / var(--tile-count, 6)), 12rem);
   }
 
   .sets-chip {
@@ -789,51 +834,68 @@
    * the accent colour so a broadcast viewer immediately sees which
    * board is being played.
    */
-  .board-strip {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-    padding: 0.25rem 0.4rem;
-    background: rgba(255,255,255,0.04);
-    border-radius: 0.5rem;
-    margin-top: 0.15rem;
-    max-width: 100%;
-    flex-wrap: wrap;
-    justify-content: center;
+  /*
+   * Solo overlay tiles (v3.4.8). Row of equal-sized dark tiles —
+   * one per board + a TOTAL tile — each holding a big DSEG7 digit
+   * matching the singles/doubles overlay clamp. Layout mirrors the
+   * production LiveScoreboardView practice grid but with the
+   * overlay's larger digit language so the row is broadcast-scale
+   * rather than lobby-preview-scale.
+   */
+  .board-tiles {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
+    gap: 0.6rem;
+    align-items: stretch;
+    min-width: 0;
+    /* Claim the whole row of the parent (.practice-strip is a
+       one-column grid now), so tiles share the full 96vw budget
+       instead of collapsing to content width. */
+    width: 100%;
+    justify-self: stretch;
   }
-  .board-cell {
-    display: inline-flex;
+  .board-tile {
+    display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 0.05rem;
-    padding: 0.2rem 0.45rem;
-    border-radius: 0.4rem;
-    border: 1px solid rgba(255,255,255,0.14);
-    min-width: 2.1rem;
-    line-height: 1;
+    /* justify-content: flex-start pins the label to the top so the
+       big DSEG7 digit (with its tall ascender glyph box) can't creep
+       up over it. Was `center` — with a large digit the two children
+       were centred as a group and the digit's negative-space rows
+       ate into the label above it. */
+    justify-content: flex-start;
+    gap: 0.5rem;
+    padding: 0.55rem 0.7rem 0.7rem;
+    background: rgba(15,15,15,0.72);
+    border: 1.5px solid rgba(255,255,255,0.14);
+    border-radius: 0.6rem;
+    min-width: 0;
   }
-  .board-cell-idx {
+  .board-tile-lbl {
     color: rgba(255,255,255,0.55);
-    font-size: 0.55rem;
-    letter-spacing: 0.12em;
+    font-size: 0.75rem;
+    letter-spacing: 0.14em;
     text-transform: uppercase;
     font-weight: 700;
+    line-height: 1;
+    /* Ensure the label sits ABOVE the digit's stacking context —
+       belt-and-braces in case a future digit shadow spills up. */
+    z-index: 1;
   }
-  .board-cell-val {
-    font-family: 'DSEG7 Classic', 'Courier New', ui-monospace, monospace;
-    font-weight: 700;
-    font-size: clamp(1.1rem, 2vw, 1.5rem);
-    color: rgba(255,255,255,0.85);
+  .board-tile-digit {
+    /* Line-height 1 gives the DSEG7 glyph its full internal
+       headroom so the top of the "0" / "8" doesn't overlap into
+       the label's row above. Was 0.85 which packed too tight. */
+    line-height: 1;
   }
-  .board-cell-current {
+  .board-tile-current {
     border-color: var(--accent);
-    box-shadow: 0 0 10px rgba(255,213,74,0.35);
+    box-shadow: 0 0 14px rgba(255,213,74,0.35);
   }
-  .board-cell-current .board-cell-idx { color: var(--accent); }
-  .board-cell-current .board-cell-val {
-    color: var(--accent);
-    text-shadow: 0 0 14px rgba(255,213,74,0.55);
-  }
+  .board-tile-current .board-tile-lbl { color: var(--accent); }
+  .board-tile-total { border-color: rgba(255,213,74,0.35); }
+  .board-tile-total .board-tile-lbl { color: rgba(255,213,74,0.8); }
 
   /* Tighten spacing on smaller streams (720p windows, tight OBS canvases). */
   @media (max-width: 720px) {
