@@ -1733,20 +1733,15 @@
     max-width: 1600px;
     width: 100%;
     margin: 0 auto;
-    /* Right padding reserves a safe-zone (~200px on 1080p) for stream-
-       software watermarks — Prism Live's brand stamp, OBS/Twitch/YouTube
-       recording indicators — that sit in the bottom-right corner. The
-       overlay's final cells (TOTAL for practice, side-B pill for versus)
-       stopped short of the watermark instead of being obscured by it. */
-    padding: 0.35rem 12rem 0.5rem 0.6rem;
-  }
-  @media (max-width: 520px) {
-    .overlay-wrap {
-      /* Watermarks scale down proportionally on smaller streams;
-         180px on 1920px = 10rem on 520px. Also reduce so mobile
-         viewers don't lose too much horizontal real estate. */
-      padding: 0.35rem 4rem 0.5rem 0.6rem;
-    }
+    /*
+     * v3.4.6: no padding. The overlay wrap previously reserved
+     * ~12rem on the right for a stream-app watermark safe-zone
+     * (Prism / OBS / Twitch record indicators), but the umpire now
+     * positions their branding independently in the streaming app
+     * itself — the reserved buffer was just eating usable overlay
+     * width in every mode. Let the overlay use the full container.
+     */
+    padding: 0;
   }
   /* Compact overrides for LiveScoreboardView when rendered inside
      .overlay-wrap. `:global` because the child component's styles are
