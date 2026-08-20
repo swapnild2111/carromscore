@@ -34,6 +34,7 @@
   import FeedbackPopup from './FeedbackPopup.svelte';
   import MatchEditModal from './MatchEditModal.svelte';
   import ReportsTab from './reports/ReportsTab.svelte';
+  import { logScreen } from '../lib/analytics';
   import { subscribeCurrentUserRole, type Role } from '../lib/roles';
   import { currentUser } from '../lib/auth';
   import {
@@ -224,6 +225,10 @@
   }
 
   onMount(() => {
+    // v3.4: log screen_view for the lobby (no-op without consent).
+    // The isSpectatorView() guard inside analytics.ts drops
+    // ?mid=... shares so a WhatsApp click doesn't inflate DAU.
+    void logScreen('lobby');
     // Read the target mid before the Firebase subscription lands.
     // We hold onto it and pop the popup open the moment its entry
     // arrives in the live-tree snapshot.

@@ -65,7 +65,17 @@ free.
 
 **No server, no cloud, no accounts.** Consequences:
 
-- ✅ No privacy story to manage. No PII collected. Nothing to breach.
+- ✅ Anonymous by default: no login required to score. Sign-in is
+  additive — for editing your own matches or being onboarded as an
+  organiser. Casual scoring never touches an account.
+- ✅ Minimal PII surface. Sign-in mirrors `{email, displayName, photoURL}`
+  to `/users/{uid}` for the roles system; nothing else is collected
+  from that flow. See `src/lib/users.ts`.
+- ⚙️ Optional analytics: an opt-in first-run banner offers Firebase
+  Analytics (geography, device type, screen views — same posture
+  as any Firebase app). OFF by default. Users can revoke consent
+  from Home → Settings; revocation stops beacons immediately. See
+  `src/lib/analytics.ts` and `docs/dev/analytics-setup.md`.
 - ✅ Works fully offline once loaded.
 - ✅ Zero recurring cost.
 - ⚠️ No cross-device live sync. A phone-scored match doesn't stream

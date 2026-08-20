@@ -28,6 +28,12 @@ scoring stays anonymous — no accounts required. Sign in only if you
 want to edit your own matches or run a tournament as an organiser.
 Same code on every device.
 
+Optional Firebase Analytics helps the maintainer see which regions
+use the app — off by default; a first-run banner asks. See
+[docs/dev/analytics-setup.md](./docs/dev/analytics-setup.md) for
+what's collected when you opt in and how to turn it off any time
+from **Settings**.
+
 <p align="center">
   <img src="docs/screenshots/04-score-midset.png" alt="Carromscore mid-match: cyan and coral player pills, big 7-segment digits, gold BREAK chip" width="800" />
 </p>

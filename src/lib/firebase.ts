@@ -9,14 +9,19 @@
  * the entire security model. See Firebase's own doc:
  *   https://firebase.google.com/docs/projects/api-keys
  *
- * Analytics: intentionally NOT imported. We don't want Firebase's
- * page-view tracking loaded in the client — it doesn't fit the app's
- * "no accounts, no cloud" story.
+ * Analytics: NOT imported here. The Firebase Analytics SDK is
+ * loaded on demand by `src/lib/analytics.ts`, and only after the
+ * user opts in via the first-run consent banner. Never touch
+ * `firebase/analytics` from anywhere else — the analytics module
+ * is the single place that owns the consent gate. See
+ * `src/lib/analytics.ts` and `docs/dev/analytics-setup.md`.
  *
  * Bundle-size discipline: this module is small (config + init only).
  * The heavy `firebase/database` import is dynamic-loaded lazily by
  * `players.ts` / `history.ts` / `live-sync.ts` on first use, so users
  * who never open a live match or the History page don't pay for it.
+ * The `firebase/analytics` import is likewise dynamic — never in the
+ * main bundle for users who declined consent.
  */
 import { initializeApp, getApps, type FirebaseApp } from 'firebase/app';
 
@@ -50,6 +55,20 @@ const firebaseConfig = {
   storageBucket: 'carrom-score.firebasestorage.app',
   messagingSenderId: '890319805819',
   appId: '1:890319805819:web:4ff96133e0bca93f5bb1de',
+  // GA4 measurement id — used by src/lib/analytics.ts. Firebase's
+  // docs call this a PUBLIC identifier (baked into every gtag
+  // script tag on the web), but we route it through an env var
+  // for symmetry with PUBLIC_FIREBASE_API_KEY — same reason:
+  // keep any Google-shaped identifier out of the committed source
+  // so future secret-scanners don't get confused. Absent env var
+  // = analytics silently skipped (initAnalytics() short-circuits
+  // when measurementId is empty). Value goes into the built bundle
+  // regardless, and that's fine — it's how gtag identifies the
+  // GA4 property. Firebase console → Project settings → Your
+  // apps → Web SDK snippet → measurementId.
+  ...(import.meta.env.PUBLIC_FIREBASE_MEASUREMENT_ID
+    ? { measurementId: import.meta.env.PUBLIC_FIREBASE_MEASUREMENT_ID }
+    : {}),
 };
 
 let cached: FirebaseApp | null = null;

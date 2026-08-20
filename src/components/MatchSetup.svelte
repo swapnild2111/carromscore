@@ -45,6 +45,9 @@
   import SignInButton from './SignInButton.svelte';
   import FeedbackPopup from './FeedbackPopup.svelte';
   import HelpTip from './HelpTip.svelte';
+  import ConsentBanner from './ConsentBanner.svelte';
+  import SettingsMenu from './SettingsMenu.svelte';
+  import { logScreen } from '../lib/analytics';
   import { countryName, flagEmoji } from '../lib/countries';
 
   const base: string = import.meta.env.BASE_URL;
@@ -750,6 +753,13 @@
     return () => window.removeEventListener('carrom:sw-updated', onSwUpdated);
   });
 
+  // v3.4: log a screen_view for the home page on mount. No-op when
+  // the user hasn't opted into analytics — the callsite doesn't
+  // have to know the consent state.
+  $effect(() => {
+    void logScreen('home');
+  });
+
   function restartApp() {
     // Bypass the SW cache for the reload — we want the freshest HTML shell.
     window.location.reload();
@@ -864,6 +874,14 @@
 {/if}
 
 <form class="setup" onsubmit={start}>
+  <!--
+    v3.4: first-run consent banner for optional Firebase Analytics.
+    Renders only when the user hasn't answered or when a 30-day
+    re-ask window elapsed. Compact one-line strip so it doesn't
+    push the setup form below the fold on small phones.
+  -->
+  <ConsentBanner />
+
   <!--
     Mode selection renders BEFORE Match rules because the chosen
     mode reshapes the rules block: Practice hides the Points input
@@ -1159,6 +1177,14 @@
         — a downward dropdown would clip below the fold.
       -->
       <SignInButton dropUp />
+      <span class="foot-sep" aria-hidden="true">·</span>
+      <!--
+        Home-screen Settings menu (v3.4). Currently a single toggle
+        for optional analytics; a natural home for any future
+        per-device preference that shouldn't live behind the
+        admin gate.
+      -->
+      <SettingsMenu />
     </div>
     <p class="foot-meta">
       <a

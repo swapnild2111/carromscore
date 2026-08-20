@@ -34,6 +34,7 @@
   import AdminHistoryCleanup from './AdminHistoryCleanup.svelte';
   import AdminAuditLog from './AdminAuditLog.svelte';
   import AdminRoles from './AdminRoles.svelte';
+  import { logScreen } from '../lib/analytics';
 
   type Tab = 'players' | 'tournaments' | 'live' | 'history' | 'roles' | 'audit';
 
@@ -67,6 +68,8 @@
   );
 
   onMount(() => {
+    // v3.4: log screen_view for the admin surface (no-op without consent).
+    void logScreen('admin');
     const unsubAuth = subscribeAuth((u) => {
       user = u;
       setCurrentUidForRoles(u?.uid ?? null);

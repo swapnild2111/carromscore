@@ -11,6 +11,7 @@
     type Side as SideId,
   } from '../lib/match';
   import { APP_VERSION, releaseUrl } from '../lib/version';
+  import { logScreen } from '../lib/analytics';
   import {
     finishMatch,
     loadMatchIdentity,
@@ -408,6 +409,10 @@
   let playerStoreTick = $state(0);
 
   onMount(() => {
+    // v3.4: log screen_view for the scoreboard (no-op without
+    // consent; also silently dropped for spectator ?spec=1 loads
+    // per analytics.ts).
+    void logScreen('score');
     const q = new URLSearchParams(window.location.search);
     cfg = decodeConfig(q);
     sideA.name = teamLabel(cfg.playerA, cfg.playerA2, cfg.mode) || 'First Player';
