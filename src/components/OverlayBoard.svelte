@@ -127,11 +127,13 @@
     queenHolder = s.queenHolder;
     matchResult = s.matchResult;
     if (s.practiceBoards) practiceBoards = s.practiceBoards;
-    // LiveRecord doesn't carry practiceSetIdx today — infer as the
-    // last set with any non-zero cell, else 0. Umpires flip through
-    // sets locally on the phone; the overlay just shows the "most
-    // recently touched" set of a bo>1 practice run.
-    if (s.practiceBoards) {
+    // Prefer the umpire's actual paging position from RTDB. Fallback
+    // (older clients that don't publish it): infer as the last set
+    // with any non-zero cell — right most of the time, one miss
+    // behind reality at the start of a fresh set.
+    if (typeof s.practiceSetIdx === 'number') {
+      practiceSetIdx = s.practiceSetIdx;
+    } else if (s.practiceBoards) {
       let last = 0;
       for (let i = 0; i < s.practiceBoards.length; i += 1) {
         if (s.practiceBoards[i]?.some((v) => v > 0)) last = i;
@@ -255,20 +257,36 @@
         </div>
       </div>
       {#if !isBoardsUnlimited(cfg)}
+        <!--
+          Solo overlay always shows only the currently-active set —
+          matches the umpire's phone: whichever set they're paging
+          through, the overlay follows via `practiceSetIdx` on the
+          Firebase / localStorage payload. A small SET header pill
+          on the left of the tile row tells the viewer which set of
+          the bestOf run they're watching.
+        -->
         {@const row = practiceBoards[practiceSetIdx] ?? []}
         {@const setTotal = row.reduce((s, v) => s + (v ?? 0), 0)}
-        <div class="board-tiles" aria-label="Boards in this set">
-          {#each Array(cfg.maxBoards) as _, boardIdx (boardIdx)}
-            {@const missed = row[boardIdx] ?? 0}
-            {@const isCurrent = boardIdx === Math.min(board, cfg.maxBoards - 1)}
-            <div class="board-tile" class:board-tile-current={isCurrent}>
-              <span class="board-tile-lbl">B{boardIdx + 1}</span>
-              <span class="digit digit-a board-tile-digit">{missed}</span>
+        <div class="active-set-row" aria-label="Set {practiceSetIdx + 1} of {cfg.bestOf}">
+          {#if cfg.bestOf > 1}
+            <div class="set-header-pill">
+              <span class="set-header-lbl">SET</span>
+              <span class="set-header-num">{practiceSetIdx + 1}<span class="set-header-total">/{cfg.bestOf}</span></span>
             </div>
-          {/each}
-          <div class="board-tile board-tile-total">
-            <span class="board-tile-lbl">TOTAL</span>
-            <span class="digit digit-mid board-tile-digit">{setTotal}</span>
+          {/if}
+          <div class="board-tiles">
+            {#each Array(cfg.maxBoards) as _, boardIdx (boardIdx)}
+              {@const missed = row[boardIdx] ?? 0}
+              {@const isCurrent = boardIdx === Math.min(board, cfg.maxBoards - 1)}
+              <div class="board-tile" class:board-tile-current={isCurrent}>
+                <span class="board-tile-lbl">B{boardIdx + 1}</span>
+                <span class="digit digit-a board-tile-digit">{missed}</span>
+              </div>
+            {/each}
+            <div class="board-tile board-tile-total">
+              <span class="board-tile-lbl">TOTAL</span>
+              <span class="digit digit-mid board-tile-digit">{setTotal}</span>
+            </div>
           </div>
         </div>
       {:else}
@@ -769,16 +787,71 @@
   .digit-b { color: var(--side-b); text-shadow: 0 0 24px rgba(255,138,101,0.55); }
   .digit-mid { color: var(--accent); text-shadow: 0 0 20px rgba(255,213,74,0.45); }
   /*
-   * Solo/practice tile digits (v3.4.10). Now that the name pill
-   * lives on its own row above the tiles, the full 96vw goes to
-   * tiles. Formula: 96vw shared across N tiles → each tile
-   * ~(96/N)vw wide → digit ~65% of that → font-size ≈
-   * (0.65 * 96 / N)vw ≈ 62vw / N. Clamped [3.5rem, 12rem] so a
-   * 2-tile fallback stays legible without blowing off the strip
-   * and a 12-tile config still reads.
+   * Solo/practice tile digits. Now that the name pill lives on its
+   * own row above the tiles, the full 96vw goes to tiles. Formula:
+   * 96vw shared across N tiles → each tile ~(96/N)vw wide → digit
+   * ~65% of that → font-size ≈ 62vw / N. Clamped [3.5rem, 12rem]
+   * so a 2-tile fallback stays legible without blowing off the
+   * strip and a 12-tile config still reads.
    */
   .practice-strip .digit {
     font-size: clamp(3.5rem, calc(62vw / var(--tile-count, 6)), 12rem);
+  }
+
+  /*
+   * Active-set row (v3.4.11). Only the currently-played set is
+   * rendered — a SET header pill on the outer left tells the viewer
+   * which of the bestOf sets is on-screen; the umpire's phone drives
+   * `practiceSetIdx`, so the overlay follows their pagination. Grid
+   * `auto 1fr` — header sizes to content, tiles claim the rest.
+   */
+  .active-set-row {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0.7rem;
+    align-items: stretch;
+    width: 100%;
+  }
+  /* bo=1 fallback: no SET header rendered, so the row is a single
+     grid column — the tiles claim it entirely. */
+  .active-set-row:not(:has(.set-header-pill)) {
+    grid-template-columns: 1fr;
+  }
+  .set-header-pill {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.15rem;
+    padding: 0.5rem 1rem 0.6rem;
+    background: rgba(255,213,74,0.08);
+    border: 1.5px solid rgba(255,213,74,0.35);
+    border-radius: 0.6rem;
+    min-width: 4.5rem;
+    line-height: 1;
+  }
+  .set-header-lbl {
+    color: rgba(255,213,74,0.8);
+    font-size: 0.75rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    font-weight: 700;
+  }
+  .set-header-num {
+    font-family: 'DSEG7 Classic', 'Courier New', ui-monospace, monospace;
+    font-weight: 700;
+    font-size: clamp(2.2rem, 4vw, 3rem);
+    color: var(--accent);
+    text-shadow: 0 0 14px rgba(255,213,74,0.4);
+    line-height: 1;
+    display: inline-flex;
+    align-items: baseline;
+  }
+  .set-header-total {
+    font-size: 0.5em;
+    color: rgba(255,213,74,0.5);
+    text-shadow: none;
+    margin-left: 0.15em;
   }
 
   .sets-chip {
