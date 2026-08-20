@@ -252,10 +252,18 @@
           </span>
         {/if}
         <span class="digit digit-a">{pad2(sideA.points)}</span>
-        <span class="sets-chip">
-          <span class="sets-label">SETS</span>
-          <span class="sets-num">{sideA.sets}</span>
-        </span>
+        <!--
+          SETS chip only in best-of-N matches. In a bo=1 match SETS is
+          always 0/0, and the middle column already renders "SINGLE
+          SET", so the per-team chip just duplicates that info and
+          adds visual clutter (v3.4.5 feedback).
+        -->
+        {#if cfg.bestOf > 1}
+          <span class="sets-chip">
+            <span class="sets-label">SETS</span>
+            <span class="sets-num">{sideA.sets}</span>
+          </span>
+        {/if}
       </div>
 
       <!-- Middle: board + set-pips -->
@@ -286,10 +294,12 @@
         pinned to the OUTER (right) edge.
       -->
       <div class="team team-b team-inline">
-        <span class="sets-chip">
-          <span class="sets-label">SETS</span>
-          <span class="sets-num">{sideB.sets}</span>
-        </span>
+        {#if cfg.bestOf > 1}
+          <span class="sets-chip">
+            <span class="sets-label">SETS</span>
+            <span class="sets-num">{sideB.sets}</span>
+          </span>
+        {/if}
         <span class="digit digit-b">{pad2(sideB.points)}</span>
         {#if !matchResult}
           <span class="coin" class:coin-red={queenHolder === 'b'} aria-label={queenHolder === 'b' ? `${sideB.name} has queen` : 'Queen not held'}>
