@@ -695,7 +695,7 @@
         queenHolder,
         matchResult,
         ...(!isPractice && boardLog.length > 0 ? { boardLog } : {}),
-        ...(isPractice ? { practiceBoards } : {}),
+        ...(isPractice ? { practiceBoards, practiceSetIdx } : {}),
       };
       // tournamentKey rides alongside tournament so the RTDB
       // /live/{mid} delete rule can look up organiser privileges
@@ -2881,16 +2881,24 @@
     flex-shrink: 0;
   }
   /*
-   * Solo practice header: only one player + centre meta. Overriding
-   * the grid to auto columns collapses the third phantom cell so the
-   * pill + PRACTICE meta sit tight in the middle instead of leaving
-   * a wide empty band to the right (v3.4.5 feedback).
+   * Solo practice header (v3.4.4). Centred flex row with three
+   * children: [NAME PILL] [PRACTICE meta] [TOTAL missed]. The pill
+   * hugs its content (overrides the base .head-name `flex: 1 1
+   * auto`) so it no longer stretches across the full viewport and
+   * pushes the meta / total off the right edge. The three
+   * children stay visually grouped in the centre — matches the
+   * pre-v3.4.5 look the umpire preferred.
    */
   .practice-head {
     display: flex;
     justify-content: center;
     align-items: center;
     gap: 0.75rem;
+    flex-wrap: wrap;
+  }
+  .practice-head .head-name {
+    flex: 0 0 auto;
+    max-width: min(60vw, 32rem);
   }
   .head-name {
     display: inline-flex;
@@ -2980,15 +2988,15 @@
     max-width: 100%;
   }
   /*
-   * v3.4.5: stretch each head-side to fill its grid cell (was
-   * inline-flex justify-self:start/end, which left a wide buffer
-   * between the pill and the middle column on singles + doubles).
-   * The pill inside grows via flex:1 1 auto to consume the extra
-   * width, so short names read as full-width pills and long names
-   * still ellipsis-truncate at the cell edge.
+   * v3.4.4: reverted to the pre-v3.4.5 anchoring — each head-side
+   * hugs its content and anchors to the outer edge of its grid
+   * cell. The v3.4.5 `stretch` variant made a short singles name
+   * pill span the full half of the strip, dwarfing the middle
+   * BOARD / SINGLE SET column; umpires preferred the compact
+   * pill-anchored-to-corner look.
    */
-  .head-side-a { justify-self: stretch; justify-content: flex-start; }
-  .head-side-b { justify-self: stretch; justify-content: flex-end;   }
+  .head-side-a { justify-self: start; }
+  .head-side-b { justify-self: end;   }
 
   /*
    * Carrom queen coin. Renders identically on either side of the pill,

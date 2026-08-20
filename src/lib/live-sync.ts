@@ -53,6 +53,14 @@ export type LivePayload = {
   matchResult: 'a' | 'b' | 'draw' | null;
   boardLog?: BoardLogEntry[];
   practiceBoards?: number[][];
+  /**
+   * Practice/solo only. Which set the umpire is currently paging in
+   * their phone view. The overlay uses this to highlight the current
+   * set-row and to keep the SET-pips strip in sync — without it the
+   * overlay has to infer from cell values, which lags one miss
+   * behind the umpire's actual state.
+   */
+  practiceSetIdx?: number;
 };
 
 /**
@@ -184,6 +192,9 @@ export async function publishLive(
         ? { boardLog: payload.boardLog }
         : {}),
       ...(payload.practiceBoards ? { practiceBoards: payload.practiceBoards } : {}),
+      ...(typeof payload.practiceSetIdx === 'number'
+        ? { practiceSetIdx: payload.practiceSetIdx }
+        : {}),
     };
     const metaClean: Record<string, unknown> = {
       mode: meta.mode,
