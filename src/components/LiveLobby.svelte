@@ -30,6 +30,7 @@
   import { subscribePlayers, subscribeStore } from '../lib/players';
   import { APP_VERSION, releaseUrl } from '../lib/version';
   import LiveScoreboardView from './LiveScoreboardView.svelte';
+  import OverlayBoard from './OverlayBoard.svelte';
   import SignInButton from './SignInButton.svelte';
   import FeedbackPopup from './FeedbackPopup.svelte';
   import MatchEditModal from './MatchEditModal.svelte';
@@ -1055,13 +1056,13 @@
 {#if overlayMid}
   <!--
     OBS/Prism overlay mode. Transparent background, no chrome, no
-    lobby. Just the scoreboard strip so broadcasters can composite it
-    over their camera feed. The BaseLayout's default body colour gets
-    overridden by the data-overlay attribute set in onMount.
+    lobby. Renders the v3.4.2 broadcast strip (OverlayBoard) driven
+    by the Firebase /live/{mid} subscription rather than the older
+    LiveScoreboardView boxed-tile layout.
   -->
   {#if overlayEntry}
     <div class="overlay-wrap">
-      <LiveScoreboardView record={overlayEntry} />
+      <OverlayBoard record={overlayEntry} />
     </div>
   {/if}
 {:else}

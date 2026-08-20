@@ -10,17 +10,29 @@
     type MatchConfig,
     type Side,
   } from '../lib/match';
+  import type { LiveRecord } from '../lib/live-sync';
 
   /*
    * Broadcast overlay. Renders a transparent bottom-third strip that OBS
-   * or Prism can layer over a live camera feed of a carrom match. Reads
-   * state from the shared localStorage key that ScoreBoard writes; picks
-   * up changes instantly on the same browser via the `storage` event.
+   * or Prism can layer over a live camera feed of a carrom match.
    *
-   * Visual language mirrors the phone scoreboard: coloured player pills,
-   * DSEG7 7-segment digits, set-pip strip, and small BREAK / QUEEN
-   * indicators so viewers see who's breaking and who has the queen.
+   * Two data sources, selected via the optional `record` prop:
+   *   1. Prop-driven (record supplied): used by LiveLobby's
+   *      /live/?mid=X&view=overlay route. State comes from the
+   *      Firebase /live/{mid} subscription — remote broadcast, umpire
+   *      and streamer can be on different machines.
+   *   2. Standalone (no prop): the /score/?view=overlay route. State
+   *      comes from the URL query string (config) + localStorage
+   *      subscription (state, cross-tab on the same device) — for
+   *      single-machine setups where OBS and the phone browser sit
+   *      on the same laptop.
+   *
+   * Visual language identical either way: coloured player pills, DSEG7
+   * 7-segment digits, set-pip strip, small BREAK / QUEEN indicators.
    */
+
+  type Props = { record?: LiveRecord | null };
+  const { record = null }: Props = $props();
 
   type SideState = { name: string; namePartA: string; namePartB: string; note: string; sets: number; points: number };
 
@@ -60,33 +72,86 @@
     return pips;
   });
 
-  onMount(() => {
-    const q = new URLSearchParams(window.location.search);
-    cfg = decodeConfig(q);
-    // Solo pills have only one name and now render on their own row
-    // above the tile grid — there's plenty of horizontal room, so
-    // show the full name. Singles/doubles pills sit inline next to
-    // digits with tight width budget → keep first-name-only.
-    const soloName = cfg.mode === 'practice';
-    const nameA1 = soloName ? cfg.playerA : firstName(cfg.playerA);
-    const nameA2 = soloName ? cfg.playerA2 : firstName(cfg.playerA2);
-    const nameB1 = soloName ? cfg.playerB : firstName(cfg.playerB);
-    const nameB2 = soloName ? cfg.playerB2 : firstName(cfg.playerB2);
-    sideA.name = teamLabel(nameA1, nameA2, cfg.mode) || 'Player A';
-    sideB.name = teamLabel(nameB1, nameB2, cfg.mode) || 'Player B';
-    // Doubles: split into two parts so the pill can render each partner
-    // on its own line with a centred "&" separator between them (three
-    // lines total). Singles/practice leave namePartB empty and use the
-    // flat `name` string.
+  /**
+   * Compute pill labels from a config. Solo shows the full player
+   * name (has its own row, room to breathe); singles/doubles use
+   * first-name-only in the pill since the pill competes with the
+   * digit for horizontal budget.
+   */
+  function applyConfig(next: MatchConfig): void {
+    cfg = next;
+    const soloName = next.mode === 'practice';
+    const nameA1 = soloName ? next.playerA : firstName(next.playerA);
+    const nameA2 = soloName ? next.playerA2 : firstName(next.playerA2);
+    const nameB1 = soloName ? next.playerB : firstName(next.playerB);
+    const nameB2 = soloName ? next.playerB2 : firstName(next.playerB2);
+    sideA.name = teamLabel(nameA1, nameA2, next.mode) || 'Player A';
+    sideB.name = teamLabel(nameB1, nameB2, next.mode) || 'Player B';
     sideA.namePartA = nameA1;
-    sideA.namePartB = cfg.mode === 'doubles' ? nameA2 : '';
+    sideA.namePartB = next.mode === 'doubles' ? nameA2 : '';
     sideB.namePartA = nameB1;
-    sideB.namePartB = cfg.mode === 'doubles' ? nameB2 : '';
-    sideA.note = cfg.noteA;
-    sideB.note = cfg.noteB;
+    sideB.namePartB = next.mode === 'doubles' ? nameB2 : '';
+    sideA.note = next.noteA;
+    sideB.note = next.noteB;
+  }
 
-    // Cross-tab live sync: pick up state written to localStorage by the
-    // player view. Keys and shape stay compatible with ScoreBoard's write.
+  /**
+   * Apply a LiveRecord (from Firebase /live/{mid}) to the reactive
+   * fields. Shape mirrors LivePayload — used by the prop-driven
+   * /live/?view=overlay flow. Meta may change between calls (name
+   * typo fix mid-match) so we re-derive pill labels every time.
+   */
+  function applyRecord(r: LiveRecord): void {
+    const m = r.meta;
+    applyConfig({
+      ...DEFAULT_CONFIG,
+      mode: m.mode,
+      playerA: m.playerA,
+      playerA2: m.playerA2 ?? '',
+      playerB: m.playerB,
+      playerB2: m.playerB2 ?? '',
+      noteA: m.noteA ?? '',
+      noteB: m.noteB ?? '',
+      bestOf: m.bestOf,
+      pointsTarget: m.pointsTarget,
+      maxBoards: m.maxBoards,
+      tournament: m.tournament ?? '',
+    });
+    const s = r.liveState;
+    sideA.points = s.sideA.points;
+    sideB.points = s.sideB.points;
+    sideA.sets = s.sideA.sets;
+    sideB.sets = s.sideB.sets;
+    board = s.board;
+    currentBreak = s.currentBreak;
+    queenHolder = s.queenHolder;
+    matchResult = s.matchResult;
+    if (s.practiceBoards) practiceBoards = s.practiceBoards;
+    // LiveRecord doesn't carry practiceSetIdx today — infer as the
+    // last set with any non-zero cell, else 0. Umpires flip through
+    // sets locally on the phone; the overlay just shows the "most
+    // recently touched" set of a bo>1 practice run.
+    if (s.practiceBoards) {
+      let last = 0;
+      for (let i = 0; i < s.practiceBoards.length; i += 1) {
+        if (s.practiceBoards[i]?.some((v) => v > 0)) last = i;
+      }
+      practiceSetIdx = last;
+    }
+  }
+
+  onMount(() => {
+    // Prop-driven path (/live/?mid=X&view=overlay). Parent (LiveLobby)
+    // owns the Firebase subscription and passes fresh LiveRecords
+    // through; a $effect below reacts to every prop update.
+    if (record) {
+      applyRecord(record);
+      return;
+    }
+    // Standalone path (/score/?view=overlay): parse URL config, then
+    // subscribe to the cross-tab localStorage key for state updates.
+    const q = new URLSearchParams(window.location.search);
+    applyConfig(decodeConfig(q));
     const KEY = matchStateKey(cfg.mode, q.get('playerA') ?? '', q.get('playerB') ?? '');
     const apply = (raw: string | null) => {
       if (!raw) return;
@@ -125,6 +190,12 @@
     };
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
+  });
+
+  // Prop-driven live updates. Fires every time the parent hands us a
+  // new LiveRecord (Firebase subscription re-emits on each write).
+  $effect(() => {
+    if (record) applyRecord(record);
   });
 
   const pad2 = (n: number) => (n < 10 ? `0${n}` : `${n}`);
