@@ -639,8 +639,20 @@
     // writing that would clobber the previous session's saved
     // localStorage AND /live/{mid} payload.
     if (!hydrated) return;
+    // Practice mode aggregate: OBS overlay reads sideA.points directly
+    // from localStorage, but in practice mode `sideA.points` is the raw
+    // state (unused). The real running score is the sum of missed shots
+    // across all sets/boards. Publish the aggregate in both localStorage
+    // (below) and the live payload (further down) so the overlay shows
+    // a live "SCORE" digit in solo/practice mode too.
+    const practicePoints = isPractice
+      ? practiceBoards.reduce(
+          (sum, row) => sum + row.reduce((r, v) => r + (v ?? 0), 0),
+          0,
+        )
+      : 0;
     const s: Record<string, unknown> = {
-      sideA: { points: sideA.points, sets: sideA.sets },
+      sideA: { points: isPractice ? practicePoints : sideA.points, sets: sideA.sets },
       sideB: { points: sideB.points, sets: sideB.sets },
       board,
       currentBreak,
@@ -649,7 +661,10 @@
       boardLog,
       pointsAtBoardStart,
     };
-    if (isPractice) s.practiceBoards = practiceBoards;
+    if (isPractice) {
+      s.practiceBoards = practiceBoards;
+      s.practiceSetIdx = practiceSetIdx;
+    }
     try {
       localStorage.setItem(storageKey, JSON.stringify(s));
     } catch {
@@ -669,13 +684,9 @@
       // the real data lives in practiceBoards[]. To keep spectator +
       // OBS-overlay views showing a running "SCORE" digit that reflects
       // what the umpire has entered, publish the grand total of missed
-      // shots (sum across all sets + boards) as sideA.points.
-      const publishedPointsA = isPractice
-        ? practiceBoards.reduce(
-            (sum, row) => sum + row.reduce((r, v) => r + (v ?? 0), 0),
-            0,
-          )
-        : sideA.points;
+      // shots (sum across all sets + boards) as sideA.points. Same
+      // aggregate is already computed for the localStorage write above.
+      const publishedPointsA = isPractice ? practicePoints : sideA.points;
       const payload: LivePayload = {
         sideA: { points: publishedPointsA, sets: sideA.sets },
         sideB: { points: sideB.points, sets: sideB.sets },
@@ -1997,6 +2008,12 @@
   </button>
 
   {#if isPractice}
+    <!--
+      Practice header. v3.4.5: drop the phantom third grid column that
+      the shared .head grid (1fr auto 1fr) reserved on the right, so
+      the solo layout centres its content instead of leaving a big
+      empty band to the right of PRACTICE meta.
+    -->
     <header class="head practice-head">
       <div class="head-name head-a tone-{colourA}">
         <span class="hn-name">{sideA.name}</span>
@@ -2015,7 +2032,6 @@
           Total missed <span class="practice-total-num">{practiceGrandTotal()}</span>
         </div>
       </div>
-      <div aria-hidden="true"></div>
     </header>
 
     <div class="practice-grid">
@@ -2864,6 +2880,18 @@
     padding: 0 0.25rem;
     flex-shrink: 0;
   }
+  /*
+   * Solo practice header: only one player + centre meta. Overriding
+   * the grid to auto columns collapses the third phantom cell so the
+   * pill + PRACTICE meta sit tight in the middle instead of leaving
+   * a wide empty band to the right (v3.4.5 feedback).
+   */
+  .practice-head {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 0.75rem;
+  }
   .head-name {
     display: inline-flex;
     flex-direction: column;
@@ -2951,8 +2979,16 @@
     /* max-width:100% keeps the whole row inside its grid cell. */
     max-width: 100%;
   }
-  .head-side-a { justify-self: start; }
-  .head-side-b { justify-self: end;   }
+  /*
+   * v3.4.5: stretch each head-side to fill its grid cell (was
+   * inline-flex justify-self:start/end, which left a wide buffer
+   * between the pill and the middle column on singles + doubles).
+   * The pill inside grows via flex:1 1 auto to consume the extra
+   * width, so short names read as full-width pills and long names
+   * still ellipsis-truncate at the cell edge.
+   */
+  .head-side-a { justify-self: stretch; justify-content: flex-start; }
+  .head-side-b { justify-self: stretch; justify-content: flex-end;   }
 
   /*
    * Carrom queen coin. Renders identically on either side of the pill,
