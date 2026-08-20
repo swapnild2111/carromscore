@@ -1,14 +1,16 @@
 # Firebase Analytics setup
 
-Optional. Off by default in every user's browser until they tap
-**Allow** on the first-run consent banner.
+Firebase Analytics runs in the background whenever the app has a
+`PUBLIC_FIREBASE_MEASUREMENT_ID` in its build environment. No
+consent banner, no toggle in the app — the design decision (v3.4.0
+during beta) was that we want a real signal on where the app is
+used, and the data we collect is limited enough that an opt-in
+prompt was more theatre than protection.
 
-## What is collected (per user, when opted in)
+## What is collected
 
-Firebase Analytics is not scoped-down-able — once initialised it
-collects:
-
-- **Geography** — country, region, city (Google's default).
+- **Geography** — country, region, city (Google's default;
+  country is the useful signal for us).
 - **Device / browser** — model, OS, browser vendor + version.
 - **Session events** — `first_open`, `session_start`,
   `user_engagement`, `app_remove`.
@@ -22,22 +24,28 @@ collects:
   look like two anonymous sessions.
 - No conversion or funnel events beyond `screen_view`.
 - No `/live/{mid}` spectator views. Someone tapping a shared link
-  from WhatsApp/Slack doesn't count — the client checks
+  from WhatsApp / Slack doesn't count — the client checks
   `isSpectatorView()` and drops the event before it emits.
+- Nothing is sold or shared with third parties. The GA4 property
+  is bound to the same Google account that owns the Firebase
+  project.
 
-## Consent lifecycle
+## How a user opts out (browser-level, not in-app)
 
-1. First launch after v3.4.0 → consent banner appears above the
-   setup form on `/`.
-2. **Allow** → localStorage `carromscore:analytics-consent = 'granted'`.
-   The Analytics SDK is dynamic-imported and initialises. First
-   screen_view fires within ~2s.
-3. **No thanks** → `'denied'` + a timestamp under
-   `carromscore:analytics-declined-at`. Banner is suppressed for
-   30 days, then re-surfaces as a soft ask.
-4. User revokes from Home → Settings → **Share usage analytics**
-   toggle. `setAnalyticsCollectionEnabled(false)` fires
-   immediately; beacons stop.
+The app itself has no opt-out UI (removed in v3.4.0-beta.3). Users
+who want to block Analytics can:
+
+- Enable Firefox's built-in tracking protection (strict mode
+  blocks Google Analytics by default).
+- Install uBlock Origin / Ghostery / Privacy Badger — Firebase
+  Analytics is on every common blocklist.
+- Enable "Do Not Track" (Firebase Analytics honors the DNT header
+  when the browser sends it).
+- On mobile TWA, browsers' anti-tracking flags apply the same way
+  since the TWA is Chrome under the hood.
+
+The blocked case is graceful — `src/lib/analytics.ts` swallows the
+failed init and the rest of the app works normally.
 
 ## Enabling Analytics on a fresh Firebase project
 
@@ -66,8 +74,7 @@ Two ways:
 
 - **Codebase**: remove `PUBLIC_FIREBASE_MEASUREMENT_ID` from repo
   secrets. Next deploy: `src/lib/analytics.ts` sees no measurement
-  id and silently skips the SDK. Consent banner still shows but
-  taps go nowhere.
+  id and silently skips the SDK.
 - **Firebase console**: **Analytics** → **Analytics settings** →
   disable data collection. Same effect, no redeploy required.
 

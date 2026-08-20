@@ -71,10 +71,12 @@ free.
 - ✅ Minimal PII surface. Sign-in mirrors `{email, displayName, photoURL}`
   to `/users/{uid}` for the roles system; nothing else is collected
   from that flow. See `src/lib/users.ts`.
-- ⚙️ Optional analytics: an opt-in first-run banner offers Firebase
-  Analytics (geography, device type, screen views — same posture
-  as any Firebase app). OFF by default. Users can revoke consent
-  from Home → Settings; revocation stops beacons immediately. See
+- ⚙️ Firebase Analytics runs in the background — geography, device
+  type, screen views — so the maintainer can see which regions use
+  the app. No account linkage (`setUserId` is never called), no
+  ad tracking, no data sold. Users who want to block it entirely
+  can use uBlock Origin / Firefox tracking protection — Firebase
+  Analytics is on every common blocklist. See
   `src/lib/analytics.ts` and `docs/dev/analytics-setup.md`.
 - ✅ Works fully offline once loaded.
 - ✅ Zero recurring cost.

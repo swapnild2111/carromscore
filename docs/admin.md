@@ -265,16 +265,16 @@ or any match a super wants gone.
 - Firebase Analytics is the collector. There's no in-app dashboard
   — read metrics in the Firebase console, same account that owns
   the Realtime Database.
-- Opt-in only. Home screen shows a one-time consent banner; a
-  Settings toggle lets any user revoke consent later.
-- Only screens `home`, `lobby`, `admin`, `setup`, `score` are
-  reported, plus Firebase's own defaults (geography, device,
-  session events). Spectator `/live/{mid}` link opens are
+- Runs in the background for every session (no opt-in UI as of
+  v3.4.0-beta.3). Only screens `home`, `lobby`, `admin`, `setup`,
+  `score` are reported plus Firebase's own defaults (geography,
+  device, session events). Spectator `/live/{mid}` link opens are
   dropped client-side so shared-link taps don't inflate DAU.
+- Users can block Analytics browser-side (Firefox tracking
+  protection, uBlock Origin, Do Not Track). See
+  [../dev/analytics-setup.md](./dev/analytics-setup.md).
 - Console URL:
   <https://console.firebase.google.com/project/carrom-score/analytics>.
-- Full setup + revocation semantics in
-  [../dev/analytics-setup.md](./dev/analytics-setup.md).
 
 ---
 
