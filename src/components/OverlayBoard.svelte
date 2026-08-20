@@ -31,6 +31,17 @@
   let currentBreak = $state<Side | null>(null);
   let queenHolder = $state<Side | null>(null);
   let matchResult = $state<Side | 'draw' | null>(null);
+  // Practice/solo per-board missed-shot matrix + which set is active.
+  // Published by ScoreBoard's writeLocalStorage so the overlay can
+  // render every board in the set instead of just the current one.
+  let practiceBoards = $state<number[][]>([]);
+  let practiceSetIdx = $state(0);
+
+  // Overlay pills are tight; a full name like "Vethanayagam Antonio
+  // Sylvester" wraps or clips. Show the first token only, and for
+  // doubles apply per-partner before teamLabel joins them so the
+  // pill reads "SWAPNIL & YUVARAJ" instead of the full four names.
+  const firstName = (s: string) => (s ?? '').trim().split(/\s+/)[0] ?? '';
 
   const currentSet = $derived(Math.min(cfg.bestOf, sideA.sets + sideB.sets + 1));
 
@@ -52,8 +63,8 @@
   onMount(() => {
     const q = new URLSearchParams(window.location.search);
     cfg = decodeConfig(q);
-    sideA.name = teamLabel(cfg.playerA, cfg.playerA2, cfg.mode) || 'Player A';
-    sideB.name = teamLabel(cfg.playerB, cfg.playerB2, cfg.mode) || 'Player B';
+    sideA.name = teamLabel(firstName(cfg.playerA), firstName(cfg.playerA2), cfg.mode) || 'Player A';
+    sideB.name = teamLabel(firstName(cfg.playerB), firstName(cfg.playerB2), cfg.mode) || 'Player B';
     sideA.note = cfg.noteA;
     sideB.note = cfg.noteB;
 
@@ -78,6 +89,15 @@
         if (s?.matchResult === 'a' || s?.matchResult === 'b' || s?.matchResult === 'draw' || s?.matchResult === null) {
           matchResult = s.matchResult;
         }
+        if (
+          Array.isArray(s?.practiceBoards) &&
+          s.practiceBoards.every((row: unknown) =>
+            Array.isArray(row) && row.every((v: unknown) => typeof v === 'number'),
+          )
+        ) {
+          practiceBoards = s.practiceBoards as number[][];
+        }
+        if (typeof s?.practiceSetIdx === 'number') practiceSetIdx = s.practiceSetIdx;
       } catch {
         // ignore malformed state
       }
@@ -139,13 +159,32 @@
         {:else}
           <div class="set-caption">SOLO PRACTICE</div>
         {/if}
-        <div class="board-block">
-          <span class="board-label">BOARD</span>
-          <span class="board-num">{board}</span>
-          {#if !isBoardsUnlimited(cfg)}
-            <span class="board-total">/{cfg.maxBoards}</span>
-          {/if}
-        </div>
+        <!--
+          Per-board missed-shot strip. Each cell corresponds to one
+          board in the active set; the current board glows in the
+          accent colour. Unlimited-boards mode falls back to a single
+          rolling BOARD n block since there's no fixed board count to
+          render. Reads practiceBoards[practiceSetIdx] published by
+          ScoreBoard's writeLocalStorage.
+        -->
+        {#if !isBoardsUnlimited(cfg)}
+          {@const row = practiceBoards[practiceSetIdx] ?? []}
+          <div class="board-strip" aria-label="Boards in this set">
+            {#each Array(cfg.maxBoards) as _, boardIdx (boardIdx)}
+              {@const missed = row[boardIdx] ?? 0}
+              {@const isCurrent = boardIdx === Math.min(board, cfg.maxBoards - 1)}
+              <span class="board-cell" class:board-cell-current={isCurrent}>
+                <span class="board-cell-idx">B{boardIdx + 1}</span>
+                <span class="board-cell-val">{missed}</span>
+              </span>
+            {/each}
+          </div>
+        {:else}
+          <div class="board-block">
+            <span class="board-label">BOARD</span>
+            <span class="board-num">{board}</span>
+          </div>
+        {/if}
       </div>
     </div>
   {:else}
@@ -672,6 +711,57 @@
   .practice-strip .sets-chip .sets-label {
     color: rgba(255,213,74,0.85);
     letter-spacing: 0.14em;
+  }
+  /*
+   * Per-board strip (practice/solo, fixed maxBoards). One pill per
+   * board showing its missed-shot count; the active board glows in
+   * the accent colour so a broadcast viewer immediately sees which
+   * board is being played.
+   */
+  .board-strip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.25rem 0.4rem;
+    background: rgba(255,255,255,0.04);
+    border-radius: 0.5rem;
+    margin-top: 0.15rem;
+    max-width: 100%;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .board-cell {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.05rem;
+    padding: 0.2rem 0.45rem;
+    border-radius: 0.4rem;
+    border: 1px solid rgba(255,255,255,0.14);
+    min-width: 2.1rem;
+    line-height: 1;
+  }
+  .board-cell-idx {
+    color: rgba(255,255,255,0.55);
+    font-size: 0.55rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    font-weight: 700;
+  }
+  .board-cell-val {
+    font-family: 'DSEG7 Classic', 'Courier New', ui-monospace, monospace;
+    font-weight: 700;
+    font-size: clamp(1.1rem, 2vw, 1.5rem);
+    color: rgba(255,255,255,0.85);
+  }
+  .board-cell-current {
+    border-color: var(--accent);
+    box-shadow: 0 0 10px rgba(255,213,74,0.35);
+  }
+  .board-cell-current .board-cell-idx { color: var(--accent); }
+  .board-cell-current .board-cell-val {
+    color: var(--accent);
+    text-shadow: 0 0 14px rgba(255,213,74,0.55);
   }
 
   /* Tighten spacing on smaller streams (720p windows, tight OBS canvases). */

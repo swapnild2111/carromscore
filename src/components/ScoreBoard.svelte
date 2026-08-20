@@ -4,7 +4,6 @@
   import {
     DEFAULT_CONFIG,
     decodeConfig,
-    encodeConfig,
     isBoardsUnlimited,
     matchStateKey,
     teamLabel,
@@ -196,14 +195,6 @@
    * decided — see adjustSets's match-clinch guard added 2026-08-18.
    */
   let matchClinchedToast = $state(false);
-  /**
-   * OBS overlay URL copy affordance (v3.4.2). One-shot "✓ Copied"
-   * toast fires when the umpire taps the OBS footer button. Available
-   * for singles, doubles, AND practice — the overlay renders a
-   * single-side variant for practice so a solo player can still
-   * broadcast their live "missed" count.
-   */
-  let obsCopiedToast = $state(false);
   /**
    * Set to true when finishMatch() failed to reach Firebase (network
    * dead, rules denied). Surfaces as a small non-blocking toast so
@@ -670,7 +661,10 @@
       boardLog,
       pointsAtBoardStart,
     };
-    if (isPractice) s.practiceBoards = practiceBoards;
+    if (isPractice) {
+      s.practiceBoards = practiceBoards;
+      s.practiceSetIdx = practiceSetIdx;
+    }
     try {
       localStorage.setItem(storageKey, JSON.stringify(s));
     } catch {
@@ -1778,46 +1772,6 @@
     }
   }
 
-  /**
-   * Copy the OBS / Prism overlay URL for the current match to the
-   * clipboard. Works across every match mode:
-   *   - singles / doubles: the overlay reads live state from
-   *     localStorage (same device, second tab as an OBS Browser
-   *     Source), keyed by matchStateKey(mode, playerA, playerB).
-   *   - live matches with a mid: `&mid=X` is preserved so a remote
-   *     spectator/broadcaster can pull from Firebase /live/{mid}
-   *     instead. The overlay component handles either path.
-   *   - practice / solo: same URL shape; the overlay renders a
-   *     single-side variant showing the running missed-shot total.
-   *
-   * The URL is deterministic — same match config → same URL — so
-   * OBS Browser Source doesn't need to be reconfigured mid-session.
-   */
-  async function copyOverlayUrl() {
-    if (typeof window === 'undefined') return;
-    const base = import.meta.env.BASE_URL;
-    const params = new URLSearchParams(encodeConfig(cfg));
-    if (cfg.live && cfg.mid) params.set('mid', cfg.mid);
-    params.set('view', 'overlay');
-    const url = `${window.location.origin}${base}score/?${params.toString()}`;
-    try {
-      await navigator.clipboard.writeText(url);
-    } catch {
-      // Older browsers / non-secure contexts: fall back to
-      // temporarily selecting a hidden textarea. Best-effort only.
-      const ta = document.createElement('textarea');
-      ta.value = url;
-      ta.style.position = 'fixed';
-      ta.style.opacity = '0';
-      document.body.appendChild(ta);
-      ta.select();
-      try { document.execCommand('copy'); } catch { /* ignore */ }
-      document.body.removeChild(ta);
-    }
-    obsCopiedToast = true;
-    setTimeout(() => { obsCopiedToast = false; }, 1600);
-  }
-
   function swapSides() {
     // Physical seat swap: every per-player attribute travels with
     // the player, so their names, notes, colours, SET counts, AND
@@ -2400,22 +2354,6 @@
         </button>
       {/if}
       <!--
-        OBS overlay URL (v3.4.2). Available in every mode — singles,
-        doubles, and practice/solo — because the OverlayBoard now
-        renders a single-side variant for practice too. Copies a URL
-        the umpire can paste into an OBS/Prism Browser Source; the
-        overlay picks up live localStorage / /live/{mid} updates.
-      -->
-      <button
-        type="button"
-        class="foot-btn obs"
-        onclick={copyOverlayUrl}
-        aria-label="Copy OBS overlay URL"
-        title="Copy the transparent-overlay URL for OBS or Prism Browser Source"
-      >
-        <span class="foot-ico" aria-hidden="true">📺</span><span class="foot-lbl">OBS</span>
-      </button>
-      <!--
         Reset button hidden 2026-08-17: umpires kept tapping this
         thinking it would undo the last board / roll back a stray
         credit, but Reset wipes everything back to 0-0-0. The correct
@@ -2765,12 +2703,6 @@
     -->
     <div class="queen-toast" role="status" aria-live="polite">
       Swap only between sets — finish or clear the current board first
-    </div>
-  {/if}
-
-  {#if obsCopiedToast}
-    <div class="queen-toast" role="status" aria-live="polite">
-      Overlay URL copied — paste into OBS Browser Source
     </div>
   {/if}
 
@@ -3550,7 +3482,6 @@
 
   .foot-btn.swap { border-color: rgba(79,195,247,0.4); color: var(--side-a); }
   .foot-btn.reset { border-color: rgba(255,213,74,0.4); color: var(--accent); }
-  .foot-btn.obs { border-color: rgba(186,104,200,0.45); color: #ba68c8; }
   .foot-btn.endm { border-color: rgba(76,175,80,0.5); color: #66bb6a; }
   .foot-btn.close { border-color: rgba(239,83,80,0.4); color: var(--danger); }
 
