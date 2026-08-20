@@ -286,8 +286,8 @@
         target="_blank"
         rel="noopener noreferrer"
         class="foot-link foot-link-support"
-        aria-label="Support Carromscore on Ko-fi"
-      >Support ❤</a>
+        aria-label="Donate to Carromscore on Ko-fi"
+      >Donate ❤</a>
       <span class="foot-sep" aria-hidden="true">·</span>
       <SignInButton dropUp />
     </div>

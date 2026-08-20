@@ -1150,20 +1150,23 @@
       <FeedbackPopup />
       <span class="foot-sep" aria-hidden="true">·</span>
       <!--
-        Support link. Opens the Ko-fi donation page in a new tab.
-        Ko-fi accepts card + PayPal + Apple Pay + Google Pay; the
-        repo's Sponsor button (github.com/sponsors/…) is the other
-        channel for donors who prefer GitHub-native. Both funnel to
-        the same maintainer bank account. Kept muted so it never
-        competes with primary actions on the page.
+        Donate link. Opens the Ko-fi donation page in a new tab.
+        Renamed from "Support" in v3.4 — the earlier wording read
+        as a bug-report / feedback channel to some readers, muddying
+        what the link actually does. Ko-fi accepts card + PayPal +
+        Apple Pay + Google Pay; the repo's Sponsor button
+        (github.com/sponsors/…) is the other channel for donors who
+        prefer GitHub-native. Both funnel to the same maintainer
+        bank account. Kept muted so it never competes with primary
+        actions on the page.
       -->
       <a
         href="https://ko-fi.com/carromscore"
         target="_blank"
         rel="noopener noreferrer"
         class="foot-link foot-link-support"
-        aria-label="Support Carromscore on Ko-fi"
-      >Support ❤</a>
+        aria-label="Donate to Carromscore on Ko-fi"
+      >Donate ❤</a>
       <span class="foot-sep" aria-hidden="true">·</span>
       <!--
         Sign-in entry point. Same SignInButton component the lobby
