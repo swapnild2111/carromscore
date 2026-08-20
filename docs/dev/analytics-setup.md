@@ -32,8 +32,8 @@ prompt was more theatre than protection.
 
 ## How a user opts out (browser-level, not in-app)
 
-The app itself has no opt-out UI (removed in v3.4.0-beta.3). Users
-who want to block Analytics can:
+The app itself has no opt-out UI. Users who want to block
+Analytics can:
 
 - Enable Firefox's built-in tracking protection (strict mode
   blocks Google Analytics by default).

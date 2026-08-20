@@ -266,7 +266,7 @@ or any match a super wants gone.
   — read metrics in the Firebase console, same account that owns
   the Realtime Database.
 - Runs in the background for every session (no opt-in UI as of
-  v3.4.0-beta.3). Only screens `home`, `lobby`, `admin`, `setup`,
+  v3.4.0). Only screens `home`, `lobby`, `admin`, `setup`,
   `score` are reported plus Firebase's own defaults (geography,
   device, session events). Spectator `/live/{mid}` link opens are
   dropped client-side so shared-link taps don't inflate DAU.
