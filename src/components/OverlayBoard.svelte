@@ -22,11 +22,11 @@
    * indicators so viewers see who's breaking and who has the queen.
    */
 
-  type SideState = { name: string; note: string; sets: number; points: number };
+  type SideState = { name: string; namePartA: string; namePartB: string; note: string; sets: number; points: number };
 
   let cfg = $state<MatchConfig>({ ...DEFAULT_CONFIG });
-  let sideA = $state<SideState>({ name: 'Player A', note: '', sets: 0, points: 0 });
-  let sideB = $state<SideState>({ name: 'Player B', note: '', sets: 0, points: 0 });
+  let sideA = $state<SideState>({ name: 'Player A', namePartA: '', namePartB: '', note: '', sets: 0, points: 0 });
+  let sideB = $state<SideState>({ name: 'Player B', namePartA: '', namePartB: '', note: '', sets: 0, points: 0 });
   let board = $state(0);
   let currentBreak = $state<Side | null>(null);
   let queenHolder = $state<Side | null>(null);
@@ -65,6 +65,14 @@
     cfg = decodeConfig(q);
     sideA.name = teamLabel(firstName(cfg.playerA), firstName(cfg.playerA2), cfg.mode) || 'Player A';
     sideB.name = teamLabel(firstName(cfg.playerB), firstName(cfg.playerB2), cfg.mode) || 'Player B';
+    // Doubles: split into two parts so the pill can render each partner
+    // on its own line with a centred "&" separator between them (three
+    // lines total). Singles/practice leave namePartB empty and use the
+    // flat `name` string.
+    sideA.namePartA = firstName(cfg.playerA);
+    sideA.namePartB = cfg.mode === 'doubles' ? firstName(cfg.playerA2) : '';
+    sideB.namePartA = firstName(cfg.playerB);
+    sideB.namePartB = cfg.mode === 'doubles' ? firstName(cfg.playerB2) : '';
     sideA.note = cfg.noteA;
     sideB.note = cfg.noteB;
 
@@ -115,6 +123,19 @@
     (['1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th', '9th'][n - 1] ?? `${n}th`);
 </script>
 
+{#snippet nameTxt(side: SideState)}
+  {#if side.namePartB}
+    <!-- Doubles: three-line stack — first partner / & / second partner. -->
+    <span class="name-txt name-txt-stack">
+      <span class="name-line">{side.namePartA}</span>
+      <span class="name-amp">&amp;</span>
+      <span class="name-line">{side.namePartB}</span>
+    </span>
+  {:else}
+    <span class="name-txt">{side.name}</span>
+  {/if}
+{/snippet}
+
 {#snippet coinSvg()}
   <!-- Carrom queen coin. Fills adapt via --coin-* custom properties on .coin / .coin-red. -->
   <svg viewBox="-16 -16 32 32" width="1.55em" height="1.55em" aria-hidden="true" focusable="false">
@@ -138,7 +159,7 @@
     <div class="strip practice-strip">
       <div class="team team-a team-inline">
         <div class="name-pill tone-a">
-          <span class="name-txt">{sideA.name}</span>
+          {@render nameTxt(sideA)}
           {#if sideA.note}<span class="name-note">{sideA.note}</span>{/if}
         </div>
         <span class="digit digit-a">{pad2(sideA.points)}</span>
@@ -217,7 +238,7 @@
               <span class="medal-label">DRAW</span>
             </span>
           {/if}
-          <span class="name-txt">{sideA.name}</span>
+          {@render nameTxt(sideA)}
           {#if sideA.note}<span class="name-note">{sideA.note}</span>{/if}
         </div>
         {#if !matchResult && currentBreak === 'a'}
@@ -285,7 +306,7 @@
              class:gold={matchResult === 'b'}
              class:silver={matchResult === 'a'}
              class:draw={matchResult === 'draw'}>
-          <span class="name-txt">{sideB.name}</span>
+          {@render nameTxt(sideB)}
           {#if sideB.note}<span class="name-note">{sideB.note}</span>{/if}
           {#if matchResult === 'b'}
             <span class="medal" aria-label="First place">
@@ -346,7 +367,14 @@
     border-bottom: 2px solid rgba(255,255,255,0.06);
     border-radius: 1.25rem;
     box-shadow: 0 8px 32px rgba(0,0,0,0.5);
-    min-width: min(1100px, 94vw);
+    /*
+     * No fixed min-width. v3.4.4: broadcasters (notably Prism) overlay
+     * their own logo in the free corner of the frame, and the reserved
+     * empty space on either side of the strip was eating into that
+     * corner. Let the strip collapse to its content width so the
+     * external logo has all the free canvas it wants; the strip only
+     * takes the room it needs.
+     */
     max-width: 96vw;
     color: #fff;
     font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
@@ -371,14 +399,14 @@
   }
   .team-a.team-inline { justify-content: flex-start; }
   .team-b.team-inline { justify-content: flex-end; }
-  /* Practice/solo variant: single team-block spans the full strip;
-     centre it so the digit remains the visual anchor. */
+  /* Practice/solo variant: single team-block + centre column, both
+     auto-sized so the strip shrinks to its actual content and doesn't
+     reserve the old empty right column (v3.4.4). */
   .practice-strip .team-inline {
-    grid-column: 1 / 2;
     justify-content: center;
   }
   .practice-strip {
-    grid-template-columns: 1fr auto;
+    grid-template-columns: auto auto;
   }
 
   /*
@@ -404,6 +432,31 @@
   .name-pill .name-txt {
     white-space: normal;
     word-break: break-word;
+  }
+  /*
+   * Doubles: stack the pill as
+   *   FIRST_A
+   *     &
+   *   FIRST_B
+   * so each partner reads clearly on-camera and the "&" is visually a
+   * separator, not part of a joined string (v3.4.4 feedback).
+   */
+  .name-pill .name-txt-stack {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.05rem;
+    line-height: 1;
+  }
+  .name-pill .name-line {
+    display: block;
+    white-space: nowrap;
+  }
+  .name-pill .name-amp {
+    display: block;
+    font-size: 0.8em;
+    opacity: 0.75;
+    line-height: 1;
   }
   .name-pill.tone-a { background: var(--side-a); }
   .name-pill.tone-b { background: var(--side-b); }
@@ -593,6 +646,14 @@
   }
   .digit-a { color: var(--side-a); text-shadow: 0 0 24px rgba(79,195,247,0.55); }
   .digit-b { color: var(--side-b); text-shadow: 0 0 24px rgba(255,138,101,0.55); }
+  /*
+   * Solo/practice: the strip only carries one team, so the score digit
+   * can grow well past the 2P clamp without pushing anything else
+   * off-frame. Bump ~1.55x vs the 2P digit (v3.4.4 feedback).
+   */
+  .practice-strip .digit {
+    font-size: clamp(8.5rem, 17vw, 14rem);
+  }
 
   .sets-chip {
     display: inline-flex;
