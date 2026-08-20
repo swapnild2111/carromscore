@@ -45,6 +45,7 @@
   import SignInButton from './SignInButton.svelte';
   import FeedbackPopup from './FeedbackPopup.svelte';
   import HelpTip from './HelpTip.svelte';
+  import { logScreen } from '../lib/analytics';
   import { countryName, flagEmoji } from '../lib/countries';
 
   const base: string = import.meta.env.BASE_URL;
@@ -750,6 +751,13 @@
     return () => window.removeEventListener('carrom:sw-updated', onSwUpdated);
   });
 
+  // v3.4: log a screen_view for the home page on mount. No-op when
+  // the user hasn't opted into analytics — the callsite doesn't
+  // have to know the consent state.
+  $effect(() => {
+    void logScreen('home');
+  });
+
   function restartApp() {
     // Bypass the SW cache for the reload — we want the freshest HTML shell.
     window.location.reload();
@@ -1132,20 +1140,23 @@
       <FeedbackPopup />
       <span class="foot-sep" aria-hidden="true">·</span>
       <!--
-        Support link. Opens the Ko-fi donation page in a new tab.
-        Ko-fi accepts card + PayPal + Apple Pay + Google Pay; the
-        repo's Sponsor button (github.com/sponsors/…) is the other
-        channel for donors who prefer GitHub-native. Both funnel to
-        the same maintainer bank account. Kept muted so it never
-        competes with primary actions on the page.
+        Donate link. Opens the Ko-fi donation page in a new tab.
+        Renamed from "Support" in v3.4 — the earlier wording read
+        as a bug-report / feedback channel to some readers, muddying
+        what the link actually does. Ko-fi accepts card + PayPal +
+        Apple Pay + Google Pay; the repo's Sponsor button
+        (github.com/sponsors/…) is the other channel for donors who
+        prefer GitHub-native. Both funnel to the same maintainer
+        bank account. Kept muted so it never competes with primary
+        actions on the page.
       -->
       <a
         href="https://ko-fi.com/carromscore"
         target="_blank"
         rel="noopener noreferrer"
         class="foot-link foot-link-support"
-        aria-label="Support Carromscore on Ko-fi"
-      >Support ❤</a>
+        aria-label="Donate to Carromscore on Ko-fi"
+      >Donate ❤</a>
       <span class="foot-sep" aria-hidden="true">·</span>
       <!--
         Sign-in entry point. Same SignInButton component the lobby

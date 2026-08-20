@@ -260,6 +260,22 @@ or any match a super wants gone.
 - Expand a row to see the before/after diff, the actor, and the
   targeted path.
 
+### App analytics (v3.4.0, external dashboard)
+
+- Firebase Analytics is the collector. There's no in-app dashboard
+  — read metrics in the Firebase console, same account that owns
+  the Realtime Database.
+- Runs in the background for every session (no opt-in UI as of
+  v3.4.0). Only screens `home`, `lobby`, `admin`, `setup`,
+  `score` are reported plus Firebase's own defaults (geography,
+  device, session events). Spectator `/live/{mid}` link opens are
+  dropped client-side so shared-link taps don't inflate DAU.
+- Users can block Analytics browser-side (Firefox tracking
+  protection, uBlock Origin, Do Not Track). See
+  [../dev/analytics-setup.md](./dev/analytics-setup.md).
+- Console URL:
+  <https://console.firebase.google.com/project/carrom-score/analytics>.
+
 ---
 
 ## Audit log

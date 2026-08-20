@@ -56,6 +56,10 @@ jobs:
           # "public identifier, not a secret" rationale. Sourced from
           # the repo secret so the literal doesn't sit in source.
           PUBLIC_FIREBASE_API_KEY: ${{ secrets.PUBLIC_FIREBASE_API_KEY }}
+          # GA4 measurement id. Public identifier (baked into every gtag
+          # snippet); env-var'd for symmetry with the API key. Missing
+          # value = analytics silently disabled (src/lib/analytics.ts).
+          PUBLIC_FIREBASE_MEASUREMENT_ID: ${{ secrets.PUBLIC_FIREBASE_MEASUREMENT_ID }}
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
@@ -117,6 +121,10 @@ jobs:
         env:
           PUBLIC_BASE: /carromscore/
           PUBLIC_FIREBASE_API_KEY: ${{ secrets.PUBLIC_FIREBASE_API_KEY }}
+          # GA4 measurement id. Public identifier (baked into every gtag
+          # snippet); env-var'd for symmetry with the API key. Missing
+          # value = analytics silently disabled (src/lib/analytics.ts).
+          PUBLIC_FIREBASE_MEASUREMENT_ID: ${{ secrets.PUBLIC_FIREBASE_MEASUREMENT_ID }}
 
       - name: Install (beta)
         run: npm ci
@@ -126,6 +134,10 @@ jobs:
         env:
           PUBLIC_BASE: /carromscore/beta/
           PUBLIC_FIREBASE_API_KEY: ${{ secrets.PUBLIC_FIREBASE_API_KEY }}
+          # GA4 measurement id. Public identifier (baked into every gtag
+          # snippet); env-var'd for symmetry with the API key. Missing
+          # value = analytics silently disabled (src/lib/analytics.ts).
+          PUBLIC_FIREBASE_MEASUREMENT_ID: ${{ secrets.PUBLIC_FIREBASE_MEASUREMENT_ID }}
 
       # Compose the final artifact: main at root, beta under /beta/.
       # Runs from repo root (default working-directory override
