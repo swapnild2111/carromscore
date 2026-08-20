@@ -9,7 +9,9 @@
     "dev": "astro dev",
     "build": "astro build && node scripts/build-manifest.mjs",
     "preview": "astro preview",
-    "astro": "astro"
+    "astro": "astro",
+    "screenshots": "tsx scripts/screenshots.ts",
+    "videos": "tsx scripts/videos.ts"
   },
   "dependencies": {
     "@astrojs/svelte": "^9.0.1",

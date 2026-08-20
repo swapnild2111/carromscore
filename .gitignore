@@ -28,3 +28,9 @@ pnpm-debug.log*
 # Gradle output is generated, all reproducible from twa-manifest.json.
 twa/*
 !twa/twa-manifest.json
+
+# Playwright-captured demo videos (see scripts/videos.ts).
+# Regenerated any time with `npm run videos`; keep out of git until
+# we commit the specific clips we want to embed on the README /
+# Play Store / socials.
+docs/videos/

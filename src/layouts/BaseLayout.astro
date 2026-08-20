@@ -205,7 +205,8 @@ const base = import.meta.env.BASE_URL;
         Promise.all([
           import('../lib/connectivity'),
           import('../lib/sync-queue'),
-        ]).then(([conn, queue]) => {
+          import('../lib/live-sync'),
+        ]).then(([conn, queue, live]) => {
           conn.subscribeConnectivity((state) => {
             apply(state.online);
             if (!prevOnline && state.online) {
@@ -215,6 +216,30 @@ const base = import.meta.env.BASE_URL;
               void queue.flushQueue();
             }
             prevOnline = state.online;
+          });
+          // Xiaomi / MIUI background-suspend workaround (v3.4.1):
+          // when the app returns to foreground after being hidden
+          // long enough that the OS could have suspended the RTDB
+          // WebSocket, force-cycle the Firebase connection so the
+          // offline banner clears and the socket re-establishes
+          // immediately. The score screen has its own copy of this
+          // handler, but home + lobby didn't — reported 2026-08-20
+          // that the banner stuck on Xiaomi until the user minimised
+          // and reopened the app. Hoisting it to BaseLayout means
+          // every route benefits.
+          let hiddenSince: number | null = null;
+          const NUDGE_MS = 2000;
+          document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden') {
+              hiddenSince = Date.now();
+              return;
+            }
+            if (document.visibilityState === 'visible') {
+              if (hiddenSince !== null && Date.now() - hiddenSince > NUDGE_MS) {
+                void live.nudgeFirebaseReconnect();
+              }
+              hiddenSince = null;
+            }
           });
         }).catch(() => {
           // Modules failed to load (e.g. offline first-visit and
