@@ -831,15 +831,13 @@
   .digit-b { color: var(--side-b); text-shadow: 0 0 24px rgba(255,138,101,0.55); }
   .digit-mid { color: var(--accent); text-shadow: 0 0 20px rgba(255,213,74,0.45); }
   /*
-   * Solo/practice tile digits. Now that the name pill lives on its
-   * own row above the tiles, the full 96vw goes to tiles. Formula:
-   * 96vw shared across N tiles → each tile ~(96/N)vw wide → digit
-   * ~65% of that → font-size ≈ 62vw / N. Clamped [3.5rem, 12rem]
-   * so a 2-tile fallback stays legible without blowing off the
-   * strip and a 12-tile config still reads.
+   * Solo/practice tile digits. Scales with tile count via the
+   * `--tile-count` custom property. Reduced ~20% in v3.4.6 after
+   * live feedback that the digits crowded the camera feed — was
+   * 62vw / N clamped [3.5rem, 12rem].
    */
   .practice-strip .digit {
-    font-size: clamp(3.5rem, calc(62vw / var(--tile-count, 6)), 12rem);
+    font-size: clamp(2.8rem, calc(50vw / var(--tile-count, 6)), 9.5rem);
   }
 
   /*
@@ -1055,7 +1053,15 @@
     justify-content: flex-start;
     gap: 0.5rem;
     padding: 0.55rem 0.7rem 0.7rem;
-    background: rgba(15,15,15,0.72);
+    /*
+     * v3.4.6: tile background bumped to near-opaque (0.9 alpha) +
+     * backdrop-blur. Was 0.72 alpha which let the carrom-table wood
+     * grain bleed through and made the digit look ghosted on real
+     * broadcast feeds.
+     */
+    background: rgba(0,0,0,0.9);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
     border: 1.5px solid rgba(255,255,255,0.14);
     border-radius: 0.6rem;
     min-width: 0;
