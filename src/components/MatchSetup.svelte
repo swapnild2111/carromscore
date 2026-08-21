@@ -655,8 +655,14 @@
     // from resolvedPlayerCountries (captured by pick/onNameInput/
     // confirmAlias) rather than the async player-store, so the flag
     // survives a Setup → Score handoff on a cold cache.
-    const aCountry = cfg.mode === 'singles' ? resolvedPlayerCountries.playerA : '';
-    const bCountry = cfg.mode === 'singles' ? resolvedPlayerCountries.playerB : '';
+    // v3.4.5: snapshot country for every mode, not singles-only.
+    // Practice needs it so the solo overlay can render side-A's flag;
+    // doubles benefits from side-A's country as the team-flag proxy.
+    // Previous guard `cfg.mode === 'singles' ? … : ''` dropped country
+    // on the floor for solo + doubles, which is why /live/ solo
+    // overlays never showed a flag.
+    const aCountry = resolvedPlayerCountries.playerA;
+    const bCountry = cfg.mode === 'practice' ? '' : resolvedPlayerCountries.playerB;
     saveMatchIdentity(key, {
       aResolvedId: resolvedPlayerIds.playerA,
       a2ResolvedId: resolvedPlayerIds.playerA2,

@@ -246,7 +246,12 @@
    */
   const countryA = $derived.by((): string => {
     void playerStoreTick;
-    if (cfg.mode !== 'singles') return '';
+    // Was `cfg.mode !== 'singles'` — restricted the country to
+    // singles only, which is why solo/doubles /live/ overlays never
+    // saw a flag. Country makes sense in every mode; the header pill
+    // in doubles just picks side A's country as the team-flag proxy,
+    // and solo has only one player.
+    if (cfg.mode !== 'singles' && cfg.mode !== 'practice' && cfg.mode !== 'doubles') return '';
     if (aResolvedId) {
       const p = loadAllPlayers().find((x) => x.id === aResolvedId);
       if (p?.country) return p.country;
@@ -255,7 +260,7 @@
   });
   const countryB = $derived.by((): string => {
     void playerStoreTick;
-    if (cfg.mode !== 'singles') return '';
+    if (cfg.mode !== 'singles' && cfg.mode !== 'doubles') return '';
     if (bResolvedId) {
       const p = loadAllPlayers().find((x) => x.id === bResolvedId);
       if (p?.country) return p.country;
@@ -383,11 +388,16 @@
         q.get('playerB') ?? '',
       );
       const identity = loadMatchIdentity(key);
+      // URL overrides take precedence: `?countryA=DK&countryB=IN`
+      // lets a match link carry countries even when the umpire's
+      // Player DB doesn't have them (fresh device, shared link).
+      const urlCountryA = q.get('countryA') ?? '';
+      const urlCountryB = q.get('countryB') ?? '';
       return {
         aId: identity.aResolvedId ?? null,
         bId: identity.bResolvedId ?? null,
-        aCountry: identity.aCountry ?? '',
-        bCountry: identity.bCountry ?? '',
+        aCountry: urlCountryA || (identity.aCountry ?? ''),
+        bCountry: urlCountryB || (identity.bCountry ?? ''),
       };
     } catch {
       return { aId: null, bId: null, aCountry: '', bCountry: '' };
@@ -711,6 +721,13 @@
         playerB2: cfg.playerB2,
         noteA: cfg.noteA,
         noteB: cfg.noteB,
+        // Country codes travel on the live meta so remote overlays can
+        // render the flag. Local Player DB is the source of truth
+        // (via the countryA/countryB deriveds above); noteA/noteB are
+        // free-text and can legitimately hold a round tag like "Tie
+        // Breaker 1" that isn't a country. Only ride when set.
+        ...(countryA ? { countryA } : {}),
+        ...(countryB ? { countryB } : {}),
         bestOf: cfg.bestOf,
         pointsTarget: cfg.pointsTarget,
         maxBoards: cfg.maxBoards,
@@ -2016,7 +2033,12 @@
     -->
     <header class="head practice-head">
       <div class="head-name head-a tone-{colourA}">
-        <span class="hn-name">{sideA.name}</span>
+        <span class="hn-row">
+          {#if countryA && flagEmoji(countryA)}
+            <span class="hn-flag" title={countryName(countryA)} aria-label={countryName(countryA)}>{flagEmoji(countryA)}</span>
+          {/if}
+          <span class="hn-name">{sideA.name}</span>
+        </span>
         {#if sideA.note}<span class="hn-note">{sideA.note}</span>{/if}
       </div>
       <div class="head-mid">
