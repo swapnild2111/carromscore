@@ -842,6 +842,23 @@
   .digit-b { color: var(--side-b); text-shadow: 0 0 24px rgba(255,138,101,0.55); }
   .digit-mid { color: var(--accent); text-shadow: 0 0 20px rgba(255,213,74,0.45); }
   /*
+   * Versus-branch digit card (v3.4.7): singles/doubles digits sit
+   * bare in the team-row. With the outer strip background now
+   * transparent, they need their own opaque card to read against
+   * a live camera feed — same treatment as the solo tile boxes.
+   * Only targets direct-child `.digit` spans of `.team-inline`
+   * (which live in the versus branch); solo digits sit inside
+   * `.board-tile` and are unaffected.
+   */
+  .team-inline > .digit {
+    padding: 0.35rem 0.9rem 0.5rem;
+    background: rgba(0,0,0,0.9);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1.5px solid rgba(255,255,255,0.14);
+    border-radius: 0.6rem;
+  }
+  /*
    * Solo/practice tile digits. Scales with tile count via the
    * `--tile-count` custom property. Reduced twice on live feedback:
    * v3.4.6 62 → 50vw/N; v3.4.7 further to 42vw/N (~15% shrink) so
@@ -941,9 +958,18 @@
     flex-direction: column;
     align-items: center;
     gap: 0.35rem;
-    padding: 0 clamp(0.5rem, 1.5vw, 1rem);
-    border-left: 1px solid rgba(255,255,255,0.12);
-    border-right: 1px solid rgba(255,255,255,0.12);
+    /*
+     * v3.4.7: middle column now carries its own dark card so the
+     * SET pips + BOARD digit read against a live camera feed.
+     * Left/right dividers dropped — the card carries its own
+     * borders now.
+     */
+    padding: 0.6rem clamp(0.75rem, 1.5vw, 1.2rem) 0.7rem;
+    background: rgba(0,0,0,0.9);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1.5px solid rgba(255,255,255,0.14);
+    border-radius: 0.6rem;
   }
   .pip-strip {
     display: inline-flex;
