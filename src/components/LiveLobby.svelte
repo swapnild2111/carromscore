@@ -1744,108 +1744,15 @@
      */
     padding: 0;
   }
-  /* Compact overrides for LiveScoreboardView when rendered inside
-     .overlay-wrap. `:global` because the child component's styles are
-     scoped and we can't otherwise reach them. */
-  :global(.overlay-wrap .pill) {
-    padding: 0.45rem 0.75rem !important;
-    background: rgba(10, 10, 10, 0.92) !important;
-    backdrop-filter: blur(6px);
-    -webkit-backdrop-filter: blur(6px);
-  }
-  :global(.overlay-wrap .name) {
-    font-size: 1.5rem !important;
-  }
-  :global(.overlay-wrap .note) {
-    font-size: 0.9rem !important;
-    /* Overlay context: muted grey gets swallowed by the semi-
-       transparent pill tile over a busy camera feed. Bump to
-       near-white with a hard text-shadow so the country/region
-       reads on any background. */
-    color: rgba(240, 240, 240, 0.9) !important;
-    font-weight: 600 !important;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
-    letter-spacing: 0.02em;
-  }
-  /* Slightly larger BREAK chip + queen coin so they read on a
-     broadcast feed at a distance. */
-  :global(.overlay-wrap .chip) {
-    font-size: 0.75rem !important;
-    padding: 0.15rem 0.5rem !important;
-  }
-  :global(.overlay-wrap .coin) {
-    width: 1.25rem !important;
-    height: 1.25rem !important;
-  }
-  :global(.overlay-wrap .board) {
-    min-height: 0 !important;
-    padding: 0.15rem 0 !important;
-  }
-  :global(.overlay-wrap .col) {
-    /* Nearly opaque so the DSEG7 digit reads on any camera
-       background. Was 0.75 originally — viewers on Prism's browser
-       source reported the tint blended into the carrom-table wood
-       and the digits looked flat. Backdrop-blur is still there as
-       a belt-and-braces measure for cameras where the wood grain
-       is high-contrast. */
-    background: rgba(10, 10, 10, 0.92) !important;
-    backdrop-filter: blur(6px);
-    -webkit-backdrop-filter: blur(6px);
-    padding: 0.6rem 0.4rem !important;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-  }
-  :global(.overlay-wrap .digit) {
-    font-size: clamp(1.4rem, 4vw, 2.4rem) !important;
-  }
-  /* Practice overlay: viewers reported the digits were unreadable
-     on phone-sized viewer windows. Bump every practice cell's digit
-     with a wider clamp range so it dominates the strip on any canvas
-     size. Text-shadow provides an outline that reads even when the
-     tile background is defeated by an unusually bright feed. */
-  :global(.overlay-wrap .prow-cell .digit) {
-    font-size: clamp(4.5rem, 12.5vw, 9.5rem) !important;
-    line-height: 1 !important;
-    text-shadow: 0 0 6px rgba(0, 0, 0, 0.9), 0 2px 4px rgba(0, 0, 0, 0.9) !important;
-  }
-  :global(.overlay-wrap .prow-total .digit) {
-    font-size: clamp(5.2rem, 13.5vw, 10.5rem) !important;
-    line-height: 1 !important;
-    text-shadow: 0 0 6px rgba(0, 0, 0, 0.9), 0 2px 4px rgba(0, 0, 0, 0.9) !important;
-  }
-  :global(.overlay-wrap .prow-label) {
-    font-size: clamp(1.15rem, 2.2vw, 1.6rem) !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    text-align: center !important;
-  }
-  :global(.overlay-wrap .solo-pill .name) {
-    font-size: clamp(1.5rem, 3.1vw, 2.5rem) !important;
-  }
-  :global(.overlay-wrap .practice-badge) {
-    font-size: clamp(1.05rem, 1.9vw, 1.6rem) !important;
-  }
-  :global(.overlay-wrap .solo-note) {
-    font-size: clamp(1.05rem, 1.9vw, 1.6rem) !important;
-  }
-  :global(.overlay-wrap .lbl) {
-    font-size: 0.55rem !important;
-    margin-bottom: 0.15rem !important;
-  }
-  :global(.overlay-wrap .hdr) {
-    padding: 0 0 0.35rem !important;
-  }
-  :global(.overlay-wrap .pips) {
-    padding: 0.2rem 0 0 !important;
-  }
-  /* Overlay is the broadcast strip, not the deep-dive. Hide the
-     board-by-board versus scorecard so it doesn't push the strip
-     off-screen. Broadcast viewers can find the full recap in the
-     /live/?mid=xxx popup instead. Practice mode's per-set rows
-     already fit compactly, so they render in overlay unchanged. */
-  :global(.overlay-wrap .scorecard) {
-    display: none !important;
-  }
+  /*
+   * Overlay-wrap :global overrides were LiveScoreboardView-era
+   * tuning. Since v3.4.3 the /live/?view=overlay route renders
+   * OverlayBoard instead, which owns its own sizing. Leaving the
+   * old rules in place clobbered singles/doubles digits with
+   * `font-size: clamp(1.4rem, 4vw, 2.4rem) !important` because
+   * OverlayBoard also uses the `.digit` class. All overrides
+   * removed in v3.4.5.
+   */
   main {
     max-width: 800px;
     margin: 0 auto;

@@ -76,6 +76,17 @@ export type LiveMeta = {
   playerB2?: string;
   noteA?: string;
   noteB?: string;
+  /**
+   * ISO alpha-2 country codes (e.g. "DK", "IN") for each side. Comes
+   * from the local player record (Country field on the Home form) and
+   * is separate from `noteA/noteB` — those double as round tags in
+   * tournament matches (e.g. "Tie Breaker 1") and shouldn't be
+   * expected to hold a country. Present only when the umpire picked
+   * a country for that player; absent for anonymous / country-less
+   * entries. Overlay renders the flag from this field.
+   */
+  countryA?: string;
+  countryB?: string;
   bestOf: number;
   pointsTarget: number;
   maxBoards: number;
@@ -208,6 +219,8 @@ export async function publishLive(
     if (meta.playerB2) metaClean.playerB2 = meta.playerB2;
     if (meta.noteA) metaClean.noteA = meta.noteA;
     if (meta.noteB) metaClean.noteB = meta.noteB;
+    if (meta.countryA) metaClean.countryA = meta.countryA;
+    if (meta.countryB) metaClean.countryB = meta.countryB;
     if (meta.tournament) metaClean.tournament = meta.tournament;
     if (meta.tournamentKey) metaClean.tournamentKey = meta.tournamentKey;
     if (meta.round) metaClean.round = meta.round;

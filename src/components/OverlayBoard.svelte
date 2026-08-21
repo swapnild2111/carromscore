@@ -11,6 +11,7 @@
     type Side,
   } from '../lib/match';
   import type { LiveRecord } from '../lib/live-sync';
+  import { flagEmoji } from '../lib/countries';
 
   /*
    * Broadcast overlay. Renders a transparent bottom-third strip that OBS
@@ -34,11 +35,11 @@
   type Props = { record?: LiveRecord | null };
   const { record = null }: Props = $props();
 
-  type SideState = { name: string; namePartA: string; namePartB: string; note: string; sets: number; points: number };
+  type SideState = { name: string; namePartA: string; namePartB: string; note: string; country: string; sets: number; points: number };
 
   let cfg = $state<MatchConfig>({ ...DEFAULT_CONFIG });
-  let sideA = $state<SideState>({ name: 'Player A', namePartA: '', namePartB: '', note: '', sets: 0, points: 0 });
-  let sideB = $state<SideState>({ name: 'Player B', namePartA: '', namePartB: '', note: '', sets: 0, points: 0 });
+  let sideA = $state<SideState>({ name: 'Player A', namePartA: '', namePartB: '', note: '', country: '', sets: 0, points: 0 });
+  let sideB = $state<SideState>({ name: 'Player B', namePartA: '', namePartB: '', note: '', country: '', sets: 0, points: 0 });
   let board = $state(0);
   let currentBreak = $state<Side | null>(null);
   let queenHolder = $state<Side | null>(null);
@@ -80,6 +81,10 @@
    */
   function applyConfig(next: MatchConfig): void {
     cfg = next;
+    // Solo pill has room for the full player name (renders on its
+    // own row above the tile grid, full viewport width). Singles /
+    // doubles pills sit inline next to the score digit and BREAK
+    // chip → first-name-only, otherwise long names spill off-frame.
     const soloName = next.mode === 'practice';
     const nameA1 = soloName ? next.playerA : firstName(next.playerA);
     const nameA2 = soloName ? next.playerA2 : firstName(next.playerA2);
@@ -117,15 +122,25 @@
       maxBoards: m.maxBoards,
       tournament: m.tournament ?? '',
     });
+    // Country codes ride on LiveMeta as of v3.4.5; independent of the
+    // note field which doubles as a round tag. Set after applyConfig
+    // so we don't wipe them.
+    sideA.country = m.countryA ?? '';
+    sideB.country = m.countryB ?? '';
     const s = r.liveState;
     sideA.points = s.sideA.points;
     sideB.points = s.sideB.points;
     sideA.sets = s.sideA.sets;
     sideB.sets = s.sideB.sets;
     board = s.board;
-    currentBreak = s.currentBreak;
-    queenHolder = s.queenHolder;
-    matchResult = s.matchResult;
+    // Firebase RTDB strips explicit-null values before write, so on
+    // read the key is `undefined` rather than `null`. The template
+    // gates the winner-medal / silver / decided classes on
+    // `matchResult !== null` — an undefined would slip through and
+    // paint fresh matches with the winner treatment. Coerce here.
+    currentBreak = s.currentBreak ?? null;
+    queenHolder = s.queenHolder ?? null;
+    matchResult = s.matchResult ?? null;
     if (s.practiceBoards) practiceBoards = s.practiceBoards;
     // Prefer the umpire's actual paging position from RTDB. Fallback
     // (older clients that don't publish it): infer as the last set
@@ -154,6 +169,11 @@
     // subscribe to the cross-tab localStorage key for state updates.
     const q = new URLSearchParams(window.location.search);
     applyConfig(decodeConfig(q));
+    // Country codes ride on the URL as `countryA` / `countryB`
+    // (ISO alpha-2, e.g. `DK`). Independent from `noteA` / `noteB`
+    // which double as round tags.
+    sideA.country = q.get('countryA') ?? '';
+    sideB.country = q.get('countryB') ?? '';
     const KEY = matchStateKey(cfg.mode, q.get('playerA') ?? '', q.get('playerB') ?? '');
     const apply = (raw: string | null) => {
       if (!raw) return;
@@ -252,6 +272,16 @@
     >
       <div class="team team-a team-inline">
         <div class="name-pill tone-a">
+          <!--
+            Solo pill (v3.4.5): flag glyph inline with the player
+            name so a broadcast viewer sees the country at a glance.
+            Same flagEmoji() helper the phone scoreboard uses; falls
+            back to nothing when the note isn't a recognised country
+            code / name.
+          -->
+          {#if flagEmoji(sideA.country || sideA.note)}
+            <span class="name-flag" aria-hidden="true">{flagEmoji(sideA.country || sideA.note)}</span>
+          {/if}
           {@render nameTxt(sideA)}
           {#if sideA.note}<span class="name-note">{sideA.note}</span>{/if}
         </div>
@@ -336,6 +366,9 @@
               <span class="medal-label">DRAW</span>
             </span>
           {/if}
+          {#if flagEmoji(sideA.country || sideA.note)}
+            <span class="name-flag" aria-hidden="true">{flagEmoji(sideA.country || sideA.note)}</span>
+          {/if}
           {@render nameTxt(sideA)}
           {#if sideA.note}<span class="name-note">{sideA.note}</span>{/if}
         </div>
@@ -351,17 +384,13 @@
         {/if}
         <span class="digit digit-a">{pad2(sideA.points)}</span>
         <!--
-          SETS chip only in best-of-N matches. In a bo=1 match SETS is
-          always 0/0, and the middle column already renders "SINGLE
-          SET", so the per-team chip just duplicates that info and
-          adds visual clutter (v3.4.5 feedback).
+          Per-team SETS chip removed (v3.4.5). It was a third
+          encoding of set-count info: the middle set-pips strip
+          shows wins-per-side visually, the "SET 1st/2nd/3rd"
+          caption below the pips shows which set is being played,
+          and this chip added a redundant numeric on each side that
+          umpires flagged as duplication.
         -->
-        {#if cfg.bestOf > 1}
-          <span class="sets-chip">
-            <span class="sets-label">SETS</span>
-            <span class="sets-num">{sideA.sets}</span>
-          </span>
-        {/if}
       </div>
 
       <!-- Middle: board + set-pips -->
@@ -392,12 +421,7 @@
         pinned to the OUTER (right) edge.
       -->
       <div class="team team-b team-inline">
-        {#if cfg.bestOf > 1}
-          <span class="sets-chip">
-            <span class="sets-label">SETS</span>
-            <span class="sets-num">{sideB.sets}</span>
-          </span>
-        {/if}
+        <!-- Side-B SETS chip removed to match side A (v3.4.5). -->
         <span class="digit digit-b">{pad2(sideB.points)}</span>
         {#if !matchResult}
           <span class="coin" class:coin-red={queenHolder === 'b'} aria-label={queenHolder === 'b' ? `${sideB.name} has queen` : 'Queen not held'}>
@@ -414,6 +438,9 @@
              class:gold={matchResult === 'b'}
              class:silver={matchResult === 'a'}
              class:draw={matchResult === 'draw'}>
+          {#if flagEmoji(sideB.country || sideB.note)}
+            <span class="name-flag" aria-hidden="true">{flagEmoji(sideB.country || sideB.note)}</span>
+          {/if}
           {@render nameTxt(sideB)}
           {#if sideB.note}<span class="name-note">{sideB.note}</span>{/if}
           {#if matchResult === 'b'}
@@ -464,26 +491,35 @@
    */
   .strip {
     display: grid;
-    grid-template-columns: 1fr auto 1fr;
+    /*
+     * `auto 1fr auto`: pill/digit clusters hug their content on the
+     * outer edges, the middle SET/BOARD column stretches to fill
+     * the space between. Was `1fr auto 1fr`, which stretched the
+     * team cells wider than their content and left a distracting
+     * empty band between the digit and the middle column on wide
+     * viewports.
+     */
+    grid-template-columns: auto 1fr auto;
     align-items: center;
-    gap: clamp(1.25rem, 3.5vw, 3rem);
-    padding: 1.4rem 2rem;
+    /*
+     * Whitespace redistribution (v3.4.5, iter 2): inner gap trimmed
+     * further and its budget moved to the outer padding. Digit sits
+     * right next to the SET/BOARD middle block; pills are pushed
+     * further inset from the viewport edges.
+     */
+    gap: clamp(0.15rem, 0.35vw, 0.4rem);
+    padding: 1.4rem clamp(3rem, 8vw, 8rem);
     background: linear-gradient(180deg, rgba(11,11,11,0.75), rgba(11,11,11,0.92));
     backdrop-filter: blur(6px);
     -webkit-backdrop-filter: blur(6px);
     border-top: 2px solid rgba(255,255,255,0.06);
     border-bottom: 2px solid rgba(255,255,255,0.06);
-    border-radius: 1.25rem;
     box-shadow: 0 8px 32px rgba(0,0,0,0.5);
-    /*
-     * No fixed min-width. v3.4.4: broadcasters (notably Prism) overlay
-     * their own logo in the free corner of the frame, and the reserved
-     * empty space on either side of the strip was eating into that
-     * corner. Let the strip collapse to its content width so the
-     * external logo has all the free canvas it wants; the strip only
-     * takes the room it needs.
-     */
-    max-width: 96vw;
+    /* Rounded corners dropped so the strip sits flush with the
+       viewport edges — matches the umpire's ask for zero margin. */
+    border-radius: 0;
+    width: 100vw;
+    max-width: 100vw;
     color: #fff;
     font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   }
@@ -520,16 +556,19 @@
     row-gap: 0.7rem;
     align-items: center;
     justify-items: center;
-    width: 96vw;
+    /* Full viewport width — matches the singles/doubles strip after
+       v3.4.5 dropped horizontal padding + rounded corners. */
+    width: 100vw;
   }
   .practice-strip .team-inline {
     justify-content: center;
   }
   /*
-   * Solo pill: single-row horizontal layout — [NAME] [COUNTRY].
-   * Overrides the vertical stack that singles/doubles use, because
-   * solo has only one player so there's no need to stack the note
-   * under the name to save width.
+   * Solo pill: single-row horizontal layout —
+   * [FLAG] [NAME] [COUNTRY]. Overrides the vertical stack that
+   * singles/doubles use, because solo has only one player so
+   * there's no need to stack the note under the name to save
+   * width.
    */
   .practice-strip .name-pill {
     flex-direction: row;
@@ -537,6 +576,11 @@
     gap: 0.55rem;
     max-width: none;
     text-align: left;
+  }
+  .name-flag {
+    font-size: 1.35em;
+    line-height: 1;
+    flex-shrink: 0;
   }
 
   /*
