@@ -509,14 +509,19 @@
      */
     gap: clamp(0.15rem, 0.35vw, 0.4rem);
     padding: 1.4rem clamp(3rem, 8vw, 8rem);
-    background: linear-gradient(180deg, rgba(11,11,11,0.75), rgba(11,11,11,0.92));
-    backdrop-filter: blur(6px);
-    -webkit-backdrop-filter: blur(6px);
-    border-top: 2px solid rgba(255,255,255,0.06);
-    border-bottom: 2px solid rgba(255,255,255,0.06);
-    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
-    /* Rounded corners dropped so the strip sits flush with the
-       viewport edges — matches the umpire's ask for zero margin. */
+    /*
+     * v3.4.7: strip background fully transparent. The individual
+     * name pills and digit tiles carry their own near-opaque
+     * backgrounds; the outer strip was a second layer of blur on
+     * top of them, which read as "everything is dim" against a
+     * live camera feed. Letting the camera through between the
+     * cards makes the overlay feel like a lower-third graphic
+     * rather than a solid ribbon obscuring the frame.
+     */
+    background: transparent;
+    border-top: none;
+    border-bottom: none;
+    box-shadow: none;
     border-radius: 0;
     width: 100vw;
     max-width: 100vw;
@@ -600,9 +605,15 @@
     flex-direction: column;
     align-items: center;
     gap: 0.25rem;
-    padding: 0.45rem 1rem;
-    border-radius: 0.6rem;
-    font-size: clamp(1.1rem, 2vw, 1.6rem);
+    padding: 0.55rem 1.2rem;
+    border-radius: 0.7rem;
+    /*
+     * v3.4.7: pill font-size bumped so the name reads at brand-word
+     * scale on-camera — the strip background is now transparent,
+     * so the pill has to carry more visual weight. Was
+     * clamp(1.1rem, 2vw, 1.6rem).
+     */
+    font-size: clamp(1.4rem, 2.8vw, 2.4rem);
     font-weight: 800;
     letter-spacing: 0.06em;
     text-transform: uppercase;
@@ -832,12 +843,12 @@
   .digit-mid { color: var(--accent); text-shadow: 0 0 20px rgba(255,213,74,0.45); }
   /*
    * Solo/practice tile digits. Scales with tile count via the
-   * `--tile-count` custom property. Reduced ~20% in v3.4.6 after
-   * live feedback that the digits crowded the camera feed — was
-   * 62vw / N clamped [3.5rem, 12rem].
+   * `--tile-count` custom property. Reduced twice on live feedback:
+   * v3.4.6 62 → 50vw/N; v3.4.7 further to 42vw/N (~15% shrink) so
+   * the tile row leaves more headroom for the name pill above.
    */
   .practice-strip .digit {
-    font-size: clamp(2.8rem, calc(50vw / var(--tile-count, 6)), 9.5rem);
+    font-size: clamp(2.4rem, calc(42vw / var(--tile-count, 6)), 8rem);
   }
 
   /*
