@@ -337,7 +337,16 @@
                 <span class="sc-cell sc-b-score" role="columnheader">Coins</span>
                 <span class="sc-cell sc-b-pts" role="columnheader">Score</span>
               </div>
-              {#each g.boards as entry (`${entry.set}-${entry.board}`)}
+              <!--
+                Key = `set-board-endedAt`. `endedAt` is a millisecond
+                timestamp per row and is guaranteed unique. Was
+                `set-board`, which threw `each_key_duplicate` on legacy
+                records where a set had the same board number logged
+                twice (e.g. match -P-Zdr857Doy2YslW_Ly logs board 1
+                twice under set 0: breakSide=a then breakSide=b).
+                Popup used to fail to open entirely for those records.
+              -->
+              {#each g.boards as entry (`${entry.set}-${entry.board}-${entry.endedAt}`)}
                 {@const queenA = entry.queen === 'a'}
                 {@const queenB = entry.queen === 'b'}
                 <!--
