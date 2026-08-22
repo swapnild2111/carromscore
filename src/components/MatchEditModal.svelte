@@ -118,7 +118,12 @@
   let noteA = $state<string>(record.notes?.a ?? '');
   let noteB = $state<string>(record.notes?.b ?? '');
   let rows = $state<BoardRow[]>(
-    (record.boardLog ?? []).map((e) => ({
+    // Filter out null/undefined slots. Firebase RTDB stores arrays
+    // as sparse maps, and an admin delete of a single boardLog index
+    // in the Console leaves `null` at that slot rather than
+    // compacting; the modal's per-row .map would then throw on
+    // `null.set`. Same defensive filter LiveScoreboardView uses.
+    (record.boardLog ?? []).filter((e): e is NonNullable<typeof e> => !!e && typeof e === 'object').map((e) => ({
       set: e.set,
       board: e.board,
       breakSide: e.breakSide,
