@@ -83,7 +83,13 @@
     // only SET 1 with a garbled rowset (reported 2026-08-18).
     // boardLog is now authoritative in both live and finished paths;
     // no trim needed.
-    const log = rawLog;
+    //
+    // Filter out null/undefined slots. Firebase RTDB stores arrays
+    // as sparse maps, and an admin delete of a single boardLog index
+    // in the Console leaves `null` in place at that slot rather than
+    // compacting. Without this filter the null hits `.set` below and
+    // throws, silently crashing the popup.
+    const log = rawLog.filter((e): e is BoardEntry => !!e && typeof e === 'object');
     if (log.length === 0) return [];
     const bySet = new Map<number, BoardEntry[]>();
     for (const entry of log) {
@@ -337,7 +343,16 @@
                 <span class="sc-cell sc-b-score" role="columnheader">Coins</span>
                 <span class="sc-cell sc-b-pts" role="columnheader">Score</span>
               </div>
-              {#each g.boards as entry (`${entry.set}-${entry.board}`)}
+              <!--
+                Key = `set-board-endedAt`. `endedAt` is a millisecond
+                timestamp per row and is guaranteed unique. Was
+                `set-board`, which threw `each_key_duplicate` on legacy
+                records where a set had the same board number logged
+                twice (e.g. match -P-Zdr857Doy2YslW_Ly logs board 1
+                twice under set 0: breakSide=a then breakSide=b).
+                Popup used to fail to open entirely for those records.
+              -->
+              {#each g.boards as entry (`${entry.set}-${entry.board}-${entry.endedAt}`)}
                 {@const queenA = entry.queen === 'a'}
                 {@const queenB = entry.queen === 'b'}
                 <!--
