@@ -83,7 +83,13 @@
     // only SET 1 with a garbled rowset (reported 2026-08-18).
     // boardLog is now authoritative in both live and finished paths;
     // no trim needed.
-    const log = rawLog;
+    //
+    // Filter out null/undefined slots. Firebase RTDB stores arrays
+    // as sparse maps, and an admin delete of a single boardLog index
+    // in the Console leaves `null` in place at that slot rather than
+    // compacting. Without this filter the null hits `.set` below and
+    // throws, silently crashing the popup.
+    const log = rawLog.filter((e): e is BoardEntry => !!e && typeof e === 'object');
     if (log.length === 0) return [];
     const bySet = new Map<number, BoardEntry[]>();
     for (const entry of log) {
