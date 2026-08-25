@@ -26,7 +26,9 @@
     type Role,
   } from '../lib/roles';
   import SignInButton from './SignInButton.svelte';
-  import FeedbackPopup from './FeedbackPopup.svelte';
+  // FeedbackPopup removed — v3.4.8 merged the admin footer's
+  // separate "Feedback" link into the "Help" entry, which points
+  // at /help/ where the popup now lives.
   import { APP_VERSION, releaseUrl } from '../lib/version';
   import AdminPlayers from './AdminPlayers.svelte';
   import AdminTournaments from './AdminTournaments.svelte';
@@ -264,22 +266,21 @@
 
   <!--
     Admin footer. Same shape as the home + lobby footers so every
-    screen in the app reads as one product. Row 1: How to use ⇗ ·
-    Feedback ⇗ · Admin (signed-in avatar or sign-in link). Row 2:
-    version pill (links to that release's notes on GitHub) +
-    copyright. CSS below is copied verbatim from LiveLobby / home
-    — component-scoped styles can't be shared, so a change here
+    screen in the app reads as one product. Row 1: Help ⇗ · Donate
+    ❤ · Admin (signed-in avatar or sign-in link). Row 2: version
+    pill (links to that release's notes on GitHub) + copyright.
+    CSS below is copied verbatim from LiveLobby / home —
+    component-scoped styles can't be shared, so a change here
     should be mirrored to the other two.
+    v3.4.8: "How to use" + "Feedback" merged into one Help entry.
   -->
   <div class="foot-block">
     <div class="foot-links">
       <a
         href={`${base}help/`}
         class="foot-link"
-        aria-label="How to use Carromscore"
-      >How to use ⇗</a>
-      <span class="foot-sep" aria-hidden="true">·</span>
-      <FeedbackPopup />
+        aria-label="Help — how to use Carromscore + send feedback"
+      >Help ⇗</a>
       <span class="foot-sep" aria-hidden="true">·</span>
       <a
         href="https://ko-fi.com/carromscore"

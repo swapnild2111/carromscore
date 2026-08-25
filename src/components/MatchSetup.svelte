@@ -43,7 +43,9 @@
     type ReleaseInfo,
   } from '../lib/version';
   import SignInButton from './SignInButton.svelte';
-  import FeedbackPopup from './FeedbackPopup.svelte';
+  // FeedbackPopup no longer imported here — v3.4.8 merged the home
+  // footer's separate "Feedback" link into the "Help" entry, which
+  // points at /help/ where the popup now lives.
   import HelpTip from './HelpTip.svelte';
   import { logScreen } from '../lib/analytics';
   import { countryName, flagEmoji } from '../lib/countries';
@@ -1137,13 +1139,18 @@
       (browsers auto-close the <p> and the layout breaks).
     -->
     <div class="foot-links">
+      <!--
+        v3.4.8: "How to use" + "Feedback" merged into a single "Help"
+        entry to reduce footer clutter. The feedback popup now lives
+        at the top of the /help/ page, so clicking Help lands the
+        umpire on the how-to guide and gives them the same feedback
+        affordance inline.
+      -->
       <a
         href={`${base}help/`}
         class="foot-link"
-        aria-label="How to use Carromscore"
-      >How to use ⇗</a>
-      <span class="foot-sep" aria-hidden="true">·</span>
-      <FeedbackPopup />
+        aria-label="Help — how to use Carromscore + send feedback"
+      >Help ⇗</a>
       <span class="foot-sep" aria-hidden="true">·</span>
       <!--
         Donate link. Opens the Ko-fi donation page in a new tab.

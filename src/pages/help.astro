@@ -1,5 +1,6 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
+import FeedbackPopup from '../components/FeedbackPopup.svelte';
 const base = import.meta.env.BASE_URL;
 
 /**
@@ -209,7 +210,31 @@ const sections = [
 <BaseLayout title="Carromscore — how to use">
   <main class="wrap">
     <header class="hero">
-      <a class="back" href={base} aria-label="Back to home">← Home</a>
+      <!--
+        Top row: back-link on the left, Feedback trigger on the
+        right. Feedback moved out of the sub-title line so the two
+        actionable affordances sit as a matched pair opposite each
+        other. The umpire finds "how do I go home" and "how do I
+        report an issue" without scanning through prose.
+      -->
+      <div class="hero-top">
+        <a class="back" href={base} aria-label="Back to home">← Home</a>
+        <!--
+          Static server-rendered Feedback anchor — matches the exact
+          markup FeedbackPopup would render once hydrated. Wired to
+          open the dialog via a `data-feedback-trigger` handshake so
+          the user sees the button on first paint (no post-load
+          flash). The Svelte island still owns the dialog + all its
+          state; it just doesn't own the trigger anymore.
+        -->
+        <a
+          href="#feedback"
+          class="foot-link"
+          data-feedback-trigger
+          aria-label="Send feedback about Carromscore"
+        >Feedback ⇗</a>
+        <FeedbackPopup client:load triggerless />
+      </div>
       <h1>How to use Carromscore</h1>
       <p class="tag">A quick tour of match setup, scoring, live broadcast, and the admin panel.</p>
     </header>
@@ -258,15 +283,64 @@ const sections = [
       color: var(--muted);
       font-size: 0.95rem;
     }
+    .hero-top {
+      /*
+       * Two-column row: back-link on the left, Feedback trigger on
+       * the right. `justify-content: space-between` pins them to
+       * their edges. Flex-wrap only kicks in on absurdly narrow
+       * viewports; the two links are short enough that they
+       * always sit on one row in normal use.
+       */
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      margin: 0 -0.4rem 0.25rem;
+    }
+    .hero-top :global(.foot-link) {
+      /*
+       * FeedbackPopup renders its trigger with .foot-link (mirrors
+       * the app's footer link style). Match the .back link's
+       * padding on the left side so both edges align visually.
+       *
+       * Painted accent-gold at rest — this is the primary "how do
+       * I reach the maintainer" affordance on the /help/ page, so
+       * it earns the app's theme colour rather than the muted grey
+       * the footer version uses. Subtle gold-tinted background on
+       * hover so the affordance reads clearly.
+       *
+       * `text-decoration: none` is explicit because the browser's
+       * default underline on <a> was showing on the server-rendered
+       * anchor before Svelte hydrated its own styles.
+       */
+      padding: 0.25rem 0.55rem;
+      font-size: 0.9rem;
+      color: var(--accent, #ffd54a);
+      font-weight: 700;
+      background: rgba(255, 213, 74, 0.08);
+      border: 1px solid rgba(255, 213, 74, 0.32);
+      border-radius: 0.4rem;
+      text-decoration: none;
+    }
+    .hero-top :global(.foot-link:hover) {
+      background: rgba(255, 213, 74, 0.18);
+      border-color: rgba(255, 213, 74, 0.55);
+      color: var(--accent, #ffd54a);
+    }
     .back {
       display: inline-block;
       color: var(--muted);
       text-decoration: none;
       font-size: 0.9rem;
       padding: 0.25rem 0.4rem;
-      margin-left: -0.4rem;
       border-radius: 0.35rem;
     }
+    /* Only the standalone footer .back link (below the sections)
+       needs the negative margin to sit flush with the wrap. The
+       header .back now lives in .hero-top which already handles
+       edge alignment via its own margin. */
+    .foot .back { margin-left: -0.4rem; }
     .back:hover { color: var(--accent); background: rgba(255,255,255,0.04); }
 
     .toc {

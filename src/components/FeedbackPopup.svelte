@@ -22,6 +22,18 @@
    * this is a mitigation, not a barrier.
    */
   import { APP_VERSION } from '../lib/version';
+  import { onMount } from 'svelte';
+
+  /**
+   * When `triggerless` is true, the component doesn't render its
+   * built-in "Feedback ⇗" anchor. Instead it listens for clicks on
+   * any `[data-feedback-trigger]` element in the document and opens
+   * the dialog. Used on the /help/ page so the trigger anchor can
+   * be server-rendered by Astro (avoids the "Feedback text appears
+   * after page load" flash).
+   */
+  type Props = { triggerless?: boolean };
+  const { triggerless = false }: Props = $props();
 
   let showPopup = $state(false);
   let copied = $state(false);
@@ -44,6 +56,23 @@
     showPopup = true;
   }
 
+  onMount(() => {
+    if (!triggerless) return;
+    // Delegate: any click on an element carrying
+    // `data-feedback-trigger` opens the popup. Delegating from
+    // document so a trigger anywhere on the page works — including
+    // server-rendered anchors that exist before Svelte hydrates.
+    const onDocClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      const trigger = target?.closest('[data-feedback-trigger]');
+      if (!trigger) return;
+      e.preventDefault();
+      showPopup = true;
+    };
+    document.addEventListener('click', onDocClick);
+    return () => document.removeEventListener('click', onDocClick);
+  });
+
   async function copyEmail() {
     try {
       await navigator.clipboard.writeText(feedbackEmail);
@@ -61,12 +90,14 @@
   }
 </script>
 
-<a
-  href="#feedback"
-  class="foot-link"
-  onclick={openFeedback}
-  aria-label="Send feedback about Carromscore"
->Feedback ⇗</a>
+{#if !triggerless}
+  <a
+    href="#feedback"
+    class="foot-link"
+    onclick={openFeedback}
+    aria-label="Send feedback about Carromscore"
+  >Feedback ⇗</a>
+{/if}
 
 {#if showPopup}
   <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="fb-title">
