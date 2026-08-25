@@ -289,9 +289,25 @@ const sections = [
        * FeedbackPopup renders its trigger with .foot-link (mirrors
        * the app's footer link style). Match the .back link's
        * padding on the left side so both edges align visually.
+       *
+       * Painted accent-gold at rest — this is the primary "how do
+       * I reach the maintainer" affordance on the /help/ page, so
+       * it earns the app's theme colour rather than the muted grey
+       * the footer version uses. Subtle gold-tinted background on
+       * hover so the affordance reads clearly.
        */
-      padding: 0.25rem 0.4rem;
+      padding: 0.25rem 0.55rem;
       font-size: 0.9rem;
+      color: var(--accent, #ffd54a);
+      font-weight: 700;
+      background: rgba(255, 213, 74, 0.08);
+      border: 1px solid rgba(255, 213, 74, 0.32);
+      border-radius: 0.4rem;
+    }
+    .hero-top :global(.foot-link:hover) {
+      background: rgba(255, 213, 74, 0.18);
+      border-color: rgba(255, 213, 74, 0.55);
+      color: var(--accent, #ffd54a);
     }
     .back {
       display: inline-block;
