@@ -440,20 +440,16 @@
         {@const row = practiceBoards[practiceSetIdx] ?? []}
         {@const setTotal = row.reduce((s, v) => s + (v ?? 0), 0)}
         <!--
-          "Current" board in practice mode = the rightmost tile
-          with a non-zero miss count. Practice has no BOARD+1
-          button, so we can't use ScoreBoard's `board` counter
-          (which is only advanced in versus mode). Deriving from
-          the misses row matches the umpire's mental model: the
-          last tile they scored on lights up. Falls back to -1 (no
-          highlight) when the whole set is 0-0-0-… (fresh set).
+          Solo overlay tiles — no per-tile "current" highlight.
+          Previously the rightmost non-zero tile got a gold glow to
+          indicate the last-scored board, but umpires flagged it as
+          noise: it either misled (glowing B1 forever when there
+          was no BOARD+1 in practice mode to advance) or added
+          visual clutter without giving them useful information.
+          All tiles now render with the same neutral treatment; the
+          TOTAL tile keeps its distinct gold accent border since
+          that IS structurally different from a per-board tile.
         -->
-        {@const lastScoredIdx = (() => {
-          for (let i = row.length - 1; i >= 0; i -= 1) {
-            if ((row[i] ?? 0) > 0) return i;
-          }
-          return -1;
-        })()}
         <div class="active-set-row" aria-label="Set {practiceSetIdx + 1} of {cfg.bestOf}">
           {#if cfg.bestOf > 1}
             <div class="set-header-pill">
@@ -464,8 +460,7 @@
           <div class="board-tiles">
             {#each Array(cfg.maxBoards) as _, boardIdx (boardIdx)}
               {@const missed = row[boardIdx] ?? 0}
-              {@const isCurrent = boardIdx === lastScoredIdx}
-              <div class="board-tile" class:board-tile-current={isCurrent}>
+              <div class="board-tile">
                 <span class="board-tile-lbl">B{boardIdx + 1}</span>
                 <span class="digit digit-a board-tile-digit">{missed}</span>
               </div>
