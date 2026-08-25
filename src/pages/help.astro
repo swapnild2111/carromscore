@@ -219,7 +219,21 @@ const sections = [
       -->
       <div class="hero-top">
         <a class="back" href={base} aria-label="Back to home">← Home</a>
-        <FeedbackPopup client:only="svelte" />
+        <!--
+          Static server-rendered Feedback anchor — matches the exact
+          markup FeedbackPopup would render once hydrated. Wired to
+          open the dialog via a `data-feedback-trigger` handshake so
+          the user sees the button on first paint (no post-load
+          flash). The Svelte island still owns the dialog + all its
+          state; it just doesn't own the trigger anymore.
+        -->
+        <a
+          href="#feedback"
+          class="foot-link"
+          data-feedback-trigger
+          aria-label="Send feedback about Carromscore"
+        >Feedback ⇗</a>
+        <FeedbackPopup client:load triggerless />
       </div>
       <h1>How to use Carromscore</h1>
       <p class="tag">A quick tour of match setup, scoring, live broadcast, and the admin panel.</p>
@@ -295,6 +309,10 @@ const sections = [
        * it earns the app's theme colour rather than the muted grey
        * the footer version uses. Subtle gold-tinted background on
        * hover so the affordance reads clearly.
+       *
+       * `text-decoration: none` is explicit because the browser's
+       * default underline on <a> was showing on the server-rendered
+       * anchor before Svelte hydrated its own styles.
        */
       padding: 0.25rem 0.55rem;
       font-size: 0.9rem;
@@ -303,6 +321,7 @@ const sections = [
       background: rgba(255, 213, 74, 0.08);
       border: 1px solid rgba(255, 213, 74, 0.32);
       border-radius: 0.4rem;
+      text-decoration: none;
     }
     .hero-top :global(.foot-link:hover) {
       background: rgba(255, 213, 74, 0.18);
