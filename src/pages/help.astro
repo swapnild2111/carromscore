@@ -1,5 +1,6 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
+import FeedbackPopup from '../components/FeedbackPopup.svelte';
 const base = import.meta.env.BASE_URL;
 
 /**
@@ -212,6 +213,17 @@ const sections = [
       <a class="back" href={base} aria-label="Back to home">← Home</a>
       <h1>How to use Carromscore</h1>
       <p class="tag">A quick tour of match setup, scoring, live broadcast, and the admin panel.</p>
+      <!--
+        Feedback trigger. Uses the shared FeedbackPopup island so the
+        umpire can open the same dialog they used to open from the
+        home footer. The home footer's separate "Feedback" link was
+        merged into a single "Help" entry in v3.4.8; landing here is
+        now the canonical way to reach the feedback flow.
+      -->
+      <p class="hero-feedback">
+        Have a bug report or an idea?
+        <FeedbackPopup client:only="svelte" />
+      </p>
     </header>
 
     <nav class="toc" aria-label="Sections">
@@ -257,6 +269,23 @@ const sections = [
       margin: 0;
       color: var(--muted);
       font-size: 0.95rem;
+    }
+    .hero-feedback {
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+      flex-wrap: wrap;
+      margin: 0.9rem 0 0;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    .hero-feedback :global(.foot-link) {
+      /*
+       * FeedbackPopup renders its trigger with .foot-link (mirrors
+       * the app's footer link style). Nudge the trigger visually so
+       * it sits inline with the surrounding sentence.
+       */
+      padding: 0.15rem 0.5rem;
     }
     .back {
       display: inline-block;

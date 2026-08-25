@@ -29,6 +29,10 @@ pnpm-debug.log*
 twa/*
 !twa/twa-manifest.json
 
+# Local planning docs — kept off the public repo. Business + product
+# plans that don't need to ship with the app.
+docs/plan/
+
 # Playwright-captured demo videos (see scripts/videos.ts).
 # Regenerated any time with `npm run videos`; keep out of git until
 # we commit the specific clips we want to embed on the README /

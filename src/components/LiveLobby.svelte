@@ -32,7 +32,9 @@
   import LiveScoreboardView from './LiveScoreboardView.svelte';
   import OverlayBoard from './OverlayBoard.svelte';
   import SignInButton from './SignInButton.svelte';
-  import FeedbackPopup from './FeedbackPopup.svelte';
+  // FeedbackPopup removed — v3.4.8 merged the lobby footer's
+  // separate "Feedback" link into the "Help" entry, which points
+  // at /help/ where the popup now lives.
   import MatchEditModal from './MatchEditModal.svelte';
   import ReportsTab from './reports/ReportsTab.svelte';
   import { logScreen } from '../lib/analytics';
@@ -1544,20 +1546,19 @@
 
   <!--
     Lobby footer. Mirrors the home-screen footer for visual continuity
-    across the app. Row 1: actionable links (How to use, Feedback,
+    across the app. Row 1: actionable links (Help, Donate,
     Admin/sign-in). Row 2: version + copyright, low contrast.
     Everything on this row is the same component the home footer uses,
     so a change in one place propagates to both.
+    v3.4.8: "How to use" + "Feedback" merged into one Help entry.
   -->
   <div class="foot-block">
     <div class="foot-links">
       <a
         href={`${base}help/`}
         class="foot-link"
-        aria-label="How to use Carromscore"
-      >How to use ⇗</a>
-      <span class="foot-sep" aria-hidden="true">·</span>
-      <FeedbackPopup />
+        aria-label="Help — how to use Carromscore + send feedback"
+      >Help ⇗</a>
       <span class="foot-sep" aria-hidden="true">·</span>
       <a
         href="https://ko-fi.com/carromscore"
