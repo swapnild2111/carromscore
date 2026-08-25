@@ -439,6 +439,17 @@
         -->
         {@const row = practiceBoards[practiceSetIdx] ?? []}
         {@const setTotal = row.reduce((s, v) => s + (v ?? 0), 0)}
+        <!--
+          Solo overlay tiles — no per-tile "current" highlight.
+          Previously the rightmost non-zero tile got a gold glow to
+          indicate the last-scored board, but umpires flagged it as
+          noise: it either misled (glowing B1 forever when there
+          was no BOARD+1 in practice mode to advance) or added
+          visual clutter without giving them useful information.
+          All tiles now render with the same neutral treatment; the
+          TOTAL tile keeps its distinct gold accent border since
+          that IS structurally different from a per-board tile.
+        -->
         <div class="active-set-row" aria-label="Set {practiceSetIdx + 1} of {cfg.bestOf}">
           {#if cfg.bestOf > 1}
             <div class="set-header-pill">
@@ -449,8 +460,7 @@
           <div class="board-tiles">
             {#each Array(cfg.maxBoards) as _, boardIdx (boardIdx)}
               {@const missed = row[boardIdx] ?? 0}
-              {@const isCurrent = boardIdx === Math.min(board, cfg.maxBoards - 1)}
-              <div class="board-tile" class:board-tile-current={isCurrent}>
+              <div class="board-tile">
                 <span class="board-tile-lbl">B{boardIdx + 1}</span>
                 <span class="digit digit-a board-tile-digit">{missed}</span>
               </div>
