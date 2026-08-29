@@ -2403,9 +2403,14 @@
     inset: 0;
   }
   dialog.sheet::backdrop {
-    background: rgba(0, 0, 0, 0.65);
-    backdrop-filter: blur(3px);
-    -webkit-backdrop-filter: blur(3px);
+    /* Higher opacity than the earlier 0.65 (reported 2026-08-29:
+       history-card numbers behind the popup were still legible on
+       mobile Chrome, mixing visually with the popup content as the
+       user scrolled). Combined with a stronger blur, the lobby is
+       now clearly a secondary surface. */
+    background: rgba(0, 0, 0, 0.88);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
   }
   .sheet-inner {
     background: #0f0f0f;

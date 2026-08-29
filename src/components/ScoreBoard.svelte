@@ -862,15 +862,24 @@
   });
 
   /**
-   * True once the match is fully decided — endMatch() has run,
-   * matchResult is set. All positive-delta scoring inputs freeze in
-   * this state to prevent stray taps from adding phantom scoring to
-   * a match that's over. BOARD-1 / SET- / POINTS- (negative deltas)
-   * remain enabled so mistakes can still be undone. See
-   * matchDecidedToast for the user-facing feedback.
+   * True once the match is fully decided — either endMatch() has run
+   * (matchResult set) OR one side has mathematically clinched by
+   * winning ⌈bestOf/2⌉ sets. In bo3 that's 2 sets. Even before the
+   * umpire hits End Match, a clinched match freezes positive-delta
+   * scoring so a player leaning over the phone (or a stray tap) can
+   * never open a phantom next set. BOARD-1 / SET- / POINTS-
+   * (negative deltas) remain enabled so mistakes can still be undone
+   * — including SET-1 which the umpire could use to rescind a
+   * mistakenly-credited set and reopen scoring.
+   *
+   * Practice mode has no versus concept, so the clinch branch is
+   * skipped there — practice ends purely by tapping End Match.
    */
   function isMatchDecided(): boolean {
-    return matchResult !== null;
+    if (matchResult !== null) return true;
+    if (isPractice) return false;
+    const winThreshold = Math.ceil(cfg.bestOf / 2);
+    return sideA.sets >= winThreshold || sideB.sets >= winThreshold;
   }
 
   /** Max points a single board can score in ICF-rules carrom:
@@ -2719,12 +2728,19 @@
   {#if matchDecidedToast}
     <!--
       Surfaced when any positive-delta scoring input (POINTS+, BOARD+,
-      SET+, tapCoin) is attempted after endMatch has decided the
-      result. Prevents stray taps from adding phantom scoring after
-      the match is closed. Negative deltas remain enabled as an undo.
+      SET+, tapCoin) is attempted after the match is decided. Two paths
+      reach this state now (v3.4.12): (1) endMatch has actually run and
+      set matchResult, or (2) one side has mathematically clinched by
+      winning ⌈bestOf/2⌉ sets and the umpire hasn't tapped End yet.
+      A single message covers both — the guidance is the same: hit End
+      to close the record. Negative deltas remain enabled as an undo.
     -->
     <div class="queen-toast" role="status" aria-live="polite">
-      Match ended — score is locked. Use Reset to start over.
+      {#if matchResult !== null}
+        Match ended — score is locked. Use Reset to start over.
+      {:else}
+        Match decided — tap End to finish. Or SET-1 to reopen scoring.
+      {/if}
     </div>
   {/if}
 
