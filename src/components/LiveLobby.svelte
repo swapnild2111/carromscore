@@ -23,6 +23,7 @@
   import {
     loadHistory,
     playerName,
+    reconcileResultFromBoardLog,
     selfDeleteMatch,
     sweepOldMatches,
     type MatchRecord,
@@ -947,6 +948,15 @@
   // render for archived matches. The final points/sets/board are all
   // preserved from the match's result field.
   function matchAsLiveRecord(m: MatchRecord): import('../lib/live-sync').LiveRecord {
+    // Prefer boardLog-derived setsA/setsB/winner over stored values.
+    // Historical records occasionally have divergent stored fields
+    // when a stray SET+ tap during play committed a phantom set the
+    // umpire never corrected (see reconcileResultFromBoardLog in
+    // lib/history for the reasoning). boardLog is untouched by such
+    // mistakes and stays the authoritative source of truth. When
+    // boardLog is missing (legacy records), the helper falls back to
+    // the stored fields — no behaviour change for those.
+    const rec = reconcileResultFromBoardLog(m);
     return {
       matchId: m.id,
       updatedAt: m.endedAt ?? 0,
@@ -959,12 +969,12 @@
         maxBoards: m.cfg?.maxBoards ?? 8,
       },
       liveState: {
-        sideA: { points: m.result?.finalPointsA ?? 0, sets: m.result?.setsA ?? 0 },
-        sideB: { points: m.result?.finalPointsB ?? 0, sets: m.result?.setsB ?? 0 },
-        board: m.result?.boardCount ?? 0,
+        sideA: { points: rec.finalPointsA, sets: rec.setsA },
+        sideB: { points: rec.finalPointsB, sets: rec.setsB },
+        board: rec.boardCount,
         currentBreak: null,
         queenHolder: null,
-        matchResult: m.result?.winner ?? null,
+        matchResult: rec.winner,
         ...(m.boardLog && m.boardLog.length > 0 ? { boardLog: m.boardLog } : {}),
         ...(m.practiceBoards && m.practiceBoards.length > 0
           ? { practiceBoards: m.practiceBoards }
@@ -1331,8 +1341,16 @@
               {#if !roundFolded}
               <ul class="grid">
             {#each roundMatches as m (m.id)}
-              {@const r = m.result}
-              {@const winner = r?.winner}
+              {@const rec = reconcileResultFromBoardLog(m)}
+              {@const r = {
+                setsA: rec.setsA,
+                setsB: rec.setsB,
+                winner: rec.winner,
+                finalPointsA: rec.finalPointsA,
+                finalPointsB: rec.finalPointsB,
+                boardCount: rec.boardCount,
+              }}
+              {@const winner = r.winner}
               {@const editable = canEditMatch(m)}
               <li class="card-li">
                 <button
