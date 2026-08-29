@@ -371,6 +371,100 @@ export type MatchRecord = {
 };
 
 /**
+ * Reconcile the summary result fields from the boardLog when the
+ * per-set totals in boardLog disagree with the stored `setsA/setsB/
+ * winner`. Historically these fields were written by the scoring
+ * engine at End Match and never re-checked; a stray SET+ tap during
+ * play (against a side that hadn't yet lost the set — e.g. a mid-set
+ * lead) could commit a phantom set that persists after the actual
+ * set ends and points reset. The boardLog is untouched by such
+ * mistakes because it snapshots the real per-board deltas.
+ *
+ * Policy: boardLog is authoritative when present and comprehensive.
+ * When the derived set-count disagrees with the stored one, prefer
+ * the derived value. Returns the reconciled fields; caller decides
+ * whether to trust them.
+ *
+ * "Comprehensive" means: at least one board row exists. Skipping the
+ * reconcile for empty logs preserves legacy records that predate
+ * boardLog snapshotting.
+ *
+ * Ignores the last set if it never reached the per-set cap AND the
+ * scoring engine ended the match early — a partial deciding set can
+ * legitimately be won on points below cap (the umpire hit End with
+ * one side ahead). We still credit that set to whichever side leads.
+ * A tied partial-set is left uncredited (winner:null on that set).
+ */
+export function reconcileResultFromBoardLog(record: MatchRecord): {
+  setsA: number;
+  setsB: number;
+  winner: 'a' | 'b' | 'draw' | null;
+  finalPointsA: number;
+  finalPointsB: number;
+  boardCount: number;
+  divergedFromStored: boolean;
+} {
+  const stored = record.result ?? {};
+  const storedSetsA = Number(stored.setsA ?? 0);
+  const storedSetsB = Number(stored.setsB ?? 0);
+  const storedWinner = stored.winner ?? null;
+  const storedFinalA = Number(stored.finalPointsA ?? 0);
+  const storedFinalB = Number(stored.finalPointsB ?? 0);
+  const storedBoardCount = Number(stored.boardCount ?? 0);
+
+  const log = (record.boardLog ?? []).filter(
+    (e): e is NonNullable<typeof e> => !!e && typeof e === 'object',
+  );
+  if (log.length === 0) {
+    return {
+      setsA: storedSetsA,
+      setsB: storedSetsB,
+      winner: storedWinner,
+      finalPointsA: storedFinalA,
+      finalPointsB: storedFinalB,
+      boardCount: storedBoardCount,
+      divergedFromStored: false,
+    };
+  }
+
+  const bySet = new Map<number, { a: number; b: number; boards: number }>();
+  for (const e of log) {
+    const cur = bySet.get(e.set) ?? { a: 0, b: 0, boards: 0 };
+    cur.a += Number(e.pointsA ?? 0);
+    cur.b += Number(e.pointsB ?? 0);
+    cur.boards += 1;
+    bySet.set(e.set, cur);
+  }
+  let setsA = 0;
+  let setsB = 0;
+  const setKeys = Array.from(bySet.keys()).sort((a, b) => a - b);
+  const lastKey = setKeys[setKeys.length - 1];
+  for (const s of setKeys) {
+    const g = bySet.get(s)!;
+    if (g.a > g.b) setsA += 1;
+    else if (g.b > g.a) setsB += 1;
+    // tied set: uncredited on either side
+    void lastKey;
+  }
+  const lastSet = lastKey !== undefined ? bySet.get(lastKey)! : { a: 0, b: 0, boards: 0 };
+  const finalPointsA = lastSet.a;
+  const finalPointsB = lastSet.b;
+  const boardCount = lastSet.boards;
+
+  let winner: 'a' | 'b' | 'draw' | null = null;
+  if (setsA > setsB) winner = 'a';
+  else if (setsB > setsA) winner = 'b';
+  else if (setsA === setsB && setsA > 0) winner = 'draw';
+
+  const divergedFromStored =
+    setsA !== storedSetsA ||
+    setsB !== storedSetsB ||
+    (storedWinner !== null && storedWinner !== winner);
+
+  return { setsA, setsB, winner, finalPointsA, finalPointsB, boardCount, divergedFromStored };
+}
+
+/**
  * Best-effort sweep: remove match records whose `endedAt` is older
  * than a mode+tournament-aware threshold. Piggybacks on the lobby
  * load — no scheduled infrastructure, no Blaze tier. Silent-on-

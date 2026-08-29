@@ -236,6 +236,18 @@ const base = import.meta.env.BASE_URL;
             }
             if (document.visibilityState === 'visible') {
               if (hiddenSince !== null && Date.now() - hiddenSince > NUDGE_MS) {
+                // Aggressive banner-hide on resume (v3.4.11): if the
+                // browser says we're online, hide the banner immediately.
+                // Chrome mobile suspends the tab process while backgrounded;
+                // Firebase's .info/connected can stay stale-true or stale-
+                // false after resume even though the actual socket died.
+                // The banner then either gets stuck or blinks. Trusting
+                // navigator.onLine here — combined with the reconnect nudge
+                // below — clears the stuck-banner case for the "usually
+                // online" majority. If we're truly offline, the Firebase
+                // side will flip .info/connected to false within a few
+                // seconds and the banner will re-appear.
+                if (navigator.onLine !== false) apply(true);
                 void live.nudgeFirebaseReconnect();
               }
               hiddenSince = null;
