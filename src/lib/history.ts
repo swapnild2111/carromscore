@@ -202,6 +202,40 @@ export async function finishMatch(
   const rawBName = (identity.bName ?? '').trim().slice(0, 80);
   const rawB2Name = (identity.b2Name ?? '').trim().slice(0, 80);
 
+  // Write-time reconcile (v3.4.11). If the caller-supplied summary
+  // (from the live sideA/sideB/board counters) disagrees with what
+  // the boardLog totals say, prefer the boardLog. Rare in practice
+  // — endMatch's own reconcile at ScoreBoard.svelte:~1470 already
+  // clamps the running board so the live counters match — but if
+  // any code path ever accepted a phantom SET+ tap that the live
+  // guard let through, this closes the loop at persistence time.
+  // For practice mode boardLog is undefined; the fallback below
+  // uses the caller's summary unchanged.
+  const derived =
+    !isPractice && result.boardLog && result.boardLog.length > 0
+      ? reconcileResultFromBoardLog({
+          id: '',
+          mode: result.mode,
+          result: {
+            setsA: result.sideA.sets,
+            setsB: result.sideB.sets,
+            finalPointsA: result.sideA.points,
+            finalPointsB: result.sideB.points,
+            boardCount: result.board,
+            winner: result.winner,
+          },
+          boardLog: result.boardLog,
+        })
+      : {
+          setsA: result.sideA.sets,
+          setsB: result.sideB.sets,
+          finalPointsA: result.sideA.points,
+          finalPointsB: result.sideB.points,
+          boardCount: result.board,
+          winner: result.winner,
+          divergedFromStored: false,
+        };
+
   const record = {
     mode: result.mode,
     ...(playerAId ? { playerAId } : {}),
@@ -223,12 +257,12 @@ export async function finishMatch(
       format: result.cfg.format,
     },
     result: {
-      winner: result.winner,
-      finalPointsA: result.sideA.points,
-      finalPointsB: result.sideB.points,
-      setsA: result.sideA.sets,
-      setsB: result.sideB.sets,
-      boardCount: result.board,
+      winner: derived.winner,
+      finalPointsA: derived.finalPointsA,
+      finalPointsB: derived.finalPointsB,
+      setsA: derived.setsA,
+      setsB: derived.setsB,
+      boardCount: derived.boardCount,
     },
     ...(result.boardLog && result.boardLog.length > 0
       ? { boardLog: result.boardLog }
@@ -648,6 +682,30 @@ function applyMatchPatch(
   applyRoundPatch(next, patch.round);
   if (patch.boardLog) {
     applyBoardLogPatch(next, patch.boardLog);
+  }
+  // Write-time reconcile (v3.4.11). After the patch is merged, if the
+  // merged record has a boardLog whose per-set totals disagree with
+  // the merged summary fields, prefer the boardLog. Guarantees no
+  // divergent record can be persisted through updateMatch, regardless
+  // of what the caller sends. Practice records have no boardLog and
+  // pass through unchanged.
+  if (Array.isArray(next.boardLog) && (next.boardLog as unknown[]).length > 0) {
+    const asMatch: MatchRecord = {
+      id: '',
+      mode: (next.mode as MatchRecord['mode']) ?? 'singles',
+      result: next.result as MatchRecord['result'],
+      boardLog: next.boardLog as MatchRecord['boardLog'],
+    };
+    const rec = reconcileResultFromBoardLog(asMatch);
+    next.result = {
+      ...(next.result as Record<string, unknown>),
+      setsA: rec.setsA,
+      setsB: rec.setsB,
+      finalPointsA: rec.finalPointsA,
+      finalPointsB: rec.finalPointsB,
+      boardCount: rec.boardCount,
+      winner: rec.winner,
+    };
   }
   return next;
 }

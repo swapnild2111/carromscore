@@ -109,11 +109,6 @@
   const shortA = nameA.split(/[\s&]/)[0] || 'A';
   const shortB = nameB.split(/[\s&]/)[0] || 'B';
 
-  let setsA = $state<number>(Number(initial.setsA ?? 0));
-  let setsB = $state<number>(Number(initial.setsB ?? 0));
-  let winner = $state<'a' | 'b' | ''>(
-    initial.winner === 'a' || initial.winner === 'b' ? initial.winner : '',
-  );
   let tournament = $state<string>(record.tournament ?? '');
   let noteA = $state<string>(record.notes?.a ?? '');
   let noteB = $state<string>(record.notes?.b ?? '');
@@ -147,9 +142,66 @@
    * separate "+Q" badge. That's presentation, not storage — the
    * stored number stays the total.
    */
-  const finalPointsA = $derived(rows.reduce((sum, r) => sum + r.pointsA, 0));
-  const finalPointsB = $derived(rows.reduce((sum, r) => sum + r.pointsB, 0));
-  const boardCount = $derived(rows.length);
+  /**
+   * Final-points and board-count derive from the LAST set's rows —
+   * they mirror what the scoreboard displays at End Match time,
+   * which is the score AT THE MOMENT the match closed (not a
+   * lifetime total). Sums across all rows would inflate finalPoints
+   * for multi-set matches. Preserves shape written by ScoreBoard's
+   * endMatch (see history.ts:227-232).
+   */
+  const lastSetIdx = $derived(rows.length > 0 ? Math.max(...rows.map((r) => r.set)) : 0);
+  const lastSetRows = $derived(rows.filter((r) => r.set === lastSetIdx));
+  const finalPointsA = $derived(lastSetRows.reduce((sum, r) => sum + r.pointsA, 0));
+  const finalPointsB = $derived(lastSetRows.reduce((sum, r) => sum + r.pointsB, 0));
+  const boardCount = $derived(lastSetRows.length);
+
+  /**
+   * Derived setsA / setsB / winner (v3.4.11). Historically these
+   * were editable inputs that admins could set independently of
+   * the boardLog, which produced a class of bug where the popup
+   * header pill showed one thing (setsA=2) while the per-set
+   * breakdown showed another (A won all 3 sets). See
+   * reconcileResultFromBoardLog in lib/history for the read-time
+   * defence; this is the write-time defence — the modal now
+   * refuses to let an admin write inconsistent summary fields.
+   *
+   * When boardLog is empty (legacy record, or admin deleted every
+   * row), setsA/setsB fall back to the stored values and winner
+   * falls back to null. Never let an empty log wipe legacy
+   * summaries silently — admins can still see the stored numbers.
+   */
+  const derivedSets = $derived.by(() => {
+    if (rows.length === 0) {
+      return {
+        setsA: Number(initial.setsA ?? 0),
+        setsB: Number(initial.setsB ?? 0),
+        winner: (initial.winner === 'a' || initial.winner === 'b'
+          ? initial.winner
+          : null) as 'a' | 'b' | null,
+      };
+    }
+    const bySet = new Map<number, { a: number; b: number }>();
+    for (const r of rows) {
+      const cur = bySet.get(r.set) ?? { a: 0, b: 0 };
+      cur.a += r.pointsA;
+      cur.b += r.pointsB;
+      bySet.set(r.set, cur);
+    }
+    let sA = 0;
+    let sB = 0;
+    for (const g of bySet.values()) {
+      if (g.a > g.b) sA += 1;
+      else if (g.b > g.a) sB += 1;
+    }
+    let w: 'a' | 'b' | null = null;
+    if (sA > sB) w = 'a';
+    else if (sB > sA) w = 'b';
+    return { setsA: sA, setsB: sB, winner: w };
+  });
+  const setsA = $derived(derivedSets.setsA);
+  const setsB = $derived(derivedSets.setsB);
+  const winner = $derived(derivedSets.winner);
 
   let saving = $state(false);
   let deletingConfirm = $state(false);
@@ -192,16 +244,17 @@
     saving = true;
     const patch: MatchPatch = {
       result: {
-        setsA: Math.max(0, Math.floor(setsA)),
-        setsB: Math.max(0, Math.floor(setsB)),
-        // finalPointsA/B and boardCount are derived from `rows`, so
+        // setsA / setsB / winner / finalPoints / boardCount are all
+        // derived from `rows` (see $derived declarations above), so
         // they're always in sync with the boardLog we're about to
-        // write. Clamps aren't needed — the derivation itself
-        // guarantees non-negative integers.
+        // write. Clamps aren't needed — the derivations guarantee
+        // non-negative integers and a valid winner value.
+        setsA,
+        setsB,
         finalPointsA,
         finalPointsB,
         boardCount,
-        winner: winner === '' ? null : winner,
+        winner,
       },
       notes: { a: noteA, b: noteB },
       // Empty string clears the tag entirely (retention shortens).
@@ -257,12 +310,18 @@
     <section class="section">
       <div class="grid2">
         <label>
-          <span>Sets — {nameA}</span>
-          <input type="number" min="0" max="9" bind:value={setsA} />
+          <span>
+            Sets — {nameA}
+            <em class="hint">(computed)</em>
+          </span>
+          <div class="computed-cell">{setsA}</div>
         </label>
         <label>
-          <span>Sets — {nameB}</span>
-          <input type="number" min="0" max="9" bind:value={setsB} />
+          <span>
+            Sets — {nameB}
+            <em class="hint">(computed)</em>
+          </span>
+          <div class="computed-cell">{setsB}</div>
         </label>
         <label>
           <span>
@@ -286,21 +345,23 @@
           <div class="computed-cell">{boardCount}</div>
         </label>
         <label>
-          <span>Winner</span>
-          <select bind:value={winner}>
-            <option value="">(no winner)</option>
-            <option value="a">{nameA}</option>
-            <option value="b">{nameB}</option>
-          </select>
+          <span>
+            Winner
+            <em class="hint">(computed)</em>
+          </span>
+          <div class="computed-cell">
+            {winner === 'a' ? nameA : winner === 'b' ? nameB : '(no winner)'}
+          </div>
         </label>
       </div>
       <p class="hint-block">
-        Points and board count are computed from the board log below.
-        <strong>{shortA}</strong> / <strong>{shortB}</strong> is the
-        total that side scored on that board — coins + 3 if they
-        pocketed the queen. So a board where {nameA} got 4 coins and
-        the queen is stored as <strong>{shortA} = 7, Queen = {shortA}</strong>.
-        Edit the rows and the totals reconcile automatically.
+        All summary fields (sets, points, board count, winner) are
+        computed from the board log below. Each row's <strong>{shortA}</strong>
+        / <strong>{shortB}</strong> is the total that side scored on
+        that board — coins + 3 if they pocketed the queen. So a board
+        where {nameA} got 4 coins and the queen is stored as
+        <strong>{shortA} = 7, Queen = {shortA}</strong>. Edit the rows and
+        every summary reconciles automatically.
       </p>
 
       <div class="grid2 grid-notes">
