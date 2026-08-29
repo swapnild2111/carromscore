@@ -1010,8 +1010,14 @@
           board: board + 1,
           breakSide: currentBreak,
           queen: queenHolder,
-          pointsA: sideA.points - pointsAtBoardStart.a,
-          pointsB: sideB.points - pointsAtBoardStart.b,
+          // Clamp per-board delta to >= 0. A negative per-board
+          // score cannot happen under any real carrom rule; if the
+          // subtraction goes negative it means the baseline drifted
+          // (e.g. a swipe-undo dropped sideA.points below the
+          // recorded pointsAtBoardStart). Belt-and-braces after
+          // several negative-row bugs traced to different paths.
+          pointsA: Math.max(0, sideA.points - pointsAtBoardStart.a),
+          pointsB: Math.max(0, sideB.points - pointsAtBoardStart.b),
           endedAt: Date.now(),
         };
         boardLog = [...boardLog, entry];
@@ -1165,8 +1171,12 @@
         board: board + 1,
         breakSide: currentBreak,
         queen: queenHolder,
-        pointsA: sideA.points - pointsAtBoardStart.a,
-        pointsB: sideB.points - pointsAtBoardStart.b,
+        // Clamp per-board delta to >= 0. Same rationale as
+        // adjustSets's snapshot path — a swipe-undo dropping
+        // sideA.points below pointsAtBoardStart used to write a
+        // negative row that poisoned the archive. Belt-and-braces.
+        pointsA: Math.max(0, sideA.points - pointsAtBoardStart.a),
+        pointsB: Math.max(0, sideB.points - pointsAtBoardStart.b),
         endedAt: Date.now(),
       };
       boardLog = [...boardLog, entry];
@@ -1450,20 +1460,39 @@
     // point — rewrite the last row's delta so ΣboardLog matches the
     // current cumulative totals.
     if (!currentBoardHasScore && boardLog.length > 0) {
-      const sumA = boardLog.reduce((n, e) => n + e.pointsA, 0);
-      const sumB = boardLog.reduce((n, e) => n + e.pointsB, 0);
-      if (sumA !== sideA.points || sumB !== sideB.points) {
-        const last = boardLog[boardLog.length - 1];
-        const adjustedLast: BoardEntry = {
-          ...last,
-          pointsA: last.pointsA + (sideA.points - sumA),
-          pointsB: last.pointsB + (sideB.points - sumB),
-          endedAt: Date.now(),
-        };
-        boardLog = [...boardLog.slice(0, -1), adjustedLast];
-        // Re-baseline so any downstream reads (queenCreditProblem,
-        // subsequent adjustments) see a consistent world.
-        pointsAtBoardStart = { a: sideA.points, b: sideB.points };
+      // Scope the sum to the CURRENT SET only. Was summing the whole
+      // boardLog (across all sets), which broke multi-set matches:
+      // `sideA.points` resets to 0 on SET+1, but the all-time sum
+      // still carried the prior sets' totals. Result was a large
+      // negative delta written into the last board's row, e.g.
+      // matches -P-tpodsusiXypqQx4sQ (set 1 last row -25/-12),
+      // -P-tT5XCEnG5uAuJR81U (set 2 last row unknown but affected
+      // result counters), -P-tUTCCDEohoo6C7txW (set 2 last row
+      // -53/-17). Filtering by set index — `sideA.sets + sideB.sets`
+      // is the current in-progress set for versus mode — restores
+      // the invariant this reconcile assumed.
+      const currentSetIdx = sideA.sets + sideB.sets;
+      const currentSetRows = boardLog.filter((e) => e.set === currentSetIdx);
+      if (currentSetRows.length > 0) {
+        const sumA = currentSetRows.reduce((n, e) => n + e.pointsA, 0);
+        const sumB = currentSetRows.reduce((n, e) => n + e.pointsB, 0);
+        if (sumA !== sideA.points || sumB !== sideB.points) {
+          const last = boardLog[boardLog.length - 1];
+          const adjustedLast: BoardEntry = {
+            ...last,
+            // Defensive clamp: a per-board delta cannot be negative
+            // under any real carrom rule. Belt-and-braces even after
+            // the current-set filter above, so a future rewrite of
+            // this reconcile can't accidentally poison the archive.
+            pointsA: Math.max(0, last.pointsA + (sideA.points - sumA)),
+            pointsB: Math.max(0, last.pointsB + (sideB.points - sumB)),
+            endedAt: Date.now(),
+          };
+          boardLog = [...boardLog.slice(0, -1), adjustedLast];
+          // Re-baseline so any downstream reads (queenCreditProblem,
+          // subsequent adjustments) see a consistent world.
+          pointsAtBoardStart = { a: sideA.points, b: sideB.points };
+        }
       }
     }
     if (currentBoardHasScore) {
@@ -1531,8 +1560,12 @@
         board: board + 1,
         breakSide: currentBreak,
         queen: queenHolder,
-        pointsA: sideA.points - pointsAtBoardStart.a,
-        pointsB: sideB.points - pointsAtBoardStart.b,
+        // Clamp per-board delta to >= 0. Same rationale as
+        // adjustSets's snapshot path — a swipe-undo dropping
+        // sideA.points below pointsAtBoardStart used to write a
+        // negative row that poisoned the archive. Belt-and-braces.
+        pointsA: Math.max(0, sideA.points - pointsAtBoardStart.a),
+        pointsB: Math.max(0, sideB.points - pointsAtBoardStart.b),
         endedAt: Date.now(),
       };
       boardLog = [...boardLog, entry];
