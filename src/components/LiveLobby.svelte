@@ -561,11 +561,19 @@
     void myUid;
     if (!role) return false;
     if (role.isSuper) return true;
+    // Creator-of-the-record path (v3.5.4). Independent of role/
+    // tournament: whoever wrote the record can always edit it.
+    // Covers the "I recorded this match, but it isn't tagged to
+    // any tournament I organise" case an organiser reported
+    // 2026-08-30. RTDB rule at /matches/$id already permits an
+    // authored write from the createdBy uid, so this is safe.
+    if (!!myUid && m.createdBy === myUid) return true;
     if (!role.isOrganiser) return false;
-    // Own-only auth (v3.3): organiser can edit only when they created
-    // the parent tournament. Look up the tournament record from the
-    // store; if it isn't loaded yet (initial hydration race), the
-    // gate stays false — pencil doesn't render until we know.
+    // Own-tournament path (v3.3): organiser can edit any record
+    // tagged to a tournament they created — regardless of who
+    // recorded it. Look up the tournament record from the store;
+    // if it isn't loaded yet (initial hydration race), the gate
+    // stays false and the pencil renders once the store hydrates.
     const key = m.tournamentKey ?? normalizeKey(m.tournament ?? '');
     if (!key) return false;
     const t = findByKey(key);
