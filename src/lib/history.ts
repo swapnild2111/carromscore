@@ -117,7 +117,7 @@ export type MatchResultInput = {
    * winner ribbon) use this when present and fall back to boardLog
    * totals when absent (legacy records).
    */
-  setWinners?: Array<'a' | 'b'>;
+  setWinners?: Array<'a' | 'b' | 'draw'>;
   /**
    * Practice-only: 2D matrix of missed-shot counts. Outer index = set,
    * inner = board. Present only when mode === 'practice'.
@@ -264,16 +264,20 @@ export async function finishMatch(
   // 'a' when a set is tied (rare — the ScoreBoard blocks tied SET+
   // anyway). Practice mode has no setWinners concept.
   const setsTotal = derived.setsA + derived.setsB;
+  // Preserve drawn-set slots on disk so per-set winner ribbons stay
+  // positionally correct across multi-set matches with a mid-match
+  // draw. Sanity-check only the 'a'/'b' tally against setsA/setsB;
+  // drawn slots don't contribute to either counter.
   const suppliedWinners = Array.isArray(result.setWinners)
-    ? result.setWinners.filter((w): w is 'a' | 'b' => w === 'a' || w === 'b')
+    ? result.setWinners.filter((w): w is 'a' | 'b' | 'draw' =>
+        w === 'a' || w === 'b' || w === 'draw',
+      )
     : [];
   const suppliedTallyA = suppliedWinners.filter((w) => w === 'a').length;
   const suppliedTallyB = suppliedWinners.filter((w) => w === 'b').length;
   const suppliedIsConsistent =
-    suppliedWinners.length === setsTotal &&
-    suppliedTallyA === derived.setsA &&
-    suppliedTallyB === derived.setsB;
-  let finalSetWinners: Array<'a' | 'b'> = suppliedWinners;
+    suppliedTallyA === derived.setsA && suppliedTallyB === derived.setsB;
+  let finalSetWinners: Array<'a' | 'b' | 'draw'> = suppliedWinners;
   if (!isPractice && result.boardLog && result.boardLog.length > 0 && !suppliedIsConsistent) {
     const bySet = new Map<number, { a: number; b: number }>();
     for (const e of result.boardLog) {
@@ -283,26 +287,21 @@ export async function finishMatch(
       g.b += Number(e.pointsB ?? 0);
       bySet.set(e.set, g);
     }
-    const rebuilt: Array<'a' | 'b'> = [];
+    const rebuilt: Array<'a' | 'b' | 'draw'> = [];
     for (const s of Array.from(bySet.keys()).sort((x, y) => x - y)) {
       const g = bySet.get(s)!;
       if (g.a > g.b) rebuilt.push('a');
       else if (g.b > g.a) rebuilt.push('b');
-      // tied set: skip (won't add up but rare enough to not fabricate)
+      else rebuilt.push('draw');
     }
-    // Only overwrite if the rebuilt version tallies match the
-    // derived summary — otherwise we'd be making things worse.
     const rebuiltA = rebuilt.filter((w) => w === 'a').length;
     const rebuiltB = rebuilt.filter((w) => w === 'b').length;
     if (rebuiltA === derived.setsA && rebuiltB === derived.setsB) {
       finalSetWinners = rebuilt;
     } else {
-      // Both the caller-supplied and the boardLog-rebuilt are
-      // inconsistent with the derived summary. Drop the field
-      // entirely — read-time reconcile will fall back to boardLog
-      // totals in LiveScoreboardView.
       finalSetWinners = [];
     }
+    void setsTotal;
   }
 
   const record = {
@@ -440,7 +439,7 @@ export type MatchRecord = {
    * the full contract. Optional on the read side — legacy records
    * predate this field and consumers fall back to boardLog totals.
    */
-  setWinners?: Array<'a' | 'b'>;
+  setWinners?: Array<'a' | 'b' | 'draw'>;
   practiceBoards?: number[][];
   /**
    * Tournament tag. Absent / empty → treated as "Default" bucket in
@@ -552,8 +551,13 @@ export function reconcileResultFromBoardLog(record: MatchRecord): {
   // concession sets correctly (losing side had more per-set points
   // but the credit went to the other side). Falls back to boardLog
   // score-based derivation for legacy records that predate the field.
+  // Include 'draw' slots so setWinners is trusted-and-preferred even
+  // for multi-set records that include a drawn set. Only 'a' / 'b'
+  // are tallied into setsA / setsB — a drawn set counts for neither.
   const storedSetWinners = Array.isArray(record.setWinners)
-    ? record.setWinners.filter((w): w is 'a' | 'b' => w === 'a' || w === 'b')
+    ? record.setWinners.filter((w): w is 'a' | 'b' | 'draw' =>
+        w === 'a' || w === 'b' || w === 'draw',
+      )
     : [];
   let setsA = 0;
   let setsB = 0;

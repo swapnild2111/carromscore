@@ -132,8 +132,15 @@
     // sets stay honest (the losing side may have more per-set points
     // on paper but the credit went to the other side).
     const rawSetWinners = state.setWinners;
-    const setWinners: Array<'a' | 'b'> = Array.isArray(rawSetWinners)
-      ? rawSetWinners.filter((w): w is 'a' | 'b' => w === 'a' || w === 'b')
+    // Accept 'a' | 'b' | 'draw' — the 'draw' slots keep positional
+    // indexing intact when a drawn set was recorded mid-match; the
+    // consumer's credit lookup below falls back to boardLog totals
+    // when the entry isn't 'a'/'b', which for a tied set produces
+    // the correct "no winner" ribbon.
+    const setWinners: Array<'a' | 'b' | 'draw'> = Array.isArray(rawSetWinners)
+      ? rawSetWinners.filter((w): w is 'a' | 'b' | 'draw' =>
+          w === 'a' || w === 'b' || w === 'draw',
+        )
       : [];
     const groups: SetGroup[] = [];
     for (const i of sortedIndices) {
