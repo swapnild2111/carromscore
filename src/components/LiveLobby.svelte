@@ -99,6 +99,95 @@
    *  tap handler can route them to /score/ instead of the popup. */
   const localOfflineMids = $derived(new Set(localOfflineEntries.map((e) => e.mid)));
   let matches = $state<MatchRecord[]>([]);
+
+  /*
+   * History view state (v3.4.12).
+   *
+   * `historyView` selects between the table layout (dense, sortable,
+   * default) and the card grid (visual, tournament-grouped). Persisted
+   * to localStorage so the umpire's preference sticks across sessions.
+   *
+   * `historySortKey` + `historySortDir` control the table sort. Card
+   * view uses its existing tournament-grouped-then-endedAt-DESC order.
+   *
+   * Filters are shared across both views:
+   *  - `filterSearch`: substring match against any of aName / a2Name /
+   *    bName / b2Name (case-insensitive).
+   *  - `filterMode`: 'all' or one of 'singles' | 'doubles' | 'practice'.
+   *  - `filterTournament`: '' = all, DEFAULT_BUCKET = untagged only,
+   *    or a specific tournament name.
+   *  - `filterDays`: 0 = all, or a rolling window in days (7 / 30 / 90).
+   */
+  type HistoryView = 'table' | 'cards';
+  type HistorySortKey = 'endedAt' | 'mode' | 'sideA' | 'sideB' | 'sets' | 'boards' | 'points';
+  const HISTORY_PREFS_KEY = 'carromscore.history.prefs.v1';
+  function loadHistoryPrefs(): {
+    view: HistoryView;
+    sortKey: HistorySortKey;
+    sortDir: 'asc' | 'desc';
+    filterMode: 'all' | 'singles' | 'doubles' | 'practice';
+    filterTournament: string;
+    filterDays: number;
+    filterSearch: string;
+  } {
+    const fallback = {
+      view: 'table' as HistoryView,
+      sortKey: 'endedAt' as HistorySortKey,
+      sortDir: 'desc' as const,
+      filterMode: 'all' as const,
+      filterTournament: '',
+      filterDays: 0,
+      filterSearch: '',
+    };
+    try {
+      const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(HISTORY_PREFS_KEY) : null;
+      if (!raw) return fallback;
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      return {
+        view: parsed.view === 'cards' ? 'cards' : 'table',
+        sortKey: (['endedAt','mode','sideA','sideB','sets','boards','points'] as const)
+          .includes(parsed.sortKey as HistorySortKey)
+          ? (parsed.sortKey as HistorySortKey)
+          : 'endedAt',
+        sortDir: parsed.sortDir === 'asc' ? 'asc' : 'desc',
+        filterMode: (['all','singles','doubles','practice'] as const)
+          .includes(parsed.filterMode as 'all' | 'singles' | 'doubles' | 'practice')
+          ? (parsed.filterMode as 'all' | 'singles' | 'doubles' | 'practice')
+          : 'all',
+        filterTournament: typeof parsed.filterTournament === 'string' ? parsed.filterTournament : '',
+        filterDays: typeof parsed.filterDays === 'number' && parsed.filterDays >= 0
+          ? parsed.filterDays
+          : 0,
+        filterSearch: typeof parsed.filterSearch === 'string' ? parsed.filterSearch : '',
+      };
+    } catch {
+      return fallback;
+    }
+  }
+  const initialHistoryPrefs = loadHistoryPrefs();
+  let historyView = $state<HistoryView>(initialHistoryPrefs.view);
+  let historySortKey = $state<HistorySortKey>(initialHistoryPrefs.sortKey);
+  let historySortDir = $state<'asc' | 'desc'>(initialHistoryPrefs.sortDir);
+  let filterMode = $state<'all' | 'singles' | 'doubles' | 'practice'>(initialHistoryPrefs.filterMode);
+  let filterTournament = $state<string>(initialHistoryPrefs.filterTournament);
+  let filterDays = $state<number>(initialHistoryPrefs.filterDays);
+  let filterSearch = $state<string>(initialHistoryPrefs.filterSearch);
+  $effect(() => {
+    try {
+      const payload = {
+        view: historyView,
+        sortKey: historySortKey,
+        sortDir: historySortDir,
+        filterMode,
+        filterTournament,
+        filterDays,
+        filterSearch,
+      };
+      localStorage.setItem(HISTORY_PREFS_KEY, JSON.stringify(payload));
+    } catch {
+      // ignore
+    }
+  });
   let now = $state(Date.now());
   let identityTick = $state(0);
   // Tick bumped whenever the /tournaments store notifies (v3.2). Read
@@ -696,12 +785,125 @@
   // visually confusing — different stats, different render shape.
   // Now: tournament groups render first, Practice section renders
   // after them if any practice records exist.
-  const versusMatches = $derived(matches.filter((m) => m.mode !== 'practice'));
+  // For card view: derive versus + practice from the filtered set so
+  // the toolbar's filters affect both views. Table view uses its own
+  // `sortedHistoryTable` derived below.
+  const versusMatches = $derived(filteredHistory().filter((m) => m.mode !== 'practice'));
   const practiceMatches = $derived(
-    matches.filter((m) => m.mode === 'practice')
+    filteredHistory().filter((m) => m.mode === 'practice')
       .sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0)),
   );
   const historyGroups = $derived(groupByTournament(versusMatches, bucketOfMatch));
+
+  /**
+   * Derived helpers for the history filter + table view (v3.4.12).
+   *
+   * `tournamentBuckets`: distinct tournament labels seen in the
+   * current archive. Feeds the tournament filter dropdown. Ordered
+   * with DEFAULT_BUCKET first (matches the visual convention).
+   *
+   * `filteredHistory`: `matches` after applying the four filters —
+   * search, mode, tournament, date range. Both card and table views
+   * consume this as their base list. Practice matches pass through
+   * unless filterMode explicitly excludes them.
+   *
+   * `sortedHistoryTable`: `filteredHistory` sorted by the current
+   * column + direction. Table view only.
+   */
+  const tournamentBuckets = $derived(() => {
+    const seen = new Set<string>();
+    seen.add(DEFAULT_BUCKET);
+    for (const m of matches) {
+      const t = (m.tournament ?? '').trim();
+      if (t) seen.add(t);
+    }
+    return Array.from(seen);
+  });
+  /**
+   * Full name of side A / side B for filter search + table columns.
+   * Uses the same helper the card renderer uses so team-name shape
+   * is identical across views.
+   */
+  function sideFullNameForFilter(m: MatchRecord, side: 'a' | 'b'): string {
+    return sideNameMatch(m, side).toLowerCase();
+  }
+  const filteredHistory = $derived(() => {
+    const q = filterSearch.trim().toLowerCase();
+    const cutoff = filterDays > 0 ? Date.now() - filterDays * 24 * 60 * 60 * 1000 : 0;
+    return matches.filter((m) => {
+      if (filterMode !== 'all' && m.mode !== filterMode) return false;
+      if (filterTournament) {
+        const tb = (m.tournament ?? '').trim() || DEFAULT_BUCKET;
+        if (tb !== filterTournament) return false;
+      }
+      if (cutoff > 0 && (m.endedAt ?? 0) < cutoff) return false;
+      if (q) {
+        const hay = `${sideFullNameForFilter(m, 'a')} ${sideFullNameForFilter(m, 'b')}`;
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  });
+  const sortedHistoryTable = $derived(() => {
+    const arr = [...filteredHistory()];
+    const dir = historySortDir === 'asc' ? 1 : -1;
+    const key = historySortKey;
+    arr.sort((a, b) => {
+      let av: number | string = 0;
+      let bv: number | string = 0;
+      switch (key) {
+        case 'endedAt':
+          av = a.endedAt ?? 0; bv = b.endedAt ?? 0; break;
+        case 'mode':
+          av = a.mode; bv = b.mode; break;
+        case 'sideA':
+          av = sideNameMatch(a, 'a').toLowerCase();
+          bv = sideNameMatch(b, 'a').toLowerCase();
+          break;
+        case 'sideB':
+          av = sideNameMatch(a, 'b').toLowerCase();
+          bv = sideNameMatch(b, 'b').toLowerCase();
+          break;
+        case 'sets':
+          av = (a.result?.setsA ?? 0) + (a.result?.setsB ?? 0);
+          bv = (b.result?.setsA ?? 0) + (b.result?.setsB ?? 0);
+          break;
+        case 'boards':
+          av = a.result?.boardCount ?? 0;
+          bv = b.result?.boardCount ?? 0;
+          break;
+        case 'points':
+          av = (a.result?.finalPointsA ?? 0) + (a.result?.finalPointsB ?? 0);
+          bv = (b.result?.finalPointsA ?? 0) + (b.result?.finalPointsB ?? 0);
+          break;
+      }
+      if (av < bv) return -1 * dir;
+      if (av > bv) return 1 * dir;
+      // Stable tiebreak on endedAt DESC so equal keys stay newest-first.
+      return ((b.endedAt ?? 0) - (a.endedAt ?? 0));
+    });
+    return arr;
+  });
+  function toggleSort(k: HistorySortKey): void {
+    if (historySortKey === k) {
+      historySortDir = historySortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      historySortKey = k;
+      historySortDir = k === 'sideA' || k === 'sideB' || k === 'mode' ? 'asc' : 'desc';
+    }
+  }
+  function clearFilters(): void {
+    filterSearch = '';
+    filterMode = 'all';
+    filterTournament = '';
+    filterDays = 0;
+  }
+  const anyFilterActive = $derived(
+    filterSearch.trim() !== '' ||
+    filterMode !== 'all' ||
+    filterTournament !== '' ||
+    filterDays > 0
+  );
 
   /**
    * Sentinel key for the "matches without a round" sub-group inside a
@@ -1303,6 +1505,192 @@
         <p class="empty-sub">Every match you complete lands here so you can look back at scores, opponents, and who won.</p>
       </div>
     {:else}
+      <!--
+        History toolbar (v3.4.12): filters + view toggle. Filters
+        apply to both the table and cards view. Sort is table-only
+        — cards keep their tournament-grouped-then-endedAt-DESC order.
+      -->
+      <div class="hist-toolbar">
+        <div class="hist-filters">
+          <input
+            type="search"
+            class="hist-search"
+            placeholder="Search player name…"
+            bind:value={filterSearch}
+            aria-label="Search matches by player name"
+          />
+          <select
+            class="hist-select"
+            bind:value={filterMode}
+            aria-label="Filter by mode"
+          >
+            <option value="all">All modes</option>
+            <option value="singles">Singles</option>
+            <option value="doubles">Doubles</option>
+            <option value="practice">Practice</option>
+          </select>
+          <select
+            class="hist-select"
+            bind:value={filterTournament}
+            aria-label="Filter by tournament"
+          >
+            <option value="">All tournaments</option>
+            {#each tournamentBuckets() as bucket (bucket)}
+              <option value={bucket}>{bucket}</option>
+            {/each}
+          </select>
+          <div class="hist-chips" role="group" aria-label="Filter by date range">
+            {#each [ { d: 0, label: 'All' }, { d: 7, label: '7d' }, { d: 30, label: '30d' }, { d: 90, label: '90d' } ] as opt (opt.d)}
+              <button
+                type="button"
+                class="hist-chip"
+                class:hist-chip-active={filterDays === opt.d}
+                onclick={() => (filterDays = opt.d)}
+              >{opt.label}</button>
+            {/each}
+          </div>
+          {#if anyFilterActive}
+            <button
+              type="button"
+              class="hist-clear"
+              onclick={clearFilters}
+              aria-label="Clear all filters"
+            >✕ Clear</button>
+          {/if}
+        </div>
+        <div class="hist-view-toggle" role="group" aria-label="History view">
+          <button
+            type="button"
+            class="hist-view-btn"
+            class:hist-view-btn-active={historyView === 'table'}
+            onclick={() => (historyView = 'table')}
+            aria-label="Table view"
+            title="Table view"
+          >☰ Table</button>
+          <button
+            type="button"
+            class="hist-view-btn"
+            class:hist-view-btn-active={historyView === 'cards'}
+            onclick={() => (historyView = 'cards')}
+            aria-label="Card view"
+            title="Card view"
+          >▦ Cards</button>
+        </div>
+      </div>
+
+      {#if historyView === 'table'}
+        {@const rows = sortedHistoryTable()}
+        {#if rows.length === 0}
+          <div class="empty">
+            <p><strong>No matches match these filters.</strong></p>
+            <p class="empty-sub">Try clearing the search or widening the date range.</p>
+          </div>
+        {:else}
+          <div class="hist-tbl-scroll">
+            <table class="hist-tbl">
+              <thead>
+                <tr>
+                  <th
+                    class="hist-th hist-th-sortable"
+                    class:hist-th-sorted={historySortKey === 'endedAt'}
+                    onclick={() => toggleSort('endedAt')}
+                  >
+                    Ended
+                    {#if historySortKey === 'endedAt'}<span class="sort-caret">{historySortDir === 'asc' ? '▲' : '▼'}</span>{/if}
+                  </th>
+                  <th
+                    class="hist-th hist-th-sortable"
+                    class:hist-th-sorted={historySortKey === 'mode'}
+                    onclick={() => toggleSort('mode')}
+                  >
+                    Mode
+                    {#if historySortKey === 'mode'}<span class="sort-caret">{historySortDir === 'asc' ? '▲' : '▼'}</span>{/if}
+                  </th>
+                  <th
+                    class="hist-th hist-th-sortable hist-th-name"
+                    class:hist-th-sorted={historySortKey === 'sideA'}
+                    onclick={() => toggleSort('sideA')}
+                  >
+                    Side A
+                    {#if historySortKey === 'sideA'}<span class="sort-caret">{historySortDir === 'asc' ? '▲' : '▼'}</span>{/if}
+                  </th>
+                  <th
+                    class="hist-th hist-th-sortable hist-th-name"
+                    class:hist-th-sorted={historySortKey === 'sideB'}
+                    onclick={() => toggleSort('sideB')}
+                  >
+                    Side B
+                    {#if historySortKey === 'sideB'}<span class="sort-caret">{historySortDir === 'asc' ? '▲' : '▼'}</span>{/if}
+                  </th>
+                  <th
+                    class="hist-th hist-th-sortable"
+                    class:hist-th-sorted={historySortKey === 'sets'}
+                    onclick={() => toggleSort('sets')}
+                  >
+                    Sets
+                    {#if historySortKey === 'sets'}<span class="sort-caret">{historySortDir === 'asc' ? '▲' : '▼'}</span>{/if}
+                  </th>
+                  <th
+                    class="hist-th hist-th-sortable"
+                    class:hist-th-sorted={historySortKey === 'points'}
+                    onclick={() => toggleSort('points')}
+                  >
+                    Points
+                    {#if historySortKey === 'points'}<span class="sort-caret">{historySortDir === 'asc' ? '▲' : '▼'}</span>{/if}
+                  </th>
+                  <th
+                    class="hist-th hist-th-sortable"
+                    class:hist-th-sorted={historySortKey === 'boards'}
+                    onclick={() => toggleSort('boards')}
+                  >
+                    Boards
+                    {#if historySortKey === 'boards'}<span class="sort-caret">{historySortDir === 'asc' ? '▲' : '▼'}</span>{/if}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each rows as m (m.id)}
+                  {@const rec = reconcileResultFromBoardLog(m)}
+                  {@const winner = rec.winner}
+                  <tr
+                    class="hist-tr"
+                    class:winner-a={winner === 'a'}
+                    class:winner-b={winner === 'b'}
+                    onclick={() => openMatch(m)}
+                  >
+                    <td class="hist-td hist-td-when">{relTime(m.endedAt)}</td>
+                    <td class="hist-td hist-td-mode">
+                      <span class="hist-mode-chip">{modeLabelMatch(m)}</span>
+                      {#if m.tournament}
+                        <span class="hist-tour-chip">{m.tournament}</span>
+                      {/if}
+                    </td>
+                    <td class="hist-td hist-td-name" class:hist-td-winner={winner === 'a'}>
+                      {#if winner === 'a'}<span class="hist-crown">🏆</span>{/if}
+                      {sideNameMatch(m, 'a')}
+                    </td>
+                    <td class="hist-td hist-td-name" class:hist-td-winner={winner === 'b'}>
+                      {#if winner === 'b'}<span class="hist-crown">🏆</span>{/if}
+                      {sideNameMatch(m, 'b')}
+                    </td>
+                    <td class="hist-td hist-td-score">
+                      <span class="digit-a">{rec.setsA}</span>–<span class="digit-b">{rec.setsB}</span>
+                    </td>
+                    <td class="hist-td hist-td-score">
+                      {#if m.mode === 'practice'}
+                        —
+                      {:else}
+                        <span class="digit-a">{rec.finalPointsA}</span>–<span class="digit-b">{rec.finalPointsB}</span>
+                      {/if}
+                    </td>
+                    <td class="hist-td hist-td-num">{rec.boardCount}</td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+        {/if}
+      {:else}
       {#each historyGroups as [bucket, matchesInBucket] (bucket)}
         {@const folded = isCollapsed('history', bucket)}
         {@const tKey = bucket === DEFAULT_BUCKET ? '' : normalizeKey(bucket)}
@@ -1545,6 +1933,7 @@
           </ul>
           {/if}
         </section>
+      {/if}
       {/if}
     {/if}
   {:else if tab === 'reports'}
@@ -2508,6 +2897,217 @@
     color: rgba(255, 255, 255, 0.2);
   }
 
+  /* ─── History toolbar + table view (v3.4.12) ──────────────────── */
+  .hist-toolbar {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    margin: 0 0 1rem;
+    padding: 0.6rem 0.75rem;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 0.7rem;
+  }
+  .hist-filters {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .hist-search {
+    flex: 1 1 12rem;
+    min-width: 8rem;
+    padding: 0.4rem 0.6rem;
+    background: #141414;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 0.45rem;
+    color: var(--fg, #f5f5f5);
+    font-size: 0.85rem;
+  }
+  .hist-search:focus {
+    outline: none;
+    border-color: rgba(255, 213, 74, 0.5);
+  }
+  .hist-select {
+    padding: 0.4rem 0.6rem;
+    background: #141414;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 0.45rem;
+    color: var(--fg, #f5f5f5);
+    font-size: 0.85rem;
+    cursor: pointer;
+  }
+  .hist-chips {
+    display: inline-flex;
+    gap: 0.25rem;
+    padding: 0.15rem;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 0.5rem;
+  }
+  .hist-chip {
+    padding: 0.25rem 0.55rem;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 0.35rem;
+    color: var(--muted, #9aa0a6);
+    font-size: 0.8rem;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .hist-chip:hover { color: var(--fg, #f5f5f5); }
+  .hist-chip-active {
+    background: rgba(255, 213, 74, 0.12);
+    border-color: rgba(255, 213, 74, 0.45);
+    color: var(--accent, #ffd54a);
+  }
+  .hist-clear {
+    padding: 0.35rem 0.65rem;
+    background: transparent;
+    border: 1px solid rgba(239, 83, 80, 0.4);
+    border-radius: 0.45rem;
+    color: #ef5350;
+    font-size: 0.78rem;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .hist-clear:hover { background: rgba(239, 83, 80, 0.08); }
+  .hist-view-toggle {
+    display: inline-flex;
+    gap: 0.25rem;
+    padding: 0.15rem;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 0.5rem;
+    flex-shrink: 0;
+  }
+  .hist-view-btn {
+    padding: 0.3rem 0.65rem;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 0.35rem;
+    color: var(--muted, #9aa0a6);
+    font-size: 0.8rem;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .hist-view-btn:hover { color: var(--fg, #f5f5f5); }
+  .hist-view-btn-active {
+    background: rgba(255, 213, 74, 0.12);
+    border-color: rgba(255, 213, 74, 0.45);
+    color: var(--accent, #ffd54a);
+  }
+
+  /* Table view. Horizontally scrollable on narrow phones so the
+     row fits without wrapping cells. Header row is sticky when the
+     lobby's own scroll container scrolls. Winner side coloured
+     amber; non-winner stays neutral. */
+  .hist-tbl-scroll {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 0.6rem;
+    background: #101010;
+  }
+  .hist-tbl {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 620px;
+    font-size: 0.85rem;
+  }
+  .hist-tbl th,
+  .hist-tbl td {
+    padding: 0.55rem 0.65rem;
+    text-align: left;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    white-space: nowrap;
+  }
+  .hist-tbl tr:last-child td { border-bottom: 0; }
+  .hist-th {
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--muted, #9aa0a6);
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+  }
+  .hist-th-sortable {
+    cursor: pointer;
+    user-select: none;
+  }
+  .hist-th-sortable:hover { color: var(--fg, #f5f5f5); }
+  .hist-th-sorted { color: var(--accent, #ffd54a); }
+  .sort-caret {
+    margin-left: 0.2rem;
+    font-size: 0.62rem;
+  }
+  .hist-th-name { min-width: 8rem; }
+  .hist-tr {
+    cursor: pointer;
+    transition: background 0.12s;
+  }
+  .hist-tr:hover { background: rgba(255, 255, 255, 0.03); }
+  .hist-td-when {
+    color: var(--muted, #9aa0a6);
+    font-size: 0.78rem;
+  }
+  .hist-td-mode {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    flex-wrap: wrap;
+  }
+  .hist-mode-chip {
+    font-size: 0.62rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 0.12rem 0.4rem;
+    border-radius: 0.3rem;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: var(--muted, #9aa0a6);
+  }
+  .hist-tour-chip {
+    font-size: 0.68rem;
+    color: var(--accent, #ffd54a);
+    font-weight: 700;
+    max-width: 8rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .hist-td-name {
+    font-weight: 700;
+    color: var(--fg, #f5f5f5);
+    max-width: 12rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .hist-td-winner {
+    color: var(--accent, #ffd54a);
+  }
+  .hist-crown {
+    font-size: 0.85rem;
+    margin-right: 0.2rem;
+  }
+  .hist-td-score {
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+  }
+  .hist-td-num {
+    text-align: center;
+    color: var(--muted, #9aa0a6);
+    font-variant-numeric: tabular-nums;
+  }
+
   /* Score digits on ended cards flip to the winner-gold / loser-silver
      colour language, so the whole card reads as one medal narrative.
      `.winner-a` / `.winner-b` classes on the card indicate which side
@@ -2620,6 +3220,20 @@
        gaps at any DPI. */
     top: 1.65rem;
     padding-top: 0.5rem;
+    /* Full-bleed to sheet-inner's edges when sticky. The negative
+       margins cancel sheet-inner's 1rem horizontal padding so the
+       sticky bg reaches the popup card's rounded edges (v3.4.12:
+       reported names row visually escaped left/right of the card
+       while scrolling). Re-add the padding inside via padding-* so
+       the pills sit centred within the same visible column as the
+       non-sticky content beneath. Box-sizing keeps the numbers sane. */
+    box-sizing: border-box;
+    margin-left: -1rem;
+    margin-right: -1rem;
+    padding-left: 1rem;
+    padding-right: 1rem;
+    width: calc(100% + 2rem);
+    max-width: calc(100% + 2rem);
   }
   .sheet-inner :global(.board) {
     /* Sits directly beneath the names pill with the same overlap
@@ -2629,6 +3243,15 @@
     padding-bottom: 0.5rem;
     border-bottom: 1px solid #1e1e1e;
     margin-bottom: 0.25rem;
+    /* Match the full-bleed treatment of .hdr above so the sticky
+       score-tile row also covers to the popup card's edges. */
+    box-sizing: border-box;
+    margin-left: -1rem;
+    margin-right: -1rem;
+    padding-left: 1rem;
+    padding-right: 1rem;
+    width: calc(100% + 2rem);
+    max-width: calc(100% + 2rem);
   }
   /* Two-row title container. First row = LIVE/Ended + mode.
      Second row = tournament + round tags when present. min-width:0
