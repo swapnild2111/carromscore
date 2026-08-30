@@ -236,6 +236,12 @@ export async function finishMatch(
             winner: result.winner,
           },
           boardLog: result.boardLog,
+          // Thread the caller-supplied setWinners into the reconcile
+          // so it can prefer that over boardLog-derived totals when
+          // consistent (v3.4.12).
+          ...(result.setWinners && result.setWinners.length > 0
+            ? { setWinners: result.setWinners }
+            : {}),
         })
       : {
           setsA: result.sideA.sets,
@@ -246,6 +252,58 @@ export async function finishMatch(
           winner: result.winner,
           divergedFromStored: false,
         };
+
+  // Sanity check + heal (v3.4.12): setWinners must have the same
+  // count as the credited-sets total AND its per-side tally must
+  // match setsA / setsB. If it doesn't, the ScoreBoard state
+  // drifted — most likely from a mis-tracked SET+/- rollback +
+  // swap combo — and the array on disk would tell a different
+  // story than the summary. Reset to a boardLog-derived best guess:
+  // one entry per set with the higher-scoring side, in set order.
+  // Emits an in-order per-set winner for the common case and gives
+  // 'a' when a set is tied (rare — the ScoreBoard blocks tied SET+
+  // anyway). Practice mode has no setWinners concept.
+  const setsTotal = derived.setsA + derived.setsB;
+  const suppliedWinners = Array.isArray(result.setWinners)
+    ? result.setWinners.filter((w): w is 'a' | 'b' => w === 'a' || w === 'b')
+    : [];
+  const suppliedTallyA = suppliedWinners.filter((w) => w === 'a').length;
+  const suppliedTallyB = suppliedWinners.filter((w) => w === 'b').length;
+  const suppliedIsConsistent =
+    suppliedWinners.length === setsTotal &&
+    suppliedTallyA === derived.setsA &&
+    suppliedTallyB === derived.setsB;
+  let finalSetWinners: Array<'a' | 'b'> = suppliedWinners;
+  if (!isPractice && result.boardLog && result.boardLog.length > 0 && !suppliedIsConsistent) {
+    const bySet = new Map<number, { a: number; b: number }>();
+    for (const e of result.boardLog) {
+      if (!e) continue;
+      const g = bySet.get(e.set) ?? { a: 0, b: 0 };
+      g.a += Number(e.pointsA ?? 0);
+      g.b += Number(e.pointsB ?? 0);
+      bySet.set(e.set, g);
+    }
+    const rebuilt: Array<'a' | 'b'> = [];
+    for (const s of Array.from(bySet.keys()).sort((x, y) => x - y)) {
+      const g = bySet.get(s)!;
+      if (g.a > g.b) rebuilt.push('a');
+      else if (g.b > g.a) rebuilt.push('b');
+      // tied set: skip (won't add up but rare enough to not fabricate)
+    }
+    // Only overwrite if the rebuilt version tallies match the
+    // derived summary — otherwise we'd be making things worse.
+    const rebuiltA = rebuilt.filter((w) => w === 'a').length;
+    const rebuiltB = rebuilt.filter((w) => w === 'b').length;
+    if (rebuiltA === derived.setsA && rebuiltB === derived.setsB) {
+      finalSetWinners = rebuilt;
+    } else {
+      // Both the caller-supplied and the boardLog-rebuilt are
+      // inconsistent with the derived summary. Drop the field
+      // entirely — read-time reconcile will fall back to boardLog
+      // totals in LiveScoreboardView.
+      finalSetWinners = [];
+    }
+  }
 
   const record = {
     mode: result.mode,
@@ -278,8 +336,8 @@ export async function finishMatch(
     ...(result.boardLog && result.boardLog.length > 0
       ? { boardLog: result.boardLog }
       : {}),
-    ...(result.setWinners && result.setWinners.length > 0
-      ? { setWinners: [...result.setWinners] }
+    ...(finalSetWinners.length > 0
+      ? { setWinners: [...finalSetWinners] }
       : {}),
     ...(result.practiceBoards && result.practiceBoards.length > 0
       ? { practiceBoards: result.practiceBoards }

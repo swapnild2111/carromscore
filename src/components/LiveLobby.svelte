@@ -101,16 +101,15 @@
   let matches = $state<MatchRecord[]>([]);
 
   /*
-   * History view state (v3.4.12).
+   * History table state (v3.4.12). The tab is table-only now — the
+   * card layout was removed after landing on beta because the table
+   * covered every use case (scan, sort, filter) more directly.
    *
-   * `historyView` selects between the table layout (dense, sortable,
-   * default) and the card grid (visual, tournament-grouped). Persisted
-   * to localStorage so the umpire's preference sticks across sessions.
+   * `historySortKey` + `historySortDir` control the sort. Defaults to
+   * endedAt DESC. Persisted to localStorage so the umpire's ordering
+   * preference sticks across sessions.
    *
-   * `historySortKey` + `historySortDir` control the table sort. Card
-   * view uses its existing tournament-grouped-then-endedAt-DESC order.
-   *
-   * Filters are shared across both views:
+   * Filters:
    *  - `filterSearch`: substring match against any of aName / a2Name /
    *    bName / b2Name (case-insensitive).
    *  - `filterMode`: 'all' or one of 'singles' | 'doubles' | 'practice'.
@@ -118,11 +117,9 @@
    *    or a specific tournament name.
    *  - `filterDays`: 0 = all, or a rolling window in days (7 / 30 / 90).
    */
-  type HistoryView = 'table' | 'cards';
   type HistorySortKey = 'endedAt' | 'mode' | 'sideA' | 'sideB' | 'sets' | 'boards' | 'points';
   const HISTORY_PREFS_KEY = 'carromscore.history.prefs.v1';
   function loadHistoryPrefs(): {
-    view: HistoryView;
     sortKey: HistorySortKey;
     sortDir: 'asc' | 'desc';
     filterMode: 'all' | 'singles' | 'doubles' | 'practice';
@@ -131,7 +128,6 @@
     filterSearch: string;
   } {
     const fallback = {
-      view: 'table' as HistoryView,
       sortKey: 'endedAt' as HistorySortKey,
       sortDir: 'desc' as const,
       filterMode: 'all' as const,
@@ -144,7 +140,6 @@
       if (!raw) return fallback;
       const parsed = JSON.parse(raw) as Record<string, unknown>;
       return {
-        view: parsed.view === 'cards' ? 'cards' : 'table',
         sortKey: (['endedAt','mode','sideA','sideB','sets','boards','points'] as const)
           .includes(parsed.sortKey as HistorySortKey)
           ? (parsed.sortKey as HistorySortKey)
@@ -165,7 +160,6 @@
     }
   }
   const initialHistoryPrefs = loadHistoryPrefs();
-  let historyView = $state<HistoryView>(initialHistoryPrefs.view);
   let historySortKey = $state<HistorySortKey>(initialHistoryPrefs.sortKey);
   let historySortDir = $state<'asc' | 'desc'>(initialHistoryPrefs.sortDir);
   let filterMode = $state<'all' | 'singles' | 'doubles' | 'practice'>(initialHistoryPrefs.filterMode);
@@ -175,7 +169,6 @@
   $effect(() => {
     try {
       const payload = {
-        view: historyView,
         sortKey: historySortKey,
         sortDir: historySortDir,
         filterMode,
@@ -1564,29 +1557,9 @@
             >✕ Clear</button>
           {/if}
         </div>
-        <div class="hist-view-toggle" role="group" aria-label="History view">
-          <button
-            type="button"
-            class="hist-view-btn"
-            class:hist-view-btn-active={historyView === 'table'}
-            onclick={() => (historyView = 'table')}
-            aria-label="Table view"
-            title="Table view"
-          >☰ Table</button>
-          <button
-            type="button"
-            class="hist-view-btn"
-            class:hist-view-btn-active={historyView === 'cards'}
-            onclick={() => (historyView = 'cards')}
-            aria-label="Card view"
-            title="Card view"
-          >▦ Cards</button>
-        </div>
       </div>
 
-      {#if historyView === 'table'}
-        {@const rows = sortedHistoryTable()}
-        {#if rows.length === 0}
+      {#if sortedHistoryTable().length === 0}
           <div class="empty">
             <p><strong>No matches match these filters.</strong></p>
             <p class="empty-sub">Try clearing the search or widening the date range.</p>
@@ -1655,7 +1628,7 @@
                 </tr>
               </thead>
               <tbody>
-                {#each rows as m (m.id)}
+                {#each sortedHistoryTable() as m (m.id)}
                   {@const rec = reconcileResultFromBoardLog(m)}
                   {@const winner = rec.winner}
                   <tr
@@ -1696,251 +1669,6 @@
             </table>
           </div>
         {/if}
-      {:else}
-      {#each historyGroups as [bucket, matchesInBucket] (bucket)}
-        {@const folded = isCollapsed('history', bucket)}
-        {@const tKey = bucket === DEFAULT_BUCKET ? '' : normalizeKey(bucket)}
-        {@const roundGroups = groupByRound(tKey, matchesInBucket)}
-        {@const hasRounds = roundGroups.length > 1 || (roundGroups[0] && roundGroups[0][0] !== '')}
-        <section class="tour-group" class:folded>
-          <button
-            type="button"
-            class="tour-hdr"
-            aria-expanded={!folded}
-            onclick={() => toggleGroup('history', bucket)}
-          >
-            <span class="tour-caret" class:tour-caret-folded={folded} aria-hidden="true">▾</span>
-            <span class="tour-name">{bucket}</span>
-            <span class="tour-count">{matchesInBucket.length}</span>
-          </button>
-          {#if !folded}
-          {#each roundGroups as [roundKey, roundName, roundMatches] (roundKey || 'flat')}
-            {@const showRoundHeader = hasRounds && roundKey !== ''}
-            {@const roundFolded = showRoundHeader && isCollapsed('history', `${bucket}::${roundKey}`)}
-            <section
-              class="round-group"
-              class:round-unassigned={roundKey === UNASSIGNED_ROUND_KEY}
-              class:round-flat={!showRoundHeader}
-              class:folded={roundFolded}
-            >
-              {#if showRoundHeader}
-              <button
-                type="button"
-                class="round-hdr"
-                aria-expanded={!roundFolded}
-                onclick={() => toggleGroup('history', `${bucket}::${roundKey}`)}
-              >
-                <span class="round-caret" class:round-caret-folded={roundFolded} aria-hidden="true">▾</span>
-                <span class="round-name">{roundName}</span>
-                <span class="round-count">{roundMatches.length}</span>
-              </button>
-              {/if}
-              {#if !roundFolded}
-              <ul class="grid">
-            {#each roundMatches as m (m.id)}
-              {@const rec = reconcileResultFromBoardLog(m)}
-              {@const r = {
-                setsA: rec.setsA,
-                setsB: rec.setsB,
-                winner: rec.winner,
-                finalPointsA: rec.finalPointsA,
-                finalPointsB: rec.finalPointsB,
-                boardCount: rec.boardCount,
-              }}
-              {@const winner = r.winner}
-              {@const editable = canEditMatch(m)}
-              <li class="card-li">
-                <button
-                  type="button"
-                  class="card-copy"
-                  aria-label="Copy share URL for this match"
-                  title="Copy share URL"
-                  onclick={(ev) => copyMatchIdUrl(m.id, ev)}
-                >
-                  {#if copiedCardKey === `match:${m.id}`}
-                    <span aria-hidden="true">✓</span>
-                  {:else}
-                    <span aria-hidden="true">🔗</span>
-                  {/if}
-                </button>
-                {#if editable}
-                  <!--
-                    Pencil sits absolutely-positioned in the card's
-                    top-right corner. Sibling of the main card button
-                    (nesting buttons is invalid HTML) with a higher
-                    z-index so the click reaches it first. Only
-                    renders when the current user is authorised to
-                    edit this record.
-                  -->
-                  <button
-                    type="button"
-                    class="card-edit"
-                    onclick={(e) => openEdit(m, e)}
-                    aria-label="Edit match"
-                  >✎</button>
-                {/if}
-                <button
-                  type="button"
-                  class="card card-ended"
-                  class:has-winner={!!winner}
-                  class:winner-a={winner === 'a'}
-                  class:winner-b={winner === 'b'}
-                  onclick={() => openMatch(m)}
-                >
-              <div class="card-hdr">
-                {#if m.mode === 'practice'}
-                  <span class="card-badge card-badge-practice">Practice</span>
-                {:else}
-                  <span class="card-badge card-badge-ended">Ended</span>
-                {/if}
-                <span class="card-mode">{modeLabelMatch(m)}</span>
-                <span class="card-meta">{relTime(m.endedAt)}</span>
-              </div>
-
-              {#if m.mode === 'practice'}
-                {@const rows = m.practiceBoards ?? []}
-                {@const totalMisses = rows.reduce(
-                  (s, row) => s + (row ?? []).reduce((a, v) => a + (v ?? 0), 0),
-                  0,
-                )}
-                {@const boardsPerSet = m.cfg?.maxBoards ?? (rows[0]?.length ?? 0)}
-                {@const totalBoards = rows.length * boardsPerSet}
-                <div class="card-teams">
-                  <span class="team-block team-a" style="flex:1">
-                    <span class="team-name">{sideNameMatch(m, 'a')}</span>
-                  </span>
-                </div>
-                <div class="card-scores">
-                  <span class="score-block">
-                    <span class="score-lbl">MISSES</span>
-                    <span class="score-val">{totalMisses}</span>
-                  </span>
-                  <span class="score-block">
-                    <span class="score-lbl">BOARDS</span>
-                    <span class="score-val">{totalBoards}</span>
-                  </span>
-                </div>
-              {:else}
-                <!--
-                  Polished ended-match card (v3.4.12). Two centred name
-                  pills flanking a small "vs" chip, then a big centred
-                  SETS score, then a compact secondary line with points
-                  and board count. Winner side gets a subtle gold outline
-                  + trophy; loser stays neutral. Reads as one scoreboard,
-                  not a form.
-                -->
-                <div class="card-teams-c">
-                  <span class="team-pill team-pill-a" class:winner={winner === 'a'}>
-                    {#if winner === 'a'}<span class="crown">🏆</span>{/if}
-                    <span class="team-name-c">{sideNameMatch(m, 'a')}</span>
-                  </span>
-                  <span class="vs-chip">vs</span>
-                  <span class="team-pill team-pill-b" class:winner={winner === 'b'}>
-                    {#if winner === 'b'}<span class="crown">🏆</span>{/if}
-                    <span class="team-name-c">{sideNameMatch(m, 'b')}</span>
-                  </span>
-                </div>
-                <div class="card-sets-c">
-                  <span class="sets-digit digit-a" class:sets-w={winner === 'a'}>{r?.setsA ?? 0}</span>
-                  <span class="sets-sep">–</span>
-                  <span class="sets-digit digit-b" class:sets-w={winner === 'b'}>{r?.setsB ?? 0}</span>
-                </div>
-                <div class="card-secondary-c">
-                  <span class="sec-item">
-                    <span class="sec-lbl">Points</span>
-                    <span class="sec-val"><span class="digit-a">{r?.finalPointsA ?? 0}</span>–<span class="digit-b">{r?.finalPointsB ?? 0}</span></span>
-                  </span>
-                  <span class="sec-dot" aria-hidden="true">·</span>
-                  <span class="sec-item">
-                    <span class="sec-val">{r?.boardCount ?? 0}</span>
-                    <span class="sec-lbl">{(r?.boardCount ?? 0) === 1 ? 'board' : 'boards'}</span>
-                  </span>
-                </div>
-              {/if}
-                </button>
-              </li>
-            {/each}
-              </ul>
-              {/if}
-            </section>
-          {/each}
-          {/if}
-        </section>
-      {/each}
-      <!--
-        Practice section — flat list of solo drill runs. Renders below
-        the tournament-grouped versus matches so those two very
-        different concepts don't intermix visually. Collapsible via
-        the same isCollapsed/toggleGroup state Map used for real
-        buckets; the reserved key `__practice__` never clashes with a
-        real tournament name (60-char alphanumeric-plus-dash regex).
-      -->
-      {#if practiceMatches.length > 0}
-        {@const practiceFolded = isCollapsed('history', PRACTICE_BUCKET)}
-        <section class="tour-group" class:folded={practiceFolded}>
-          <button
-            type="button"
-            class="tour-hdr"
-            aria-expanded={!practiceFolded}
-            onclick={() => toggleGroup('history', PRACTICE_BUCKET)}
-          >
-            <span class="tour-caret" class:tour-caret-folded={practiceFolded} aria-hidden="true">▾</span>
-            <span class="tour-name">Practice</span>
-            <span class="tour-count">{practiceMatches.length}</span>
-          </button>
-          {#if !practiceFolded}
-          <ul class="grid">
-            {#each practiceMatches as m (m.id)}
-              {@const editable = canEditMatch(m)}
-              {@const rows = m.practiceBoards ?? []}
-              {@const totalMisses = rows.reduce(
-                (s, row) => s + (row ?? []).reduce((a, v) => a + (v ?? 0), 0),
-                0,
-              )}
-              {@const boardsPerSet = m.cfg?.maxBoards ?? (rows[0]?.length ?? 0)}
-              {@const totalBoards = rows.length * boardsPerSet}
-              <li class="card-li">
-                {#if editable}
-                  <button
-                    type="button"
-                    class="card-edit"
-                    onclick={(e) => openEdit(m, e)}
-                    aria-label="Edit match"
-                  >✎</button>
-                {/if}
-                <button
-                  type="button"
-                  class="card card-ended"
-                  onclick={() => openMatch(m)}
-                >
-                  <div class="card-hdr">
-                    <span class="card-badge card-badge-practice">Practice</span>
-                    <span class="card-mode">{modeLabelMatch(m)}</span>
-                    <span class="card-meta">{relTime(m.endedAt)}</span>
-                  </div>
-                  <div class="card-teams">
-                    <span class="team-block team-a" style="flex:1">
-                      <span class="team-name">{sideNameMatch(m, 'a')}</span>
-                    </span>
-                  </div>
-                  <div class="card-scores">
-                    <span class="score-block">
-                      <span class="score-lbl">MISSES</span>
-                      <span class="score-val">{totalMisses}</span>
-                    </span>
-                    <span class="score-block">
-                      <span class="score-lbl">BOARDS</span>
-                      <span class="score-val">{totalBoards}</span>
-                    </span>
-                  </div>
-                </button>
-              </li>
-            {/each}
-          </ul>
-          {/if}
-        </section>
-      {/if}
-      {/if}
     {/if}
   {:else if tab === 'reports'}
     <!--
@@ -2982,31 +2710,8 @@
     cursor: pointer;
   }
   .hist-clear:hover { background: rgba(239, 83, 80, 0.08); }
-  .hist-view-toggle {
-    display: inline-flex;
-    gap: 0.25rem;
-    padding: 0.15rem;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 0.5rem;
-    flex-shrink: 0;
-  }
-  .hist-view-btn {
-    padding: 0.3rem 0.65rem;
-    background: transparent;
-    border: 1px solid transparent;
-    border-radius: 0.35rem;
-    color: var(--muted, #9aa0a6);
-    font-size: 0.8rem;
-    font-weight: 700;
-    cursor: pointer;
-  }
-  .hist-view-btn:hover { color: var(--fg, #f5f5f5); }
-  .hist-view-btn-active {
-    background: rgba(255, 213, 74, 0.12);
-    border-color: rgba(255, 213, 74, 0.45);
-    color: var(--accent, #ffd54a);
-  }
+  /* .hist-view-toggle / .hist-view-btn removed with the card view
+     (v3.4.12) — history is table-only. */
 
   /* Table view. Horizontally scrollable on narrow phones so the
      row fits without wrapping cells. Header row is sticky when the
