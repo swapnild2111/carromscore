@@ -3993,6 +3993,7 @@
   .foot-ico { font-size: 0.95rem; line-height: 1; }
   .foot-lbl { letter-spacing: 0.04em; }
 
+  .foot-btn.scores { border-color: rgba(255,213,74,0.4); color: var(--accent); }
   .foot-btn.swap { border-color: rgba(79,195,247,0.4); color: var(--side-a); }
   .foot-btn.reset { border-color: rgba(255,213,74,0.4); color: var(--accent); }
   .foot-btn.endm { border-color: rgba(76,175,80,0.5); color: #66bb6a; }

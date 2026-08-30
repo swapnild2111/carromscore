@@ -1424,33 +1424,39 @@
                   </span>
                 </div>
               {:else}
-                <div class="card-teams">
-                  <span class="team-block team-a" class:winner={winner === 'a'}>
-                    <span class="team-name">
-                      {#if winner === 'a'}<span class="crown">🏆</span>{/if}
-                      {sideNameMatch(m, 'a')}
-                    </span>
+                <!--
+                  Polished ended-match card (v3.4.12). Two centred name
+                  pills flanking a small "vs" chip, then a big centred
+                  SETS score, then a compact secondary line with points
+                  and board count. Winner side gets a subtle gold outline
+                  + trophy; loser stays neutral. Reads as one scoreboard,
+                  not a form.
+                -->
+                <div class="card-teams-c">
+                  <span class="team-pill team-pill-a" class:winner={winner === 'a'}>
+                    {#if winner === 'a'}<span class="crown">🏆</span>{/if}
+                    <span class="team-name-c">{sideNameMatch(m, 'a')}</span>
                   </span>
-                  <span class="team-vs">vs</span>
-                  <span class="team-block team-b" class:winner={winner === 'b'}>
-                    <span class="team-name">
-                      {#if winner === 'b'}<span class="crown">🏆</span>{/if}
-                      {sideNameMatch(m, 'b')}
-                    </span>
+                  <span class="vs-chip">vs</span>
+                  <span class="team-pill team-pill-b" class:winner={winner === 'b'}>
+                    {#if winner === 'b'}<span class="crown">🏆</span>{/if}
+                    <span class="team-name-c">{sideNameMatch(m, 'b')}</span>
                   </span>
                 </div>
-                <div class="card-scores">
-                  <span class="score-block">
-                    <span class="score-lbl">SETS</span>
-                    <span class="score-val"><span class="digit-a">{r?.setsA ?? 0}</span>–<span class="digit-b">{r?.setsB ?? 0}</span></span>
+                <div class="card-sets-c">
+                  <span class="sets-digit digit-a" class:sets-w={winner === 'a'}>{r?.setsA ?? 0}</span>
+                  <span class="sets-sep">–</span>
+                  <span class="sets-digit digit-b" class:sets-w={winner === 'b'}>{r?.setsB ?? 0}</span>
+                </div>
+                <div class="card-secondary-c">
+                  <span class="sec-item">
+                    <span class="sec-lbl">Points</span>
+                    <span class="sec-val"><span class="digit-a">{r?.finalPointsA ?? 0}</span>–<span class="digit-b">{r?.finalPointsB ?? 0}</span></span>
                   </span>
-                  <span class="score-block">
-                    <span class="score-lbl">POINTS</span>
-                    <span class="score-val"><span class="digit-a">{r?.finalPointsA ?? 0}</span>–<span class="digit-b">{r?.finalPointsB ?? 0}</span></span>
-                  </span>
-                  <span class="score-block">
-                    <span class="score-lbl">BOARD</span>
-                    <span class="score-val">{r?.boardCount ?? 0}</span>
+                  <span class="sec-dot" aria-hidden="true">·</span>
+                  <span class="sec-item">
+                    <span class="sec-val">{r?.boardCount ?? 0}</span>
+                    <span class="sec-lbl">{(r?.boardCount ?? 0) === 1 ? 'board' : 'boards'}</span>
                   </span>
                 </div>
               {/if}
@@ -2372,6 +2378,132 @@
   }
   .digit-a { color: var(--side-a, #4fc3f7); }
   .digit-b { color: var(--side-b, #ff8a65); }
+
+  /* Polished ended-match card layout (v3.4.12) — takes over from
+     .card-teams / .card-scores for ended-versus cards. Live cards
+     and practice cards retain the older layout. */
+  .card-teams-c {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.65rem;
+    flex: 1 1 auto;
+  }
+  .team-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.3rem;
+    padding: 0.4rem 0.65rem;
+    border-radius: 0.55rem;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    min-width: 0;
+    max-width: 100%;
+    text-align: center;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .team-name-c {
+    font-weight: 700;
+    font-size: 0.95rem;
+    line-height: 1.2;
+    word-break: break-word;
+    min-width: 0;
+  }
+  .team-pill-a .team-name-c { color: var(--side-a, #4fc3f7); }
+  .team-pill-b .team-name-c { color: var(--side-b, #ff8a65); }
+  /* Winner pill: soft gold outline + glow, gold text. Loser pill
+     stays neutral. Fully-tied matches keep both sides' side colours. */
+  .card-ended.has-winner .team-pill.winner {
+    background: rgba(255, 213, 74, 0.06);
+    border-color: rgba(255, 213, 74, 0.5);
+    box-shadow: 0 0 0 1px rgba(255, 213, 74, 0.12), 0 0 12px rgba(255, 213, 74, 0.06);
+  }
+  .card-ended.has-winner .team-pill.winner .team-name-c {
+    color: var(--accent, #ffd54a);
+  }
+  .card-ended.has-winner .team-pill:not(.winner) .team-name-c {
+    color: var(--fg, #f5f5f5);
+  }
+  .vs-chip {
+    font-size: 0.6rem;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--muted, #9aa0a6);
+    padding: 0.15rem 0.4rem;
+    border-radius: 0.3rem;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    flex-shrink: 0;
+  }
+  /* Big centred SETS score. This IS the outcome — everything else is
+     supporting. Uses tabular-nums so 1-1 and 2-0 align vertically
+     across the grid. */
+  .card-sets-c {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: 0.35rem;
+    padding: 0.15rem 0 0.35rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .sets-digit {
+    font-size: 1.65rem;
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: 0.02em;
+  }
+  .sets-sep {
+    color: var(--muted, #9aa0a6);
+    font-size: 1.35rem;
+    font-weight: 700;
+    line-height: 1;
+  }
+  .card-ended.winner-a .sets-digit.sets-w,
+  .card-ended.winner-b .sets-digit.sets-w {
+    color: var(--accent, #ffd54a);
+    text-shadow: 0 0 12px rgba(255, 213, 74, 0.25);
+  }
+  .card-ended.winner-a .sets-digit:not(.sets-w),
+  .card-ended.winner-b .sets-digit:not(.sets-w) {
+    color: var(--fg, #f5f5f5);
+    opacity: 0.7;
+  }
+  /* Secondary line: "Points 21–13 · 8 boards". Muted; sits below
+     the big SETS score and gives the additional context without
+     competing for attention. */
+  .card-secondary-c {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 0.35rem 0.55rem;
+    padding-top: 0.4rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    font-size: 0.78rem;
+    color: var(--muted, #9aa0a6);
+  }
+  .sec-item {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.3rem;
+  }
+  .sec-lbl {
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--muted, #9aa0a6);
+    font-weight: 700;
+  }
+  .sec-val {
+    font-weight: 700;
+    color: var(--fg, #f5f5f5);
+    font-variant-numeric: tabular-nums;
+  }
+  .sec-dot {
+    color: rgba(255, 255, 255, 0.2);
+  }
 
   /* Score digits on ended cards flip to the winner-gold / loser-silver
      colour language, so the whole card reads as one medal narrative.

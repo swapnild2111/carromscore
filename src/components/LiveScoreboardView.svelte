@@ -112,6 +112,20 @@
     for (let i = 0; i < meta.bestOf; i += 1) setIndices.add(i);
     for (const s of bySet.keys()) setIndices.add(s);
     const sortedIndices = Array.from(setIndices).sort((a, b) => a - b);
+    // The set the umpire is currently playing (0-indexed). Anything
+    // at THIS index or beyond is not yet decided — the winner ribbon
+    // ("Set won by ...") should only appear for COMPLETED sets.
+    // Determination (v3.4.12):
+    //   - If matchResult is set, the match has ended; every set with
+    //     any rows is decided.
+    //   - Otherwise the current set is sideA.sets + sideB.sets (the
+    //     count of already-credited sets). Any setIdx < that is done.
+    // Reported 2026-08-30: opening the mid-match Scores popup after
+    // one board showed "Set won by A" even though the set was still
+    // in progress. Same issue in the /live/ lobby popup for live
+    // matches.
+    const matchEnded = (state.matchResult ?? null) !== null;
+    const currentSetIdx = (state.sideA?.sets ?? 0) + (state.sideB?.sets ?? 0);
     const groups: SetGroup[] = [];
     for (const i of sortedIndices) {
       const raw = bySet.get(i) ?? [];
@@ -127,7 +141,8 @@
       const totalA = cumA;
       const totalB = cumB;
       let winner: SetGroup['winner'] = null;
-      if (boards.length > 0) {
+      const setIsCompleted = matchEnded || i < currentSetIdx;
+      if (setIsCompleted && boards.length > 0) {
         if (totalA > totalB) winner = 'a';
         else if (totalB > totalA) winner = 'b';
         else winner = 'tie';
