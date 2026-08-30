@@ -148,6 +148,18 @@
    */
   let matchDecidedToast = $state(false);
   /**
+   * Swap-sides prompt (v3.4.12). Fires immediately after a SET+1
+   * successfully transitions into a NEW set. Real-carrom seat
+   * swaps between sets are common (played first-break-alternates),
+   * and umpires frequently forgot to tap the Swap button — leading
+   * to boardLogs where a mid-match physical swap was recorded on
+   * the wrong seat (reported 2026-08-30, match -P0DbrB6MBtflI74aVDq).
+   * Prompt is a small modal with Yes → swapSides(), No → dismiss.
+   * Not shown on the clinch tap (nothing to swap for) or on SET-1
+   * (undo path).
+   */
+  let showSwapPrompt = $state(false);
+  /**
    * Fires when SET+1 is tapped on the losing side (per-set points
    * lower than or equal to the opponent). Real-carrom rule: the
    * winning side credits the set. This prevents a common umpire
@@ -1095,6 +1107,13 @@
       if (prevSetOpener) {
         currentBreak = prevSetOpener === 'a' ? 'b' : 'a';
       }
+      // Prompt the umpire to swap sides for the new set. Yes → runs
+      // the same swapSides() action the toolbar button uses. No →
+      // dismiss. Doesn't fire on the clinch tap (skipped by the
+      // outer anotherSetRemains guard) or on SET-1 (positive-delta
+      // only). Overlays the score screen briefly; auto-dismisses on
+      // outside tap or 12s idle so it never blocks a running match.
+      showSwapPrompt = true;
     }
     // Auto-clinch: if this SET+1 credit takes the side to the
     // match-winning threshold (⌈bestOf/2⌉), the match is over —
@@ -2744,6 +2763,42 @@
     </div>
   {/if}
 
+  {#if showSwapPrompt}
+    <!--
+      Fires immediately after SET+1 opens a new set. Physical seat
+      swaps between sets are common in real carrom; umpires forgot
+      to tap Swap on the app several times (reported 2026-08-30).
+      Yes → runs the same swapSides() action as the toolbar button.
+      No / backdrop tap → dismiss without swapping. Non-blocking:
+      the score screen keeps working underneath (buttons stay tappable
+      because the backdrop only covers the modal — see .swap-prompt-
+      backdrop below).
+    -->
+    <div
+      class="swap-prompt-backdrop"
+      role="dialog"
+      aria-modal="false"
+      aria-labelledby="swap-prompt-title"
+      onclick={(e) => { if (e.target === e.currentTarget) showSwapPrompt = false; }}
+    >
+      <div class="swap-prompt-card">
+        <p id="swap-prompt-title" class="swap-prompt-title">Swap sides for the next set?</p>
+        <div class="swap-prompt-actions">
+          <button
+            type="button"
+            class="swap-prompt-btn swap-prompt-no"
+            onclick={() => { showSwapPrompt = false; }}
+          >No</button>
+          <button
+            type="button"
+            class="swap-prompt-btn swap-prompt-yes"
+            onclick={() => { showSwapPrompt = false; swapSides(); }}
+          >Yes, swap</button>
+        </div>
+      </div>
+    </div>
+  {/if}
+
   {#if boardCapToast}
     <!--
       Fires when a POINTS tap would take this side past 12 on the
@@ -2920,6 +2975,83 @@
   @keyframes queenToastIn {
     from { opacity: 0; transform: translate(-50%, -0.4rem); }
     to   { opacity: 1; transform: translate(-50%, 0); }
+  }
+
+  /* Swap-sides prompt (v3.4.12). Centred modal card with a dimmed
+     backdrop. Non-blocking-ish: the backdrop is only there to catch
+     "tap outside → dismiss," but visually mutes the score screen
+     so the umpire's attention lands on the question. Similar amber
+     palette to the queen-toast for family resemblance. */
+  .swap-prompt-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 320;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+    animation: swapPromptFade 0.15s ease-out;
+  }
+  .swap-prompt-card {
+    background: linear-gradient(135deg, #221a0a, #14100a);
+    border: 1px solid rgba(255, 213, 74, 0.55);
+    border-radius: 0.9rem;
+    padding: 1.1rem 1.25rem 1rem;
+    max-width: min(20rem, calc(100vw - 2rem));
+    box-shadow:
+      0 0 0 1px rgba(255, 213, 74, 0.25),
+      0 18px 48px rgba(0, 0, 0, 0.65);
+    animation: swapPromptScale 0.18s ease-out;
+  }
+  .swap-prompt-title {
+    margin: 0 0 0.9rem;
+    color: var(--accent, #ffd54a);
+    font-weight: 700;
+    font-size: 1rem;
+    text-align: center;
+  }
+  .swap-prompt-actions {
+    display: flex;
+    gap: 0.6rem;
+    justify-content: center;
+  }
+  .swap-prompt-btn {
+    flex: 1 1 0;
+    min-width: 5rem;
+    padding: 0.55rem 0.9rem;
+    border-radius: 0.55rem;
+    font-weight: 700;
+    font-size: 0.95rem;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: background 0.12s, border-color 0.12s;
+  }
+  .swap-prompt-no {
+    background: #1a1a1a;
+    color: #ccc;
+    border-color: #333;
+  }
+  .swap-prompt-no:hover, .swap-prompt-no:active {
+    background: #222;
+    border-color: #444;
+  }
+  .swap-prompt-yes {
+    background: linear-gradient(135deg, #3a2a10, #2a1e0a);
+    color: var(--accent, #ffd54a);
+    border-color: rgba(255, 213, 74, 0.6);
+  }
+  .swap-prompt-yes:hover, .swap-prompt-yes:active {
+    background: linear-gradient(135deg, #4a3618, #362510);
+  }
+  @keyframes swapPromptFade {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+  @keyframes swapPromptScale {
+    from { transform: scale(0.94); opacity: 0; }
+    to   { transform: scale(1); opacity: 1; }
   }
 
   .rotate-card {
