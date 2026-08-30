@@ -995,19 +995,20 @@
     font-size: 0.85rem;
     cursor: pointer;
   }
+  /* Tournament + Round selects use the same neutral fg colour as
+     the Mode select. Earlier we had them in accent gold, but the
+     gold clashed with the gold-tinted filter bar around them
+     (reported 2026-08-30). Border and label stay neutral;
+     the amber tint on the bar itself is enough emphasis. */
   .rep-select-tour {
-    border-color: rgba(255, 213, 74, 0.35);
-    color: var(--accent, #ffd54a);
-    font-weight: 700;
     min-width: 12rem;
     max-width: min(24rem, 60vw);
+    font-weight: 700;
   }
   .rep-select-round {
-    border-color: rgba(255, 213, 74, 0.25);
-    color: var(--accent, #ffd54a);
-    font-weight: 700;
     min-width: 8rem;
     max-width: min(18rem, 50vw);
+    font-weight: 700;
   }
   .rep-select:focus {
     outline: none;
