@@ -660,6 +660,21 @@
     if (copiedTimer !== null) window.clearTimeout(copiedTimer);
     copiedTimer = window.setTimeout(() => { copiedKind = null; }, 1500);
   }
+  /**
+   * Copy the shareable /live/?tab=history&match=... URL for the
+   * currently-open history-match popup (v3.4.12). Wired to the popup
+   * header's Share button. The tap-through URL scheme mirrors the
+   * per-card copy — anyone opening it lands on the same popup.
+   */
+  async function copyMatchShareUrl() {
+    if (openPopup?.source !== 'match') return;
+    const id = openPopup.matchId;
+    const url = `${window.location.origin}${base}live/?tab=history&match=${encodeURIComponent(id)}`;
+    await writeClipboard(url);
+    copiedKind = 'share';
+    if (copiedTimer !== null) window.clearTimeout(copiedTimer);
+    copiedTimer = window.setTimeout(() => { copiedKind = null; }, 1500);
+  }
 
   function openEntry(entry: LobbyEntry) {
     // Local offline entry: no Firebase record to subscribe the
@@ -1776,6 +1791,24 @@
               title="Copy the transparent-overlay URL for OBS or Prism Browser Source"
             >
               {#if copiedKind === 'obs'}<span aria-hidden="true">✓</span> Copied{:else}<span aria-hidden="true">📺</span> OBS{/if}
+            </button>
+          {:else if openPopup?.source === 'match'}
+            <!--
+              History-match popup Share button (v3.4.12). Copies a
+              deep-link URL that opens the same popup for anyone who
+              clicks it. Reported 2026-08-30: after History switched
+              to table layout the per-card 🔗 button disappeared, so
+              there was no way to share a specific archived match.
+              This puts a Share affordance back in the popup header.
+            -->
+            <button
+              type="button"
+              class="sheet-share"
+              onclick={copyMatchShareUrl}
+              aria-label="Copy match URL"
+              title="Copy the match URL to share"
+            >
+              {#if copiedKind === 'share'}<span aria-hidden="true">✓</span> Copied{:else}<span aria-hidden="true">⧉</span> Share{/if}
             </button>
           {/if}
           <button type="button" class="sheet-close" onclick={closePopup} aria-label="Close">✕</button>

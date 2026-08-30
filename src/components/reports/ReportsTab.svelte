@@ -340,9 +340,11 @@
   let lbSortDir = $state<'asc' | 'desc'>(initialReportsPrefs.lbSortDir);
   let mSortKey = $state<MSortKey>(initialReportsPrefs.mSortKey);
   let mSortDir = $state<'asc' | 'desc'>(initialReportsPrefs.mSortDir);
-  let lbSearch = $state<string>('');
-  let mSearch = $state<string>('');
-  let mFilterMode = $state<'all' | 'singles' | 'doubles'>('all');
+  // Shared filter state (v3.4.12) — one bar drives both the
+  // Leaderboard and the Matches table. The tournament dropdown drives
+  // `selection` directly so the whole report scopes with it.
+  let filterSearch = $state<string>('');
+  let filterMode = $state<'all' | 'singles' | 'doubles'>('all');
   $effect(() => {
     try {
       localStorage.setItem(
@@ -372,7 +374,7 @@
   const sortedLeaderboard = $derived(() => {
     const r = viewReport();
     if (!r) return [];
-    const q = lbSearch.trim().toLowerCase();
+    const q = filterSearch.trim().toLowerCase();
     const arr = r.playerSummary.filter((p) => !q || p.name.toLowerCase().includes(q));
     // Preserve buildPlayerSummary's baked-in tie-break order when
     // sorting by 'rank' (its input order IS the rank).
@@ -400,9 +402,9 @@
   const sortedMatches = $derived(() => {
     const r = viewReport();
     if (!r) return [];
-    const q = mSearch.trim().toLowerCase();
+    const q = filterSearch.trim().toLowerCase();
     const arr = r.rows.filter((row) => {
-      if (mFilterMode !== 'all' && String(row.mode).toLowerCase() !== mFilterMode) return false;
+      if (filterMode !== 'all' && String(row.mode).toLowerCase() !== filterMode) return false;
       if (q) {
         const hay = `${row.sideA} ${row.sideB}`.toLowerCase();
         if (!hay.includes(q)) return false;
@@ -432,31 +434,55 @@
 
 <section class="reports">
   <!--
-    Tournament scope (v3.4.12). Chip strip removed per user feedback
-    2026-08-30 — the "hardcoded" row of chips took vertical space
-    without adding much. Replaced with a compact select that anchors
-    top-left of the tab. The Matches table's filter row (below the
-    stats + leaderboard) offers a second, redundant tournament
-    selector for umpires who prefer scoping through table filters —
-    both stay in sync via the same `selection` state.
+    Shared filter bar (v3.4.12) — replaces both the top tournament
+    chip strip AND the per-table search rows we had earlier.
+    Player-name search + mode dropdown + tournament dropdown drive
+    the whole Reports body: summary tiles, leaderboard, matches
+    table. The Tournament select is now the ONLY tournament picker
+    (the earlier compact-select was removed here). Tournament change
+    fires pick() so URL deep-linking still works.
+    Default value = null (Default bucket) — first-time visitors
+    land on the untagged summary rather than the empty state.
   -->
-  <div class="picker picker-compact">
-    <label class="picker-lbl">
-      Tournament
-      <select
-        class="tour-select"
-        value={selection === undefined ? '' : selection === null ? '__default__' : selection}
-        onchange={(e) => {
-          const v = (e.currentTarget as HTMLSelectElement).value;
-          if (v === '__default__') pick(null);
-          else pick(v);
-        }}
-      >
-        {#each options() as opt (opt.key ?? '__default__')}
-          <option value={opt.key === null ? '__default__' : opt.key}>{opt.label}</option>
-        {/each}
-      </select>
-    </label>
+  <div class="reports-filters" role="group" aria-label="Filter reports">
+    <input
+      type="search"
+      class="rep-search"
+      placeholder="Search player name…"
+      bind:value={filterSearch}
+      aria-label="Filter by player name"
+    />
+    <select
+      class="rep-select"
+      bind:value={filterMode}
+      aria-label="Filter by match mode"
+    >
+      <option value="all">All modes</option>
+      <option value="singles">Singles</option>
+      <option value="doubles">Doubles</option>
+    </select>
+    <select
+      class="rep-select rep-select-tour"
+      value={selection === null ? '__default__' : (selection ?? '__default__')}
+      onchange={(e) => {
+        const v = (e.currentTarget as HTMLSelectElement).value;
+        if (v === '__default__') pick(null);
+        else pick(v);
+      }}
+      aria-label="Tournament"
+    >
+      {#each options() as opt (opt.key ?? '__default__')}
+        <option value={opt.key === null ? '__default__' : opt.key}>{opt.label}</option>
+      {/each}
+    </select>
+    {#if filterSearch.trim() !== '' || filterMode !== 'all'}
+      <button
+        type="button"
+        class="rep-clear"
+        onclick={() => { filterSearch = ''; filterMode = 'all'; }}
+        aria-label="Clear filters"
+      >✕ Clear</button>
+    {/if}
   </div>
 
   {#if report && (report.roundReports?.length ?? 0) > 0}
@@ -521,6 +547,25 @@
         else.
       -->
       <div class="stat-row">
+        <!--
+          Podium tile (v3.4.12): top three players in the current
+          tournament + round scope. Each row = [medal] [Player name]
+          [wins]. Medal-first per user preference so gold/silver/bronze
+          anchor the row visually. Podium is the FIRST tile in the
+          stat row — the eye lands here before the numeric summaries.
+        -->
+        <div class="stat-tile stat-tile-podium">
+          <div class="stat-label podium-lbl">Top players</div>
+          <div class="podium-list">
+            {#each view.playerSummary.slice(0, 3) as p, i (p.playerId)}
+              <div class="podium-row" class:podium-1={i === 0} class:podium-2={i === 1} class:podium-3={i === 2}>
+                <span class="podium-medal" aria-hidden="true">{i === 0 ? '🥇' : i === 1 ? '🥈' : '🥉'}</span>
+                <span class="podium-name" title={p.name}>{p.name}</span>
+                <span class="podium-wins">{p.wins === 1 ? '1 W' : `${p.wins} W`}</span>
+              </div>
+            {/each}
+          </div>
+        </div>
         <div class="stat-tile">
           <div class="stat-value">{stats.matchesCount}</div>
           <div class="stat-label">{stats.matchesCount === 1 ? 'Match' : 'Matches'}</div>
@@ -537,40 +582,11 @@
           <div class="stat-value">{tournamentsCount()}</div>
           <div class="stat-label">{tournamentsCount() === 1 ? 'Tournament' : 'Tournaments'}</div>
         </div>
-        <!--
-          Podium tile (v3.4.12): top three players in the current
-          tournament + round scope. Each row = [Player name] [medal]
-          [wins]. Name is the primary anchor per user preference; medal
-          sits alongside as an ornament. Column headers appear as a
-          tiny label above the row list. Falls back to fewer rows
-          when the field is smaller than 3.
-        -->
-        <div class="stat-tile stat-tile-podium">
-          <div class="stat-label podium-lbl">Top players</div>
-          <div class="podium-list">
-            {#each view.playerSummary.slice(0, 3) as p, i (p.playerId)}
-              <div class="podium-row" class:podium-1={i === 0} class:podium-2={i === 1} class:podium-3={i === 2}>
-                <span class="podium-medal" aria-hidden="true">{i === 0 ? '🥇' : i === 1 ? '🥈' : '🥉'}</span>
-                <span class="podium-name" title={p.name}>{p.name}</span>
-                <span class="podium-wins">{p.wins === 1 ? '1 W' : `${p.wins} W`}</span>
-              </div>
-            {/each}
-          </div>
-        </div>
       </div>
     {/if}
 
     <div class="summary">
-      <div class="tbl-toolbar">
-        <h3 class="section-hdr">Leaderboard</h3>
-        <input
-          type="search"
-          class="tbl-search"
-          placeholder="Search player…"
-          bind:value={lbSearch}
-          aria-label="Filter leaderboard by player name"
-        />
-      </div>
+      <h3 class="section-hdr">Leaderboard</h3>
       <!--
         Leaderboard: sortable columns (v3.4.12). Rank column uses the
         buildPlayerSummary baked-in order (wins DESC → boards DESC →
@@ -641,25 +657,6 @@
         >
           {#if copiedKey === MAIN_COPY_KEY}<span aria-hidden="true">✓</span> Copied{:else}<span aria-hidden="true">⧉</span> Copy table{/if}
         </button>
-      </div>
-    </div>
-    <div class="tbl-filters">
-      <input
-        type="search"
-        class="tbl-search"
-        placeholder="Search player…"
-        bind:value={mSearch}
-        aria-label="Filter matches by player name"
-      />
-      <div class="tbl-chips" role="group" aria-label="Filter by mode">
-        {#each [ { m: 'all', label: 'All' }, { m: 'singles', label: 'Singles' }, { m: 'doubles', label: 'Doubles' } ] as opt (opt.m)}
-          <button
-            type="button"
-            class="tbl-chip"
-            class:tbl-chip-active={mFilterMode === opt.m}
-            onclick={() => (mFilterMode = opt.m as 'all' | 'singles' | 'doubles')}
-          >{opt.label}</button>
-        {/each}
       </div>
     </div>
     <!--
@@ -881,38 +878,68 @@
     letter-spacing: 0.08em;
     color: var(--muted, #9aa0a6);
   }
-  /* Compact tournament picker (v3.4.12) — inline label + select in
-     one row instead of the wide chip strip. Reduces vertical noise
-     at the top of the Reports tab. */
-  .picker-compact {
-    flex-direction: row;
-    align-items: center;
-    gap: 0.6rem;
-    margin-bottom: 0.35rem;
-  }
-  .picker-compact .picker-lbl {
-    display: inline-flex;
+  /* Shared filter bar (v3.4.12) — search + mode + tournament in one
+     row above the summary tiles. Same visual language as the History
+     tab's filter bar. */
+  .reports-filters {
+    display: flex;
     align-items: center;
     gap: 0.5rem;
-    color: var(--muted, #9aa0a6);
+    flex-wrap: wrap;
+    margin-bottom: 0.75rem;
+    padding: 0.6rem 0.75rem;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 0.7rem;
   }
-  .tour-select {
+  .rep-search {
+    flex: 1 1 12rem;
+    min-width: 8rem;
+    padding: 0.4rem 0.6rem;
     background: #141414;
-    border: 1px solid rgba(255, 213, 74, 0.35);
-    color: var(--accent, #ffd54a);
-    padding: 0.35rem 0.6rem;
+    border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 0.45rem;
+    color: var(--fg, #f5f5f5);
     font: inherit;
     font-size: 0.85rem;
+  }
+  .rep-search:focus {
+    outline: none;
+    border-color: rgba(255, 213, 74, 0.5);
+  }
+  .rep-select {
+    padding: 0.4rem 0.6rem;
+    background: #141414;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 0.45rem;
+    color: var(--fg, #f5f5f5);
+    font: inherit;
+    font-size: 0.85rem;
+    cursor: pointer;
+  }
+  .rep-select-tour {
+    border-color: rgba(255, 213, 74, 0.35);
+    color: var(--accent, #ffd54a);
+    font-weight: 700;
+    min-width: 12rem;
+    max-width: min(24rem, 60vw);
+  }
+  .rep-select:focus {
+    outline: none;
+    border-color: rgba(255, 213, 74, 0.5);
+  }
+  .rep-clear {
+    padding: 0.35rem 0.65rem;
+    background: transparent;
+    border: 1px solid rgba(239, 83, 80, 0.4);
+    border-radius: 0.45rem;
+    color: #ef5350;
+    font: inherit;
+    font-size: 0.78rem;
     font-weight: 700;
     cursor: pointer;
-    min-width: 12rem;
-    max-width: min(24rem, 90vw);
   }
-  .tour-select:focus {
-    outline: none;
-    border-color: rgba(255, 213, 74, 0.7);
-  }
+  .rep-clear:hover { background: rgba(239, 83, 80, 0.08); }
   .chips {
     display: flex;
     gap: 0.4rem;
