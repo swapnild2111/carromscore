@@ -40,7 +40,7 @@
   import ReportsTab from './reports/ReportsTab.svelte';
   import { logScreen } from '../lib/analytics';
   import { subscribeCurrentUserRole, type Role } from '../lib/roles';
-  import { currentUser } from '../lib/auth';
+  import { currentUser, subscribeAuth } from '../lib/auth';
   import {
     normalizeKey,
     loadRounds,
@@ -489,11 +489,19 @@
     // on each card. Role is null when logged out or before the
     // subscription rehydrates.
     const unsubRole = subscribeCurrentUserRole((r) => (role = r));
+    // Reactive uid (v3.5.3). Previously the pencil / self-delete
+    // checks called currentUser() synchronously at template render
+    // — non-reactive, so a slow auth hydration left the checks
+    // stuck at "not signed in" even after the user's uid landed.
+    // Reported 2026-08-30: organizer signs in, sees the row but
+    // no pencil until a manual reload.
+    const unsubAuth = subscribeAuth((u) => (myUid = u?.uid ?? null));
     return () => {
       unsub?.();
       unsubStore();
       unsubTournaments();
       unsubRole();
+      unsubAuth();
       unsubConn();
       window.removeEventListener('storage', onStorage);
       window.clearInterval(nowTick);
@@ -534,6 +542,7 @@
 
   // Role reactive state + edit-modal open target.
   let role = $state<Role | null>(null);
+  let myUid = $state<string | null>(null);
   let editing = $state<MatchRecord | null>(null);
 
   /**
@@ -543,6 +552,13 @@
    * UI-only — the RTDB rule at /matches/$id is the actual enforcement.
    */
   function canEditMatch(m: MatchRecord): boolean {
+    // Reactive touches so the template re-evaluates when the
+    // tournament store or auth uid hydrate after mount. Without
+    // these, an organiser signing in AFTER the History table
+    // renders never sees the pencil (canEditMatch ran once with
+    // stale null values and never re-ran). v3.5.3.
+    void tournamentTick;
+    void myUid;
     if (!role) return false;
     if (role.isSuper) return true;
     if (!role.isOrganiser) return false;
@@ -554,7 +570,6 @@
     if (!key) return false;
     const t = findByKey(key);
     if (!t) return false;
-    const myUid = currentUser()?.uid;
     return !!(myUid && t.createdBy === myUid);
   }
 
@@ -569,9 +584,8 @@
    */
   function canSelfDelete(m: MatchRecord | null): boolean {
     if (!m) return false;
-    const uid = currentUser()?.uid;
-    if (!uid) return false;
-    return m.createdBy === uid;
+    if (!myUid) return false;
+    return m.createdBy === myUid;
   }
 
   // Self-delete UI state. Kept close to the sheet-dialog markup below.
@@ -1898,8 +1912,7 @@
         {#if openPopup?.source === 'match'}
           {@const rec = openMatchRecord}
           {#if rec}
-            {@const uid = currentUser()?.uid}
-            {@const owns = !!uid && rec.createdBy === uid}
+            {@const owns = !!myUid && rec.createdBy === myUid}
             {#if rec.createdBy}
               <p class="recorded-by">
                 Recorded by <strong>{rec.createdByName || 'a signed-in player'}</strong>
