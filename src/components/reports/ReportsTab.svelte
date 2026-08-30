@@ -195,6 +195,24 @@
   });
 
   /**
+   * Distinct tournament count (v3.4.12) — how many tournaments the
+   * archive has recorded matches for, regardless of the current
+   * picker scope. Reads from the raw `matches` prop, not viewReport,
+   * so the number stays stable across the picker. Includes the
+   * untagged Default bucket if any untagged match exists.
+   */
+  const tournamentsCount = $derived(() => {
+    const seen = new Set<string>();
+    let hasUntagged = false;
+    for (const m of matches) {
+      const t = (m.tournament ?? '').trim();
+      if (t) seen.add(t);
+      else hasUntagged = true;
+    }
+    return seen.size + (hasUntagged ? 1 : 0);
+  });
+
+  /**
    * Per-round accordion fold state (v3.2). Session-only Set of
    * roundKeys the user has explicitly toggled — reset whenever
    * `selection` changes so switching tournaments starts with a
@@ -413,21 +431,32 @@
 </script>
 
 <section class="reports">
-  <div class="picker">
-    <span class="picker-lbl">Tournament</span>
-    <div class="chips" role="tablist" aria-label="Choose tournament">
-      {#each options() as opt (opt.key ?? '__default__')}
-        <button
-          type="button"
-          role="tab"
-          class="chip"
-          class:chip-on={selection === opt.key}
-          class:chip-default={opt.key === null}
-          aria-selected={selection === opt.key}
-          onclick={() => pick(opt.key)}
-        >{opt.label}</button>
-      {/each}
-    </div>
+  <!--
+    Tournament scope (v3.4.12). Chip strip removed per user feedback
+    2026-08-30 — the "hardcoded" row of chips took vertical space
+    without adding much. Replaced with a compact select that anchors
+    top-left of the tab. The Matches table's filter row (below the
+    stats + leaderboard) offers a second, redundant tournament
+    selector for umpires who prefer scoping through table filters —
+    both stay in sync via the same `selection` state.
+  -->
+  <div class="picker picker-compact">
+    <label class="picker-lbl">
+      Tournament
+      <select
+        class="tour-select"
+        value={selection === undefined ? '' : selection === null ? '__default__' : selection}
+        onchange={(e) => {
+          const v = (e.currentTarget as HTMLSelectElement).value;
+          if (v === '__default__') pick(null);
+          else pick(v);
+        }}
+      >
+        {#each options() as opt (opt.key ?? '__default__')}
+          <option value={opt.key === null ? '__default__' : opt.key}>{opt.label}</option>
+        {/each}
+      </select>
+    </label>
   </div>
 
   {#if report && (report.roundReports?.length ?? 0) > 0}
@@ -504,6 +533,10 @@
           <div class="stat-value">{stats.boardsCount}</div>
           <div class="stat-label">{stats.boardsCount === 1 ? 'Board' : 'Boards'}</div>
         </div>
+        <div class="stat-tile">
+          <div class="stat-value">{tournamentsCount()}</div>
+          <div class="stat-label">{tournamentsCount() === 1 ? 'Tournament' : 'Tournaments'}</div>
+        </div>
         <!--
           Podium tile (v3.4.12): top three players in the current
           tournament + round scope. Each row = [Player name] [medal]
@@ -517,8 +550,8 @@
           <div class="podium-list">
             {#each view.playerSummary.slice(0, 3) as p, i (p.playerId)}
               <div class="podium-row" class:podium-1={i === 0} class:podium-2={i === 1} class:podium-3={i === 2}>
-                <span class="podium-name" title={p.name}>{p.name}</span>
                 <span class="podium-medal" aria-hidden="true">{i === 0 ? '🥇' : i === 1 ? '🥈' : '🥉'}</span>
+                <span class="podium-name" title={p.name}>{p.name}</span>
                 <span class="podium-wins">{p.wins === 1 ? '1 W' : `${p.wins} W`}</span>
               </div>
             {/each}
@@ -835,7 +868,8 @@
     gap: 1rem;
   }
 
-  /* Tournament chip picker */
+  /* Tournament chip picker (round strip only; the top tournament
+     row now uses .picker-compact + a native <select>). */
   .picker {
     display: flex;
     flex-direction: column;
@@ -846,6 +880,38 @@
     text-transform: uppercase;
     letter-spacing: 0.08em;
     color: var(--muted, #9aa0a6);
+  }
+  /* Compact tournament picker (v3.4.12) — inline label + select in
+     one row instead of the wide chip strip. Reduces vertical noise
+     at the top of the Reports tab. */
+  .picker-compact {
+    flex-direction: row;
+    align-items: center;
+    gap: 0.6rem;
+    margin-bottom: 0.35rem;
+  }
+  .picker-compact .picker-lbl {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--muted, #9aa0a6);
+  }
+  .tour-select {
+    background: #141414;
+    border: 1px solid rgba(255, 213, 74, 0.35);
+    color: var(--accent, #ffd54a);
+    padding: 0.35rem 0.6rem;
+    border-radius: 0.45rem;
+    font: inherit;
+    font-size: 0.85rem;
+    font-weight: 700;
+    cursor: pointer;
+    min-width: 12rem;
+    max-width: min(24rem, 90vw);
+  }
+  .tour-select:focus {
+    outline: none;
+    border-color: rgba(255, 213, 74, 0.7);
   }
   .chips {
     display: flex;
@@ -890,19 +956,28 @@
     grid-template-columns: repeat(2, 1fr);
     gap: 0.6rem;
   }
-  /* Wider viewport: 3 number tiles on the left row + a wider podium
-     tile spanning 2 columns on the right so all three podium rows
-     fit comfortably without truncating names. */
-  @media (min-width: 560px) {
+  /* Wider viewport: 4 number tiles + podium spanning 2 columns.
+     Total 6 cols. Podium is the wider block on the right so all
+     three medal rows fit comfortably. */
+  @media (min-width: 720px) {
     .stat-row {
-      grid-template-columns: repeat(5, 1fr);
+      grid-template-columns: repeat(6, 1fr);
     }
     .stat-tile-podium {
       grid-column: span 2;
     }
   }
-  /* Narrow phones: podium spans full width beneath the three number
-     tiles (2-col grid), so it gets its own row and stays readable. */
+  /* Mid-width tablet: 2-col grid for the 4 number tiles, podium
+     spans full width on its own row. */
+  @media (min-width: 560px) and (max-width: 719px) {
+    .stat-row {
+      grid-template-columns: repeat(4, 1fr);
+    }
+    .stat-tile-podium {
+      grid-column: span 4;
+    }
+  }
+  /* Narrow phones: number tiles remain 2-col, podium spans full width. */
   @media (max-width: 559px) {
     .stat-tile-podium {
       grid-column: span 2;
@@ -964,7 +1039,10 @@
   }
   .podium-row {
     display: grid;
-    grid-template-columns: 1fr auto auto;
+    /* medal (fixed) · name (flex) · wins (fixed). Medal-first order
+       per user preference so the gold/silver/bronze anchor is the
+       leftmost visual cue. */
+    grid-template-columns: auto 1fr auto;
     align-items: center;
     gap: 0.5rem;
     padding: 0.15rem 0;
