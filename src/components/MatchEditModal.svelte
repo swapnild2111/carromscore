@@ -112,6 +112,50 @@
   let tournament = $state<string>(record.tournament ?? '');
   let noteA = $state<string>(record.notes?.a ?? '');
   let noteB = $state<string>(record.notes?.b ?? '');
+
+  // Practice-mode support (v3.5.5). Practice records store a 2D
+  // matrix of miss counts (outer = set, inner = board within set)
+  // instead of the versus boardLog. The versus form's fields (sets/
+  // points/winner/board log) are meaningless for practice; a
+  // separate editor block renders below when isPractice is true.
+  const isPractice = record.mode === 'practice';
+  let practiceBoards = $state<number[][]>(
+    // Defensive clone: outer + inner are new arrays so edits stay
+    // local until Save.
+    (record.practiceBoards ?? []).map((row) =>
+      Array.isArray(row) ? row.map((v) => Number(v) || 0) : [],
+    ),
+  );
+  // Fallback shape when the record has no matrix yet — read from
+  // the record's cfg or use a small default. Only used to size the
+  // grid on first render.
+  const practiceCfg = {
+    sets: Math.max(1, record.cfg?.bestOf ?? practiceBoards.length ?? 1),
+    boardsPerSet: Math.max(1, record.cfg?.maxBoards ?? practiceBoards[0]?.length ?? 8),
+  };
+  // Normalise the matrix to the expected shape so empty cells render
+  // consistently. Missing rows/columns become 0.
+  function normalisedPracticeCell(setIdx: number, boardIdx: number): number {
+    const row = practiceBoards[setIdx];
+    if (!Array.isArray(row)) return 0;
+    return Number(row[boardIdx]) || 0;
+  }
+  function setPracticeCell(setIdx: number, boardIdx: number, value: number) {
+    const next = practiceBoards.map((r) => (Array.isArray(r) ? [...r] : []));
+    while (next.length <= setIdx) next.push([]);
+    const row = next[setIdx];
+    while (row.length <= boardIdx) row.push(0);
+    const clean = Math.max(0, Math.min(99, Math.floor(Number.isFinite(value) ? value : 0)));
+    row[boardIdx] = clean;
+    practiceBoards = next;
+  }
+  const practiceTotalMisses = $derived(
+    practiceBoards.reduce(
+      (sum, row) => sum + (Array.isArray(row) ? row.reduce((s, v) => s + (Number(v) || 0), 0) : 0),
+      0,
+    ),
+  );
+
   let rows = $state<BoardRow[]>(
     // Filter out null/undefined slots. Firebase RTDB stores arrays
     // as sparse maps, and an admin delete of a single boardLog index
@@ -242,26 +286,34 @@
   async function save() {
     inlineError = null;
     saving = true;
-    const patch: MatchPatch = {
-      result: {
-        // setsA / setsB / winner / finalPoints / boardCount are all
-        // derived from `rows` (see $derived declarations above), so
-        // they're always in sync with the boardLog we're about to
-        // write. Clamps aren't needed — the derivations guarantee
-        // non-negative integers and a valid winner value.
-        setsA,
-        setsB,
-        finalPointsA,
-        finalPointsB,
-        boardCount,
-        winner,
-      },
-      notes: { a: noteA, b: noteB },
-      // Empty string clears the tag entirely (retention shortens).
-      // Non-empty writes the trimmed value.
-      tournament: isSuper ? tournament.trim() : record.tournament ?? '',
-      boardLog: rows,
-    };
+    const patch: MatchPatch = isPractice
+      ? {
+          // Practice: only the miss-matrix and metadata make sense.
+          // Sets/points/winner/boardLog don't apply to solo drills.
+          notes: { a: noteA, b: noteB },
+          tournament: isSuper ? tournament.trim() : record.tournament ?? '',
+          practiceBoards,
+        }
+      : {
+          result: {
+            // setsA / setsB / winner / finalPoints / boardCount are all
+            // derived from `rows` (see $derived declarations above), so
+            // they're always in sync with the boardLog we're about to
+            // write. Clamps aren't needed — the derivations guarantee
+            // non-negative integers and a valid winner value.
+            setsA,
+            setsB,
+            finalPointsA,
+            finalPointsB,
+            boardCount,
+            winner,
+          },
+          notes: { a: noteA, b: noteB },
+          // Empty string clears the tag entirely (retention shortens).
+          // Non-empty writes the trimmed value.
+          tournament: isSuper ? tournament.trim() : record.tournament ?? '',
+          boardLog: rows,
+        };
     const outcome = await updateMatch(record.id, patch);
     saving = false;
     if (outcome.ok) {
@@ -305,7 +357,90 @@
     <h2 id="edit-title">
       Edit match
       {#if !isSuper}<span class="scope-badge">Organiser scope</span>{/if}
+      {#if isPractice}<span class="scope-badge">Practice</span>{/if}
     </h2>
+
+    {#if isPractice}
+      <!--
+        Practice-mode editor (v3.5.5). Solo drill records store a
+        2D miss-count matrix instead of the versus boardLog. Grid
+        renders one row per set × one input per board with the raw
+        miss count. Player-name grid + Represents field stay so
+        the player identity is editable; sets/points/winner/board
+        log fields are hidden — none of them apply to practice.
+      -->
+      <section class="section">
+        <p class="hint-block">
+          <strong>{nameA}</strong> — solo practice. Cells below are
+          the miss count per board within each set. Edit any cell to
+          fix a miscount.
+        </p>
+        <div class="practice-grid-wrap">
+          <table class="practice-grid">
+            <thead>
+              <tr>
+                <th class="practice-set-col">Set</th>
+                {#each Array.from({ length: practiceCfg.boardsPerSet }, (_, i) => i) as bIdx (bIdx)}
+                  <th>Board {bIdx + 1}</th>
+                {/each}
+                <th class="practice-total-col">Misses</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each Array.from({ length: practiceCfg.sets }, (_, i) => i) as sIdx (sIdx)}
+                {@const rowTotal = Array.from(
+                  { length: practiceCfg.boardsPerSet },
+                  (_, b) => normalisedPracticeCell(sIdx, b),
+                ).reduce((s, v) => s + v, 0)}
+                <tr>
+                  <td class="practice-set-col">{sIdx + 1}</td>
+                  {#each Array.from({ length: practiceCfg.boardsPerSet }, (_, i) => i) as bIdx (bIdx)}
+                    <td>
+                      <input
+                        type="number"
+                        min="0"
+                        max="99"
+                        step="1"
+                        class="practice-cell"
+                        value={normalisedPracticeCell(sIdx, bIdx)}
+                        oninput={(e) => setPracticeCell(sIdx, bIdx, Number((e.currentTarget as HTMLInputElement).value))}
+                        aria-label={`Set ${sIdx + 1} board ${bIdx + 1} misses`}
+                      />
+                    </td>
+                  {/each}
+                  <td class="practice-total-col practice-total-cell">{rowTotal}</td>
+                </tr>
+              {/each}
+              <tr class="practice-grand">
+                <td class="practice-set-col">Total</td>
+                <td colspan={practiceCfg.boardsPerSet}></td>
+                <td class="practice-total-col practice-total-cell">{practiceTotalMisses}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="grid2 grid-notes">
+          <label>
+            <span>Represents — {nameA}</span>
+            <input type="text" maxlength="40" bind:value={noteA} placeholder="Country, club…" />
+          </label>
+        </div>
+
+        <label class="tourn-input">
+          <span>
+            Tournament tag
+            {#if !isSuper}<em class="hint">(super-admin only)</em>{/if}
+          </span>
+          <input
+            type="text"
+            maxlength="60"
+            bind:value={tournament}
+            readonly={!isSuper}
+          />
+        </label>
+      </section>
+    {:else}
 
     <section class="section">
       <div class="grid2">
@@ -433,6 +568,7 @@
         </div>
       {/if}
     </section>
+    {/if}
 
     <section class="section danger">
       <h3>Danger zone</h3>
@@ -868,5 +1004,66 @@
     margin-top: 1rem;
     padding-top: 0.9rem;
     border-top: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  /* Practice-mode grid editor (v3.5.5). One row per set, one input
+     per board within the set + a per-set total column, and a grand
+     total at the bottom. Horizontally scrollable on narrow phones. */
+  .practice-grid-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    margin: 0.5rem 0 1rem;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 0.5rem;
+    background: rgba(255, 255, 255, 0.02);
+  }
+  .practice-grid {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+  }
+  .practice-grid th,
+  .practice-grid td {
+    padding: 0.35rem 0.5rem;
+    text-align: center;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  }
+  .practice-grid th {
+    background: rgba(255, 255, 255, 0.04);
+    font-weight: 700;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted, #9aa0a6);
+  }
+  .practice-set-col,
+  .practice-total-col {
+    font-weight: 700;
+    color: var(--fg, #f5f5f5);
+    font-variant-numeric: tabular-nums;
+  }
+  .practice-total-col {
+    color: var(--accent, #ffd54a);
+  }
+  .practice-total-cell {
+    font-weight: 800;
+  }
+  .practice-cell {
+    width: 3rem;
+    padding: 0.3rem 0.35rem;
+    background: #111;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 0.35rem;
+    color: var(--fg, #f5f5f5);
+    font-size: 0.9rem;
+    font-family: inherit;
+    text-align: center;
+  }
+  .practice-cell:focus {
+    outline: none;
+    border-color: rgba(255, 213, 74, 0.55);
+  }
+  .practice-grand {
+    background: rgba(255, 213, 74, 0.04);
   }
 </style>
