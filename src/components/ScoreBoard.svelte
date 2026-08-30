@@ -180,6 +180,43 @@
   let skipConcessionCheck = false;
 
   /**
+   * Rollback breadcrumb for SET+1 (v3.4.12). SET+1 has three
+   * side-effects that SET-1 previously did NOT undo:
+   *   (1) appends a boardLog row snapshotting the running board
+   *   (2) resets points/board/queenHolder/pointsAtBoardStart for
+   *       the new set
+   *   (3) flips currentBreak for the new set's first breaker
+   * If SET-1 fires without any intervening action (adjustBoard,
+   * adjustPoints, tapCoin, SET+ on the other side), we reverse
+   * exactly those side-effects using this breadcrumb. Any
+   * intervening state-mutating action clears it (the umpire has
+   * committed to the new-set path; undoing it would corrupt what
+   * they just did in the new set). Reported 2026-08-30: umpire
+   * hit SET+1, cancelled swap prompt with No, tapped SET-1 to
+   * "go back," and phantom snapshot rows + a reset points state
+   * corrupted the final record.
+   */
+  type SetPlusRollback = {
+    /** Which side got the SET+ credit (so SET-1 knows which sets counter to reverse) */
+    side: 'a' | 'b';
+    /** boardLog length BEFORE the SET+ snapshot; used to pop back to that length */
+    prevBoardLogLen: number;
+    /** Previous per-side points before reset */
+    prevPointsA: number;
+    prevPointsB: number;
+    /** Previous board counter + queen + break + baseline */
+    prevBoard: number;
+    prevQueen: 'a' | 'b' | null;
+    prevBreak: 'a' | 'b' | null;
+    prevBaseline: { a: number; b: number };
+    /** Previous isDecidingBoard state + maxBoardsBeforeDecider (SET+ can restore the pre-decider cap) */
+    prevIsDecidingBoard: boolean;
+    prevMaxBoardsBeforeDecider: number | null;
+    prevMaxBoards: number;
+  };
+  let lastSetPlusRollback: SetPlusRollback | null = null;
+
+  /**
    * Read-only mini-scoreboard popup accessible from the footer
    * (v3.4.12). Reuses LiveScoreboardView + a synthesised LiveRecord
    * built from the current live scoring state, so umpires can flip
@@ -928,6 +965,10 @@
 
   function adjustPoints(side: 'a' | 'b', delta: number) {
     void tryLockLandscape();
+    // Any state-mutating action commits the umpire past the previous
+    // SET+1, so its rollback breadcrumb no longer applies. See
+    // adjustSets' SET-1 rollback branch for the full contract.
+    lastSetPlusRollback = null;
     // Post-endMatch lockout: don't accept positive deltas. Negatives
     // are still allowed as an undo — an umpire realising a stray tap
     // after End can back out without a full reset.
@@ -971,6 +1012,45 @@
     if (isMatchDecided() && delta > 0) {
       matchDecidedToast = true;
       window.setTimeout(() => { matchDecidedToast = false; }, 2500);
+      return;
+    }
+    // Symmetric SET-1 undo (v3.4.12). If SET-1 fires and we hold a
+    // breadcrumb from the previous SET+1 (no intervening state-
+    // mutating action), fully reverse the SET+1 side-effects:
+    // pop the snapshot row, restore points/board/queen/break/
+    // baseline/decider state, and decrement sets on the side that
+    // received the credit — regardless of which side the umpire
+    // now tapped SET- on (they're saying "undo my last SET+", not
+    // "credit the other side negatively"). Without this, SET-1
+    // after SET+1 leaves a phantom row + zero'd points, so the
+    // umpire keeps playing thinking they undid it, but the archive
+    // ends up corrupt (reported 2026-08-30, match -P0GOCEaXTIC7ryRzFO_).
+    if (delta < 0 && lastSetPlusRollback && !isPractice) {
+      const rb = lastSetPlusRollback;
+      lastSetPlusRollback = null;
+      // Undo the sets counter on whichever side got the credit
+      if (rb.side === 'a') sideA.sets = Math.max(0, sideA.sets - 1);
+      else sideB.sets = Math.max(0, sideB.sets - 1);
+      // Restore mid-set state
+      sideA.points = rb.prevPointsA;
+      sideB.points = rb.prevPointsB;
+      board = rb.prevBoard;
+      queenHolder = rb.prevQueen;
+      currentBreak = rb.prevBreak;
+      pointsAtBoardStart = { ...rb.prevBaseline };
+      isDecidingBoard = rb.prevIsDecidingBoard;
+      maxBoardsBeforeDecider = rb.prevMaxBoardsBeforeDecider;
+      cfg.maxBoards = rb.prevMaxBoards;
+      // Pop any snapshot rows appended by the SET+1
+      if (boardLog.length > rb.prevBoardLogLen) {
+        boardLog = boardLog.slice(0, rb.prevBoardLogLen);
+      }
+      // matchResult never latched (SET+1 didn't clinch since we
+      // captured a rollback; auto-clinch branch would have skipped
+      // the breadcrumb — well, it doesn't currently, so if it did
+      // clinch, matchResult was set. Un-set it here to fully reverse.)
+      matchResult = null;
+      showWinnerPopup = false;
       return;
     }
     // Match-clinch guard: refuse SET+X when the OTHER side has
@@ -1042,6 +1122,27 @@
         return;
       }
       skipConcessionCheck = false;
+    }
+    // Capture the pre-mutation breadcrumb so SET-1 (called next,
+    // without any intervening action) can fully reverse the three
+    // side-effects SET+1 performs: (1) boardLog snapshot, (2) reset
+    // of points/board/queen/baseline, (3) currentBreak flip. See
+    // lastSetPlusRollback declaration for the full contract.
+    // Cleared inside SET-1's rollback branch after applying.
+    if (delta > 0 && !isPractice) {
+      lastSetPlusRollback = {
+        side,
+        prevBoardLogLen: boardLog.length,
+        prevPointsA: sideA.points,
+        prevPointsB: sideB.points,
+        prevBoard: board,
+        prevQueen: queenHolder,
+        prevBreak: currentBreak,
+        prevBaseline: { ...pointsAtBoardStart },
+        prevIsDecidingBoard: isDecidingBoard,
+        prevMaxBoardsBeforeDecider: maxBoardsBeforeDecider,
+        prevMaxBoards: cfg.maxBoards,
+      };
     }
     // Before the SET+ handler could reset points/board/queen for the
     // new set, we need to snapshot the running (in-progress) board so
@@ -1193,6 +1294,8 @@
   }
   function adjustBoard(delta: number) {
     void tryLockLandscape();
+    // Any state-mutating action commits past the previous SET+1.
+    lastSetPlusRollback = null;
     // Post-endMatch lockout on positive deltas. BOARD-1 still works
     // so an accidental BOARD+1 during a decided match can be popped
     // (adjustBoard's own delta<0 branch handles the boardLog pop).
@@ -1330,6 +1433,8 @@
    *     ownership (this coin turns red, the other returns to grey).
    */
   function tapCoin(side: SideId) {
+    // Any state-mutating action commits past the previous SET+1.
+    lastSetPlusRollback = null;
     // Match already decided — freeze queen marking. This prevents a
     // stray coin tap after End from repainting the recap. The lock
     // applies to both new-queen assignment and transfer; return-to-
@@ -1906,6 +2011,12 @@
   }
 
   function swapSides() {
+    // Swap commits past the previous SET+1 — the swap flips names/
+    // colours/sets/breaks, so a subsequent SET-1 rollback would
+    // reconcile against a post-swap frame that doesn't match the
+    // captured breadcrumb. Clear the rollback so SET-1 does its
+    // plain-decrement default in this state.
+    lastSetPlusRollback = null;
     // Physical seat swap: every per-player attribute travels with
     // the player, so their names, notes, colours, SET counts, AND
     // current-set POINTS all move together. BOARD stays put — it
