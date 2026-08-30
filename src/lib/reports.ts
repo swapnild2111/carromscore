@@ -106,6 +106,14 @@ function countBoardsWon(m: MatchRecord): { boardsWonA: number; boardsWonB: numbe
   let a = 0;
   let b = 0;
   for (const entry of log) {
+    // RTDB stores arrays as sparse maps — an admin delete of a
+    // single boardLog index in Firebase Console leaves a null hole
+    // rather than compacting the array. `entry.pointsA` on that
+    // null throws (reported 2026-08-30: selecting Friendly Match
+    // tournament crashed the Reports tab because one of its matches
+    // had a null hole in the boardLog). Same defensive filter every
+    // other boardLog consumer uses.
+    if (!entry || typeof entry !== 'object') continue;
     const pa = entry.pointsA ?? 0;
     const pb = entry.pointsB ?? 0;
     if (pa > pb) a += 1;
@@ -159,6 +167,9 @@ const WINNER_LABEL: Record<'a' | 'b' | 'draw', ReportRow['winner']> = {
 export function buildReportRows(matches: MatchRecord[]): ReportRow[] {
   const rows: ReportRow[] = [];
   for (const m of matches) {
+    // Skip malformed / null entries — defensive against RTDB null
+    // holes (rare, but a single one crashes the whole report).
+    if (!m || typeof m !== 'object') continue;
     if (m.mode !== 'singles' && m.mode !== 'doubles') continue;
     const { boardsWonA, boardsWonB } = countBoardsWon(m);
     const winnerRaw = m.result?.winner ?? null;
@@ -231,10 +242,13 @@ function accumulateSide(
   }
 }
 
+// Guard added v3.4.12: same null-hole defence as buildReportRows /
+// countBoardsWon.
 export function buildPlayerSummary(matches: MatchRecord[]): PlayerSummary[] {
   const map = new Map<string, PlayerSummary>();
 
   for (const m of matches) {
+    if (!m || typeof m !== 'object') continue;
     if (m.mode !== 'singles' && m.mode !== 'doubles') continue;
     const { boardsWonA, boardsWonB } = countBoardsWon(m);
     const winner = m.result?.winner ?? null;
@@ -275,6 +289,7 @@ export function buildTournamentReport(
   roundRoster?: Array<{ key: string; name: string; order: number }>,
 ): TournamentReport {
   const filtered = allMatches.filter((m) => {
+    if (!m || typeof m !== 'object') return false;
     if (m.mode === 'practice') return false;
     const tag = (m.tournament ?? '').trim();
     return tournament === null ? tag === '' : tag === tournament;
@@ -304,13 +319,14 @@ function buildRoundReports(
   matches: MatchRecord[],
   roundRoster: Array<{ key: string; name: string; order: number }>,
 ): RoundReport[] {
-  const hasAnyRound = matches.some((m) => (m.roundKey ?? '').trim() !== '');
+  const hasAnyRound = matches.some((m) => !!m && (m.roundKey ?? '').trim() !== '');
   if (!hasAnyRound) return [];
   const rosterMap = new Map(roundRoster.map((r) => [r.key, r]));
   const known = new Map<string, MatchRecord[]>();
   const ghost = new Map<string, { name: string; items: MatchRecord[] }>();
   const unassigned: MatchRecord[] = [];
   for (const m of matches) {
+    if (!m || typeof m !== 'object') continue;
     const rk = (m.roundKey ?? '').trim();
     if (!rk) {
       unassigned.push(m);

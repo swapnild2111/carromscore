@@ -28,7 +28,10 @@
     loadRounds,
     normalizeKey,
   } from '../../lib/tournaments';
-  import BarChart from './BarChart.svelte';
+  // BarChart removed v3.4.12 — the two horizontal bar rows above the
+  // Leaderboard were redundant with the Leaderboard table itself.
+  // Reports now leans on sortable + filterable tables mirroring the
+  // History tab convention.
 
   type Props = {
     matches: MatchRecord[];
@@ -74,7 +77,7 @@
    * tournament yet" inside the report body.
    */
   type PickerOption = { key: string | null; label: string };
-  const options = $derived<PickerOption[]>(() => {
+  const options = $derived.by<PickerOption[]>(() => {
     void tournamentTick;
     // Real tournaments first (most-recently-active), Default last
     // and de-emphasised — organisers scanning the chip strip should
@@ -88,21 +91,41 @@
     return opts;
   });
 
-  // Selected tournament. `null` = the Default bucket (untagged
-  // matches — mirrors the History tab's terminology). Auto-selects
-  // Default on first Reports open so users see data straight away
-  // instead of a "pick a tournament" empty state. Deep-link via
-  // ?tournament=... overrides — those callers know what they want.
-  let selection = $state<string | null | undefined>(
+  /**
+   * Selected tournament, derived directly from the parent's
+   * `initialTournament` prop (v3.4.12 rewrite). Single source of
+   * truth — LiveLobby owns the state and pushes it in via the
+   * prop; user picks call `onSelectionChange` (which writes back
+   * to the parent's reportsSelection) and the prop flows back.
+   * No local `$state` shadow to keep in sync — previous versions
+   * had `selection` as $state PLUS a proxy PLUS effects, which
+   * created feedback loops and out-of-sync bugs.
+   *
+   * `null` = Default (untagged) bucket. `undefined` = nothing
+   * picked (renders the "pick a tournament" empty state).
+   */
+  const selection = $derived<string | null | undefined>(
     initialTournament === undefined ? null : initialTournament,
   );
+  const selectionProxy = $derived(
+    selection === null || selection === undefined ? '__default__' : selection,
+  );
+  function onTournamentChange(e: Event) {
+    const v = (e.currentTarget as HTMLSelectElement).value;
+    const next = v === '__default__' ? null : v;
+    // Always fire — the parent's reportsSelection may still be
+    // `undefined` (fresh load, no tournament URL param) even when
+    // `selection` derived to `null`. Firing on every pick pushes
+    // the user's explicit choice into the parent so URL sync runs.
+    onSelectionChange(next);
+  }
 
   // Pass the tournament's round roster into buildTournamentReport so
   // per-round sub-reports get ordered R16 → QF → SF → F rather than
   // alphabetically. Empty when the selection is Default (untagged) or
   // the tournament has no rounds configured — buildTournamentReport
   // still produces roundReports if any match has a roundKey tag.
-  const currentRoundRoster = $derived(() => {
+  const currentRoundRoster = $derived.by(() => {
     void tournamentTick;
     if (selection === undefined || selection === null) return [];
     return loadRounds(normalizeKey(selection));
@@ -111,7 +134,7 @@
   const report = $derived<TournamentReport | null>(
     selection === undefined
       ? null
-      : buildTournamentReport(matches, selection, currentRoundRoster()),
+      : buildTournamentReport(matches, selection, currentRoundRoster),
   );
 
   /**
@@ -122,11 +145,49 @@
    * selection changes so a stale round key from a previous
    * tournament doesn't carry over.
    */
-  let roundFilter = $state<string | null>(null);
+  function initialRoundFilter(): string | null {
+    if (typeof window === 'undefined') return null;
+    const v = new URL(window.location.href).searchParams.get('round');
+    return v ? v : null;
+  }
+  let roundFilter = $state<string | null>(initialRoundFilter());
+  // Reset roundFilter on tournament change — but skip the FIRST run
+  // so the URL-preloaded value survives mount. Otherwise `void selection`
+  // fires on initial derivation with initialTournament and immediately
+  // nulls out the round param the URL asked for.
+  let roundFilterSelectionInit = false;
   $effect(() => {
     void selection;
+    if (!roundFilterSelectionInit) {
+      roundFilterSelectionInit = true;
+      return;
+    }
     roundFilter = null;
   });
+  // Mirror roundFilter to URL as `round=`.
+  $effect(() => {
+    if (typeof window === 'undefined') return;
+    const url = new URL(window.location.href);
+    if (roundFilter === null) url.searchParams.delete('round');
+    else url.searchParams.set('round', roundFilter);
+    window.history.replaceState({}, '', url.toString());
+  });
+
+  /**
+   * Proxy binding for the Round <select> (v3.4.12) — same pattern
+   * as selectionProxy. '__all__' = every round combined. Effects
+   * keep roundFilter and this proxy in step; on tournament switch
+   * both reset to their "all" default (via the reset effect above).
+   */
+  // Round select proxy (v3.4.12) — same one-way + onchange pattern
+  // as selectionProxy above. '__all__' represents null (All rounds).
+  const roundFilterProxy = $derived(roundFilter === null ? '__all__' : roundFilter);
+  function onRoundChange(e: Event) {
+    const v = (e.currentTarget as HTMLSelectElement).value;
+    const next = v === '__all__' ? null : v;
+    // Always assign — cheap, and keeps parity with onTournamentChange.
+    roundFilter = next;
+  }
 
   /**
    * The view report — either the combined tournament report or a
@@ -135,7 +196,7 @@
    * downstream renders (charts, leaderboard, matches table) don't
    * branch on filter state. summary tiles read from this too.
    */
-  const viewReport = $derived<TournamentReport | null>(() => {
+  const viewReport = $derived.by<TournamentReport | null>(() => {
     if (!report) return null;
     if (roundFilter === null) return report;
     const rr = report.roundReports?.find((x) => x.roundKey === roundFilter);
@@ -165,8 +226,8 @@
    *   buildPlayerSummary). Tie-broken by boards then points; if
    *   the top two are truly tied the label reads "Tied".
    */
-  const summaryStats = $derived(() => {
-    const r = viewReport();
+  const summaryStats = $derived.by(() => {
+    const r = viewReport;
     if (!r || r.rows.length === 0) return null;
     const matchesCount = r.matches;
     const playersCount = r.playerSummary.length;
@@ -189,6 +250,24 @@
       topPlayer: top,
       tiedAtTop,
     };
+  });
+
+  /**
+   * Distinct tournament count (v3.4.12) — how many tournaments the
+   * archive has recorded matches for, regardless of the current
+   * picker scope. Reads from the raw `matches` prop, not viewReport,
+   * so the number stays stable across the picker. Includes the
+   * untagged Default bucket if any untagged match exists.
+   */
+  const tournamentsCount = $derived.by(() => {
+    const seen = new Set<string>();
+    let hasUntagged = false;
+    for (const m of matches) {
+      const t = (m.tournament ?? '').trim();
+      if (t) seen.add(t);
+      else hasUntagged = true;
+    }
+    return seen.size + (hasUntagged ? 1 : 0);
   });
 
   /**
@@ -216,10 +295,10 @@
     return !collapsedRounds.has(roundKey);
   }
 
-  function pick(key: string | null) {
-    selection = key;
-    onSelectionChange(key);
-  }
+  // pick() removed v3.4.12 — selection is now $derived off the
+  // initialTournament prop, so writes go straight to the parent via
+  // onSelectionChange. The Clear button and any other caller uses
+  // onSelectionChange directly.
 
   // Copy-to-clipboard state. Ephemeral flag keyed by what was
   // copied — the main tournament table gets `__main__`, each
@@ -270,111 +349,286 @@
     return String(i + 1);
   }
 
-  // Player-summary chart data. Ranked list already sorted in
-  // buildPlayerSummary() by wins desc → boards desc → points desc.
-  // Reads from `viewReport` so a round filter narrows the charts
-  // alongside the leaderboard.
-  const winsChart = $derived(() => {
-    const r = viewReport();
-    return r
-      ? r.playerSummary.map((p, i) => ({
-          label: p.name,
-          value: p.wins,
-          // Alternate palette between the two side colours so the chart
-          // reads visually distinct from a solid bar block.
-          colour: i % 2 === 0 ? 'var(--side-a, #4fc3f7)' : 'var(--side-b, #ff8a65)',
-        }))
-      : [];
+  // ─────────────────────────────────────────────────────────────
+  // Leaderboard + Matches sort & filter state (v3.4.12).
+  //
+  // Reports mirror History's toolbar: sortable columns for the
+  // Leaderboard AND for the Matches table, plus a small filter row
+  // shared across the two (player-name search + mode chips for
+  // Matches; leaderboard picks up player-name search only).
+  //
+  // Persistence: only the sort keys are persisted, keyed on
+  // 'carromscore.reports.prefs.v1'. Filters are transient per-
+  // session — an organiser wants to jump to a player quickly but
+  // shouldn't come back tomorrow with a stale filter still applied.
+  // ─────────────────────────────────────────────────────────────
+  type LBSortKey = 'rank' | 'name' | 'matches' | 'wins' | 'losses' | 'draws' | 'boards' | 'points';
+  type MSortKey = 'endedAt' | 'mode' | 'sideA' | 'sideB' | 'setsA' | 'setsB' | 'points' | 'winner';
+  const REPORTS_PREFS_KEY = 'carromscore.reports.prefs.v1';
+  function loadReportsPrefs(): {
+    lbSortKey: LBSortKey;
+    lbSortDir: 'asc' | 'desc';
+    mSortKey: MSortKey;
+    mSortDir: 'asc' | 'desc';
+  } {
+    const fallback = {
+      lbSortKey: 'rank' as LBSortKey,
+      lbSortDir: 'asc' as const,
+      mSortKey: 'endedAt' as MSortKey,
+      mSortDir: 'desc' as const,
+    };
+    try {
+      const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(REPORTS_PREFS_KEY) : null;
+      if (!raw) return fallback;
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      const lbKeys: LBSortKey[] = ['rank', 'name', 'matches', 'wins', 'losses', 'draws', 'boards', 'points'];
+      const mKeys: MSortKey[] = ['endedAt', 'mode', 'sideA', 'sideB', 'setsA', 'setsB', 'points', 'winner'];
+      return {
+        lbSortKey: lbKeys.includes(parsed.lbSortKey as LBSortKey) ? (parsed.lbSortKey as LBSortKey) : 'rank',
+        lbSortDir: parsed.lbSortDir === 'desc' ? 'desc' : 'asc',
+        mSortKey: mKeys.includes(parsed.mSortKey as MSortKey) ? (parsed.mSortKey as MSortKey) : 'endedAt',
+        mSortDir: parsed.mSortDir === 'asc' ? 'asc' : 'desc',
+      };
+    } catch {
+      return fallback;
+    }
+  }
+  const initialReportsPrefs = loadReportsPrefs();
+  let lbSortKey = $state<LBSortKey>(initialReportsPrefs.lbSortKey);
+  let lbSortDir = $state<'asc' | 'desc'>(initialReportsPrefs.lbSortDir);
+  let mSortKey = $state<MSortKey>(initialReportsPrefs.mSortKey);
+  let mSortDir = $state<'asc' | 'desc'>(initialReportsPrefs.mSortDir);
+  // Shared filter state (v3.4.12) — one bar drives both the
+  // Leaderboard and the Matches table. The tournament dropdown drives
+  // `selection` directly so the whole report scopes with it.
+  // Initialised from URL query params so shared links preselect
+  // filters, and mirrored back into the URL on every change.
+  function initialFilterSearch(): string {
+    if (typeof window === 'undefined') return '';
+    return new URL(window.location.href).searchParams.get('rSearch') ?? '';
+  }
+  function initialFilterMode(): 'all' | 'singles' | 'doubles' {
+    if (typeof window === 'undefined') return 'all';
+    const v = new URL(window.location.href).searchParams.get('rMode');
+    return v === 'singles' || v === 'doubles' ? v : 'all';
+  }
+  let filterSearch = $state<string>(initialFilterSearch());
+  let filterMode = $state<'all' | 'singles' | 'doubles'>(initialFilterMode());
+  // Mirror filter state to URL (rSearch, rMode). Guarded by !== '__init'
+  // check on first run isn't needed because the initial values equal
+  // whatever's already in the URL — writing them back is a no-op.
+  $effect(() => {
+    if (typeof window === 'undefined') return;
+    const url = new URL(window.location.href);
+    if (filterSearch.trim() === '') url.searchParams.delete('rSearch');
+    else url.searchParams.set('rSearch', filterSearch);
+    if (filterMode === 'all') url.searchParams.delete('rMode');
+    else url.searchParams.set('rMode', filterMode);
+    window.history.replaceState({}, '', url.toString());
   });
-  const pointsChart = $derived(() => {
-    const r = viewReport();
-    return r
-      ? r.playerSummary
-          .slice()
-          .sort((a, b) => b.pointsScored - a.pointsScored)
-          .map((p, i) => ({
-            label: p.name,
-            value: p.pointsScored,
-            colour: i % 2 === 0 ? 'var(--side-a, #4fc3f7)' : 'var(--side-b, #ff8a65)',
-          }))
-      : [];
+  $effect(() => {
+    try {
+      localStorage.setItem(
+        REPORTS_PREFS_KEY,
+        JSON.stringify({ lbSortKey, lbSortDir, mSortKey, mSortDir }),
+      );
+    } catch { /* ignore */ }
   });
-  const anyDraws = $derived(() => {
-    const r = viewReport();
-    return !!r && r.playerSummary.some((p) => p.draws > 0);
+  function toggleLBSort(k: LBSortKey): void {
+    if (lbSortKey === k) {
+      lbSortDir = lbSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      lbSortKey = k;
+      // Text columns default to ascending; number columns default to
+      // descending so the biggest / best row jumps to the top.
+      lbSortDir = k === 'name' || k === 'rank' ? 'asc' : 'desc';
+    }
+  }
+  function toggleMSort(k: MSortKey): void {
+    if (mSortKey === k) {
+      mSortDir = mSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      mSortKey = k;
+      mSortDir = k === 'sideA' || k === 'sideB' || k === 'mode' || k === 'winner' ? 'asc' : 'desc';
+    }
+  }
+  const sortedLeaderboard = $derived.by(() => {
+    const r = viewReport;
+    if (!r) return [];
+    const q = filterSearch.trim().toLowerCase();
+    const arr = r.playerSummary.filter((p) => !q || p.name.toLowerCase().includes(q));
+    // Preserve buildPlayerSummary's baked-in tie-break order when
+    // sorting by 'rank' (its input order IS the rank).
+    if (lbSortKey === 'rank') {
+      return lbSortDir === 'asc' ? arr : arr.slice().reverse();
+    }
+    const dir = lbSortDir === 'asc' ? 1 : -1;
+    return arr.slice().sort((a, b) => {
+      let av: number | string = 0;
+      let bv: number | string = 0;
+      switch (lbSortKey) {
+        case 'name': av = a.name.toLowerCase(); bv = b.name.toLowerCase(); break;
+        case 'matches': av = a.matches; bv = b.matches; break;
+        case 'wins': av = a.wins; bv = b.wins; break;
+        case 'losses': av = a.losses; bv = b.losses; break;
+        case 'draws': av = a.draws; bv = b.draws; break;
+        case 'boards': av = a.boardsWon; bv = b.boardsWon; break;
+        case 'points': av = a.pointsScored; bv = b.pointsScored; break;
+      }
+      if (av < bv) return -1 * dir;
+      if (av > bv) return 1 * dir;
+      return 0;
+    });
+  });
+  const sortedMatches = $derived.by(() => {
+    const r = viewReport;
+    if (!r) return [];
+    const q = filterSearch.trim().toLowerCase();
+    const arr = r.rows.filter((row) => {
+      if (filterMode !== 'all' && String(row.mode).toLowerCase() !== filterMode) return false;
+      if (q) {
+        const hay = `${row.sideA} ${row.sideB}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+    const dir = mSortDir === 'asc' ? 1 : -1;
+    return arr.slice().sort((a, b) => {
+      let av: number | string = 0;
+      let bv: number | string = 0;
+      switch (mSortKey) {
+        case 'endedAt': av = a.endedAtRaw ?? 0; bv = b.endedAtRaw ?? 0; break;
+        case 'mode': av = String(a.mode); bv = String(b.mode); break;
+        case 'sideA': av = String(a.sideA).toLowerCase(); bv = String(b.sideA).toLowerCase(); break;
+        case 'sideB': av = String(a.sideB).toLowerCase(); bv = String(b.sideB).toLowerCase(); break;
+        case 'setsA': av = a.setsA; bv = b.setsA; break;
+        case 'setsB': av = a.setsB; bv = b.setsB; break;
+        case 'points': av = a.pointsA + a.pointsB; bv = b.pointsA + b.pointsB; break;
+        case 'winner': av = String(a.winner); bv = String(b.winner); break;
+      }
+      if (av < bv) return -1 * dir;
+      if (av > bv) return 1 * dir;
+      return (b.endedAtRaw ?? 0) - (a.endedAtRaw ?? 0);
+    });
   });
 </script>
 
 <section class="reports">
-  <div class="picker">
-    <span class="picker-lbl">Tournament</span>
-    <div class="chips" role="tablist" aria-label="Choose tournament">
-      {#each options() as opt (opt.key ?? '__default__')}
-        <button
-          type="button"
-          role="tab"
-          class="chip"
-          class:chip-on={selection === opt.key}
-          class:chip-default={opt.key === null}
-          aria-selected={selection === opt.key}
-          onclick={() => pick(opt.key)}
-        >{opt.label}</button>
+  <!--
+    Shared filter bar (v3.4.12) — replaces both the top tournament
+    chip strip AND the per-table search rows we had earlier.
+    Player-name search + mode dropdown + tournament dropdown drive
+    the whole Reports body: summary tiles, leaderboard, matches
+    table. The Tournament select is now the ONLY tournament picker
+    (the earlier compact-select was removed here). Tournament change
+    fires pick() so URL deep-linking still works.
+    Default value = null (Default bucket) — first-time visitors
+    land on the untagged summary rather than the empty state.
+  -->
+  <div class="reports-filters" role="group" aria-label="Filter reports">
+    <input
+      type="search"
+      class="rep-search"
+      placeholder="Search player name…"
+      bind:value={filterSearch}
+      aria-label="Filter by player name"
+    />
+    <select
+      class="rep-select"
+      bind:value={filterMode}
+      aria-label="Filter by match mode"
+    >
+      <option value="all">All modes</option>
+      <option value="singles">Singles</option>
+      <option value="doubles">Doubles</option>
+    </select>
+    <!--
+      Tournament select (v3.4.12). Value derived from `selection`
+      reactively; onchange writes back via pick() so the report
+      body + URL deep-link stay in step. Earlier attempts used
+      bind:value on a $state proxy backed by two syncing $effect
+      blocks — worked in isolation but created subtle re-render
+      loops that broke selection under certain click sequences.
+      One-way + onchange is simpler and reliable.
+    -->
+    <select
+      class="rep-select rep-select-tour"
+      value={selectionProxy}
+      onchange={onTournamentChange}
+      aria-label="Tournament"
+    >
+      {#each options as opt (opt.key ?? '__default__')}
+        <option value={opt.key === null ? '__default__' : opt.key}>{opt.label}</option>
       {/each}
-    </div>
+    </select>
+    {#if report && (report.roundReports?.length ?? 0) > 0}
+      <!--
+        Round dropdown (v3.4.12) — only rendered when the current
+        tournament has round-tagged matches. Same one-way + onchange
+        pattern as the tournament select above.
+      -->
+      <select
+        class="rep-select rep-select-round"
+        value={roundFilterProxy}
+        onchange={onRoundChange}
+        aria-label="Round"
+      >
+        <option value="__all__">All rounds</option>
+        {#each report.roundReports ?? [] as rr (rr.roundKey)}
+          <option value={rr.roundKey}>{rr.roundName}</option>
+        {/each}
+      </select>
+    {/if}
+    <!--
+      Clear button (v3.4.12). Visible whenever ANY filter is off its
+      default: search has text, mode isn't 'all', tournament isn't
+      the Default bucket, or round isn't 'all rounds'. Reported
+      2026-08-30: earlier version only tripped on search/mode
+      changes, so a tournament or round pick left no way to reset
+      to the base view without manually setting each dropdown back.
+      Reset writes to `selection` via pick() (URL sync intact) and
+      the effects push back into the proxy selects.
+    -->
+    {#if filterSearch.trim() !== '' || filterMode !== 'all' || selection !== null || roundFilter !== null}
+      <button
+        type="button"
+        class="rep-clear"
+        onclick={() => {
+          filterSearch = '';
+          filterMode = 'all';
+          if (selection !== null) onSelectionChange(null);
+          roundFilter = null;
+        }}
+        aria-label="Clear filters"
+      >✕ Clear</button>
+    {/if}
   </div>
 
-  {#if report && (report.roundReports?.length ?? 0) > 0}
-    <!--
-      Round filter (v3.3.3). Chip strip below the tournament picker
-      when the current tournament has rounds. Scopes summary tiles /
-      charts / leaderboard / matches table to one round. The per-
-      round accordion below is not affected — it always renders the
-      full breakdown so an organiser can jump straight to a stage.
-    -->
-    <div class="picker picker-round">
-      <span class="picker-lbl">Round</span>
-      <div class="chips" role="tablist" aria-label="Filter by round">
-        <button
-          type="button"
-          role="tab"
-          class="chip"
-          class:chip-on={roundFilter === null}
-          aria-selected={roundFilter === null}
-          onclick={() => (roundFilter = null)}
-        >All rounds</button>
-        {#each report.roundReports ?? [] as rr (rr.roundKey)}
-          <button
-            type="button"
-            role="tab"
-            class="chip"
-            class:chip-on={roundFilter === rr.roundKey}
-            aria-selected={roundFilter === rr.roundKey}
-            onclick={() => (roundFilter = rr.roundKey)}
-          >{rr.roundName}</button>
-        {/each}
-      </div>
-    </div>
-  {/if}
+  <!-- Round chip strip removed v3.4.12 — merged into the filter bar
+       as a dropdown that appears conditionally when the current
+       tournament has rounds. See the .reports-filters block above
+       for the round <select>. -->
 
-  {#if !viewReport()}
+
+  {#if !viewReport}
     <div class="empty">
       <p><strong>Pick a tournament above.</strong></p>
       <p class="empty-sub">Every match tagged to that tournament will show up here with per-player summary, charts, and a copy-to-spreadsheet table.</p>
     </div>
-  {:else if viewReport()!.rows.length === 0}
+  {:else if viewReport!.rows.length === 0}
     <div class="empty">
       <p><strong>No matches recorded {roundFilter ? 'in this round' : 'for this tournament'} yet.</strong></p>
       <p class="empty-sub">
         {#if roundFilter}
           Try another round, or clear the filter to see every match.
         {:else}
-          Score a match on the home screen and tag it with <em>{viewReport()!.tournament}</em>. It'll appear here as soon as it ends.
+          Score a match on the home screen and tag it with <em>{viewReport!.tournament}</em>. It'll appear here as soon as it ends.
         {/if}
       </p>
     </div>
   {:else}
-    {@const view = viewReport()!}
-    {@const stats = summaryStats()}
+    {@const view = viewReport!}
+    {@const stats = summaryStats}
 
     {#if stats}
       <!--
@@ -385,6 +639,25 @@
         else.
       -->
       <div class="stat-row">
+        <!--
+          Podium tile (v3.4.12): top three players in the current
+          tournament + round scope. Each row = [medal] [Player name]
+          [wins]. Medal-first per user preference so gold/silver/bronze
+          anchor the row visually. Podium is the FIRST tile in the
+          stat row — the eye lands here before the numeric summaries.
+        -->
+        <div class="stat-tile stat-tile-podium">
+          <div class="stat-label podium-lbl">Top players</div>
+          <div class="podium-list">
+            {#each view.playerSummary.slice(0, 3) as p, i (p.playerId)}
+              <div class="podium-row" class:podium-1={i === 0} class:podium-2={i === 1} class:podium-3={i === 2}>
+                <span class="podium-medal" aria-hidden="true">{i === 0 ? '🥇' : i === 1 ? '🥈' : '🥉'}</span>
+                <span class="podium-name" title={p.name}>{p.name}</span>
+                <span class="podium-wins">{p.wins === 1 ? '1 W' : `${p.wins} W`}</span>
+              </div>
+            {/each}
+          </div>
+        </div>
         <div class="stat-tile">
           <div class="stat-value">{stats.matchesCount}</div>
           <div class="stat-label">{stats.matchesCount === 1 ? 'Match' : 'Matches'}</div>
@@ -397,60 +670,61 @@
           <div class="stat-value">{stats.boardsCount}</div>
           <div class="stat-label">{stats.boardsCount === 1 ? 'Board' : 'Boards'}</div>
         </div>
-        <div class="stat-tile stat-tile-leader">
-          <div class="stat-value stat-value-name" title={stats.tiedAtTop ? 'Tied for the lead' : stats.topPlayer?.name}>
-            {stats.tiedAtTop ? 'Tied' : stats.topPlayer?.name ?? '—'}
-          </div>
-          <div class="stat-label">Leader</div>
+        <div class="stat-tile">
+          <div class="stat-value">{tournamentsCount}</div>
+          <div class="stat-label">{tournamentsCount === 1 ? 'Tournament' : 'Tournaments'}</div>
         </div>
       </div>
     {/if}
 
-    <div class="charts">
-      <BarChart
-        title="Wins per player"
-        subtitle={anyDraws() ? 'Draws not counted' : undefined}
-        bars={winsChart()}
-        formatValue={(v) => (v === 1 ? '1 win' : `${v} wins`)}
-      />
-      <BarChart
-        title="Points scored per player"
-        subtitle={roundFilter ? 'Cumulative across the round' : 'Cumulative across the tournament'}
-        bars={pointsChart()}
-      />
-    </div>
-
-    <div class="summary">
+    <div class="tbl-hdr">
       <h3 class="section-hdr">Leaderboard</h3>
-      <!--
-        Leaderboard-style player summary. Ranking column mirrors the
-        carrom-thane.web.app layout: first row shows its true rank
-        (1, 2, 3, ...), any subsequent tied row shows "—" so ties
-        visually group. Sort order is baked into buildPlayerSummary
-        (wins DESC → boards DESC → points DESC), so ties = all three
-        keys equal to the row above.
-
-        Horizontal scroll shell preserves the POINTS column on
-        narrow phones with long player names.
-      -->
-      <div class="summary-scroll">
-        <table class="summary-tbl leaderboard-tbl">
+    </div>
+    <!--
+      Leaderboard (v3.4.12): heading lifted OUTSIDE the table wrapper
+      so the tbody column layout matches the Matches table below —
+      no bordered card around it. Sortable columns; rank column uses
+      the buildPlayerSummary baked-in order (wins DESC → boards DESC
+      → points DESC). Click any header to sort, click again to flip.
+      The '—' tie-collapse only applies when the 'rank' sort is
+      active — under other sorts the raw 1..N number is shown so
+      re-sort doesn't relabel arbitrarily.
+    -->
+    <div class="tbl-scroll">
+      <table class="matches-tbl leaderboard-tbl">
           <thead>
             <tr>
-              <th class="col-rank">#</th>
-              <th class="col-name">Player</th>
-              <th>Matches</th>
-              <th>W</th>
-              <th>L</th>
-              <th>D</th>
-              <th>Boards</th>
-              <th>Points</th>
+              <th class="col-rank hist-th-sortable" class:hist-th-sorted={lbSortKey === 'rank'} onclick={() => toggleLBSort('rank')}>
+                # {#if lbSortKey === 'rank'}<span class="sort-caret">{lbSortDir === 'asc' ? '▲' : '▼'}</span>{/if}
+              </th>
+              <th class="col-name hist-th-sortable" class:hist-th-sorted={lbSortKey === 'name'} onclick={() => toggleLBSort('name')}>
+                Player {#if lbSortKey === 'name'}<span class="sort-caret">{lbSortDir === 'asc' ? '▲' : '▼'}</span>{/if}
+              </th>
+              <th class="hist-th-sortable" class:hist-th-sorted={lbSortKey === 'matches'} onclick={() => toggleLBSort('matches')}>
+                Matches {#if lbSortKey === 'matches'}<span class="sort-caret">{lbSortDir === 'asc' ? '▲' : '▼'}</span>{/if}
+              </th>
+              <th class="hist-th-sortable" class:hist-th-sorted={lbSortKey === 'wins'} onclick={() => toggleLBSort('wins')}>
+                W {#if lbSortKey === 'wins'}<span class="sort-caret">{lbSortDir === 'asc' ? '▲' : '▼'}</span>{/if}
+              </th>
+              <th class="hist-th-sortable" class:hist-th-sorted={lbSortKey === 'losses'} onclick={() => toggleLBSort('losses')}>
+                L {#if lbSortKey === 'losses'}<span class="sort-caret">{lbSortDir === 'asc' ? '▲' : '▼'}</span>{/if}
+              </th>
+              <th class="hist-th-sortable" class:hist-th-sorted={lbSortKey === 'draws'} onclick={() => toggleLBSort('draws')}>
+                D {#if lbSortKey === 'draws'}<span class="sort-caret">{lbSortDir === 'asc' ? '▲' : '▼'}</span>{/if}
+              </th>
+              <th class="hist-th-sortable" class:hist-th-sorted={lbSortKey === 'boards'} onclick={() => toggleLBSort('boards')}>
+                Boards {#if lbSortKey === 'boards'}<span class="sort-caret">{lbSortDir === 'asc' ? '▲' : '▼'}</span>{/if}
+              </th>
+              <th class="hist-th-sortable" class:hist-th-sorted={lbSortKey === 'points'} onclick={() => toggleLBSort('points')}>
+                Points {#if lbSortKey === 'points'}<span class="sort-caret">{lbSortDir === 'asc' ? '▲' : '▼'}</span>{/if}
+              </th>
             </tr>
           </thead>
           <tbody>
-            {#each view.playerSummary as p, i (p.playerId)}
-              {@const rank = rankLabel(view.playerSummary, i)}
-              <tr class:leaderboard-top={i === 0}>
+            {#each sortedLeaderboard as p, i (p.playerId)}
+              {@const raw = view.playerSummary.findIndex((x) => x.playerId === p.playerId)}
+              {@const rank = lbSortKey === 'rank' ? rankLabel(view.playerSummary, raw) : String(raw + 1)}
+              <tr class:leaderboard-top={lbSortKey === 'rank' && raw === 0 && lbSortDir === 'asc'}>
                 <td class="col-rank">{rank}</td>
                 <td class="col-name">{p.name}</td>
                 <td>{p.matches}</td>
@@ -464,15 +738,14 @@
           </tbody>
         </table>
       </div>
-    </div>
 
     <div class="tbl-hdr">
-      <h3 class="section-hdr">Matches ({view.matches})</h3>
+      <h3 class="section-hdr">Matches ({sortedMatches.length}{#if sortedMatches.length !== view.matches} / {view.matches}{/if})</h3>
       <div class="tbl-actions">
         <button
           type="button"
           class="btn btn-copy"
-          onclick={() => copyRows(view.rows, MAIN_COPY_KEY)}
+          onclick={() => copyRows(sortedMatches, MAIN_COPY_KEY)}
           aria-label="Copy table to clipboard as tab-separated values"
         >
           {#if copiedKey === MAIN_COPY_KEY}<span aria-hidden="true">✓</span> Copied{:else}<span aria-hidden="true">⧉</span> Copy table{/if}
@@ -482,26 +755,45 @@
     <!--
       Wrapper is horizontally scrollable on narrow screens so all
       columns stay readable — no wrapping cells or hidden data.
+      Column headers are sortable (v3.4.12).
     -->
     <div class="tbl-scroll">
       <table class="matches-tbl">
         <thead>
           <tr>
-            <th>Ended</th>
-            <th>Mode</th>
-            <th class="col-name">Side A</th>
-            <th class="col-name">Side B</th>
-            <th>Sets A</th>
-            <th>Sets B</th>
+            <th class="hist-th-sortable" class:hist-th-sorted={mSortKey === 'endedAt'} onclick={() => toggleMSort('endedAt')}>
+              Ended {#if mSortKey === 'endedAt'}<span class="sort-caret">{mSortDir === 'asc' ? '▲' : '▼'}</span>{/if}
+            </th>
+            <th class="hist-th-sortable" class:hist-th-sorted={mSortKey === 'mode'} onclick={() => toggleMSort('mode')}>
+              Mode {#if mSortKey === 'mode'}<span class="sort-caret">{mSortDir === 'asc' ? '▲' : '▼'}</span>{/if}
+            </th>
+            <th class="col-name hist-th-sortable" class:hist-th-sorted={mSortKey === 'sideA'} onclick={() => toggleMSort('sideA')}>
+              Side A {#if mSortKey === 'sideA'}<span class="sort-caret">{mSortDir === 'asc' ? '▲' : '▼'}</span>{/if}
+            </th>
+            <th class="col-name hist-th-sortable" class:hist-th-sorted={mSortKey === 'sideB'} onclick={() => toggleMSort('sideB')}>
+              Side B {#if mSortKey === 'sideB'}<span class="sort-caret">{mSortDir === 'asc' ? '▲' : '▼'}</span>{/if}
+            </th>
+            <th class="hist-th-sortable" class:hist-th-sorted={mSortKey === 'setsA'} onclick={() => toggleMSort('setsA')}>
+              Sets A {#if mSortKey === 'setsA'}<span class="sort-caret">{mSortDir === 'asc' ? '▲' : '▼'}</span>{/if}
+            </th>
+            <th class="hist-th-sortable" class:hist-th-sorted={mSortKey === 'setsB'} onclick={() => toggleMSort('setsB')}>
+              Sets B {#if mSortKey === 'setsB'}<span class="sort-caret">{mSortDir === 'asc' ? '▲' : '▼'}</span>{/if}
+            </th>
             <th>Boards A</th>
             <th>Boards B</th>
-            <th>Points A</th>
-            <th>Points B</th>
-            <th>Winner</th>
+            <th class="hist-th-sortable" class:hist-th-sorted={mSortKey === 'points'} onclick={() => toggleMSort('points')}>
+              Points A {#if mSortKey === 'points'}<span class="sort-caret">{mSortDir === 'asc' ? '▲' : '▼'}</span>{/if}
+            </th>
+            <th class="hist-th-sortable" class:hist-th-sorted={mSortKey === 'points'} onclick={() => toggleMSort('points')}>
+              Points B
+            </th>
+            <th class="hist-th-sortable" class:hist-th-sorted={mSortKey === 'winner'} onclick={() => toggleMSort('winner')}>
+              Winner {#if mSortKey === 'winner'}<span class="sort-caret">{mSortDir === 'asc' ? '▲' : '▼'}</span>{/if}
+            </th>
           </tr>
         </thead>
         <tbody>
-          {#each view.rows as r (r._matchId)}
+          {#each sortedMatches as r (r._matchId)}
             <tr>
               <td>{r.endedAt}</td>
               <td>{r.mode}</td>
@@ -666,7 +958,8 @@
     gap: 1rem;
   }
 
-  /* Tournament chip picker */
+  /* Tournament chip picker (round strip only; the top tournament
+     row now uses .picker-compact + a native <select>). */
   .picker {
     display: flex;
     flex-direction: column;
@@ -678,6 +971,81 @@
     letter-spacing: 0.08em;
     color: var(--muted, #9aa0a6);
   }
+  /* Shared filter bar (v3.4.12) — search + mode + tournament in one
+     row above the summary tiles. Same visual language as the History
+     tab's filter bar. */
+  .reports-filters {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.75rem;
+    padding: 0.6rem 0.75rem;
+    /* Gold-tint highlight (v3.4.12) to distinguish the filter bar as
+       the primary scoping control for the tab — otherwise it reads
+       as another neutral chrome block. */
+    background: rgba(255, 213, 74, 0.05);
+    border: 1px solid rgba(255, 213, 74, 0.35);
+    border-radius: 0.7rem;
+    box-shadow: 0 0 0 1px rgba(255, 213, 74, 0.06),
+                0 0 18px rgba(255, 213, 74, 0.08);
+  }
+  .rep-search {
+    flex: 1 1 12rem;
+    min-width: 8rem;
+    padding: 0.4rem 0.6rem;
+    background: #141414;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 0.45rem;
+    color: var(--fg, #f5f5f5);
+    font: inherit;
+    font-size: 0.85rem;
+  }
+  .rep-search:focus {
+    outline: none;
+    border-color: rgba(255, 213, 74, 0.5);
+  }
+  .rep-select {
+    padding: 0.4rem 0.6rem;
+    background: #141414;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 0.45rem;
+    color: var(--fg, #f5f5f5);
+    font: inherit;
+    font-size: 0.85rem;
+    cursor: pointer;
+  }
+  /* Tournament + Round selects use the same neutral fg colour as
+     the Mode select. Earlier we had them in accent gold, but the
+     gold clashed with the gold-tinted filter bar around them
+     (reported 2026-08-30). Border and label stay neutral;
+     the amber tint on the bar itself is enough emphasis. */
+  .rep-select-tour {
+    min-width: 12rem;
+    max-width: min(24rem, 60vw);
+    font-weight: 700;
+  }
+  .rep-select-round {
+    min-width: 8rem;
+    max-width: min(18rem, 50vw);
+    font-weight: 700;
+  }
+  .rep-select:focus {
+    outline: none;
+    border-color: rgba(255, 213, 74, 0.5);
+  }
+  .rep-clear {
+    padding: 0.35rem 0.65rem;
+    background: transparent;
+    border: 1px solid rgba(239, 83, 80, 0.4);
+    border-radius: 0.45rem;
+    color: #ef5350;
+    font: inherit;
+    font-size: 0.78rem;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .rep-clear:hover { background: rgba(239, 83, 80, 0.08); }
   .chips {
     display: flex;
     gap: 0.4rem;
@@ -721,8 +1089,32 @@
     grid-template-columns: repeat(2, 1fr);
     gap: 0.6rem;
   }
-  @media (min-width: 560px) {
-    .stat-row { grid-template-columns: repeat(4, 1fr); }
+  /* Wider viewport: 4 number tiles + podium spanning 2 columns.
+     Total 6 cols. Podium is the wider block on the right so all
+     three medal rows fit comfortably. */
+  @media (min-width: 720px) {
+    .stat-row {
+      grid-template-columns: repeat(6, 1fr);
+    }
+    .stat-tile-podium {
+      grid-column: span 2;
+    }
+  }
+  /* Mid-width tablet: 2-col grid for the 4 number tiles, podium
+     spans full width on its own row. */
+  @media (min-width: 560px) and (max-width: 719px) {
+    .stat-row {
+      grid-template-columns: repeat(4, 1fr);
+    }
+    .stat-tile-podium {
+      grid-column: span 4;
+    }
+  }
+  /* Narrow phones: number tiles remain 2-col, podium spans full width. */
+  @media (max-width: 559px) {
+    .stat-tile-podium {
+      grid-column: span 2;
+    }
   }
   .stat-tile {
     background: rgba(255, 255, 255, 0.02);
@@ -757,6 +1149,72 @@
     background: rgba(255, 213, 74, 0.05);
     border-color: rgba(255, 213, 74, 0.22);
   }
+  /* Podium tile (v3.4.12) — replaces the single "Leader" tile with
+     a compact top-3 list. Player column first, medal + wins on the
+     right. The three rows are colour-toned so the top one visually
+     dominates without shouting. */
+  .stat-tile-podium {
+    background: rgba(255, 213, 74, 0.05);
+    border-color: rgba(255, 213, 74, 0.28);
+    padding: 0.6rem 0.75rem;
+    gap: 0.4rem;
+  }
+  .podium-lbl {
+    font-size: 0.62rem;
+    color: var(--accent, #ffd54a);
+    opacity: 0.8;
+  }
+  .podium-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    min-width: 0;
+  }
+  .podium-row {
+    display: grid;
+    /* medal (fixed) · name (flex) · wins (fixed). Medal-first order
+       per user preference so the gold/silver/bronze anchor is the
+       leftmost visual cue. */
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.15rem 0;
+    min-width: 0;
+  }
+  .podium-name {
+    font-weight: 700;
+    color: var(--fg, #f5f5f5);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+    font-size: 0.9rem;
+  }
+  .podium-medal {
+    font-size: 0.95rem;
+    line-height: 1;
+  }
+  .podium-wins {
+    font-size: 0.72rem;
+    color: var(--muted, #9aa0a6);
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  /* Row 1 stands out in gold; rows 2 and 3 stay in the neutral fg
+     colour but keep the same layout so the medal column stays aligned.
+     Bit of a bling-hierarchy without going overboard. */
+  .podium-1 .podium-name {
+    color: var(--accent, #ffd54a);
+    font-size: 1rem;
+  }
+  .podium-1 .podium-medal {
+    font-size: 1.05rem;
+    filter: drop-shadow(0 0 3px rgba(255, 213, 74, 0.35));
+  }
+  .podium-2 .podium-name,
+  .podium-3 .podium-name {
+    opacity: 0.9;
+  }
 
   /* Empty states */
   .empty {
@@ -769,16 +1227,6 @@
   }
   .empty p { margin: 0.2rem 0; }
   .empty-sub { font-size: 0.85rem; line-height: 1.5; }
-
-  /* Charts row */
-  .charts {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 0.75rem;
-  }
-  @media (min-width: 720px) {
-    .charts { grid-template-columns: 1fr 1fr; }
-  }
 
   /* Summary card */
   .section-hdr {
@@ -865,6 +1313,87 @@
     justify-content: flex-end;
     gap: 0.4rem;
     margin: 0.2rem 0 0.5rem;
+  }
+
+  /* Sort + filter toolbar shared between Leaderboard and Matches
+     tables (v3.4.12). Mirrors the History tab's toolbar palette so
+     the two feel like one design language. */
+  .tbl-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.55rem;
+  }
+  .tbl-toolbar .section-hdr {
+    margin: 0;
+  }
+  .tbl-filters {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin: 0.55rem 0 0.6rem;
+  }
+  .tbl-search {
+    flex: 1 1 12rem;
+    min-width: 8rem;
+    max-width: 20rem;
+    padding: 0.4rem 0.6rem;
+    background: #141414;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 0.45rem;
+    color: var(--fg, #f5f5f5);
+    font-size: 0.85rem;
+  }
+  .tbl-search:focus {
+    outline: none;
+    border-color: rgba(255, 213, 74, 0.5);
+  }
+  .tbl-chips {
+    display: inline-flex;
+    gap: 0.25rem;
+    padding: 0.15rem;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 0.5rem;
+  }
+  .tbl-chip {
+    padding: 0.25rem 0.55rem;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 0.35rem;
+    color: var(--muted, #9aa0a6);
+    font-size: 0.8rem;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .tbl-chip:hover { color: var(--fg, #f5f5f5); }
+  .tbl-chip-active {
+    background: rgba(255, 213, 74, 0.12);
+    border-color: rgba(255, 213, 74, 0.45);
+    color: var(--accent, #ffd54a);
+  }
+  /* Sortable header cell (both tables). Same class name as the
+     History-tab tables so the visual language stays consistent. */
+  .summary-tbl th.hist-th-sortable,
+  .matches-tbl th.hist-th-sortable {
+    cursor: pointer;
+    user-select: none;
+  }
+  .summary-tbl th.hist-th-sortable:hover,
+  .matches-tbl th.hist-th-sortable:hover {
+    color: var(--fg, #f5f5f5);
+  }
+  .summary-tbl th.hist-th-sorted,
+  .matches-tbl th.hist-th-sorted {
+    color: var(--accent, #ffd54a);
+  }
+  .sort-caret {
+    margin-left: 0.2rem;
+    font-size: 0.62rem;
   }
 
   /* Matches table + toolbar */

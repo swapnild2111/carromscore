@@ -52,6 +52,9 @@
         "cfg":        { ".validate": "newData.hasChildren()" },
         "result":     { ".validate": "newData.hasChildren()" },
         "boardLog":   { ".validate": "newData.hasChildren()" },
+        "setWinners": { ".validate": "newData.hasChildren()",
+          "$idx":     { ".validate": "newData.isString() && (newData.val() == 'a' || newData.val() == 'b')" }
+        },
         "practiceBoards": { ".validate": "newData.hasChildren()" },
         "tournament": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 60" },
         "tournamentKey": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 60" },

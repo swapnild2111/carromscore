@@ -121,6 +121,28 @@
     endedAt: number;
   };
   let boardLog = $state<BoardEntry[]>([]);
+  /**
+   * Swap parity (v3.4.12). Flipped on every swapSides() call. When
+   * TRUE, seat A currently holds the player that started in seat B
+   * (and vice versa). Used by the recap popup + live publish to
+   * remap cfg.playerA/playerB → the current-seat identity so
+   * spectators and the umpire's own recap see names paired with
+   * the correct sides. cfg.playerA itself is NOT mutated by swap
+   * because boardLog rows carry seat labels tied to when they were
+   * scored — flipping cfg would corrupt the historical rows.
+   */
+  let sidesSwapped = $state<boolean>(false);
+  /**
+   * Ordered per-set credit log (v3.4.12). Each entry is the side that
+   * received the SET+1 credit for that set, in the order sets were
+   * credited. The boardLog per-set totals alone cannot answer "who
+   * won this set" when a set ended by concession — the losing side
+   * may still have more per-set points on paper, but the credit
+   * went to the other side. Stored on the match record so history
+   * popup can render each set's winner truthfully. Empty when no
+   * sets have been credited yet.
+   */
+  let setWinners = $state<Array<'a' | 'b'>>([]);
   let pointsAtBoardStart = $state<{ a: number; b: number }>({ a: 0, b: 0 });
   let queenRequiredToast = $state(false);
   /**
@@ -147,6 +169,83 @@
    * Negative deltas remain enabled so real mistakes can be undone.
    */
   let matchDecidedToast = $state(false);
+  /**
+   * Swap-sides prompt (v3.4.12). Fires immediately after a SET+1
+   * successfully transitions into a NEW set. Real-carrom seat
+   * swaps between sets are common (played first-break-alternates),
+   * and umpires frequently forgot to tap the Swap button — leading
+   * to boardLogs where a mid-match physical swap was recorded on
+   * the wrong seat (reported 2026-08-30, match -P0DbrB6MBtflI74aVDq).
+   * Prompt is a small modal with Yes → swapSides(), No → dismiss.
+   * Not shown on the clinch tap (nothing to swap for) or on SET-1
+   * (undo path).
+   */
+  let showSwapPrompt = $state(false);
+  /**
+   * Concession prompt (v3.4.12). Fires when SET+1 is tapped on the
+   * winning side, but the set hasn't reached a natural end — winning
+   * side is below cfg.pointsTarget AND board count is below
+   * cfg.maxBoards. Real carrom: this can only be a concession from
+   * the losing side (they've decided to give up mid-set). We confirm
+   * before crediting to prevent a stray SET+ from silently ending a
+   * set that's still in play (reported 2026-08-30).
+   *
+   * Side stored so Yes runs the SET+ credit for the correct side.
+   */
+  let showConcessionPrompt = $state(false);
+  let pendingConcessionSide = $state<'a' | 'b' | null>(null);
+  /**
+   * Reentrant-skip flag for concession-confirmed SET+1. Set to true
+   * before re-calling adjustSets so the concession guard doesn't
+   * loop. Cleared inside adjustSets after the guard is checked.
+   */
+  let skipConcessionCheck = false;
+
+  /**
+   * Rollback breadcrumb for SET+1 (v3.4.12). SET+1 has three
+   * side-effects that SET-1 previously did NOT undo:
+   *   (1) appends a boardLog row snapshotting the running board
+   *   (2) resets points/board/queenHolder/pointsAtBoardStart for
+   *       the new set
+   *   (3) flips currentBreak for the new set's first breaker
+   * If SET-1 fires without any intervening action (adjustBoard,
+   * adjustPoints, tapCoin, SET+ on the other side), we reverse
+   * exactly those side-effects using this breadcrumb. Any
+   * intervening state-mutating action clears it (the umpire has
+   * committed to the new-set path; undoing it would corrupt what
+   * they just did in the new set). Reported 2026-08-30: umpire
+   * hit SET+1, cancelled swap prompt with No, tapped SET-1 to
+   * "go back," and phantom snapshot rows + a reset points state
+   * corrupted the final record.
+   */
+  type SetPlusRollback = {
+    /** Which side got the SET+ credit (so SET-1 knows which sets counter to reverse) */
+    side: 'a' | 'b';
+    /** boardLog length BEFORE the SET+ snapshot; used to pop back to that length */
+    prevBoardLogLen: number;
+    /** Previous per-side points before reset */
+    prevPointsA: number;
+    prevPointsB: number;
+    /** Previous board counter + queen + break + baseline */
+    prevBoard: number;
+    prevQueen: 'a' | 'b' | null;
+    prevBreak: 'a' | 'b' | null;
+    prevBaseline: { a: number; b: number };
+    /** Previous isDecidingBoard state + maxBoardsBeforeDecider (SET+ can restore the pre-decider cap) */
+    prevIsDecidingBoard: boolean;
+    prevMaxBoardsBeforeDecider: number | null;
+    prevMaxBoards: number;
+  };
+  let lastSetPlusRollback: SetPlusRollback | null = null;
+
+  /**
+   * Read-only mini-scoreboard popup accessible from the footer
+   * (v3.4.12). Reuses LiveScoreboardView + a synthesised LiveRecord
+   * built from the current live scoring state, so umpires can flip
+   * open the same per-set breakdown they'd see in the history popup
+   * without leaving the score screen.
+   */
+  let showRecapPopup = $state(false);
   /**
    * Fires when SET+1 is tapped on the losing side (per-set points
    * lower than or equal to the opponent). Real-carrom rule: the
@@ -498,6 +597,11 @@
         if (s?.queenHolder === 'a' || s?.queenHolder === 'b' || s?.queenHolder === null) queenHolder = s.queenHolder;
         if (s?.matchResult === 'a' || s?.matchResult === 'b' || s?.matchResult === 'draw' || s?.matchResult === null) matchResult = s.matchResult;
         if (Array.isArray(s?.boardLog)) boardLog = s.boardLog as BoardEntry[];
+        if (Array.isArray(s?.setWinners)) {
+          setWinners = (s.setWinners as unknown[]).filter(
+            (w): w is 'a' | 'b' => w === 'a' || w === 'b',
+          );
+        }
         if (typeof s?.pointsAtBoardStart?.a === 'number' && typeof s?.pointsAtBoardStart?.b === 'number') {
           pointsAtBoardStart = s.pointsAtBoardStart;
         }
@@ -669,6 +773,7 @@
       queenHolder,
       matchResult,
       boardLog,
+      setWinners,
       pointsAtBoardStart,
     };
     if (isPractice) {
@@ -705,6 +810,7 @@
         queenHolder,
         matchResult,
         ...(!isPractice && boardLog.length > 0 ? { boardLog } : {}),
+        ...(!isPractice && setWinners.length > 0 ? { setWinners } : {}),
         ...(isPractice ? { practiceBoards, practiceSetIdx } : {}),
       };
       // tournamentKey rides alongside tournament so the RTDB
@@ -862,15 +968,24 @@
   });
 
   /**
-   * True once the match is fully decided — endMatch() has run,
-   * matchResult is set. All positive-delta scoring inputs freeze in
-   * this state to prevent stray taps from adding phantom scoring to
-   * a match that's over. BOARD-1 / SET- / POINTS- (negative deltas)
-   * remain enabled so mistakes can still be undone. See
-   * matchDecidedToast for the user-facing feedback.
+   * True once the match is fully decided — either endMatch() has run
+   * (matchResult set) OR one side has mathematically clinched by
+   * winning ⌈bestOf/2⌉ sets. In bo3 that's 2 sets. Even before the
+   * umpire hits End Match, a clinched match freezes positive-delta
+   * scoring so a player leaning over the phone (or a stray tap) can
+   * never open a phantom next set. BOARD-1 / SET- / POINTS-
+   * (negative deltas) remain enabled so mistakes can still be undone
+   * — including SET-1 which the umpire could use to rescind a
+   * mistakenly-credited set and reopen scoring.
+   *
+   * Practice mode has no versus concept, so the clinch branch is
+   * skipped there — practice ends purely by tapping End Match.
    */
   function isMatchDecided(): boolean {
-    return matchResult !== null;
+    if (matchResult !== null) return true;
+    if (isPractice) return false;
+    const winThreshold = Math.ceil(cfg.bestOf / 2);
+    return sideA.sets >= winThreshold || sideB.sets >= winThreshold;
   }
 
   /** Max points a single board can score in ICF-rules carrom:
@@ -879,6 +994,10 @@
 
   function adjustPoints(side: 'a' | 'b', delta: number) {
     void tryLockLandscape();
+    // Any state-mutating action commits the umpire past the previous
+    // SET+1, so its rollback breadcrumb no longer applies. See
+    // adjustSets' SET-1 rollback branch for the full contract.
+    lastSetPlusRollback = null;
     // Post-endMatch lockout: don't accept positive deltas. Negatives
     // are still allowed as an undo — an umpire realising a stray tap
     // after End can back out without a full reset.
@@ -924,6 +1043,48 @@
       window.setTimeout(() => { matchDecidedToast = false; }, 2500);
       return;
     }
+    // Symmetric SET-1 undo (v3.4.12). If SET-1 fires and we hold a
+    // breadcrumb from the previous SET+1 (no intervening state-
+    // mutating action), fully reverse the SET+1 side-effects:
+    // pop the snapshot row, restore points/board/queen/break/
+    // baseline/decider state, and decrement sets on the side that
+    // received the credit — regardless of which side the umpire
+    // now tapped SET- on (they're saying "undo my last SET+", not
+    // "credit the other side negatively"). Without this, SET-1
+    // after SET+1 leaves a phantom row + zero'd points, so the
+    // umpire keeps playing thinking they undid it, but the archive
+    // ends up corrupt (reported 2026-08-30, match -P0GOCEaXTIC7ryRzFO_).
+    if (delta < 0 && lastSetPlusRollback && !isPractice) {
+      const rb = lastSetPlusRollback;
+      lastSetPlusRollback = null;
+      // Undo the sets counter on whichever side got the credit
+      if (rb.side === 'a') sideA.sets = Math.max(0, sideA.sets - 1);
+      else sideB.sets = Math.max(0, sideB.sets - 1);
+      // Restore mid-set state
+      sideA.points = rb.prevPointsA;
+      sideB.points = rb.prevPointsB;
+      board = rb.prevBoard;
+      queenHolder = rb.prevQueen;
+      currentBreak = rb.prevBreak;
+      pointsAtBoardStart = { ...rb.prevBaseline };
+      isDecidingBoard = rb.prevIsDecidingBoard;
+      maxBoardsBeforeDecider = rb.prevMaxBoardsBeforeDecider;
+      cfg.maxBoards = rb.prevMaxBoards;
+      // Pop any snapshot rows appended by the SET+1
+      if (boardLog.length > rb.prevBoardLogLen) {
+        boardLog = boardLog.slice(0, rb.prevBoardLogLen);
+      }
+      // Pop the setWinners tail entry so the ordered credit log
+      // stays honest with the reversed sets counter.
+      if (setWinners.length > 0) setWinners = setWinners.slice(0, -1);
+      // matchResult never latched (SET+1 didn't clinch since we
+      // captured a rollback; auto-clinch branch would have skipped
+      // the breadcrumb — well, it doesn't currently, so if it did
+      // clinch, matchResult was set. Un-set it here to fully reverse.)
+      matchResult = null;
+      showWinnerPopup = false;
+      return;
+    }
     // Match-clinch guard: refuse SET+X when the OTHER side has
     // already reached ⌈bestOf/2⌉ sets. In bo3 that's 2 — a 0-2 or
     // 2-0 score means the match is mathematically decided; the
@@ -966,6 +1127,54 @@
         window.setTimeout(() => { setLoserToast = false; }, 3000);
         return;
       }
+
+      // Concession prompt (v3.4.12): winning side is ahead but the
+      // set has NOT reached a natural end. Real carrom set-close
+      // paths:
+      //   A) winning side reached cfg.pointsTarget → accept silently
+      //   B) all cfg.maxBoards played → accept silently (ties are
+      //      caught by the equality check above)
+      //   C) neither → the losing side has conceded mid-set; confirm
+      //      with the umpire before crediting so an accidental SET+
+      //      doesn't silently end an in-progress set.
+      // Skipped when tapping while `isDecidingBoard` (the umpire
+      // already resolved the tie via the deciding-board flow and any
+      // SET+ tap now is the natural close of that decider).
+      const atOrPastTarget = tappedPts >= cfg.pointsTarget;
+      const atBoardCapForConcession =
+        !isBoardsUnlimited(cfg) && board >= cfg.maxBoards;
+      if (
+        !skipConcessionCheck &&
+        !atOrPastTarget &&
+        !atBoardCapForConcession &&
+        !isDecidingBoard
+      ) {
+        pendingConcessionSide = side;
+        showConcessionPrompt = true;
+        return;
+      }
+      skipConcessionCheck = false;
+    }
+    // Capture the pre-mutation breadcrumb so SET-1 (called next,
+    // without any intervening action) can fully reverse the three
+    // side-effects SET+1 performs: (1) boardLog snapshot, (2) reset
+    // of points/board/queen/baseline, (3) currentBreak flip. See
+    // lastSetPlusRollback declaration for the full contract.
+    // Cleared inside SET-1's rollback branch after applying.
+    if (delta > 0 && !isPractice) {
+      lastSetPlusRollback = {
+        side,
+        prevBoardLogLen: boardLog.length,
+        prevPointsA: sideA.points,
+        prevPointsB: sideB.points,
+        prevBoard: board,
+        prevQueen: queenHolder,
+        prevBreak: currentBreak,
+        prevBaseline: { ...pointsAtBoardStart },
+        prevIsDecidingBoard: isDecidingBoard,
+        prevMaxBoardsBeforeDecider: maxBoardsBeforeDecider,
+        prevMaxBoards: cfg.maxBoards,
+      };
     }
     // Before the SET+ handler could reset points/board/queen for the
     // new set, we need to snapshot the running (in-progress) board so
@@ -1038,6 +1247,17 @@
     s.sets = Math.min(cfg.bestOf, Math.max(0, s.sets + delta));
     if (s.sets === prev) return;
 
+    // Track the ordered per-set credit log (v3.4.12). Push on SET+1
+    // credit; pop on SET-1 uncredit. Cap length at bestOf so a rapid
+    // SET+ tap-past-clinch can't inflate the array. The value pushed
+    // is the SIDE that received the credit, regardless of who has
+    // more per-set points — concession sets stay honest.
+    if (delta > 0 && !isPractice) {
+      setWinners = [...setWinners, side];
+    } else if (delta < 0 && !isPractice && setWinners.length > 0) {
+      setWinners = setWinners.slice(0, -1);
+    }
+
     // A SET change either transitions into a NEW set (which needs
     // fresh points + board + queen), or credits the FINAL set of the
     // match (nothing more to play, no reset needed). Distinguish by
@@ -1086,6 +1306,13 @@
       if (prevSetOpener) {
         currentBreak = prevSetOpener === 'a' ? 'b' : 'a';
       }
+      // Prompt the umpire to swap sides for the new set. Yes → runs
+      // the same swapSides() action the toolbar button uses. No →
+      // dismiss. Doesn't fire on the clinch tap (skipped by the
+      // outer anotherSetRemains guard) or on SET-1 (positive-delta
+      // only). Overlays the score screen briefly; auto-dismisses on
+      // outside tap or 12s idle so it never blocks a running match.
+      showSwapPrompt = true;
     }
     // Auto-clinch: if this SET+1 credit takes the side to the
     // match-winning threshold (⌈bestOf/2⌉), the match is over —
@@ -1110,6 +1337,8 @@
   }
   function adjustBoard(delta: number) {
     void tryLockLandscape();
+    // Any state-mutating action commits past the previous SET+1.
+    lastSetPlusRollback = null;
     // Post-endMatch lockout on positive deltas. BOARD-1 still works
     // so an accidental BOARD+1 during a decided match can be popped
     // (adjustBoard's own delta<0 branch handles the boardLog pop).
@@ -1247,6 +1476,8 @@
    *     ownership (this coin turns red, the other returns to grey).
    */
   function tapCoin(side: SideId) {
+    // Any state-mutating action commits past the previous SET+1.
+    lastSetPlusRollback = null;
     // Match already decided — freeze queen marking. This prevents a
     // stray coin tap after End from repainting the recap. The lock
     // applies to both new-queen assignment and transfer; return-to-
@@ -1769,6 +2000,7 @@
         startedAt,
         endedAt: Date.now(),
         ...(boardLog.length > 0 ? { boardLog: [...boardLog] } : {}),
+        ...(setWinners.length > 0 ? { setWinners: [...setWinners] } : {}),
         ...(isPractice && practiceBoards.length > 0
           ? { practiceBoards: practiceBoards.map((row) => [...row]) }
           : {}),
@@ -1823,6 +2055,12 @@
   }
 
   function swapSides() {
+    // Swap commits past the previous SET+1 — the swap flips names/
+    // colours/sets/breaks, so a subsequent SET-1 rollback would
+    // reconcile against a post-swap frame that doesn't match the
+    // captured breadcrumb. Clear the rollback so SET-1 does its
+    // plain-decrement default in this state.
+    lastSetPlusRollback = null;
     // Physical seat swap: every per-player attribute travels with
     // the player, so their names, notes, colours, SET counts, AND
     // current-set POINTS all move together. BOARD stays put — it
@@ -1843,6 +2081,11 @@
     const tmpSets = sideA.sets;
     sideA.sets = sideB.sets;
     sideB.sets = tmpSets;
+    // Ordered per-set credit log tracks people (via their seat at
+    // the moment of the credit). After swapping seats, historical
+    // credits also flip a↔b so "Swapnil won set 0" stays honest
+    // when Swapnil moves from A to B.
+    setWinners = setWinners.map((w) => (w === 'a' ? 'b' : 'a'));
     const tmpPoints = sideA.points;
     sideA.points = sideB.points;
     sideB.points = tmpPoints;
@@ -1869,6 +2112,36 @@
     const tmpCountrySeed = aCountrySeed;
     aCountrySeed = bCountrySeed;
     bCountrySeed = tmpCountrySeed;
+    // Flip every boardLog row's per-seat fields so historical rows
+    // stay aligned with the CURRENT seat identity. Without this, a
+    // row scored pre-swap under seat A stays labelled `pointsA` but
+    // the consumer sees `meta.playerA` = post-swap player → the row
+    // appears attributed to the wrong person. Reported 2026-08-30:
+    // after a set-1 swap the recap popup showed "Set won by Swapnil"
+    // for set 1 (won pre-swap by Yuva). Compact swap: pointsA↔pointsB,
+    // queen a↔b, breakSide a↔b. cfg.playerA/B are also swapped so
+    // `meta.playerA` in the LiveRecord matches sideA.name.
+    boardLog = boardLog.map((r) => ({
+      ...r,
+      pointsA: r.pointsB,
+      pointsB: r.pointsA,
+      queen: r.queen === 'a' ? 'b' : 'a',
+      breakSide: r.breakSide === 'a' ? 'b' : 'a',
+    }));
+    // Swap the identity cfg fields — mirrors sideA.name/sideB.name
+    // above so consumers reading either see a coherent picture.
+    const tmpPa = cfg.playerA;
+    cfg.playerA = cfg.playerB;
+    cfg.playerB = tmpPa;
+    const tmpPa2 = cfg.playerA2;
+    cfg.playerA2 = cfg.playerB2;
+    cfg.playerB2 = tmpPa2;
+    const tmpNa = cfg.noteA;
+    cfg.noteA = cfg.noteB;
+    cfg.noteB = tmpNa;
+    // sidesSwapped kept as informational parity flag (not consumed
+    // anywhere currently; may be useful for audit later).
+    sidesSwapped = !sidesSwapped;
   }
 
   function resetScores() {
@@ -2408,6 +2681,14 @@
       </span>
     {/if}
     <div class="foot-actions">
+      <button
+        type="button"
+        class="foot-btn scores"
+        onclick={() => { showRecapPopup = true; }}
+        aria-label="Show live scoreboard"
+      >
+        <span class="foot-ico" aria-hidden="true">📊</span><span class="foot-lbl">Scores</span>
+      </button>
       {#if !isPractice}
         <button type="button" class="foot-btn swap" onclick={swapSides} aria-label="Swap sides">
           <span class="foot-ico" aria-hidden="true">⇄</span><span class="foot-lbl">Swap</span>
@@ -2555,6 +2836,7 @@
         queenHolder: null,
         matchResult,
         ...(boardLog.length > 0 ? { boardLog } : {}),
+        ...(setWinners.length > 0 ? { setWinners } : {}),
       },
     } as LiveRecord}
     <div
@@ -2586,6 +2868,63 @@
             >✎ Fix this match</button>
           </div>
         {/if}
+      </div>
+    </div>
+  {/if}
+
+  {#if showRecapPopup}
+    <!--
+      Mid-match live recap (v3.4.12). Reuses LiveScoreboardView with a
+      synthesised LiveRecord — same visual layout the /live/ history
+      popup uses. Opened via the footer's Scores button. Score screen
+      keeps running underneath; when the umpire closes, they return to
+      the exact scoring state they left. matchResult is passed through
+      so a decided-but-not-yet-Ended match still shows the trophy in
+      the recap (though the trophy rarely appears here since decided
+      matches usually go straight to endMatch's own scorecard popup).
+    -->
+    {@const recapRecord = {
+      matchId: '',
+      updatedAt: Date.now(),
+      meta: {
+        mode: cfg.mode,
+        playerA: cfg.playerA,
+        playerA2: cfg.playerA2,
+        playerB: cfg.playerB,
+        playerB2: cfg.playerB2,
+        noteA: cfg.noteA,
+        noteB: cfg.noteB,
+        bestOf: cfg.bestOf,
+        pointsTarget: cfg.pointsTarget,
+        maxBoards: cfg.maxBoards,
+        ...(cfg.tournament ? { tournament: cfg.tournament } : {}),
+      },
+      liveState: {
+        sideA: { points: sideA.points, sets: sideA.sets },
+        sideB: { points: sideB.points, sets: sideB.sets },
+        board,
+        currentBreak,
+        queenHolder,
+        matchResult,
+        ...(boardLog.length > 0 ? { boardLog } : {}),
+        ...(setWinners.length > 0 ? { setWinners } : {}),
+        ...(practiceBoards.length > 0 ? { practiceBoards } : {}),
+      },
+    } as LiveRecord}
+    <div
+      class="dialog scorecard-dialog"
+      role="dialog"
+      aria-modal="true"
+      onclick={(e) => { if (e.target === e.currentTarget) showRecapPopup = false; }}
+    >
+      <div class="dialog-card scorecard-card">
+        <button
+          type="button"
+          class="dialog-close"
+          onclick={() => (showRecapPopup = false)}
+          aria-label="Close scoreboard"
+        >✕</button>
+        <LiveScoreboardView record={recapRecord} />
       </div>
     </div>
   {/if}
@@ -2719,12 +3058,102 @@
   {#if matchDecidedToast}
     <!--
       Surfaced when any positive-delta scoring input (POINTS+, BOARD+,
-      SET+, tapCoin) is attempted after endMatch has decided the
-      result. Prevents stray taps from adding phantom scoring after
-      the match is closed. Negative deltas remain enabled as an undo.
+      SET+, tapCoin) is attempted after the match is decided. Two paths
+      reach this state now (v3.4.12): (1) endMatch has actually run and
+      set matchResult, or (2) one side has mathematically clinched by
+      winning ⌈bestOf/2⌉ sets and the umpire hasn't tapped End yet.
+      A single message covers both — the guidance is the same: hit End
+      to close the record. Negative deltas remain enabled as an undo.
     -->
     <div class="queen-toast" role="status" aria-live="polite">
-      Match ended — score is locked. Use Reset to start over.
+      {#if matchResult !== null}
+        Match ended — score is locked. Use Reset to start over.
+      {:else}
+        Match decided — tap End to finish. Or SET-1 to reopen scoring.
+      {/if}
+    </div>
+  {/if}
+
+  {#if showSwapPrompt}
+    <!--
+      Fires immediately after SET+1 opens a new set. Physical seat
+      swaps between sets are common in real carrom; umpires forgot
+      to tap Swap on the app several times (reported 2026-08-30).
+      Yes → runs the same swapSides() action as the toolbar button.
+      No / backdrop tap → dismiss without swapping. Non-blocking:
+      the score screen keeps working underneath (buttons stay tappable
+      because the backdrop only covers the modal — see .swap-prompt-
+      backdrop below).
+    -->
+    <div
+      class="swap-prompt-backdrop"
+      role="dialog"
+      aria-modal="false"
+      aria-labelledby="swap-prompt-title"
+      onclick={(e) => { if (e.target === e.currentTarget) showSwapPrompt = false; }}
+    >
+      <div class="swap-prompt-card">
+        <p id="swap-prompt-title" class="swap-prompt-title">Swap sides for the next set?</p>
+        <div class="swap-prompt-actions">
+          <button
+            type="button"
+            class="swap-prompt-btn swap-prompt-no"
+            onclick={() => { showSwapPrompt = false; }}
+          >No</button>
+          <button
+            type="button"
+            class="swap-prompt-btn swap-prompt-yes"
+            onclick={() => { showSwapPrompt = false; swapSides(); }}
+          >Yes, swap</button>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  {#if showConcessionPrompt}
+    <!--
+      Fires when SET+1 is tapped on the winning side but the set
+      hasn't reached a natural end (winning side < pointsTarget AND
+      board count < maxBoards). The only carrom-legal reason to end
+      a set here is a concession from the losing side. Confirm before
+      crediting so an accidental SET+ doesn't silently close an
+      in-progress set (reported 2026-08-30).
+
+      Yes → skip the concession check and re-invoke adjustSets to
+      credit the pending side (with the reentrant flag to prevent
+      the concession loop). No / backdrop → clear pending and dismiss.
+    -->
+    {@const winName = pendingConcessionSide === 'a' ? sideA.name : sideB.name}
+    {@const loseName = pendingConcessionSide === 'a' ? sideB.name : sideA.name}
+    <div
+      class="swap-prompt-backdrop"
+      role="dialog"
+      aria-modal="false"
+      aria-labelledby="concession-prompt-title"
+      onclick={(e) => { if (e.target === e.currentTarget) { showConcessionPrompt = false; pendingConcessionSide = null; } }}
+    >
+      <div class="swap-prompt-card">
+        <p id="concession-prompt-title" class="swap-prompt-title">
+          Set not yet finished — is <strong>{loseName || 'the other side'}</strong> conceding this set to <strong>{winName || 'this side'}</strong>?
+        </p>
+        <div class="swap-prompt-actions">
+          <button
+            type="button"
+            class="swap-prompt-btn swap-prompt-no"
+            onclick={() => { showConcessionPrompt = false; pendingConcessionSide = null; }}
+          >No, keep playing</button>
+          <button
+            type="button"
+            class="swap-prompt-btn swap-prompt-yes"
+            onclick={() => {
+              const s = pendingConcessionSide;
+              showConcessionPrompt = false;
+              pendingConcessionSide = null;
+              if (s) { skipConcessionCheck = true; adjustSets(s, 1); }
+            }}
+          >Yes, credit set</button>
+        </div>
+      </div>
     </div>
   {/if}
 
@@ -2904,6 +3333,83 @@
   @keyframes queenToastIn {
     from { opacity: 0; transform: translate(-50%, -0.4rem); }
     to   { opacity: 1; transform: translate(-50%, 0); }
+  }
+
+  /* Swap-sides prompt (v3.4.12). Centred modal card with a dimmed
+     backdrop. Non-blocking-ish: the backdrop is only there to catch
+     "tap outside → dismiss," but visually mutes the score screen
+     so the umpire's attention lands on the question. Similar amber
+     palette to the queen-toast for family resemblance. */
+  .swap-prompt-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 320;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+    animation: swapPromptFade 0.15s ease-out;
+  }
+  .swap-prompt-card {
+    background: linear-gradient(135deg, #221a0a, #14100a);
+    border: 1px solid rgba(255, 213, 74, 0.55);
+    border-radius: 0.9rem;
+    padding: 1.1rem 1.25rem 1rem;
+    max-width: min(20rem, calc(100vw - 2rem));
+    box-shadow:
+      0 0 0 1px rgba(255, 213, 74, 0.25),
+      0 18px 48px rgba(0, 0, 0, 0.65);
+    animation: swapPromptScale 0.18s ease-out;
+  }
+  .swap-prompt-title {
+    margin: 0 0 0.9rem;
+    color: var(--accent, #ffd54a);
+    font-weight: 700;
+    font-size: 1rem;
+    text-align: center;
+  }
+  .swap-prompt-actions {
+    display: flex;
+    gap: 0.6rem;
+    justify-content: center;
+  }
+  .swap-prompt-btn {
+    flex: 1 1 0;
+    min-width: 5rem;
+    padding: 0.55rem 0.9rem;
+    border-radius: 0.55rem;
+    font-weight: 700;
+    font-size: 0.95rem;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: background 0.12s, border-color 0.12s;
+  }
+  .swap-prompt-no {
+    background: #1a1a1a;
+    color: #ccc;
+    border-color: #333;
+  }
+  .swap-prompt-no:hover, .swap-prompt-no:active {
+    background: #222;
+    border-color: #444;
+  }
+  .swap-prompt-yes {
+    background: linear-gradient(135deg, #3a2a10, #2a1e0a);
+    color: var(--accent, #ffd54a);
+    border-color: rgba(255, 213, 74, 0.6);
+  }
+  .swap-prompt-yes:hover, .swap-prompt-yes:active {
+    background: linear-gradient(135deg, #4a3618, #362510);
+  }
+  @keyframes swapPromptFade {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+  @keyframes swapPromptScale {
+    from { transform: scale(0.94); opacity: 0; }
+    to   { transform: scale(1); opacity: 1; }
   }
 
   .rotate-card {
@@ -3568,6 +4074,7 @@
   .foot-ico { font-size: 0.95rem; line-height: 1; }
   .foot-lbl { letter-spacing: 0.04em; }
 
+  .foot-btn.scores { border-color: rgba(255,213,74,0.4); color: var(--accent); }
   .foot-btn.swap { border-color: rgba(79,195,247,0.4); color: var(--side-a); }
   .foot-btn.reset { border-color: rgba(255,213,74,0.4); color: var(--accent); }
   .foot-btn.endm { border-color: rgba(76,175,80,0.5); color: #66bb6a; }
