@@ -164,6 +164,22 @@
   });
 
   /**
+   * Proxy binding for the Round <select> (v3.4.12) — same pattern
+   * as selectionProxy. '__all__' = every round combined. Effects
+   * keep roundFilter and this proxy in step; on tournament switch
+   * both reset to their "all" default (via the reset effect above).
+   */
+  let roundFilterProxy = $state<string>('__all__');
+  $effect(() => {
+    const want = roundFilter === null ? '__all__' : roundFilter;
+    if (roundFilterProxy !== want) roundFilterProxy = want;
+  });
+  $effect(() => {
+    const next = roundFilterProxy === '__all__' ? null : roundFilterProxy;
+    if (next !== roundFilter) roundFilter = next;
+  });
+
+  /**
    * The view report — either the combined tournament report or a
    * specific round's slice. When a round is picked, we synthesise a
    * lightweight report shape from the matching roundReport so
@@ -514,6 +530,26 @@
         <option value={opt.key === null ? '__default__' : opt.key}>{opt.label}</option>
       {/each}
     </select>
+    {#if report && (report.roundReports?.length ?? 0) > 0}
+      <!--
+        Round dropdown (v3.4.12) — only rendered when the current
+        tournament has round-tagged matches. Uses bind:value on a
+        proxy string ('__all__' = All rounds) with an effect syncing
+        the underlying roundFilter state. Same pattern as the
+        tournament select above so nearby DOM churn can't leave
+        the picker showing a stale label.
+      -->
+      <select
+        class="rep-select rep-select-round"
+        bind:value={roundFilterProxy}
+        aria-label="Round"
+      >
+        <option value="__all__">All rounds</option>
+        {#each report.roundReports ?? [] as rr (rr.roundKey)}
+          <option value={rr.roundKey}>{rr.roundName}</option>
+        {/each}
+      </select>
+    {/if}
     {#if filterSearch.trim() !== '' || filterMode !== 'all'}
       <button
         type="button"
@@ -524,38 +560,11 @@
     {/if}
   </div>
 
-  {#if report && (report.roundReports?.length ?? 0) > 0}
-    <!--
-      Round filter (v3.3.3). Chip strip below the tournament picker
-      when the current tournament has rounds. Scopes summary tiles /
-      charts / leaderboard / matches table to one round. The per-
-      round accordion below is not affected — it always renders the
-      full breakdown so an organiser can jump straight to a stage.
-    -->
-    <div class="picker picker-round">
-      <span class="picker-lbl">Round</span>
-      <div class="chips" role="tablist" aria-label="Filter by round">
-        <button
-          type="button"
-          role="tab"
-          class="chip"
-          class:chip-on={roundFilter === null}
-          aria-selected={roundFilter === null}
-          onclick={() => (roundFilter = null)}
-        >All rounds</button>
-        {#each report.roundReports ?? [] as rr (rr.roundKey)}
-          <button
-            type="button"
-            role="tab"
-            class="chip"
-            class:chip-on={roundFilter === rr.roundKey}
-            aria-selected={roundFilter === rr.roundKey}
-            onclick={() => (roundFilter = rr.roundKey)}
-          >{rr.roundName}</button>
-        {/each}
-      </div>
-    </div>
-  {/if}
+  <!-- Round chip strip removed v3.4.12 — merged into the filter bar
+       as a dropdown that appears conditionally when the current
+       tournament has rounds. See the .reports-filters block above
+       for the round <select>. -->
+
 
   {#if !viewReport}
     <div class="empty">
@@ -968,6 +977,13 @@
     font-weight: 700;
     min-width: 12rem;
     max-width: min(24rem, 60vw);
+  }
+  .rep-select-round {
+    border-color: rgba(255, 213, 74, 0.25);
+    color: var(--accent, #ffd54a);
+    font-weight: 700;
+    min-width: 8rem;
+    max-width: min(18rem, 50vw);
   }
   .rep-select:focus {
     outline: none;
