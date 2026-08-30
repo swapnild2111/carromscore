@@ -726,6 +726,13 @@ export type MatchPatch = {
     pointsB: number;
     endedAt: number;
   }>;
+  /**
+   * Practice-only (v3.5.5). 2D matrix of per-board miss counts —
+   * outer index = set, inner = board within that set. Same shape as
+   * MatchRecord.practiceBoards. Written by MatchEditModal's practice
+   * grid editor. Ignored for versus records.
+   */
+  practiceBoards?: number[][];
 };
 
 export type WriteOutcome = { ok: true } | { ok: false; error: string };
@@ -788,6 +795,22 @@ function applyMatchPatch(
     if (next.setWinners !== undefined) {
       delete next.setWinners;
     }
+  }
+  if (patch.practiceBoards) {
+    // Practice-mode board matrix (v3.5.5). Sanitised: coerce each cell
+    // to a non-negative integer, cap outer + inner dims to reasonable
+    // sizes so a malformed patch can't blow up the record.
+    const sanitised: number[][] = [];
+    for (const row of patch.practiceBoards.slice(0, 20)) {
+      if (!Array.isArray(row)) continue;
+      const rowOut: number[] = [];
+      for (const cell of row.slice(0, 20)) {
+        const n = Number(cell);
+        rowOut.push(Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0);
+      }
+      sanitised.push(rowOut);
+    }
+    next.practiceBoards = sanitised;
   }
   // Write-time reconcile (v3.4.11). After the patch is merged, if the
   // merged record has a boardLog whose per-set totals disagree with
