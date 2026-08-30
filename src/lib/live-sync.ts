@@ -52,6 +52,15 @@ export type LivePayload = {
   queenHolder: 'a' | 'b' | null;
   matchResult: 'a' | 'b' | 'draw' | null;
   boardLog?: BoardLogEntry[];
+  /**
+   * Ordered per-set credit log (v3.4.12). Same shape + semantics as
+   * MatchRecord.setWinners in lib/history.ts. Present in the recap /
+   * spectator popup for concession-set-correct per-set winner
+   * ribbons. Absent for legacy records / live matches that don't
+   * publish it — consumers fall back to boardLog-derived per-set
+   * totals.
+   */
+  setWinners?: Array<'a' | 'b'>;
   practiceBoards?: number[][];
   /**
    * Practice/solo only. Which set the umpire is currently paging in

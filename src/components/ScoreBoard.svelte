@@ -121,6 +121,17 @@
     endedAt: number;
   };
   let boardLog = $state<BoardEntry[]>([]);
+  /**
+   * Ordered per-set credit log (v3.4.12). Each entry is the side that
+   * received the SET+1 credit for that set, in the order sets were
+   * credited. The boardLog per-set totals alone cannot answer "who
+   * won this set" when a set ended by concession — the losing side
+   * may still have more per-set points on paper, but the credit
+   * went to the other side. Stored on the match record so history
+   * popup can render each set's winner truthfully. Empty when no
+   * sets have been credited yet.
+   */
+  let setWinners = $state<Array<'a' | 'b'>>([]);
   let pointsAtBoardStart = $state<{ a: number; b: number }>({ a: 0, b: 0 });
   let queenRequiredToast = $state(false);
   /**
@@ -575,6 +586,11 @@
         if (s?.queenHolder === 'a' || s?.queenHolder === 'b' || s?.queenHolder === null) queenHolder = s.queenHolder;
         if (s?.matchResult === 'a' || s?.matchResult === 'b' || s?.matchResult === 'draw' || s?.matchResult === null) matchResult = s.matchResult;
         if (Array.isArray(s?.boardLog)) boardLog = s.boardLog as BoardEntry[];
+        if (Array.isArray(s?.setWinners)) {
+          setWinners = (s.setWinners as unknown[]).filter(
+            (w): w is 'a' | 'b' => w === 'a' || w === 'b',
+          );
+        }
         if (typeof s?.pointsAtBoardStart?.a === 'number' && typeof s?.pointsAtBoardStart?.b === 'number') {
           pointsAtBoardStart = s.pointsAtBoardStart;
         }
@@ -746,6 +762,7 @@
       queenHolder,
       matchResult,
       boardLog,
+      setWinners,
       pointsAtBoardStart,
     };
     if (isPractice) {
@@ -782,6 +799,7 @@
         queenHolder,
         matchResult,
         ...(!isPractice && boardLog.length > 0 ? { boardLog } : {}),
+        ...(!isPractice && setWinners.length > 0 ? { setWinners } : {}),
         ...(isPractice ? { practiceBoards, practiceSetIdx } : {}),
       };
       // tournamentKey rides alongside tournament so the RTDB
@@ -1045,6 +1063,9 @@
       if (boardLog.length > rb.prevBoardLogLen) {
         boardLog = boardLog.slice(0, rb.prevBoardLogLen);
       }
+      // Pop the setWinners tail entry so the ordered credit log
+      // stays honest with the reversed sets counter.
+      if (setWinners.length > 0) setWinners = setWinners.slice(0, -1);
       // matchResult never latched (SET+1 didn't clinch since we
       // captured a rollback; auto-clinch branch would have skipped
       // the breadcrumb — well, it doesn't currently, so if it did
@@ -1214,6 +1235,17 @@
     const prev = s.sets;
     s.sets = Math.min(cfg.bestOf, Math.max(0, s.sets + delta));
     if (s.sets === prev) return;
+
+    // Track the ordered per-set credit log (v3.4.12). Push on SET+1
+    // credit; pop on SET-1 uncredit. Cap length at bestOf so a rapid
+    // SET+ tap-past-clinch can't inflate the array. The value pushed
+    // is the SIDE that received the credit, regardless of who has
+    // more per-set points — concession sets stay honest.
+    if (delta > 0 && !isPractice) {
+      setWinners = [...setWinners, side];
+    } else if (delta < 0 && !isPractice && setWinners.length > 0) {
+      setWinners = setWinners.slice(0, -1);
+    }
 
     // A SET change either transitions into a NEW set (which needs
     // fresh points + board + queen), or credits the FINAL set of the
@@ -1957,6 +1989,7 @@
         startedAt,
         endedAt: Date.now(),
         ...(boardLog.length > 0 ? { boardLog: [...boardLog] } : {}),
+        ...(setWinners.length > 0 ? { setWinners: [...setWinners] } : {}),
         ...(isPractice && practiceBoards.length > 0
           ? { practiceBoards: practiceBoards.map((row) => [...row]) }
           : {}),
@@ -2037,6 +2070,11 @@
     const tmpSets = sideA.sets;
     sideA.sets = sideB.sets;
     sideB.sets = tmpSets;
+    // Ordered per-set credit log tracks people (via their seat at
+    // the moment of the credit). After swapping seats, historical
+    // credits also flip a↔b so "Swapnil won set 0" stays honest
+    // when Swapnil moves from A to B.
+    setWinners = setWinners.map((w) => (w === 'a' ? 'b' : 'a'));
     const tmpPoints = sideA.points;
     sideA.points = sideB.points;
     sideB.points = tmpPoints;
@@ -2757,6 +2795,7 @@
         queenHolder: null,
         matchResult,
         ...(boardLog.length > 0 ? { boardLog } : {}),
+        ...(setWinners.length > 0 ? { setWinners } : {}),
       },
     } as LiveRecord}
     <div
@@ -2827,6 +2866,7 @@
         queenHolder,
         matchResult,
         ...(boardLog.length > 0 ? { boardLog } : {}),
+        ...(setWinners.length > 0 ? { setWinners } : {}),
         ...(practiceBoards.length > 0 ? { practiceBoards } : {}),
       },
     } as LiveRecord}

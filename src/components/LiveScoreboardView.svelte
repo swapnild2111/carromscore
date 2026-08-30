@@ -126,6 +126,15 @@
     // matches.
     const matchEnded = (state.matchResult ?? null) !== null;
     const currentSetIdx = (state.sideA?.sets ?? 0) + (state.sideB?.sets ?? 0);
+    // Ordered per-set credit log — authoritative when present. See
+    // MatchRecord.setWinners / LivePayload.setWinners for the full
+    // contract. Written from ScoreBoard's SET+1 path so concession
+    // sets stay honest (the losing side may have more per-set points
+    // on paper but the credit went to the other side).
+    const rawSetWinners = state.setWinners;
+    const setWinners: Array<'a' | 'b'> = Array.isArray(rawSetWinners)
+      ? rawSetWinners.filter((w): w is 'a' | 'b' => w === 'a' || w === 'b')
+      : [];
     const groups: SetGroup[] = [];
     for (const i of sortedIndices) {
       const raw = bySet.get(i) ?? [];
@@ -143,7 +152,11 @@
       let winner: SetGroup['winner'] = null;
       const setIsCompleted = matchEnded || i < currentSetIdx;
       if (setIsCompleted && boards.length > 0) {
-        if (totalA > totalB) winner = 'a';
+        // Prefer the stored credit for this set; fall back to totals.
+        const credited = setWinners[i];
+        if (credited === 'a' || credited === 'b') {
+          winner = credited;
+        } else if (totalA > totalB) winner = 'a';
         else if (totalB > totalA) winner = 'b';
         else winner = 'tie';
       }

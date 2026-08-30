@@ -976,6 +976,9 @@
         queenHolder: null,
         matchResult: rec.winner,
         ...(m.boardLog && m.boardLog.length > 0 ? { boardLog: m.boardLog } : {}),
+        ...(m.setWinners && m.setWinners.length > 0
+          ? { setWinners: m.setWinners }
+          : {}),
         ...(m.practiceBoards && m.practiceBoards.length > 0
           ? { practiceBoards: m.practiceBoards }
           : {}),

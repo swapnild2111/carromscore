@@ -108,6 +108,17 @@ export type MatchResultInput = {
     endedAt: number;
   }>;
   /**
+   * Ordered per-set credit log (v3.4.12). Each entry is the seat
+   * ('a' or 'b') that received the SET+1 credit for that set, in
+   * the order sets were credited. Distinct from boardLog per-set
+   * totals because a set can end by concession — the losing side
+   * may still have more per-set points on paper, but the credit
+   * went to the other side. Consumers (LiveScoreboardView per-set
+   * winner ribbon) use this when present and fall back to boardLog
+   * totals when absent (legacy records).
+   */
+  setWinners?: Array<'a' | 'b'>;
+  /**
    * Practice-only: 2D matrix of missed-shot counts. Outer index = set,
    * inner = board. Present only when mode === 'practice'.
    */
@@ -267,6 +278,9 @@ export async function finishMatch(
     ...(result.boardLog && result.boardLog.length > 0
       ? { boardLog: result.boardLog }
       : {}),
+    ...(result.setWinners && result.setWinners.length > 0
+      ? { setWinners: [...result.setWinners] }
+      : {}),
     ...(result.practiceBoards && result.practiceBoards.length > 0
       ? { practiceBoards: result.practiceBoards }
       : {}),
@@ -363,6 +377,12 @@ export type MatchRecord = {
     pointsB: number;
     endedAt: number;
   }>;
+  /**
+   * Ordered per-set credit log (v3.4.12). See MatchResultInput for
+   * the full contract. Optional on the read side — legacy records
+   * predate this field and consumers fall back to boardLog totals.
+   */
+  setWinners?: Array<'a' | 'b'>;
   practiceBoards?: number[][];
   /**
    * Tournament tag. Absent / empty → treated as "Default" bucket in
@@ -469,16 +489,31 @@ export function reconcileResultFromBoardLog(record: MatchRecord): {
     cur.boards += 1;
     bySet.set(e.set, cur);
   }
+  // Prefer stored setWinners when present — it's the authoritative
+  // ordered credit log written at End Match time and captures
+  // concession sets correctly (losing side had more per-set points
+  // but the credit went to the other side). Falls back to boardLog
+  // score-based derivation for legacy records that predate the field.
+  const storedSetWinners = Array.isArray(record.setWinners)
+    ? record.setWinners.filter((w): w is 'a' | 'b' => w === 'a' || w === 'b')
+    : [];
   let setsA = 0;
   let setsB = 0;
+  if (storedSetWinners.length > 0) {
+    for (const w of storedSetWinners) {
+      if (w === 'a') setsA += 1;
+      else if (w === 'b') setsB += 1;
+    }
+  }
   const setKeys = Array.from(bySet.keys()).sort((a, b) => a - b);
   const lastKey = setKeys[setKeys.length - 1];
-  for (const s of setKeys) {
-    const g = bySet.get(s)!;
-    if (g.a > g.b) setsA += 1;
-    else if (g.b > g.a) setsB += 1;
-    // tied set: uncredited on either side
-    void lastKey;
+  if (storedSetWinners.length === 0) {
+    for (const s of setKeys) {
+      const g = bySet.get(s)!;
+      if (g.a > g.b) setsA += 1;
+      else if (g.b > g.a) setsB += 1;
+      // tied set: uncredited on either side
+    }
   }
   const lastSet = lastKey !== undefined ? bySet.get(lastKey)! : { a: 0, b: 0, boards: 0 };
   const finalPointsA = lastSet.a;
@@ -682,6 +717,15 @@ function applyMatchPatch(
   applyRoundPatch(next, patch.round);
   if (patch.boardLog) {
     applyBoardLogPatch(next, patch.boardLog);
+    // Stored setWinners was written against the original boardLog;
+    // once the log changes, it may no longer correspond. Strip it so
+    // reconcileResultFromBoardLog falls back to boardLog-derived
+    // per-set winners. If the admin's edit preserved the set order
+    // exactly, the derived count will match what setWinners said
+    // anyway; if it didn't, forgetting is safer than lying.
+    if (next.setWinners !== undefined) {
+      delete next.setWinners;
+    }
   }
   // Write-time reconcile (v3.4.11). After the patch is merged, if the
   // merged record has a boardLog whose per-set totals disagree with
