@@ -160,6 +160,34 @@
    */
   let showSwapPrompt = $state(false);
   /**
+   * Concession prompt (v3.4.12). Fires when SET+1 is tapped on the
+   * winning side, but the set hasn't reached a natural end — winning
+   * side is below cfg.pointsTarget AND board count is below
+   * cfg.maxBoards. Real carrom: this can only be a concession from
+   * the losing side (they've decided to give up mid-set). We confirm
+   * before crediting to prevent a stray SET+ from silently ending a
+   * set that's still in play (reported 2026-08-30).
+   *
+   * Side stored so Yes runs the SET+ credit for the correct side.
+   */
+  let showConcessionPrompt = $state(false);
+  let pendingConcessionSide = $state<'a' | 'b' | null>(null);
+  /**
+   * Reentrant-skip flag for concession-confirmed SET+1. Set to true
+   * before re-calling adjustSets so the concession guard doesn't
+   * loop. Cleared inside adjustSets after the guard is checked.
+   */
+  let skipConcessionCheck = false;
+
+  /**
+   * Read-only mini-scoreboard popup accessible from the footer
+   * (v3.4.12). Reuses LiveScoreboardView + a synthesised LiveRecord
+   * built from the current live scoring state, so umpires can flip
+   * open the same per-set breakdown they'd see in the history popup
+   * without leaving the score screen.
+   */
+  let showRecapPopup = $state(false);
+  /**
    * Fires when SET+1 is tapped on the losing side (per-set points
    * lower than or equal to the opponent). Real-carrom rule: the
    * winning side credits the set. This prevents a common umpire
@@ -987,6 +1015,33 @@
         window.setTimeout(() => { setLoserToast = false; }, 3000);
         return;
       }
+
+      // Concession prompt (v3.4.12): winning side is ahead but the
+      // set has NOT reached a natural end. Real carrom set-close
+      // paths:
+      //   A) winning side reached cfg.pointsTarget → accept silently
+      //   B) all cfg.maxBoards played → accept silently (ties are
+      //      caught by the equality check above)
+      //   C) neither → the losing side has conceded mid-set; confirm
+      //      with the umpire before crediting so an accidental SET+
+      //      doesn't silently end an in-progress set.
+      // Skipped when tapping while `isDecidingBoard` (the umpire
+      // already resolved the tie via the deciding-board flow and any
+      // SET+ tap now is the natural close of that decider).
+      const atOrPastTarget = tappedPts >= cfg.pointsTarget;
+      const atBoardCapForConcession =
+        !isBoardsUnlimited(cfg) && board >= cfg.maxBoards;
+      if (
+        !skipConcessionCheck &&
+        !atOrPastTarget &&
+        !atBoardCapForConcession &&
+        !isDecidingBoard
+      ) {
+        pendingConcessionSide = side;
+        showConcessionPrompt = true;
+        return;
+      }
+      skipConcessionCheck = false;
     }
     // Before the SET+ handler could reset points/board/queen for the
     // new set, we need to snapshot the running (in-progress) board so
@@ -2436,6 +2491,14 @@
       </span>
     {/if}
     <div class="foot-actions">
+      <button
+        type="button"
+        class="foot-btn scores"
+        onclick={() => { showRecapPopup = true; }}
+        aria-label="Show live scoreboard"
+      >
+        <span class="foot-ico" aria-hidden="true">📊</span><span class="foot-lbl">Scores</span>
+      </button>
       {#if !isPractice}
         <button type="button" class="foot-btn swap" onclick={swapSides} aria-label="Swap sides">
           <span class="foot-ico" aria-hidden="true">⇄</span><span class="foot-lbl">Swap</span>
@@ -2618,6 +2681,62 @@
     </div>
   {/if}
 
+  {#if showRecapPopup}
+    <!--
+      Mid-match live recap (v3.4.12). Reuses LiveScoreboardView with a
+      synthesised LiveRecord — same visual layout the /live/ history
+      popup uses. Opened via the footer's Scores button. Score screen
+      keeps running underneath; when the umpire closes, they return to
+      the exact scoring state they left. matchResult is passed through
+      so a decided-but-not-yet-Ended match still shows the trophy in
+      the recap (though the trophy rarely appears here since decided
+      matches usually go straight to endMatch's own scorecard popup).
+    -->
+    {@const recapRecord = {
+      matchId: '',
+      updatedAt: Date.now(),
+      meta: {
+        mode: cfg.mode,
+        playerA: cfg.playerA,
+        playerA2: cfg.playerA2,
+        playerB: cfg.playerB,
+        playerB2: cfg.playerB2,
+        noteA: cfg.noteA,
+        noteB: cfg.noteB,
+        bestOf: cfg.bestOf,
+        pointsTarget: cfg.pointsTarget,
+        maxBoards: cfg.maxBoards,
+        ...(cfg.tournament ? { tournament: cfg.tournament } : {}),
+      },
+      liveState: {
+        sideA: { points: sideA.points, sets: sideA.sets },
+        sideB: { points: sideB.points, sets: sideB.sets },
+        board,
+        currentBreak,
+        queenHolder,
+        matchResult,
+        ...(boardLog.length > 0 ? { boardLog } : {}),
+        ...(practiceBoards.length > 0 ? { practiceBoards } : {}),
+      },
+    } as LiveRecord}
+    <div
+      class="dialog scorecard-dialog"
+      role="dialog"
+      aria-modal="true"
+      onclick={(e) => { if (e.target === e.currentTarget) showRecapPopup = false; }}
+    >
+      <div class="dialog-card scorecard-card">
+        <button
+          type="button"
+          class="dialog-close"
+          onclick={() => (showRecapPopup = false)}
+          aria-label="Close scoreboard"
+        >✕</button>
+        <LiveScoreboardView record={recapRecord} />
+      </div>
+    </div>
+  {/if}
+
   {#if showEditModal && archivedMatchId}
     {@const record = buildMatchRecordForEdit()}
     {#if record}
@@ -2794,6 +2913,53 @@
             class="swap-prompt-btn swap-prompt-yes"
             onclick={() => { showSwapPrompt = false; swapSides(); }}
           >Yes, swap</button>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  {#if showConcessionPrompt}
+    <!--
+      Fires when SET+1 is tapped on the winning side but the set
+      hasn't reached a natural end (winning side < pointsTarget AND
+      board count < maxBoards). The only carrom-legal reason to end
+      a set here is a concession from the losing side. Confirm before
+      crediting so an accidental SET+ doesn't silently close an
+      in-progress set (reported 2026-08-30).
+
+      Yes → skip the concession check and re-invoke adjustSets to
+      credit the pending side (with the reentrant flag to prevent
+      the concession loop). No / backdrop → clear pending and dismiss.
+    -->
+    {@const winName = pendingConcessionSide === 'a' ? sideA.name : sideB.name}
+    {@const loseName = pendingConcessionSide === 'a' ? sideB.name : sideA.name}
+    <div
+      class="swap-prompt-backdrop"
+      role="dialog"
+      aria-modal="false"
+      aria-labelledby="concession-prompt-title"
+      onclick={(e) => { if (e.target === e.currentTarget) { showConcessionPrompt = false; pendingConcessionSide = null; } }}
+    >
+      <div class="swap-prompt-card">
+        <p id="concession-prompt-title" class="swap-prompt-title">
+          Set not yet finished — is <strong>{loseName || 'the other side'}</strong> conceding this set to <strong>{winName || 'this side'}</strong>?
+        </p>
+        <div class="swap-prompt-actions">
+          <button
+            type="button"
+            class="swap-prompt-btn swap-prompt-no"
+            onclick={() => { showConcessionPrompt = false; pendingConcessionSide = null; }}
+          >No, keep playing</button>
+          <button
+            type="button"
+            class="swap-prompt-btn swap-prompt-yes"
+            onclick={() => {
+              const s = pendingConcessionSide;
+              showConcessionPrompt = false;
+              pendingConcessionSide = null;
+              if (s) { skipConcessionCheck = true; adjustSets(s, 1); }
+            }}
+          >Yes, credit set</button>
         </div>
       </div>
     </div>
