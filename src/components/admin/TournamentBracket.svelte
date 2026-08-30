@@ -293,6 +293,14 @@
         {#if rowsForRound.length === 0}
           <p class="empty">No planned matches in this round yet.</p>
         {:else}
+          <div class="row-actions-top">
+            <a
+              class="print-link"
+              href={`${import.meta.env.BASE_URL}print-bracket/?tournament=${encodeURIComponent(tournament.key)}&round=${encodeURIComponent(selectedRoundKey)}`}
+              target="_blank"
+              rel="noopener"
+            >🖨 Print sheet for this round</a>
+          </div>
           <div class="rowtable-wrap">
             <table class="rowtable">
               <thead>
@@ -590,6 +598,28 @@
   .row-del:hover {
     background: rgba(239, 83, 80, 0.1);
     border-color: rgba(239, 83, 80, 0.5);
+  }
+
+  .row-actions-top {
+    display: flex;
+    justify-content: flex-end;
+    margin: 0.4rem 0 0.4rem;
+  }
+  .print-link {
+    display: inline-block;
+    padding: 0.35rem 0.75rem;
+    background: rgba(255, 213, 74, 0.08);
+    border: 1px solid rgba(255, 213, 74, 0.35);
+    color: var(--accent, #ffd54a);
+    border-radius: 0.4rem;
+    text-decoration: none;
+    font: inherit;
+    font-size: 0.85rem;
+    font-weight: 700;
+  }
+  .print-link:hover {
+    background: rgba(255, 213, 74, 0.16);
+    border-color: rgba(255, 213, 74, 0.55);
   }
 
   .footer-actions {

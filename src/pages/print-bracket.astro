@@ -1,0 +1,17 @@
+---
+/**
+ * Printer-friendly bracket sheet (v3.6). Reads ?tournament=<key>&round=<key>
+ * from the URL client-side, fetches every planned match in that round,
+ * and renders one match per printable page — big centered QR + player
+ * names + round label + tournament name.
+ *
+ * Layout intent: an organiser prints one page per carrom board, cuts
+ * along the border, and sticks each to the board so umpires can scan
+ * their assigned match.
+ */
+import BaseLayout from '../layouts/BaseLayout.astro';
+import PrintBracket from '../components/admin/PrintBracket.svelte';
+---
+<BaseLayout title="Carromscore — print bracket">
+  <PrintBracket client:only="svelte" />
+</BaseLayout>
