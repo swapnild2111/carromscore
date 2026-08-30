@@ -122,6 +122,17 @@
   };
   let boardLog = $state<BoardEntry[]>([]);
   /**
+   * Swap parity (v3.4.12). Flipped on every swapSides() call. When
+   * TRUE, seat A currently holds the player that started in seat B
+   * (and vice versa). Used by the recap popup + live publish to
+   * remap cfg.playerA/playerB → the current-seat identity so
+   * spectators and the umpire's own recap see names paired with
+   * the correct sides. cfg.playerA itself is NOT mutated by swap
+   * because boardLog rows carry seat labels tied to when they were
+   * scored — flipping cfg would corrupt the historical rows.
+   */
+  let sidesSwapped = $state<boolean>(false);
+  /**
    * Ordered per-set credit log (v3.4.12). Each entry is the side that
    * received the SET+1 credit for that set, in the order sets were
    * credited. The boardLog per-set totals alone cannot answer "who
@@ -2101,6 +2112,36 @@
     const tmpCountrySeed = aCountrySeed;
     aCountrySeed = bCountrySeed;
     bCountrySeed = tmpCountrySeed;
+    // Flip every boardLog row's per-seat fields so historical rows
+    // stay aligned with the CURRENT seat identity. Without this, a
+    // row scored pre-swap under seat A stays labelled `pointsA` but
+    // the consumer sees `meta.playerA` = post-swap player → the row
+    // appears attributed to the wrong person. Reported 2026-08-30:
+    // after a set-1 swap the recap popup showed "Set won by Swapnil"
+    // for set 1 (won pre-swap by Yuva). Compact swap: pointsA↔pointsB,
+    // queen a↔b, breakSide a↔b. cfg.playerA/B are also swapped so
+    // `meta.playerA` in the LiveRecord matches sideA.name.
+    boardLog = boardLog.map((r) => ({
+      ...r,
+      pointsA: r.pointsB,
+      pointsB: r.pointsA,
+      queen: r.queen === 'a' ? 'b' : 'a',
+      breakSide: r.breakSide === 'a' ? 'b' : 'a',
+    }));
+    // Swap the identity cfg fields — mirrors sideA.name/sideB.name
+    // above so consumers reading either see a coherent picture.
+    const tmpPa = cfg.playerA;
+    cfg.playerA = cfg.playerB;
+    cfg.playerB = tmpPa;
+    const tmpPa2 = cfg.playerA2;
+    cfg.playerA2 = cfg.playerB2;
+    cfg.playerB2 = tmpPa2;
+    const tmpNa = cfg.noteA;
+    cfg.noteA = cfg.noteB;
+    cfg.noteB = tmpNa;
+    // sidesSwapped kept as informational parity flag (not consumed
+    // anywhere currently; may be useful for audit later).
+    sidesSwapped = !sidesSwapped;
   }
 
   function resetScores() {
