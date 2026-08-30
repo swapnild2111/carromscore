@@ -12,7 +12,7 @@
    * stats concept.
    */
 
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import type { MatchRecord } from '../../lib/history';
   import {
     buildTournamentReport,
@@ -117,19 +117,25 @@
       ? '__default__'
       : initialTournament,
   );
-  // Programmatic → proxy: keep the select's shown label in sync when
-  // `selection` is changed by something other than the select itself
-  // (URL deep-link handling, initial value, etc.).
+  // Programmatic → proxy: keep the select's shown label in sync
+  // when `selection` is changed by something other than the select
+  // itself (URL deep-link handling, initial value). Depends ONLY on
+  // `selection` so this effect doesn't fire on proxy changes — a
+  // read-selectionProxy-then-write-selectionProxy pattern would
+  // create a feedback loop that snapped the select back on user
+  // input (reported 2026-08-30).
   $effect(() => {
     const want = selection === null || selection === undefined ? '__default__' : selection;
-    if (selectionProxy !== want) selectionProxy = want;
+    // untrack the read of selectionProxy so this effect only runs
+    // when `selection` changes, not on our own writes to the proxy.
+    if (untrack(() => selectionProxy) !== want) selectionProxy = want;
   });
   // Proxy → selection: when the user picks a value from the select
   // (bind:value writes to selectionProxy), reflect that into the
   // canonical `selection` state and fire pick() for URL sync.
   $effect(() => {
     const next = selectionProxy === '__default__' ? null : selectionProxy;
-    if (next !== selection) pick(next);
+    if (untrack(() => selection) !== next) pick(next);
   });
 
   // Pass the tournament's round roster into buildTournamentReport so
@@ -170,13 +176,16 @@
    * both reset to their "all" default (via the reset effect above).
    */
   let roundFilterProxy = $state<string>('__all__');
+  // Same untrack pattern as selectionProxy above — depend only on
+  // `roundFilter` for the programmatic → proxy direction so user
+  // clicks don't get snapped back.
   $effect(() => {
     const want = roundFilter === null ? '__all__' : roundFilter;
-    if (roundFilterProxy !== want) roundFilterProxy = want;
+    if (untrack(() => roundFilterProxy) !== want) roundFilterProxy = want;
   });
   $effect(() => {
     const next = roundFilterProxy === '__all__' ? null : roundFilterProxy;
-    if (next !== roundFilter) roundFilter = next;
+    if (untrack(() => roundFilter) !== next) roundFilter = next;
   });
 
   /**
