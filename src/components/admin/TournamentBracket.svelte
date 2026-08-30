@@ -379,7 +379,10 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    z-index: 90;
+    /* Sits ABOVE the Edit tournament dialog (z-index 400 in
+       AdminTournaments) since Bracket is opened FROM that dialog
+       and must overlay it. Reported 2026-08-30. */
+    z-index: 500;
     padding: 1rem;
   }
   .bracket-card {
