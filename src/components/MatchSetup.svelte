@@ -49,10 +49,147 @@
   import HelpTip from './HelpTip.svelte';
   import { logScreen } from '../lib/analytics';
   import { countryName, flagEmoji } from '../lib/countries';
+  import { loadPlannedMatch, claimPlannedMatch, type PlannedMatch } from '../lib/planned';
+  import { currentUser, awaitAuthReady } from '../lib/auth';
 
   const base: string = import.meta.env.BASE_URL;
 
   let cfg = $state<MatchConfig>({ ...DEFAULT_CONFIG });
+
+  /**
+   * Planned-match deep-link state (v3.6). URL `?planned=<mid>` opens
+   * the setup screen with a pre-created bracket slot's fields
+   * loaded. States:
+   *   - 'idle'      — no ?planned= param present; normal setup flow
+   *   - 'loading'   — reading /planned/{mid} from RTDB
+   *   - 'not-found' — mid didn't resolve; the slot was deleted (match
+   *                   probably already scored, or organiser removed it)
+   *   - 'takeover'  — slot exists but claimedBy is another uid; ask
+   *                   the umpire to confirm takeover
+   *   - 'loaded'    — slot fetched and cfg has been prefilled; the
+   *                   normal setup renders below
+   * See docs/plan/tournament-brackets.md for the flow.
+   */
+  type PlannedState =
+    | { kind: 'idle' }
+    | { kind: 'loading'; mid: string }
+    | { kind: 'not-found'; mid: string }
+    | { kind: 'takeover'; mid: string; match: PlannedMatch; claimerName: string }
+    | { kind: 'loaded'; mid: string };
+  let plannedState = $state<PlannedState>({ kind: 'idle' });
+  let plannedMid = $state<string>('');
+  // Read the query param synchronously so the effect below knows
+  // whether to short-circuit the resume flow.
+  if (typeof window !== 'undefined') {
+    const params = new URLSearchParams(window.location.search);
+    const mid = params.get('planned');
+    if (mid && /^[A-Za-z0-9_-]{4,24}$/.test(mid)) {
+      plannedMid = mid;
+      plannedState = { kind: 'loading', mid };
+    }
+  }
+  $effect(() => {
+    // Fetch the planned record once at mount and prefill cfg. Auth
+    // must be ready before we call claimPlannedMatch (rule needs
+    // auth.uid). awaitAuthReady bounds the wait so a broken auth
+    // session doesn't hang the flow forever.
+    if (plannedState.kind !== 'loading') return;
+    const mid = plannedState.mid;
+    (async () => {
+      await awaitAuthReady();
+      const outcome = await loadPlannedMatch(mid);
+      if (outcome.ok === false) {
+        plannedState = { kind: 'not-found', mid };
+        return;
+      }
+      const match = outcome.match;
+      if (!match) {
+        plannedState = { kind: 'not-found', mid };
+        return;
+      }
+      const uid = currentUser()?.uid;
+      // Someone else already claimed it — offer takeover.
+      if (match.claimedBy && uid && match.claimedBy !== uid) {
+        plannedState = {
+          kind: 'takeover',
+          mid,
+          match,
+          claimerName: `user ${match.claimedBy.slice(0, 6)}`,
+        };
+        return;
+      }
+      applyPlannedToCfg(match);
+      // Claim (or refresh claim) — silent-on-failure so a signed-out
+      // umpire can still see the prefilled setup; they just won't
+      // stamp claimedBy.
+      if (uid) void claimPlannedMatch(mid, uid);
+      plannedState = { kind: 'loaded', mid };
+    })();
+  });
+
+  /**
+   * Populate cfg from a fetched PlannedMatch. Falls back to the
+   * tournament's defaults for any config field the planned record
+   * didn't specify; app defaults from DEFAULT_CONFIG win beyond that.
+   */
+  function applyPlannedToCfg(m: PlannedMatch) {
+    // Look up the tournament for its defaults. The tournament store
+    // may not be hydrated yet at this exact moment — that's fine, we
+    // fall back through to DEFAULT_CONFIG.
+    const t = loadAllTournaments().find((x) => x.key === m.tournamentKey);
+    const td = t?.defaults;
+    cfg.mode = m.mode;
+    cfg.playerA = m.aName;
+    cfg.playerA2 = m.a2Name ?? '';
+    cfg.playerB = m.bName;
+    cfg.playerB2 = m.b2Name ?? '';
+    cfg.tournament = m.tournament;
+    cfg.round = m.round ?? '';
+    // Config precedence: planned.cfg > tournament.defaults > DEFAULT_CONFIG.
+    cfg.bestOf = m.cfg?.bestOf ?? td?.bestOf ?? DEFAULT_CONFIG.bestOf;
+    cfg.pointsTarget = m.cfg?.pointsTarget ?? td?.pointsTarget ?? DEFAULT_CONFIG.pointsTarget;
+    cfg.maxBoards = m.cfg?.maxBoards ?? td?.maxBoards ?? DEFAULT_CONFIG.maxBoards;
+    // Stamp resolved player ids so finishMatch stamps playerAId
+    // etc. on the archive. resolvedPlayerIds is the local map that
+    // MatchSetup already maintains via the picker's onSelect.
+    resolvedPlayerIds.playerA = m.aResolvedId ?? null;
+    resolvedPlayerIds.playerA2 = m.a2ResolvedId ?? null;
+    resolvedPlayerIds.playerB = m.bResolvedId ?? null;
+    resolvedPlayerIds.playerB2 = m.b2ResolvedId ?? null;
+  }
+
+  /**
+   * User confirmed takeover from the takeover screen. Claim the slot
+   * for their uid, apply the record to cfg, and drop into the normal
+   * setup flow.
+   */
+  async function confirmTakeover() {
+    if (plannedState.kind !== 'takeover') return;
+    const { mid, match } = plannedState;
+    const uid = currentUser()?.uid;
+    if (!uid) return;
+    applyPlannedToCfg(match);
+    void claimPlannedMatch(mid, uid);
+    plannedState = { kind: 'loaded', mid };
+  }
+  function cancelTakeover() {
+    // Return to the plain setup screen — clear the ?planned= param
+    // so a refresh doesn't re-open the same choice.
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('planned');
+      window.history.replaceState({}, '', url.toString());
+    }
+    plannedState = { kind: 'idle' };
+  }
+  function dismissNotFound() {
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('planned');
+      window.history.replaceState({}, '', url.toString());
+    }
+    plannedState = { kind: 'idle' };
+  }
 
   // Per-device roster grown from past match setups. Merged with the
   // Firebase identity store below so a name typed on this device
@@ -680,7 +817,11 @@
     rememberPlayers(cfg.playerA, cfg.playerA2, cfg.playerB, cfg.playerB2);
     // Remember this match so a mistakenly-closed /score/ tab can be
     // resumed from Home. Cleared on End paths in ScoreBoard.
-    const scoreUrl = `${base}score/?${encodeConfig(cfg)}`;
+    // v3.6: if this setup came from a planned-match QR scan, thread
+    // the mid through to the score URL. ScoreBoard reads ?planned=<mid>
+    // and deletes /planned/{mid} once the match archives.
+    const plannedSuffix = plannedMid ? `&planned=${encodeURIComponent(plannedMid)}` : '';
+    const scoreUrl = `${base}score/?${encodeConfig(cfg)}${plannedSuffix}`;
     saveResume({
       mid: cfg.mid,
       scoreUrl,
@@ -853,6 +994,45 @@
   </label>
 {/snippet}
 
+
+{#if plannedState.kind === 'loading'}
+  <aside class="planned-notice" aria-label="Loading planned match">
+    <p>Loading match…</p>
+  </aside>
+{:else if plannedState.kind === 'not-found'}
+  <aside class="planned-notice planned-notice-warn" aria-label="Planned match not available">
+    <h3>Match not available</h3>
+    <p>This match slot isn't around anymore. It may have already been
+    played, or the organiser removed it. Ask them for a fresh QR.</p>
+    <div class="planned-actions">
+      <button type="button" class="planned-btn" onclick={dismissNotFound}>
+        Set up a match manually
+      </button>
+    </div>
+  </aside>
+{:else if plannedState.kind === 'takeover'}
+  <aside class="planned-notice planned-notice-warn" aria-label="Match in progress">
+    <h3>Match already being scored</h3>
+    <p>Someone is already scoring this match ({plannedState.claimerName}).
+    If you're taking over, confirm below and continue. Otherwise cancel.</p>
+    <div class="planned-actions">
+      <button type="button" class="planned-btn planned-btn-primary" onclick={confirmTakeover}>
+        Take over
+      </button>
+      <button type="button" class="planned-btn" onclick={cancelTakeover}>
+        Cancel
+      </button>
+    </div>
+  </aside>
+{:else if plannedState.kind === 'loaded'}
+  <aside class="planned-notice planned-notice-ok" aria-label="Planned match ready">
+    <p>
+      <strong>Bracket match ready.</strong>
+      {cfg.tournament ? cfg.tournament + ' · ' : ''}{cfg.round ?? ''}
+    </p>
+    <p class="planned-hint">Setup below is pre-filled from the bracket. Tap Start when ready.</p>
+  </aside>
+{/if}
 
 {#if resumeVisible && resumeCandidate}
   <!-- Resume-match chip. Appears when the last-started /score/ tab
@@ -1868,4 +2048,57 @@
     .row3 { grid-template-columns: 1fr 1fr; }
     .player-row { grid-template-columns: 1fr; }
   }
+
+  /* Planned-match banners (v3.6) — shown when the setup screen was
+     opened via a bracket QR (?planned=<mid>). Same visual family
+     as the resume-chip so users recognise it as an actionable
+     header rather than a permanent decoration. */
+  .planned-notice {
+    background: rgba(255, 213, 74, 0.06);
+    border: 1px solid rgba(255, 213, 74, 0.35);
+    color: var(--fg, #f5f5f5);
+    border-radius: 0.6rem;
+    padding: 0.85rem 1rem;
+    margin: 0.75rem 0;
+  }
+  .planned-notice h3 {
+    margin: 0 0 0.4rem;
+    color: var(--accent, #ffd54a);
+    font-size: 1rem;
+  }
+  .planned-notice p { margin: 0.2rem 0; font-size: 0.9rem; line-height: 1.4; }
+  .planned-notice-warn {
+    background: rgba(239, 83, 80, 0.06);
+    border-color: rgba(239, 83, 80, 0.4);
+  }
+  .planned-notice-warn h3 { color: rgba(239, 83, 80, 0.95); }
+  .planned-notice-ok {
+    background: rgba(76, 175, 80, 0.06);
+    border-color: rgba(76, 175, 80, 0.4);
+  }
+  .planned-hint { color: var(--muted, #9aa0a6); font-size: 0.82rem; }
+  .planned-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.65rem;
+    flex-wrap: wrap;
+  }
+  .planned-btn {
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: var(--fg, #f5f5f5);
+    padding: 0.45rem 0.9rem;
+    border-radius: 0.4rem;
+    font: inherit;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .planned-btn:hover { background: rgba(255, 255, 255, 0.06); }
+  .planned-btn-primary {
+    background: rgba(255, 213, 74, 0.14);
+    border-color: rgba(255, 213, 74, 0.55);
+    color: var(--accent, #ffd54a);
+    font-weight: 700;
+  }
+  .planned-btn-primary:hover { background: rgba(255, 213, 74, 0.24); }
 </style>
