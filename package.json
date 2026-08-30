@@ -18,6 +18,7 @@
     "@fontsource/dseg7-classic": "^5.3.0",
     "astro": "^7.0.9",
     "firebase": "^12.17.1",
+    "qrcode-generator": "^2.0.4",
     "svelte": "^5.56.5",
     "typescript": "^6.0.3"
   },

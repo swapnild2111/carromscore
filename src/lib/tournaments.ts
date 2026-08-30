@@ -51,6 +51,19 @@ export type Tournament = {
    * inside `loadRounds`.
    */
   rounds?: Round[];
+  /**
+   * Tournament-level match defaults (v3.6). Inherited by pre-created
+   * planned matches (see /planned/{mid}) when they don't override
+   * per-match. Also read by the score-setup flow to prefill the
+   * config form. Absent field = fall back to the app defaults
+   * (bo3 / 25 / 8 singles).
+   */
+  defaults?: {
+    mode?: 'singles' | 'doubles';
+    bestOf?: number;
+    pointsTarget?: number;
+    maxBoards?: number;
+  };
 };
 
 /**
@@ -280,6 +293,25 @@ export async function subscribeTournaments(): Promise<void> {
   }
 }
 
+/**
+ * Parse the tournament's `defaults` sub-node. Absent → undefined
+ * (caller keeps app defaults). Present with any subset of fields
+ * → return the sanitised subset. Silent-skip on invalid values.
+ */
+function parseDefaults(raw: unknown): Tournament['defaults'] | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const v = raw as Record<string, unknown>;
+  const out: NonNullable<Tournament['defaults']> = {};
+  if (v.mode === 'singles' || v.mode === 'doubles') out.mode = v.mode;
+  const bestOf = Number(v.bestOf);
+  if (Number.isFinite(bestOf) && bestOf >= 1 && bestOf <= 15) out.bestOf = Math.floor(bestOf);
+  const points = Number(v.pointsTarget);
+  if (Number.isFinite(points) && points >= 1 && points <= 100) out.pointsTarget = Math.floor(points);
+  const maxBoards = Number(v.maxBoards);
+  if (Number.isFinite(maxBoards) && maxBoards >= 0 && maxBoards <= 50) out.maxBoards = Math.floor(maxBoards);
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 function parseRounds(raw: unknown): Round[] | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
   const rounds: Round[] = [];
@@ -312,6 +344,7 @@ function mergeRemote(raw: Record<string, unknown>): void {
       v.type === 'open' || v.type === 'closed' ? (v.type as 'open' | 'closed') : undefined;
     const country = typeof v.country === 'string' ? v.country : undefined;
     const rounds = parseRounds(v.rounds);
+    const defaults = parseDefaults(v.defaults);
     const existing = memoryStore.find((t) => t.key === key);
     if (existing) {
       existing.name = name;
@@ -328,6 +361,7 @@ function mergeRemote(raw: Record<string, unknown>): void {
       // but empty object still yields `[]`, which correctly wipes any
       // stale local list.
       if (rounds !== undefined) existing.rounds = rounds;
+      if (defaults !== undefined) existing.defaults = defaults;
     } else {
       memoryStore.push({
         key,
@@ -338,6 +372,7 @@ function mergeRemote(raw: Record<string, unknown>): void {
         ...(type ? { type } : {}),
         ...(country ? { country } : {}),
         ...(rounds !== undefined ? { rounds } : {}),
+        ...(defaults !== undefined ? { defaults } : {}),
       });
     }
   }
@@ -561,6 +596,57 @@ export async function updateTournamentMeta(
         ...(nextCountry ? { country: nextCountry } : {}),
       },
     });
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg || 'Update failed' };
+  }
+}
+
+/**
+ * Update tournament-level match defaults (v3.6). Same rule surface
+ * as updateTournamentMeta — organiser owns their tournament, super
+ * can touch any. Callers pass a partial patch; only present fields
+ * are written, rest are left untouched. Pass `null` on a specific
+ * field to remove that individual default (fall back to app default).
+ */
+export async function updateTournamentDefaults(
+  key: string,
+  patch: Partial<{
+    mode: 'singles' | 'doubles' | null;
+    bestOf: number | null;
+    pointsTarget: number | null;
+    maxBoards: number | null;
+  }>,
+): Promise<TournamentWriteOutcome> {
+  if (!key) return { ok: false, error: 'Missing tournament key' };
+  const t = memoryStore.find((x) => x.key === key);
+  if (!t) return { ok: false, error: 'Tournament not found in local store' };
+  try {
+    const [{ firebaseApp }, { getDatabase, ref, update }] = await Promise.all([
+      import('./firebase'),
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    const payload: Record<string, unknown> = {
+      [`tournaments/${key}/lastActive`]: Date.now(),
+    };
+    const nextLocal: NonNullable<Tournament['defaults']> = { ...(t.defaults ?? {}) };
+    for (const [field, value] of Object.entries(patch)) {
+      const path = `tournaments/${key}/defaults/${field}`;
+      if (value === null) {
+        payload[path] = null;
+        delete (nextLocal as Record<string, unknown>)[field];
+      } else if (value !== undefined) {
+        payload[path] = value;
+        (nextLocal as Record<string, unknown>)[field] = value;
+      }
+    }
+    await update(ref(db, '/'), payload);
+    if (Object.keys(nextLocal).length > 0) t.defaults = nextLocal;
+    else delete t.defaults;
+    t.lastActive = Date.now();
+    notify();
     return { ok: true };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

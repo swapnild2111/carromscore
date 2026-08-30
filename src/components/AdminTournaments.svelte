@@ -52,6 +52,7 @@
   import AdminBulkBar from './AdminBulkBar.svelte';
   import CountrySelect from './CountrySelect.svelte';
   import { countryName, flagEmoji } from '../lib/countries';
+  import TournamentBracket from './admin/TournamentBracket.svelte';
 
   /**
    * Current-user role gating: super sees every row's actions; a
@@ -168,6 +169,20 @@
   let roundsDeletingKey = $state<string | null>(null);
   let roundsDeletingCount = $state<number | null>(null);
   let roundsSaving = $state(false);
+
+  /**
+   * Bracket modal state (v3.6). Same shape as roundsKey — null
+   * closes the modal, a tournament key opens it. The modal itself
+   * (TournamentBracket.svelte) handles round selection, add/delete
+   * of planned match slots, and inline QR rendering.
+   */
+  let bracketKey = $state<string | null>(null);
+  function startBracket(t: Tournament) {
+    bracketKey = t.key;
+  }
+  function stopBracket() {
+    bracketKey = null;
+  }
 
   onMount(() => {
     void subscribeTournaments();
@@ -903,6 +918,12 @@
             onclick={() => editingTournament && startRounds(editingTournament)}
             disabled={saving || !editingTournament}
           >Rounds{editingTournament?.rounds && editingTournament.rounds.length > 0 ? ` (${editingTournament.rounds.length})` : ''}</button>
+          <button
+            type="button"
+            class="btn"
+            onclick={() => editingTournament && startBracket(editingTournament)}
+            disabled={saving || !editingTournament}
+          >Bracket</button>
           {#if editingType === 'closed' && editingTournament}
             <button
               type="button"
@@ -1414,6 +1435,19 @@
           </div>
         </div>
       </div>
+    {/if}
+  {/if}
+
+  {#if bracketKey}
+    {@const t = list().find((x) => x.key === bracketKey)}
+    {#if t}
+      {@const myUid = currentUser()?.uid ?? ''}
+      <TournamentBracket
+        tournament={t}
+        rounds={t.rounds ?? []}
+        myUid={myUid}
+        onClose={stopBracket}
+      />
     {/if}
   {/if}
 </section>

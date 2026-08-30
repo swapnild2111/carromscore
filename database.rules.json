@@ -100,7 +100,43 @@
             "$other":    { ".validate": false }
           }
         },
+        "defaults": {
+          ".validate": "!newData.exists() || newData.hasChildren()",
+          "mode":         { ".validate": "newData.isString() && (newData.val() == 'singles' || newData.val() == 'doubles')" },
+          "bestOf":       { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 15" },
+          "pointsTarget": { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 100" },
+          "maxBoards":    { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 50" },
+          "$other":       { ".validate": false }
+        },
         "$other":     { ".validate": false }
+      }
+    },
+
+    "planned": {
+      ".read": true,
+      "$mid": {
+        ".write": "$mid.length >= 4 && $mid.length <= 24 && auth != null && ((!data.exists() && newData.exists() && ((root.child('adminRoles').child(auth.uid).val() == 'super') || (root.child('tournaments').child(newData.child('tournamentKey').val()).child('createdBy').val() == auth.uid)) && newData.child('createdBy').val() == auth.uid) || (data.exists() && !newData.exists() && ((root.child('adminRoles').child(auth.uid).val() == 'super') || (root.child('tournaments').child(data.child('tournamentKey').val()).child('createdBy').val() == auth.uid) || (data.child('claimedBy').exists() && data.child('claimedBy').val() == auth.uid) || (data.child('createdBy').val() == auth.uid))) || (data.exists() && newData.exists() && newData.child('mode').val() == data.child('mode').val() && newData.child('tournamentKey').val() == data.child('tournamentKey').val() && newData.child('round').val() == data.child('round').val() && newData.child('createdBy').val() == data.child('createdBy').val() && newData.child('createdAt').val() == data.child('createdAt').val() && ((root.child('adminRoles').child(auth.uid).val() == 'super') || (root.child('tournaments').child(data.child('tournamentKey').val()).child('createdBy').val() == auth.uid) || (newData.child('claimedBy').val() == auth.uid) || (data.child('claimedBy').exists() && data.child('claimedBy').val() == auth.uid)))",
+        ".validate": "newData.hasChildren(['mode', 'tournamentKey', 'round', 'createdBy', 'createdAt'])",
+        "mode":         { ".validate": "newData.isString() && (newData.val() == 'singles' || newData.val() == 'doubles')" },
+        "tournament":   { ".validate": "newData.isString() && newData.val().length <= 60" },
+        "tournamentKey":{ ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 60" },
+        "round":        { ".validate": "newData.isString() && newData.val().length <= 60" },
+        "roundKey":     { ".validate": "newData.isString() && newData.val().length <= 60" },
+        "matchOrder":   { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 999" },
+        "aName":        { ".validate": "newData.isString() && newData.val().length <= 80" },
+        "a2Name":       { ".validate": "newData.isString() && newData.val().length <= 80" },
+        "bName":        { ".validate": "newData.isString() && newData.val().length <= 80" },
+        "b2Name":       { ".validate": "newData.isString() && newData.val().length <= 80" },
+        "aResolvedId":  { ".validate": "newData.isString() && newData.val().length <= 64" },
+        "a2ResolvedId": { ".validate": "newData.isString() && newData.val().length <= 64" },
+        "bResolvedId":  { ".validate": "newData.isString() && newData.val().length <= 64" },
+        "b2ResolvedId": { ".validate": "newData.isString() && newData.val().length <= 64" },
+        "cfg":          { ".validate": "newData.hasChildren()" },
+        "createdBy":    { ".validate": "newData.isString() && newData.val().length <= 64" },
+        "createdAt":    { ".validate": "newData.isNumber()" },
+        "claimedBy":    { ".validate": "newData.isString() && newData.val().length <= 64" },
+        "claimedAt":    { ".validate": "newData.isNumber()" },
+        "$other":       { ".validate": false }
       }
     },
 
