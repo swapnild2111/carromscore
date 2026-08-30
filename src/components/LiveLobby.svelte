@@ -2921,35 +2921,28 @@
    * Names pill (.hdr) and top-row summary (.board) inside
    * LiveScoreboardView pinned so long per-set tables scroll behind.
    */
-  .sheet-body :global(.hdr),
+  /*
+   * Sticky policy in the recap popup (v3.4.12 rewrite).
+   *
+   * Prior versions tried to keep BOTH the names pill (.hdr) and the
+   * DSEG7 score panel (.board) sticky at two different top offsets.
+   * That approach broke on long names — .hdr's rendered height
+   * exceeded the gap between the two top values (2.5rem), so on
+   * scroll the two bands visually overlapped inside the popup
+   * (reported 2026-08-30).
+   *
+   * New policy: only the sheet-hdr ("Ended · Singles / ✕" row)
+   * stays sticky. The names pill and score panel scroll away as one
+   * unit with the per-set tables below them. If the umpire wants to
+   * see names + score again, they scroll back up. This eliminates
+   * the overlap class of bug entirely by removing sticky pinning
+   * on .hdr / .board, and matches how spectator popups on most
+   * sports apps behave.
+   */
   .sheet-inner :global(.hdr),
   .sheet-inner :global(.board) {
-    position: sticky;
-    z-index: 2;
+    position: static;
     background: #0f0f0f;
-  }
-  .sheet-inner :global(.hdr) {
-    /* Sticky at 1.65rem so the names pill row abuts sheet-hdr's
-       bottom (~1.9rem after its padding + top:-0.85rem offset).
-       A ±0.25rem overlap fights sub-pixel gaps. box-shadow
-       extends the opaque #0f0f0f bg horizontally into sheet-inner's
-       1rem padding, covering the popup card edges WITHOUT widening
-       the flexbox/grid element itself — earlier attempts to widen
-       with negative margins pushed the pills visually OUT of the
-       popup card (reported 2026-08-30). */
-    top: 1.65rem;
-    padding-top: 0.5rem;
-    box-shadow: -1rem 0 0 #0f0f0f, 1rem 0 0 #0f0f0f;
-  }
-  .sheet-inner :global(.board) {
-    /* Same treatment as .hdr above — box-shadow bleed into the
-       sheet-inner's horizontal padding covers scrolled rows without
-       widening the element. */
-    top: 4.15rem;
-    padding-bottom: 0.5rem;
-    border-bottom: 1px solid #1e1e1e;
-    margin-bottom: 0.25rem;
-    box-shadow: -1rem 0 0 #0f0f0f, 1rem 0 0 #0f0f0f;
   }
   /* Two-row title container. First row = LIVE/Ended + mode.
      Second row = tournament + round tags when present. min-width:0
