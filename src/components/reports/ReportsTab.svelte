@@ -585,19 +585,21 @@
       </div>
     {/if}
 
-    <div class="summary">
+    <div class="tbl-hdr">
       <h3 class="section-hdr">Leaderboard</h3>
-      <!--
-        Leaderboard: sortable columns (v3.4.12). Rank column uses the
-        buildPlayerSummary baked-in order (wins DESC → boards DESC →
-        points DESC). Click any header to sort by it, click again to
-        flip direction. Rank column shows the row's raw rank (1..N in
-        the original order) so a re-sort doesn't relabel; the '—'
-        tie-collapse is disabled when a non-rank sort is active
-        because ties for the sort key wouldn't visually group.
-      -->
-      <div class="summary-scroll">
-        <table class="summary-tbl leaderboard-tbl">
+    </div>
+    <!--
+      Leaderboard (v3.4.12): heading lifted OUTSIDE the table wrapper
+      so the tbody column layout matches the Matches table below —
+      no bordered card around it. Sortable columns; rank column uses
+      the buildPlayerSummary baked-in order (wins DESC → boards DESC
+      → points DESC). Click any header to sort, click again to flip.
+      The '—' tie-collapse only applies when the 'rank' sort is
+      active — under other sorts the raw 1..N number is shown so
+      re-sort doesn't relabel arbitrarily.
+    -->
+    <div class="tbl-scroll">
+      <table class="matches-tbl leaderboard-tbl">
           <thead>
             <tr>
               <th class="col-rank hist-th-sortable" class:hist-th-sorted={lbSortKey === 'rank'} onclick={() => toggleLBSort('rank')}>
@@ -644,7 +646,6 @@
           </tbody>
         </table>
       </div>
-    </div>
 
     <div class="tbl-hdr">
       <h3 class="section-hdr">Matches ({sortedMatches.length}{#if sortedMatches.length !== view.matches} / {view.matches}{/if})</h3>
