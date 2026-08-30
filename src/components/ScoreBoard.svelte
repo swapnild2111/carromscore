@@ -1115,9 +1115,24 @@
       const tappedPts = side === 'a' ? sideA.points : sideB.points;
       const otherPts = side === 'a' ? sideB.points : sideA.points;
       if (tappedPts === otherPts) {
-        // Tied set — neither side has won. Point the umpire at End
-        // Match; endMatch() will pop the deciding-board chooser when
-        // the set is at cap, and let them commit as a draw otherwise.
+        // Tied set (v3.5.0). Two branches:
+        //   a) Tied AT cap (all boards played, points equal) — no
+        //      more boards available under the current cap, so the
+        //      umpire needs to commit as a draw or extend by one
+        //      deciding board. Open the same decider chooser
+        //      endMatch() opens for tie-at-cap. Fires from the SET+
+        //      tap on either side; the chooser is side-agnostic.
+        //   b) Tied BELOW cap — boards remain, they can just keep
+        //      playing. Keep the existing toast so umpires know
+        //      SET+ won't credit an inconclusive set.
+        const atBoardCap =
+          !isBoardsUnlimited(cfg) && board >= cfg.maxBoards && !isDecidingBoard;
+        if (atBoardCap) {
+          matchResult = 'draw';
+          pendingDrawChoice = true;
+          showWinnerPopup = true;
+          return;
+        }
         setTiedToast = true;
         window.setTimeout(() => { setTiedToast = false; }, 3500);
         return;
