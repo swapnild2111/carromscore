@@ -91,35 +91,33 @@
     return opts;
   });
 
-  // Selected tournament. `null` = the Default bucket (untagged
-  // matches — mirrors the History tab's terminology). Auto-selects
-  // Default on first Reports open so users see data straight away
-  // instead of a "pick a tournament" empty state. Deep-link via
-  // ?tournament=... overrides — those callers know what they want.
-  let selection = $state<string | null | undefined>(
+  /**
+   * Selected tournament, derived directly from the parent's
+   * `initialTournament` prop (v3.4.12 rewrite). Single source of
+   * truth — LiveLobby owns the state and pushes it in via the
+   * prop; user picks call `onSelectionChange` (which writes back
+   * to the parent's reportsSelection) and the prop flows back.
+   * No local `$state` shadow to keep in sync — previous versions
+   * had `selection` as $state PLUS a proxy PLUS effects, which
+   * created feedback loops and out-of-sync bugs.
+   *
+   * `null` = Default (untagged) bucket. `undefined` = nothing
+   * picked (renders the "pick a tournament" empty state).
+   */
+  const selection = $derived<string | null | undefined>(
     initialTournament === undefined ? null : initialTournament,
   );
-
-  /**
-   * Selected value shown in the tournament <select>. Reads from
-   * `selection` reactively so URL deep-links / external state
-   * changes flow into the DOM. '__default__' represents the null
-   * (Default bucket) state so option values match.
-   */
   const selectionProxy = $derived(
     selection === null || selection === undefined ? '__default__' : selection,
   );
   function onTournamentChange(e: Event) {
     const v = (e.currentTarget as HTMLSelectElement).value;
     const next = v === '__default__' ? null : v;
-    // Always call pick() on user input — even when `next` equals the
-    // current `selection`. That handles the "first load with no
-    // tournament URL param, user picks Default" case: initial
-    // `selection` is null (matches Default), but LiveLobby's
-    // reportsSelection is still `undefined`, so `syncUrl` hasn't
-    // written `tournament=` yet. Firing pick(null) flips reportsSelection
-    // to null and the URL updates (reported 2026-08-30).
-    pick(next);
+    // Always fire — the parent's reportsSelection may still be
+    // `undefined` (fresh load, no tournament URL param) even when
+    // `selection` derived to `null`. Firing on every pick pushes
+    // the user's explicit choice into the parent so URL sync runs.
+    onSelectionChange(next);
   }
 
   // Pass the tournament's round roster into buildTournamentReport so
@@ -275,10 +273,10 @@
     return !collapsedRounds.has(roundKey);
   }
 
-  function pick(key: string | null) {
-    selection = key;
-    onSelectionChange(key);
-  }
+  // pick() removed v3.4.12 — selection is now $derived off the
+  // initialTournament prop, so writes go straight to the parent via
+  // onSelectionChange. The Clear button and any other caller uses
+  // onSelectionChange directly.
 
   // Copy-to-clipboard state. Ephemeral flag keyed by what was
   // copied — the main tournament table gets `__main__`, each
@@ -553,7 +551,7 @@
         onclick={() => {
           filterSearch = '';
           filterMode = 'all';
-          if (selection !== null) pick(null);
+          if (selection !== null) onSelectionChange(null);
           roundFilter = null;
         }}
         aria-label="Clear filters"
