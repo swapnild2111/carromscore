@@ -142,7 +142,7 @@
    * popup can render each set's winner truthfully. Empty when no
    * sets have been credited yet.
    */
-  let setWinners = $state<Array<'a' | 'b'>>([]);
+  let setWinners = $state<Array<'a' | 'b' | 'draw'>>([]);
   let pointsAtBoardStart = $state<{ a: number; b: number }>({ a: 0, b: 0 });
   let queenRequiredToast = $state(false);
   /**
@@ -1907,8 +1907,55 @@
       // sideA.sets and sideB.sets both stay put. Consistent with the
       // below-limit auto-draw path in endMatch() (same rule applies
       // everywhere: SETS only ticks up when someone wins the set).
-      // Keep popup open — user can now tap "View scorecard" like any
-      // finished match. Committing the archive fires-and-forgets.
+      //
+      // Multi-set nuance (v3.5.0): a drawn SET in a bo3+ isn't a
+      // drawn MATCH. If sets remain (totalPlayed < cfg.bestOf) and
+      // neither side clinched, we roll into the next set instead of
+      // archiving. Reported 2026-08-30: bo3 with a set-1 draw was
+      // archiving the whole match right there — the players still
+      // wanted set 2 to happen. Only bo1 (or a truly-exhausted
+      // multi-set with every set drawn) archives from here.
+      const totalPlayed = sideA.sets + sideB.sets;
+      // Drawn set eats one of the bestOf slots, so "played including
+      // this drawn set" is totalPlayed + 1. Same shape as anotherSetRemains
+      // in adjustSets().
+      const playedIncludingThis = totalPlayed + 1;
+      const winThreshold = Math.ceil(cfg.bestOf / 2);
+      const clinched = sideA.sets >= winThreshold || sideB.sets >= winThreshold;
+      const anotherSetRemains = playedIncludingThis < cfg.bestOf && !clinched;
+      if (anotherSetRemains) {
+        // Snapshot the drawn set with 0/0 credit change — the boardLog
+        // rows for this set are already there from live play. Just
+        // reset for the next set the same way SET+1 does.
+        matchResult = null;
+        sideA.points = 0;
+        sideB.points = 0;
+        board = 0;
+        queenHolder = null;
+        pointsAtBoardStart = { a: 0, b: 0 };
+        isDecidingBoard = false;
+        if (maxBoardsBeforeDecider !== null) {
+          cfg.maxBoards = maxBoardsBeforeDecider;
+          maxBoardsBeforeDecider = null;
+        }
+        // First-break for the next set: flip the just-drawn set's
+        // opener (mirrors adjustSets' logic).
+        const drawnSetIdx = sideA.sets + sideB.sets;
+        const drawnSetOpener = boardLog.find((e) => e.set === drawnSetIdx)?.breakSide;
+        if (drawnSetOpener) {
+          currentBreak = drawnSetOpener === 'a' ? 'b' : 'a';
+        }
+        // Push 'draw' into setWinners at this set's slot so later
+        // sets keep their positional indices in the array. Consumers
+        // treat anything that isn't 'a'/'b' as "no credit → derive
+        // from boardLog totals," which for a drawn set produces the
+        // correct "no winner" ribbon.
+        setWinners = [...setWinners, 'draw'];
+        showSwapPrompt = true;
+        return;
+      }
+      // No more sets to play OR someone had already clinched — commit
+      // as a match-level draw.
       recordFinishedMatch('draw');
       clearResume();
     } else {
@@ -2100,7 +2147,9 @@
     // the moment of the credit). After swapping seats, historical
     // credits also flip a↔b so "Swapnil won set 0" stays honest
     // when Swapnil moves from A to B.
-    setWinners = setWinners.map((w) => (w === 'a' ? 'b' : 'a'));
+    // Flip 'a'↔'b' credits; leave 'draw' untouched (a drawn set
+     // has no seat identity to swap).
+    setWinners = setWinners.map((w) => (w === 'a' ? 'b' : w === 'b' ? 'a' : w));
     const tmpPoints = sideA.points;
     sideA.points = sideB.points;
     sideB.points = tmpPoints;
@@ -3059,13 +3108,14 @@
 
   {#if setTiedToast}
     <!--
-      Surfaced when SET+1 is tapped on a tied set (per-set points
-      equal). A tied set has no winner; the umpire needs to tap
-      End Match, which detects the tie-at-cap and pops the
-      deciding-board chooser.
+      Surfaced when SET+1 is tapped on a tied set BELOW cap
+      (v3.5.0). Boards remain in the set so the umpire should just
+      keep playing — no set-close action needed yet. When the set
+      is tied AT cap, adjustSets opens the decider chooser popup
+      directly instead of showing this toast.
     -->
     <div class="queen-toast" role="status" aria-live="polite">
-      Set is tied — tap End Match to play a deciding board
+      Score is tied — play another board to break the tie
     </div>
   {/if}
 

@@ -60,7 +60,7 @@ export type LivePayload = {
    * publish it — consumers fall back to boardLog-derived per-set
    * totals.
    */
-  setWinners?: Array<'a' | 'b'>;
+  setWinners?: Array<'a' | 'b' | 'draw'>;
   practiceBoards?: number[][];
   /**
    * Practice/solo only. Which set the umpire is currently paging in

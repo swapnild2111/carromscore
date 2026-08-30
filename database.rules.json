@@ -53,7 +53,7 @@
         "result":     { ".validate": "newData.hasChildren()" },
         "boardLog":   { ".validate": "newData.hasChildren()" },
         "setWinners": { ".validate": "newData.hasChildren()",
-          "$idx":     { ".validate": "newData.isString() && (newData.val() == 'a' || newData.val() == 'b')" }
+          "$idx":     { ".validate": "newData.isString() && (newData.val() == 'a' || newData.val() == 'b' || newData.val() == 'draw')" }
         },
         "practiceBoards": { ".validate": "newData.hasChildren()" },
         "tournament": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 60" },
