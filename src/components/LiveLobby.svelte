@@ -296,6 +296,7 @@
    */
   function syncUrl(): void {
     if (typeof window === 'undefined') return;
+    console.log('[LiveLobby] syncUrl tab=', tab, 'reportsSelection=', reportsSelection);
     const url = new URL(window.location.href);
     // Preserve mid/view for overlay flows; touch only tab + tournament.
     if (tab === 'live') url.searchParams.delete('tab');
@@ -1704,7 +1705,10 @@
       <ReportsTab
         matches={matches}
         initialTournament={reportsSelection}
-        onSelectionChange={(t) => (reportsSelection = t)}
+        onSelectionChange={(t) => {
+          console.log('[LiveLobby] reportsSelection <-', t);
+          reportsSelection = t;
+        }}
       />
     {/if}
   {/if}

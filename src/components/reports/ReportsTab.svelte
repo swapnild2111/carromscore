@@ -113,6 +113,11 @@
   function onTournamentChange(e: Event) {
     const v = (e.currentTarget as HTMLSelectElement).value;
     const next = v === '__default__' ? null : v;
+    // Debug trace (v3.4.12) — temporary while investigating the
+    // 2026-08-30 report that Friendly picks don't update URL. Prints
+    // the raw select value and what we're sending to the parent.
+    // Delete after the root cause is found + fixed.
+    console.log('[ReportsTab] onTournamentChange raw=', v, 'next=', next, 'currentSelection=', selection);
     // Always fire — the parent's reportsSelection may still be
     // `undefined` (fresh load, no tournament URL param) even when
     // `selection` derived to `null`. Firing on every pick pushes
