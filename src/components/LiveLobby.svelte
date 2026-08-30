@@ -1698,12 +1698,22 @@
                     Boards
                     {#if historySortKey === 'boards'}<span class="sort-caret">{historySortDir === 'asc' ? '▲' : '▼'}</span>{/if}
                   </th>
+                  <!--
+                    Edit column (v3.5.2). Header renders unlabeled — the
+                    ✎ icon appears in body rows only when the current
+                    user is authorised (super or the tournament's own
+                    organiser). Reported 2026-08-30: after History moved
+                    to a table layout, the per-card pencil disappeared;
+                    this restores parity with the card view.
+                  -->
+                  <th class="hist-th hist-th-edit" aria-label="Edit"></th>
                 </tr>
               </thead>
               <tbody>
                 {#each sortedHistoryTable as m (m.id)}
                   {@const rec = reconcileResultFromBoardLog(m)}
                   {@const winner = rec.winner}
+                  {@const editable = canEditMatch(m)}
                   <tr
                     class="hist-tr"
                     class:winner-a={winner === 'a'}
@@ -1736,6 +1746,17 @@
                       {/if}
                     </td>
                     <td class="hist-td hist-td-num">{rec.boardCount}</td>
+                    <td class="hist-td hist-td-edit">
+                      {#if editable}
+                        <button
+                          type="button"
+                          class="hist-edit-btn"
+                          onclick={(e) => openEdit(m, e)}
+                          aria-label="Edit match"
+                          title="Edit match"
+                        >✎</button>
+                      {/if}
+                    </td>
                   </tr>
                 {/each}
               </tbody>
@@ -2914,6 +2935,38 @@
     color: var(--muted, #9aa0a6);
     font-variant-numeric: tabular-nums;
   }
+  /* Edit-column affordances (v3.5.2). Header is narrow + unlabeled;
+     body cells render the ✎ pencil only when the current user is
+     authorised (super or the tournament's own organiser). Same
+     visual as the card view's .card-edit. */
+  .hist-th-edit,
+  .hist-td-edit {
+    width: 2.4rem;
+    padding-left: 0.25rem !important;
+    padding-right: 0.25rem !important;
+    text-align: center;
+  }
+  .hist-edit-btn {
+    background: rgba(255, 213, 74, 0.08);
+    border: 1px solid rgba(255, 213, 74, 0.35);
+    color: var(--accent, #ffd54a);
+    width: 1.9rem;
+    height: 1.9rem;
+    padding: 0;
+    border-radius: 0.4rem;
+    font-size: 0.95rem;
+    line-height: 1;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.12s, border-color 0.12s;
+  }
+  .hist-edit-btn:hover {
+    background: rgba(255, 213, 74, 0.16);
+    border-color: rgba(255, 213, 74, 0.6);
+  }
+  .hist-edit-btn:active { transform: scale(0.96); }
 
   /* Score digits on ended cards flip to the winner-gold / loser-silver
      colour language, so the whole card reads as one medal narrative.
