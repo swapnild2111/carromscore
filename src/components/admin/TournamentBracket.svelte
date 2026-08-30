@@ -24,6 +24,8 @@
   } from '../../lib/planned';
   import { qrToDataUri } from '../../lib/qrcode';
   import type { Tournament, Round } from '../../lib/tournaments';
+  import { loadAll as loadAllPlayers, subscribeStore as subscribePlayerStore } from '../../lib/players';
+  import { flagEmoji, countryName } from '../../lib/countries';
 
   interface Props {
     tournament: Tournament;
@@ -73,14 +75,110 @@
   );
 
   // Add-row form state. Only appears when a round is selected.
-  const mode = $derived<'singles' | 'doubles'>(
+  //
+  // Per-match mode override (v3.6.1): the tournament default seeds the
+  // toggle, but the organiser can flip a single row to the other mode
+  // without changing the tournament-wide default. Useful for mixed
+  // events (e.g. singles league + doubles knockout under one
+  // tournament tag).
+  const defaultMode = $derived<'singles' | 'doubles'>(
     tournament.defaults?.mode ?? 'singles',
   );
+  let mode = $state<'singles' | 'doubles'>(defaultMode);
+  $effect(() => {
+    // Re-seed the toggle when the tournament's default changes (e.g.
+    // organiser edits defaults in another tab). Only when the form is
+    // empty — otherwise a mid-typing default change would wipe input.
+    if (!addAName && !addA2Name && !addBName && !addB2Name) {
+      mode = defaultMode;
+    }
+  });
   let addAName = $state<string>('');
   let addA2Name = $state<string>('');
   let addBName = $state<string>('');
   let addB2Name = $state<string>('');
   let addBusy = $state(false);
+
+  // ─── Player name autocomplete (v3.6.1) ─────────────────────────────
+  // Reuses the /players Firebase identity store so bracket entry uses
+  // the same roster the score-setup form autocompletes from. Subscribe
+  // once on mount so newly-added players surface in the dropdown
+  // without a modal reopen.
+  //
+  // Kept intentionally simpler than MatchSetup's picker: substring
+  // match, top 8, no fuzzy-alias chip, no closed-tournament country
+  // warnings. Organisers filling a bracket already know the roster;
+  // they need speed of typing, not identity-mismatch guardrails.
+  let identityTick = $state(0);
+  onMount(() => {
+    const unsubStore = subscribePlayerStore(() => {
+      identityTick += 1;
+    });
+    return () => unsubStore();
+  });
+  type Suggestion = { id: string; name: string; country?: string };
+  function suggestPlayers(query: string): Suggestion[] {
+    // Read tick so the derivation re-runs on store updates.
+    void identityTick;
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+    return loadAllPlayers()
+      .filter((p) => p.canonicalName.toLowerCase().includes(q))
+      .slice(0, 8)
+      .map((p) => ({
+        id: p.id,
+        name: p.canonicalName,
+        ...(p.country ? { country: p.country } : {}),
+      }));
+  }
+  // Which of the four inputs' dropdown is currently open. Null = none.
+  type PickerKey = 'aName' | 'a2Name' | 'bName' | 'b2Name';
+  let openPicker = $state<PickerKey | null>(null);
+  function setField(key: PickerKey, value: string) {
+    if (key === 'aName') addAName = value;
+    else if (key === 'a2Name') addA2Name = value;
+    else if (key === 'bName') addBName = value;
+    else if (key === 'b2Name') addB2Name = value;
+  }
+  function getField(key: PickerKey): string {
+    if (key === 'aName') return addAName;
+    if (key === 'a2Name') return addA2Name;
+    if (key === 'bName') return addBName;
+    return addB2Name;
+  }
+  // Resolved player id per input, captured when a suggestion is
+  // tapped or when the typed text is an exact-normalised match. Sent
+  // with the planned match so post-scan setup can render country
+  // flags on first paint without re-resolving.
+  let resolvedIds = $state<Record<PickerKey, string | null>>({
+    aName: null,
+    a2Name: null,
+    bName: null,
+    b2Name: null,
+  });
+  function pickSuggestion(key: PickerKey, s: Suggestion) {
+    setField(key, s.name);
+    resolvedIds = { ...resolvedIds, [key]: s.id };
+    openPicker = null;
+  }
+  function onNameInput(key: PickerKey, value: string) {
+    setField(key, value);
+    // Clear the resolved id — the user is editing, so any stale
+    // resolution is invalid. If the new value happens to be an exact
+    // match, auto-resolve to that player id.
+    const norm = value.trim().toLowerCase();
+    let hit: string | null = null;
+    if (norm) {
+      for (const p of loadAllPlayers()) {
+        if (p.canonicalName.trim().toLowerCase() === norm) {
+          hit = p.id;
+          break;
+        }
+      }
+    }
+    resolvedIds = { ...resolvedIds, [key]: hit };
+    openPicker = key;
+  }
   let inlineError = $state<string | null>(null);
   let flashOk = $state<string | null>(null);
   let flashTimer: number | null = null;
@@ -95,6 +193,8 @@
     addA2Name = '';
     addBName = '';
     addB2Name = '';
+    resolvedIds = { aName: null, a2Name: null, bName: null, b2Name: null };
+    mode = defaultMode;
   }
 
   async function addRow() {
@@ -126,6 +226,14 @@
       a2Name: mode === 'doubles' ? addA2Name.trim() : undefined,
       bName,
       b2Name: mode === 'doubles' ? addB2Name.trim() : undefined,
+      ...(resolvedIds.aName ? { aResolvedId: resolvedIds.aName } : {}),
+      ...(mode === 'doubles' && resolvedIds.a2Name
+        ? { a2ResolvedId: resolvedIds.a2Name }
+        : {}),
+      ...(resolvedIds.bName ? { bResolvedId: resolvedIds.bName } : {}),
+      ...(mode === 'doubles' && resolvedIds.b2Name
+        ? { b2ResolvedId: resolvedIds.b2Name }
+        : {}),
       cfg: {
         ...(tournament.defaults?.bestOf !== undefined
           ? { bestOf: tournament.defaults.bestOf }
@@ -195,6 +303,47 @@
   }
 </script>
 
+{#snippet pickerLabel(key: PickerKey, label: string)}
+  {@const typed = getField(key)}
+  {@const suggestions = suggestPlayers(typed)}
+  {@const dropdownVisible = openPicker === key && suggestions.length > 0}
+  <label class="picker">
+    <span>{label}</span>
+    <input
+      type="text"
+      autocomplete="off"
+      placeholder="Player name"
+      value={typed}
+      maxlength="80"
+      disabled={addBusy}
+      oninput={(e) => onNameInput(key, (e.currentTarget as HTMLInputElement).value)}
+      onfocus={() => (openPicker = key)}
+      onblur={() => setTimeout(() => { if (openPicker === key) openPicker = null; }, 200)}
+    />
+    {#if dropdownVisible}
+      <ul class="suggest">
+        {#each suggestions as p (p.id)}
+          <li>
+            <button
+              type="button"
+              onmousedown={(e) => e.preventDefault()}
+              onclick={() => pickSuggestion(key, p)}
+            >
+              <span class="pname">{p.name}</span>
+              {#if p.country && p.country !== 'Unknown'}
+                <span class="pcountry" title={countryName(p.country)} aria-hidden="true">
+                  {#if flagEmoji(p.country)}{flagEmoji(p.country)}{/if}
+                  {countryName(p.country)}
+                </span>
+              {/if}
+            </button>
+          </li>
+        {/each}
+      </ul>
+    {/if}
+  </label>
+{/snippet}
+
 <div class="bracket-backdrop" role="dialog" aria-modal="true" aria-labelledby="bracket-title">
   <div class="bracket-card">
     <button
@@ -223,7 +372,7 @@
 
       {#if selectedRound}
         <p class="hint">
-          Mode inherits from tournament defaults: <strong>{mode}</strong>.
+          Default mode: <strong>{defaultMode}</strong>{#if defaultMode !== mode} (this match: <strong>{mode}</strong>){/if}.
           {#if tournament.defaults?.bestOf || tournament.defaults?.pointsTarget || tournament.defaults?.maxBoards}
             Config:
             {#if tournament.defaults?.bestOf}bo{tournament.defaults.bestOf}{/if}
@@ -233,50 +382,37 @@
         </p>
 
         <div class="bracket-add">
+          <!--
+            Per-match mode toggle (v3.6.1). Defaults to the tournament's
+            mode, but flippable per row so a mixed tournament (e.g. a
+            singles league that runs one doubles exhibition match)
+            doesn't need a second tournament tag.
+          -->
+          <div class="mode-toggle" role="group" aria-label="Match mode">
+            <button
+              type="button"
+              class="mode-chip"
+              class:mode-chip-on={mode === 'singles'}
+              onclick={() => (mode = 'singles')}
+              disabled={addBusy}
+            >Singles</button>
+            <button
+              type="button"
+              class="mode-chip"
+              class:mode-chip-on={mode === 'doubles'}
+              onclick={() => (mode = 'doubles')}
+              disabled={addBusy}
+            >Doubles</button>
+          </div>
+
           <div class="add-grid" class:add-grid-doubles={mode === 'doubles'}>
-            <label>
-              <span>Side A {mode === 'doubles' ? '— player 1' : ''}</span>
-              <input
-                type="text"
-                bind:value={addAName}
-                placeholder="Player name"
-                maxlength="80"
-                disabled={addBusy}
-              />
-            </label>
+            {@render pickerLabel('aName', mode === 'doubles' ? 'Side A — player 1' : 'Side A')}
             {#if mode === 'doubles'}
-              <label>
-                <span>Side A — player 2</span>
-                <input
-                  type="text"
-                  bind:value={addA2Name}
-                  placeholder="Partner name"
-                  maxlength="80"
-                  disabled={addBusy}
-                />
-              </label>
+              {@render pickerLabel('a2Name', 'Side A — player 2')}
             {/if}
-            <label>
-              <span>Side B {mode === 'doubles' ? '— player 1' : ''}</span>
-              <input
-                type="text"
-                bind:value={addBName}
-                placeholder="Player name"
-                maxlength="80"
-                disabled={addBusy}
-              />
-            </label>
+            {@render pickerLabel('bName', mode === 'doubles' ? 'Side B — player 1' : 'Side B')}
             {#if mode === 'doubles'}
-              <label>
-                <span>Side B — player 2</span>
-                <input
-                  type="text"
-                  bind:value={addB2Name}
-                  placeholder="Partner name"
-                  maxlength="80"
-                  disabled={addBusy}
-                />
-              </label>
+              {@render pickerLabel('b2Name', 'Side B — player 2')}
             {/if}
           </div>
           <button
@@ -464,12 +600,13 @@
   .add-grid-doubles {
     grid-template-columns: 1fr 1fr;
   }
-  .add-grid label {
+  .add-grid label, .picker {
     display: flex;
     flex-direction: column;
     gap: 0.25rem;
     font-size: 0.78rem;
     color: var(--muted, #9aa0a6);
+    position: relative;
   }
   .add-grid input {
     padding: 0.4rem 0.55rem;
@@ -498,6 +635,89 @@
   }
   .add-btn:hover { background: rgba(255, 213, 74, 0.24); }
   .add-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .mode-toggle {
+    display: inline-flex;
+    gap: 0.3rem;
+    margin-bottom: 0.55rem;
+  }
+  .mode-chip {
+    padding: 0.3rem 0.8rem;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: var(--muted, #9aa0a6);
+    border-radius: 999px;
+    font: inherit;
+    font-size: 0.78rem;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .mode-chip:hover { color: var(--fg, #f5f5f5); }
+  .mode-chip-on {
+    background: rgba(255, 213, 74, 0.14);
+    border-color: rgba(255, 213, 74, 0.55);
+    color: var(--accent, #ffd54a);
+    font-weight: 700;
+  }
+  .mode-chip:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .picker input {
+    padding: 0.4rem 0.55rem;
+    background: #141414;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 0.35rem;
+    color: var(--fg, #f5f5f5);
+    font: inherit;
+    font-size: 0.9rem;
+  }
+  .picker input:focus {
+    outline: none;
+    border-color: rgba(255, 213, 74, 0.5);
+  }
+
+  /* Dropdown of matching players. Absolutely positioned under the
+     input so it floats above the next form row instead of pushing
+     the layout down. Same visual language as MatchSetup's picker. */
+  .suggest {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 100%;
+    z-index: 5;
+    list-style: none;
+    margin: 0.2rem 0 0;
+    padding: 0.2rem 0;
+    background: #141414;
+    border: 1px solid rgba(255, 213, 74, 0.35);
+    border-radius: 0.4rem;
+    max-height: 14rem;
+    overflow-y: auto;
+    box-shadow: 0 10px 32px rgba(0, 0, 0, 0.7);
+  }
+  .suggest li { margin: 0; padding: 0; }
+  .suggest button {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.6rem;
+    width: 100%;
+    padding: 0.4rem 0.6rem;
+    background: transparent;
+    border: 0;
+    color: var(--fg, #f5f5f5);
+    font: inherit;
+    font-size: 0.88rem;
+    text-align: left;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .suggest button:hover { background: #1c1c1c; }
+  .pname { flex: 1; }
+  .pcountry {
+    color: var(--muted, #9aa0a6);
+    font-size: 0.78rem;
+    white-space: nowrap;
+  }
 
   .inline-err {
     margin: 0.5rem 0;
