@@ -106,6 +106,14 @@ function countBoardsWon(m: MatchRecord): { boardsWonA: number; boardsWonB: numbe
   let a = 0;
   let b = 0;
   for (const entry of log) {
+    // RTDB stores arrays as sparse maps — an admin delete of a
+    // single boardLog index in Firebase Console leaves a null hole
+    // rather than compacting the array. `entry.pointsA` on that
+    // null throws (reported 2026-08-30: selecting Friendly Match
+    // tournament crashed the Reports tab because one of its matches
+    // had a null hole in the boardLog). Same defensive filter every
+    // other boardLog consumer uses.
+    if (!entry || typeof entry !== 'object') continue;
     const pa = entry.pointsA ?? 0;
     const pb = entry.pointsB ?? 0;
     if (pa > pb) a += 1;
