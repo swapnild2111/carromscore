@@ -559,11 +559,26 @@
         {/each}
       </select>
     {/if}
-    {#if filterSearch.trim() !== '' || filterMode !== 'all'}
+    <!--
+      Clear button (v3.4.12). Visible whenever ANY filter is off its
+      default: search has text, mode isn't 'all', tournament isn't
+      the Default bucket, or round isn't 'all rounds'. Reported
+      2026-08-30: earlier version only tripped on search/mode
+      changes, so a tournament or round pick left no way to reset
+      to the base view without manually setting each dropdown back.
+      Reset writes to `selection` via pick() (URL sync intact) and
+      the effects push back into the proxy selects.
+    -->
+    {#if filterSearch.trim() !== '' || filterMode !== 'all' || selection !== null || roundFilter !== null}
       <button
         type="button"
         class="rep-clear"
-        onclick={() => { filterSearch = ''; filterMode = 'all'; }}
+        onclick={() => {
+          filterSearch = '';
+          filterMode = 'all';
+          if (selection !== null) pick(null);
+          roundFilter = null;
+        }}
         aria-label="Clear filters"
       >✕ Clear</button>
     {/if}
