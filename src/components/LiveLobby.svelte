@@ -2453,8 +2453,22 @@
     top: -0.85rem; /* offset the sheet-inner top padding so the header sits flush */
     z-index: 3;
   }
-  /* Names pill (.hdr) and top-row summary (.board) inside
-     LiveScoreboardView pinned so long per-set tables scroll behind. */
+  /*
+   * Sticky-band bridge (v3.4.12). The header, names pill, and
+   * score summary each pin at slightly different rem offsets while
+   * scrolling. Any mismatch between one band's rendered bottom edge
+   * and the next band's sticky `top` produces a thin horizontal gap
+   * where the per-set table's numbers slide through visibly
+   * (reported 2026-08-30). Two fixes stacked:
+   *   1) Names pill and summary pin ABUTTING the previous band with
+   *      a small negative-overlap so no gap can appear on any device.
+   *   2) The sheet-inner itself gets a ::before pseudo-element that
+   *      layers behind the sticky bands, painting a solid strip
+   *      between sheet-hdr and .board so even a browser-side
+   *      subpixel rounding can't leak the content behind.
+   * Names pill (.hdr) and top-row summary (.board) inside
+   * LiveScoreboardView pinned so long per-set tables scroll behind.
+   */
   .sheet-body :global(.hdr),
   .sheet-inner :global(.hdr),
   .sheet-inner :global(.board) {
@@ -2463,11 +2477,20 @@
     background: #0f0f0f;
   }
   .sheet-inner :global(.hdr) {
-    top: 2.5rem;
-    padding-top: 0.25rem;
+    /* top aligned to the sheet-hdr's rendered bottom edge with a
+       tiny negative-overlap. sheet-hdr's rendered bottom sits around
+       ~1.9rem from the scroll viewport top (top:-0.85rem + padding
+       0.5+content+0.75 ≈ 2.75rem, minus overlap). Setting names-pill
+       top slightly below that with a small overlap fights sub-pixel
+       gaps at any DPI. */
+    top: 1.65rem;
+    padding-top: 0.5rem;
   }
   .sheet-inner :global(.board) {
-    top: 5.5rem;
+    /* Sits directly beneath the names pill with the same overlap
+       strategy. Rendered names-pill height ~2.5rem, so top ~4.15rem
+       lands the .board pill flush against the pill above. */
+    top: 4.15rem;
     padding-bottom: 0.5rem;
     border-bottom: 1px solid #1e1e1e;
     margin-bottom: 0.25rem;
