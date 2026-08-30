@@ -77,7 +77,7 @@
    * tournament yet" inside the report body.
    */
   type PickerOption = { key: string | null; label: string };
-  const options = $derived<PickerOption[]>(() => {
+  const options = $derived.by<PickerOption[]>(() => {
     void tournamentTick;
     // Real tournaments first (most-recently-active), Default last
     // and de-emphasised — organisers scanning the chip strip should
@@ -105,7 +105,7 @@
   // alphabetically. Empty when the selection is Default (untagged) or
   // the tournament has no rounds configured — buildTournamentReport
   // still produces roundReports if any match has a roundKey tag.
-  const currentRoundRoster = $derived(() => {
+  const currentRoundRoster = $derived.by(() => {
     void tournamentTick;
     if (selection === undefined || selection === null) return [];
     return loadRounds(normalizeKey(selection));
@@ -114,7 +114,7 @@
   const report = $derived<TournamentReport | null>(
     selection === undefined
       ? null
-      : buildTournamentReport(matches, selection, currentRoundRoster()),
+      : buildTournamentReport(matches, selection, currentRoundRoster),
   );
 
   /**
@@ -138,7 +138,7 @@
    * downstream renders (charts, leaderboard, matches table) don't
    * branch on filter state. summary tiles read from this too.
    */
-  const viewReport = $derived<TournamentReport | null>(() => {
+  const viewReport = $derived.by<TournamentReport | null>(() => {
     if (!report) return null;
     if (roundFilter === null) return report;
     const rr = report.roundReports?.find((x) => x.roundKey === roundFilter);
@@ -168,8 +168,8 @@
    *   buildPlayerSummary). Tie-broken by boards then points; if
    *   the top two are truly tied the label reads "Tied".
    */
-  const summaryStats = $derived(() => {
-    const r = viewReport();
+  const summaryStats = $derived.by(() => {
+    const r = viewReport;
     if (!r || r.rows.length === 0) return null;
     const matchesCount = r.matches;
     const playersCount = r.playerSummary.length;
@@ -201,7 +201,7 @@
    * so the number stays stable across the picker. Includes the
    * untagged Default bucket if any untagged match exists.
    */
-  const tournamentsCount = $derived(() => {
+  const tournamentsCount = $derived.by(() => {
     const seen = new Set<string>();
     let hasUntagged = false;
     for (const m of matches) {
@@ -371,8 +371,8 @@
       mSortDir = k === 'sideA' || k === 'sideB' || k === 'mode' || k === 'winner' ? 'asc' : 'desc';
     }
   }
-  const sortedLeaderboard = $derived(() => {
-    const r = viewReport();
+  const sortedLeaderboard = $derived.by(() => {
+    const r = viewReport;
     if (!r) return [];
     const q = filterSearch.trim().toLowerCase();
     const arr = r.playerSummary.filter((p) => !q || p.name.toLowerCase().includes(q));
@@ -399,8 +399,8 @@
       return 0;
     });
   });
-  const sortedMatches = $derived(() => {
-    const r = viewReport();
+  const sortedMatches = $derived.by(() => {
+    const r = viewReport;
     if (!r) return [];
     const q = filterSearch.trim().toLowerCase();
     const arr = r.rows.filter((row) => {
@@ -471,7 +471,7 @@
       }}
       aria-label="Tournament"
     >
-      {#each options() as opt (opt.key ?? '__default__')}
+      {#each options as opt (opt.key ?? '__default__')}
         <option value={opt.key === null ? '__default__' : opt.key}>{opt.label}</option>
       {/each}
     </select>
@@ -518,25 +518,25 @@
     </div>
   {/if}
 
-  {#if !viewReport()}
+  {#if !viewReport}
     <div class="empty">
       <p><strong>Pick a tournament above.</strong></p>
       <p class="empty-sub">Every match tagged to that tournament will show up here with per-player summary, charts, and a copy-to-spreadsheet table.</p>
     </div>
-  {:else if viewReport()!.rows.length === 0}
+  {:else if viewReport!.rows.length === 0}
     <div class="empty">
       <p><strong>No matches recorded {roundFilter ? 'in this round' : 'for this tournament'} yet.</strong></p>
       <p class="empty-sub">
         {#if roundFilter}
           Try another round, or clear the filter to see every match.
         {:else}
-          Score a match on the home screen and tag it with <em>{viewReport()!.tournament}</em>. It'll appear here as soon as it ends.
+          Score a match on the home screen and tag it with <em>{viewReport!.tournament}</em>. It'll appear here as soon as it ends.
         {/if}
       </p>
     </div>
   {:else}
-    {@const view = viewReport()!}
-    {@const stats = summaryStats()}
+    {@const view = viewReport!}
+    {@const stats = summaryStats}
 
     {#if stats}
       <!--
@@ -579,8 +579,8 @@
           <div class="stat-label">{stats.boardsCount === 1 ? 'Board' : 'Boards'}</div>
         </div>
         <div class="stat-tile">
-          <div class="stat-value">{tournamentsCount()}</div>
-          <div class="stat-label">{tournamentsCount() === 1 ? 'Tournament' : 'Tournaments'}</div>
+          <div class="stat-value">{tournamentsCount}</div>
+          <div class="stat-label">{tournamentsCount === 1 ? 'Tournament' : 'Tournaments'}</div>
         </div>
       </div>
     {/if}
@@ -627,7 +627,7 @@
             </tr>
           </thead>
           <tbody>
-            {#each sortedLeaderboard() as p, i (p.playerId)}
+            {#each sortedLeaderboard as p, i (p.playerId)}
               {@const raw = view.playerSummary.findIndex((x) => x.playerId === p.playerId)}
               {@const rank = lbSortKey === 'rank' ? rankLabel(view.playerSummary, raw) : String(raw + 1)}
               <tr class:leaderboard-top={lbSortKey === 'rank' && raw === 0 && lbSortDir === 'asc'}>
@@ -647,12 +647,12 @@
     </div>
 
     <div class="tbl-hdr">
-      <h3 class="section-hdr">Matches ({sortedMatches().length}{#if sortedMatches().length !== view.matches} / {view.matches}{/if})</h3>
+      <h3 class="section-hdr">Matches ({sortedMatches.length}{#if sortedMatches.length !== view.matches} / {view.matches}{/if})</h3>
       <div class="tbl-actions">
         <button
           type="button"
           class="btn btn-copy"
-          onclick={() => copyRows(sortedMatches(), MAIN_COPY_KEY)}
+          onclick={() => copyRows(sortedMatches, MAIN_COPY_KEY)}
           aria-label="Copy table to clipboard as tab-separated values"
         >
           {#if copiedKey === MAIN_COPY_KEY}<span aria-hidden="true">✓</span> Copied{:else}<span aria-hidden="true">⧉</span> Copy table{/if}
@@ -700,7 +700,7 @@
           </tr>
         </thead>
         <tbody>
-          {#each sortedMatches() as r (r._matchId)}
+          {#each sortedMatches as r (r._matchId)}
             <tr>
               <td>{r.endedAt}</td>
               <td>{r.mode}</td>
@@ -888,9 +888,14 @@
     flex-wrap: wrap;
     margin-bottom: 0.75rem;
     padding: 0.6rem 0.75rem;
-    background: rgba(255, 255, 255, 0.02);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    /* Gold-tint highlight (v3.4.12) to distinguish the filter bar as
+       the primary scoping control for the tab — otherwise it reads
+       as another neutral chrome block. */
+    background: rgba(255, 213, 74, 0.05);
+    border: 1px solid rgba(255, 213, 74, 0.35);
     border-radius: 0.7rem;
+    box-shadow: 0 0 0 1px rgba(255, 213, 74, 0.06),
+                0 0 18px rgba(255, 213, 74, 0.08);
   }
   .rep-search {
     flex: 1 1 12rem;

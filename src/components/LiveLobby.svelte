@@ -796,9 +796,9 @@
   // For card view: derive versus + practice from the filtered set so
   // the toolbar's filters affect both views. Table view uses its own
   // `sortedHistoryTable` derived below.
-  const versusMatches = $derived(filteredHistory().filter((m) => m.mode !== 'practice'));
+  const versusMatches = $derived(filteredHistory.filter((m) => m.mode !== 'practice'));
   const practiceMatches = $derived(
-    filteredHistory().filter((m) => m.mode === 'practice')
+    filteredHistory.filter((m) => m.mode === 'practice')
       .sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0)),
   );
   const historyGroups = $derived(groupByTournament(versusMatches, bucketOfMatch));
@@ -818,7 +818,7 @@
    * `sortedHistoryTable`: `filteredHistory` sorted by the current
    * column + direction. Table view only.
    */
-  const tournamentBuckets = $derived(() => {
+  const tournamentBuckets = $derived.by(() => {
     const seen = new Set<string>();
     seen.add(DEFAULT_BUCKET);
     for (const m of matches) {
@@ -835,7 +835,7 @@
   function sideFullNameForFilter(m: MatchRecord, side: 'a' | 'b'): string {
     return sideNameMatch(m, side).toLowerCase();
   }
-  const filteredHistory = $derived(() => {
+  const filteredHistory = $derived.by(() => {
     const q = filterSearch.trim().toLowerCase();
     const cutoff = filterDays > 0 ? Date.now() - filterDays * 24 * 60 * 60 * 1000 : 0;
     return matches.filter((m) => {
@@ -852,8 +852,8 @@
       return true;
     });
   });
-  const sortedHistoryTable = $derived(() => {
-    const arr = [...filteredHistory()];
+  const sortedHistoryTable = $derived.by(() => {
+    const arr = [...filteredHistory];
     const dir = historySortDir === 'asc' ? 1 : -1;
     const key = historySortKey;
     arr.sort((a, b) => {
@@ -1549,7 +1549,7 @@
             aria-label="Filter by tournament"
           >
             <option value="">All tournaments</option>
-            {#each tournamentBuckets() as bucket (bucket)}
+            {#each tournamentBuckets as bucket (bucket)}
               <option value={bucket}>{bucket}</option>
             {/each}
           </select>
@@ -1574,7 +1574,7 @@
         </div>
       </div>
 
-      {#if sortedHistoryTable().length === 0}
+      {#if sortedHistoryTable.length === 0}
           <div class="empty">
             <p><strong>No matches match these filters.</strong></p>
             <p class="empty-sub">Try clearing the search or widening the date range.</p>
@@ -1643,7 +1643,7 @@
                 </tr>
               </thead>
               <tbody>
-                {#each sortedHistoryTable() as m (m.id)}
+                {#each sortedHistoryTable as m (m.id)}
                   {@const rec = reconcileResultFromBoardLog(m)}
                   {@const winner = rec.winner}
                   <tr
@@ -2673,9 +2673,14 @@
     justify-content: space-between;
     margin: 0 0 1rem;
     padding: 0.6rem 0.75rem;
-    background: rgba(255, 255, 255, 0.02);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    /* Gold-tint highlight (v3.4.12) to distinguish the filter bar
+       as the primary scoping control for the tab. Same treatment
+       lives on the Reports .reports-filters. */
+    background: rgba(255, 213, 74, 0.05);
+    border: 1px solid rgba(255, 213, 74, 0.35);
     border-radius: 0.7rem;
+    box-shadow: 0 0 0 1px rgba(255, 213, 74, 0.06),
+                0 0 18px rgba(255, 213, 74, 0.08);
   }
   .hist-filters {
     display: flex;
