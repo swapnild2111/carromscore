@@ -3218,46 +3218,27 @@
     background: #0f0f0f;
   }
   .sheet-inner :global(.hdr) {
-    /* top aligned to the sheet-hdr's rendered bottom edge with a
-       tiny negative-overlap. sheet-hdr's rendered bottom sits around
-       ~1.9rem from the scroll viewport top (top:-0.85rem + padding
-       0.5+content+0.75 ≈ 2.75rem, minus overlap). Setting names-pill
-       top slightly below that with a small overlap fights sub-pixel
-       gaps at any DPI. */
+    /* Sticky at 1.65rem so the names pill row abuts sheet-hdr's
+       bottom (~1.9rem after its padding + top:-0.85rem offset).
+       A ±0.25rem overlap fights sub-pixel gaps. box-shadow
+       extends the opaque #0f0f0f bg horizontally into sheet-inner's
+       1rem padding, covering the popup card edges WITHOUT widening
+       the flexbox/grid element itself — earlier attempts to widen
+       with negative margins pushed the pills visually OUT of the
+       popup card (reported 2026-08-30). */
     top: 1.65rem;
     padding-top: 0.5rem;
-    /* Full-bleed to sheet-inner's edges when sticky. The negative
-       margins cancel sheet-inner's 1rem horizontal padding so the
-       sticky bg reaches the popup card's rounded edges (v3.4.12:
-       reported names row visually escaped left/right of the card
-       while scrolling). Re-add the padding inside via padding-* so
-       the pills sit centred within the same visible column as the
-       non-sticky content beneath. Box-sizing keeps the numbers sane. */
-    box-sizing: border-box;
-    margin-left: -1rem;
-    margin-right: -1rem;
-    padding-left: 1rem;
-    padding-right: 1rem;
-    width: calc(100% + 2rem);
-    max-width: calc(100% + 2rem);
+    box-shadow: -1rem 0 0 #0f0f0f, 1rem 0 0 #0f0f0f;
   }
   .sheet-inner :global(.board) {
-    /* Sits directly beneath the names pill with the same overlap
-       strategy. Rendered names-pill height ~2.5rem, so top ~4.15rem
-       lands the .board pill flush against the pill above. */
+    /* Same treatment as .hdr above — box-shadow bleed into the
+       sheet-inner's horizontal padding covers scrolled rows without
+       widening the element. */
     top: 4.15rem;
     padding-bottom: 0.5rem;
     border-bottom: 1px solid #1e1e1e;
     margin-bottom: 0.25rem;
-    /* Match the full-bleed treatment of .hdr above so the sticky
-       score-tile row also covers to the popup card's edges. */
-    box-sizing: border-box;
-    margin-left: -1rem;
-    margin-right: -1rem;
-    padding-left: 1rem;
-    padding-right: 1rem;
-    width: calc(100% + 2rem);
-    max-width: calc(100% + 2rem);
+    box-shadow: -1rem 0 0 #0f0f0f, 1rem 0 0 #0f0f0f;
   }
   /* Two-row title container. First row = LIVE/Ended + mode.
      Second row = tournament + round tags when present. min-width:0
