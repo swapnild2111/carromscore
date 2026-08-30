@@ -112,7 +112,14 @@
   function onTournamentChange(e: Event) {
     const v = (e.currentTarget as HTMLSelectElement).value;
     const next = v === '__default__' ? null : v;
-    if (next !== selection) pick(next);
+    // Always call pick() on user input — even when `next` equals the
+    // current `selection`. That handles the "first load with no
+    // tournament URL param, user picks Default" case: initial
+    // `selection` is null (matches Default), but LiveLobby's
+    // reportsSelection is still `undefined`, so `syncUrl` hasn't
+    // written `tournament=` yet. Firing pick(null) flips reportsSelection
+    // to null and the URL updates (reported 2026-08-30).
+    pick(next);
   }
 
   // Pass the tournament's round roster into buildTournamentReport so
@@ -158,7 +165,8 @@
   function onRoundChange(e: Event) {
     const v = (e.currentTarget as HTMLSelectElement).value;
     const next = v === '__all__' ? null : v;
-    if (next !== roundFilter) roundFilter = next;
+    // Always assign — cheap, and keeps parity with onTournamentChange.
+    roundFilter = next;
   }
 
   /**
