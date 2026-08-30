@@ -12,7 +12,7 @@
    * stats concept.
    */
 
-  import { onMount, untrack } from 'svelte';
+  import { onMount } from 'svelte';
   import type { MatchRecord } from '../../lib/history';
   import {
     buildTournamentReport,
@@ -101,42 +101,19 @@
   );
 
   /**
-   * Proxy binding for the tournament <select> in the filter bar
-   * (v3.4.12). Represents `selection` as a plain string:
-   *   - '__default__' for the Default (untagged) bucket
-   *   - any real tournament name otherwise
-   * bind:value on the select syncs both directions automatically —
-   * more reliable than value={} + onchange under nearby DOM churn.
-   * Effects below keep the proxy in step with `selection` when it's
-   * changed programmatically (URL deep-link, external caller), and
-   * mirror the reverse direction into `selection` (+ pick()) so URL
-   * sync keeps working.
+   * Selected value shown in the tournament <select>. Reads from
+   * `selection` reactively so URL deep-links / external state
+   * changes flow into the DOM. '__default__' represents the null
+   * (Default bucket) state so option values match.
    */
-  let selectionProxy = $state<string>(
-    initialTournament === undefined || initialTournament === null
-      ? '__default__'
-      : initialTournament,
+  const selectionProxy = $derived(
+    selection === null || selection === undefined ? '__default__' : selection,
   );
-  // Programmatic → proxy: keep the select's shown label in sync
-  // when `selection` is changed by something other than the select
-  // itself (URL deep-link handling, initial value). Depends ONLY on
-  // `selection` so this effect doesn't fire on proxy changes — a
-  // read-selectionProxy-then-write-selectionProxy pattern would
-  // create a feedback loop that snapped the select back on user
-  // input (reported 2026-08-30).
-  $effect(() => {
-    const want = selection === null || selection === undefined ? '__default__' : selection;
-    // untrack the read of selectionProxy so this effect only runs
-    // when `selection` changes, not on our own writes to the proxy.
-    if (untrack(() => selectionProxy) !== want) selectionProxy = want;
-  });
-  // Proxy → selection: when the user picks a value from the select
-  // (bind:value writes to selectionProxy), reflect that into the
-  // canonical `selection` state and fire pick() for URL sync.
-  $effect(() => {
-    const next = selectionProxy === '__default__' ? null : selectionProxy;
-    if (untrack(() => selection) !== next) pick(next);
-  });
+  function onTournamentChange(e: Event) {
+    const v = (e.currentTarget as HTMLSelectElement).value;
+    const next = v === '__default__' ? null : v;
+    if (next !== selection) pick(next);
+  }
 
   // Pass the tournament's round roster into buildTournamentReport so
   // per-round sub-reports get ordered R16 → QF → SF → F rather than
@@ -175,18 +152,14 @@
    * keep roundFilter and this proxy in step; on tournament switch
    * both reset to their "all" default (via the reset effect above).
    */
-  let roundFilterProxy = $state<string>('__all__');
-  // Same untrack pattern as selectionProxy above — depend only on
-  // `roundFilter` for the programmatic → proxy direction so user
-  // clicks don't get snapped back.
-  $effect(() => {
-    const want = roundFilter === null ? '__all__' : roundFilter;
-    if (untrack(() => roundFilterProxy) !== want) roundFilterProxy = want;
-  });
-  $effect(() => {
-    const next = roundFilterProxy === '__all__' ? null : roundFilterProxy;
-    if (untrack(() => roundFilter) !== next) roundFilter = next;
-  });
+  // Round select proxy (v3.4.12) — same one-way + onchange pattern
+  // as selectionProxy above. '__all__' represents null (All rounds).
+  const roundFilterProxy = $derived(roundFilter === null ? '__all__' : roundFilter);
+  function onRoundChange(e: Event) {
+    const v = (e.currentTarget as HTMLSelectElement).value;
+    const next = v === '__all__' ? null : v;
+    if (next !== roundFilter) roundFilter = next;
+  }
 
   /**
    * The view report — either the combined tournament report or a
@@ -519,20 +492,18 @@
       <option value="doubles">Doubles</option>
     </select>
     <!--
-      Tournament select uses bind:value on a proxy string variable
-      rather than value={...}+onchange (v3.4.12 fix). Svelte 5's
-      one-way value attribute didn't reliably re-sync the select's
-      DOM value after nearby DOM churn (e.g. the Clear button
-      mounting) — the select would show a stale label while the
-      underlying selection had already changed. bind:value handles
-      DOM sync properly. The proxy variable is a string ('__default__'
-      or a real tournament name) so the option values match cleanly.
-      An effect keeps selectionProxy in step with `selection` when
-      it's driven from outside (URL deep-links, initial state).
+      Tournament select (v3.4.12). Value derived from `selection`
+      reactively; onchange writes back via pick() so the report
+      body + URL deep-link stay in step. Earlier attempts used
+      bind:value on a $state proxy backed by two syncing $effect
+      blocks — worked in isolation but created subtle re-render
+      loops that broke selection under certain click sequences.
+      One-way + onchange is simpler and reliable.
     -->
     <select
       class="rep-select rep-select-tour"
-      bind:value={selectionProxy}
+      value={selectionProxy}
+      onchange={onTournamentChange}
       aria-label="Tournament"
     >
       {#each options as opt (opt.key ?? '__default__')}
@@ -542,15 +513,13 @@
     {#if report && (report.roundReports?.length ?? 0) > 0}
       <!--
         Round dropdown (v3.4.12) — only rendered when the current
-        tournament has round-tagged matches. Uses bind:value on a
-        proxy string ('__all__' = All rounds) with an effect syncing
-        the underlying roundFilter state. Same pattern as the
-        tournament select above so nearby DOM churn can't leave
-        the picker showing a stale label.
+        tournament has round-tagged matches. Same one-way + onchange
+        pattern as the tournament select above.
       -->
       <select
         class="rep-select rep-select-round"
-        bind:value={roundFilterProxy}
+        value={roundFilterProxy}
+        onchange={onRoundChange}
         aria-label="Round"
       >
         <option value="__all__">All rounds</option>
