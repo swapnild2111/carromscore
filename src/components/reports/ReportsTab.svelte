@@ -100,6 +100,38 @@
     initialTournament === undefined ? null : initialTournament,
   );
 
+  /**
+   * Proxy binding for the tournament <select> in the filter bar
+   * (v3.4.12). Represents `selection` as a plain string:
+   *   - '__default__' for the Default (untagged) bucket
+   *   - any real tournament name otherwise
+   * bind:value on the select syncs both directions automatically —
+   * more reliable than value={} + onchange under nearby DOM churn.
+   * Effects below keep the proxy in step with `selection` when it's
+   * changed programmatically (URL deep-link, external caller), and
+   * mirror the reverse direction into `selection` (+ pick()) so URL
+   * sync keeps working.
+   */
+  let selectionProxy = $state<string>(
+    initialTournament === undefined || initialTournament === null
+      ? '__default__'
+      : initialTournament,
+  );
+  // Programmatic → proxy: keep the select's shown label in sync when
+  // `selection` is changed by something other than the select itself
+  // (URL deep-link handling, initial value, etc.).
+  $effect(() => {
+    const want = selection === null || selection === undefined ? '__default__' : selection;
+    if (selectionProxy !== want) selectionProxy = want;
+  });
+  // Proxy → selection: when the user picks a value from the select
+  // (bind:value writes to selectionProxy), reflect that into the
+  // canonical `selection` state and fire pick() for URL sync.
+  $effect(() => {
+    const next = selectionProxy === '__default__' ? null : selectionProxy;
+    if (next !== selection) pick(next);
+  });
+
   // Pass the tournament's round roster into buildTournamentReport so
   // per-round sub-reports get ordered R16 → QF → SF → F rather than
   // alphabetically. Empty when the selection is Default (untagged) or
@@ -461,14 +493,21 @@
       <option value="singles">Singles</option>
       <option value="doubles">Doubles</option>
     </select>
+    <!--
+      Tournament select uses bind:value on a proxy string variable
+      rather than value={...}+onchange (v3.4.12 fix). Svelte 5's
+      one-way value attribute didn't reliably re-sync the select's
+      DOM value after nearby DOM churn (e.g. the Clear button
+      mounting) — the select would show a stale label while the
+      underlying selection had already changed. bind:value handles
+      DOM sync properly. The proxy variable is a string ('__default__'
+      or a real tournament name) so the option values match cleanly.
+      An effect keeps selectionProxy in step with `selection` when
+      it's driven from outside (URL deep-links, initial state).
+    -->
     <select
       class="rep-select rep-select-tour"
-      value={selection === null ? '__default__' : (selection ?? '__default__')}
-      onchange={(e) => {
-        const v = (e.currentTarget as HTMLSelectElement).value;
-        if (v === '__default__') pick(null);
-        else pick(v);
-      }}
+      bind:value={selectionProxy}
       aria-label="Tournament"
     >
       {#each options as opt (opt.key ?? '__default__')}
