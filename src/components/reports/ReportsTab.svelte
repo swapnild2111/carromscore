@@ -504,11 +504,25 @@
           <div class="stat-value">{stats.boardsCount}</div>
           <div class="stat-label">{stats.boardsCount === 1 ? 'Board' : 'Boards'}</div>
         </div>
-        <div class="stat-tile stat-tile-leader">
-          <div class="stat-value stat-value-name" title={stats.tiedAtTop ? 'Tied for the lead' : stats.topPlayer?.name}>
-            {stats.tiedAtTop ? 'Tied' : stats.topPlayer?.name ?? '—'}
+        <!--
+          Podium tile (v3.4.12): top three players in the current
+          tournament + round scope. Each row = [Player name] [medal]
+          [wins]. Name is the primary anchor per user preference; medal
+          sits alongside as an ornament. Column headers appear as a
+          tiny label above the row list. Falls back to fewer rows
+          when the field is smaller than 3.
+        -->
+        <div class="stat-tile stat-tile-podium">
+          <div class="stat-label podium-lbl">Top players</div>
+          <div class="podium-list">
+            {#each view.playerSummary.slice(0, 3) as p, i (p.playerId)}
+              <div class="podium-row" class:podium-1={i === 0} class:podium-2={i === 1} class:podium-3={i === 2}>
+                <span class="podium-name" title={p.name}>{p.name}</span>
+                <span class="podium-medal" aria-hidden="true">{i === 0 ? '🥇' : i === 1 ? '🥈' : '🥉'}</span>
+                <span class="podium-wins">{p.wins === 1 ? '1 W' : `${p.wins} W`}</span>
+              </div>
+            {/each}
           </div>
-          <div class="stat-label">Leader</div>
         </div>
       </div>
     {/if}
@@ -876,8 +890,23 @@
     grid-template-columns: repeat(2, 1fr);
     gap: 0.6rem;
   }
+  /* Wider viewport: 3 number tiles on the left row + a wider podium
+     tile spanning 2 columns on the right so all three podium rows
+     fit comfortably without truncating names. */
   @media (min-width: 560px) {
-    .stat-row { grid-template-columns: repeat(4, 1fr); }
+    .stat-row {
+      grid-template-columns: repeat(5, 1fr);
+    }
+    .stat-tile-podium {
+      grid-column: span 2;
+    }
+  }
+  /* Narrow phones: podium spans full width beneath the three number
+     tiles (2-col grid), so it gets its own row and stays readable. */
+  @media (max-width: 559px) {
+    .stat-tile-podium {
+      grid-column: span 2;
+    }
   }
   .stat-tile {
     background: rgba(255, 255, 255, 0.02);
@@ -911,6 +940,69 @@
   .stat-tile-leader {
     background: rgba(255, 213, 74, 0.05);
     border-color: rgba(255, 213, 74, 0.22);
+  }
+  /* Podium tile (v3.4.12) — replaces the single "Leader" tile with
+     a compact top-3 list. Player column first, medal + wins on the
+     right. The three rows are colour-toned so the top one visually
+     dominates without shouting. */
+  .stat-tile-podium {
+    background: rgba(255, 213, 74, 0.05);
+    border-color: rgba(255, 213, 74, 0.28);
+    padding: 0.6rem 0.75rem;
+    gap: 0.4rem;
+  }
+  .podium-lbl {
+    font-size: 0.62rem;
+    color: var(--accent, #ffd54a);
+    opacity: 0.8;
+  }
+  .podium-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    min-width: 0;
+  }
+  .podium-row {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.15rem 0;
+    min-width: 0;
+  }
+  .podium-name {
+    font-weight: 700;
+    color: var(--fg, #f5f5f5);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+    font-size: 0.9rem;
+  }
+  .podium-medal {
+    font-size: 0.95rem;
+    line-height: 1;
+  }
+  .podium-wins {
+    font-size: 0.72rem;
+    color: var(--muted, #9aa0a6);
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  /* Row 1 stands out in gold; rows 2 and 3 stay in the neutral fg
+     colour but keep the same layout so the medal column stays aligned.
+     Bit of a bling-hierarchy without going overboard. */
+  .podium-1 .podium-name {
+    color: var(--accent, #ffd54a);
+    font-size: 1rem;
+  }
+  .podium-1 .podium-medal {
+    font-size: 1.05rem;
+    filter: drop-shadow(0 0 3px rgba(255, 213, 74, 0.35));
+  }
+  .podium-2 .podium-name,
+  .podium-3 .podium-name {
+    opacity: 0.9;
   }
 
   /* Empty states */

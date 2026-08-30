@@ -2865,6 +2865,12 @@
     padding: 0.85rem 1rem 1.1rem;
     max-height: min(90dvh, 44rem);
     overflow-y: auto;
+    /* Explicit overflow-x: hidden so the box-shadow horizontal-
+       spread applied to sticky bands (`.hdr`, `.board`) is clipped
+       by sheet-inner's border-radius. Without this, the shadow bg
+       leaked past the rounded gold border on scroll (reported
+       2026-08-30) because overflow-y: auto only clips the Y axis. */
+    overflow-x: hidden;
     /* sheet-inner is the scroll container. Names pill and top-row
        summary inside LiveScoreboardView are made position: sticky so
        they pin to the top while per-set tables scroll under them.
