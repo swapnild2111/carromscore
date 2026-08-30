@@ -145,10 +145,32 @@
    * selection changes so a stale round key from a previous
    * tournament doesn't carry over.
    */
-  let roundFilter = $state<string | null>(null);
+  function initialRoundFilter(): string | null {
+    if (typeof window === 'undefined') return null;
+    const v = new URL(window.location.href).searchParams.get('round');
+    return v ? v : null;
+  }
+  let roundFilter = $state<string | null>(initialRoundFilter());
+  // Reset roundFilter on tournament change — but skip the FIRST run
+  // so the URL-preloaded value survives mount. Otherwise `void selection`
+  // fires on initial derivation with initialTournament and immediately
+  // nulls out the round param the URL asked for.
+  let roundFilterSelectionInit = false;
   $effect(() => {
     void selection;
+    if (!roundFilterSelectionInit) {
+      roundFilterSelectionInit = true;
+      return;
+    }
     roundFilter = null;
+  });
+  // Mirror roundFilter to URL as `round=`.
+  $effect(() => {
+    if (typeof window === 'undefined') return;
+    const url = new URL(window.location.href);
+    if (roundFilter === null) url.searchParams.delete('round');
+    else url.searchParams.set('round', roundFilter);
+    window.history.replaceState({}, '', url.toString());
   });
 
   /**
@@ -379,8 +401,31 @@
   // Shared filter state (v3.4.12) — one bar drives both the
   // Leaderboard and the Matches table. The tournament dropdown drives
   // `selection` directly so the whole report scopes with it.
-  let filterSearch = $state<string>('');
-  let filterMode = $state<'all' | 'singles' | 'doubles'>('all');
+  // Initialised from URL query params so shared links preselect
+  // filters, and mirrored back into the URL on every change.
+  function initialFilterSearch(): string {
+    if (typeof window === 'undefined') return '';
+    return new URL(window.location.href).searchParams.get('rSearch') ?? '';
+  }
+  function initialFilterMode(): 'all' | 'singles' | 'doubles' {
+    if (typeof window === 'undefined') return 'all';
+    const v = new URL(window.location.href).searchParams.get('rMode');
+    return v === 'singles' || v === 'doubles' ? v : 'all';
+  }
+  let filterSearch = $state<string>(initialFilterSearch());
+  let filterMode = $state<'all' | 'singles' | 'doubles'>(initialFilterMode());
+  // Mirror filter state to URL (rSearch, rMode). Guarded by !== '__init'
+  // check on first run isn't needed because the initial values equal
+  // whatever's already in the URL — writing them back is a no-op.
+  $effect(() => {
+    if (typeof window === 'undefined') return;
+    const url = new URL(window.location.href);
+    if (filterSearch.trim() === '') url.searchParams.delete('rSearch');
+    else url.searchParams.set('rSearch', filterSearch);
+    if (filterMode === 'all') url.searchParams.delete('rMode');
+    else url.searchParams.set('rMode', filterMode);
+    window.history.replaceState({}, '', url.toString());
+  });
   $effect(() => {
     try {
       localStorage.setItem(

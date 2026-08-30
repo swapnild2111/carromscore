@@ -160,12 +160,47 @@
     }
   }
   const initialHistoryPrefs = loadHistoryPrefs();
+  // URL params take precedence over localStorage (v3.4.12) so a
+  // shared link preselects filters even for a fresh visitor. URL
+  // keys are namespaced (`hSearch`, `hMode`, `hTournament`, `hDays`)
+  // to avoid collision with the Reports tab's own filter params.
+  function urlHistoryOverrides(): Partial<{
+    filterMode: 'all' | 'singles' | 'doubles' | 'practice';
+    filterTournament: string;
+    filterDays: number;
+    filterSearch: string;
+  }> {
+    if (typeof window === 'undefined') return {};
+    const p = new URL(window.location.href).searchParams;
+    const out: Record<string, unknown> = {};
+    const m = p.get('hMode');
+    if (m === 'singles' || m === 'doubles' || m === 'practice') out.filterMode = m;
+    const t = p.get('hTournament');
+    if (t !== null) out.filterTournament = t;
+    const d = p.get('hDays');
+    if (d !== null) {
+      const n = Number(d);
+      if (Number.isFinite(n) && n >= 0) out.filterDays = n;
+    }
+    const s = p.get('hSearch');
+    if (s !== null) out.filterSearch = s;
+    return out as ReturnType<typeof urlHistoryOverrides>;
+  }
+  const urlHistoryPrefs = urlHistoryOverrides();
   let historySortKey = $state<HistorySortKey>(initialHistoryPrefs.sortKey);
   let historySortDir = $state<'asc' | 'desc'>(initialHistoryPrefs.sortDir);
-  let filterMode = $state<'all' | 'singles' | 'doubles' | 'practice'>(initialHistoryPrefs.filterMode);
-  let filterTournament = $state<string>(initialHistoryPrefs.filterTournament);
-  let filterDays = $state<number>(initialHistoryPrefs.filterDays);
-  let filterSearch = $state<string>(initialHistoryPrefs.filterSearch);
+  let filterMode = $state<'all' | 'singles' | 'doubles' | 'practice'>(
+    urlHistoryPrefs.filterMode ?? initialHistoryPrefs.filterMode,
+  );
+  let filterTournament = $state<string>(
+    urlHistoryPrefs.filterTournament ?? initialHistoryPrefs.filterTournament,
+  );
+  let filterDays = $state<number>(
+    urlHistoryPrefs.filterDays ?? initialHistoryPrefs.filterDays,
+  );
+  let filterSearch = $state<string>(
+    urlHistoryPrefs.filterSearch ?? initialHistoryPrefs.filterSearch,
+  );
   $effect(() => {
     try {
       const payload = {
@@ -297,7 +332,7 @@
   function syncUrl(): void {
     if (typeof window === 'undefined') return;
     const url = new URL(window.location.href);
-    // Preserve mid/view for overlay flows; touch only tab + tournament.
+    // Preserve mid/view for overlay flows; touch only tab + filter params.
     if (tab === 'live') url.searchParams.delete('tab');
     else url.searchParams.set('tab', tab);
     if (tab === 'reports') {
@@ -306,6 +341,25 @@
       else url.searchParams.set('tournament', reportsSelection);
     } else {
       url.searchParams.delete('tournament');
+    }
+    // History filter params (v3.4.12) — encoded when the History tab
+    // is active so a shared URL reproduces the exact filtered view.
+    // Namespaced with `h` prefix (hSearch, hMode, hTournament, hDays)
+    // to avoid collision with the Reports tab's own filter params.
+    if (tab === 'history') {
+      if (filterSearch.trim() === '') url.searchParams.delete('hSearch');
+      else url.searchParams.set('hSearch', filterSearch);
+      if (filterMode === 'all') url.searchParams.delete('hMode');
+      else url.searchParams.set('hMode', filterMode);
+      if (filterTournament === '') url.searchParams.delete('hTournament');
+      else url.searchParams.set('hTournament', filterTournament);
+      if (filterDays === 0) url.searchParams.delete('hDays');
+      else url.searchParams.set('hDays', String(filterDays));
+    } else {
+      url.searchParams.delete('hSearch');
+      url.searchParams.delete('hMode');
+      url.searchParams.delete('hTournament');
+      url.searchParams.delete('hDays');
     }
     window.history.replaceState({}, '', url.toString());
   }
@@ -583,12 +637,16 @@
     });
   });
 
-  // Mirror tab + Reports selection into the URL query string.
+  // Mirror tab + Reports selection + History filter state into the
+  // URL query string (v3.4.12). Any of the reactive touches below
+  // triggers a syncUrl rewrite.
   $effect(() => {
-    // Reactive deps: touch tab and reportsSelection so the effect
-    // re-runs on either change.
     void tab;
     void reportsSelection;
+    void filterSearch;
+    void filterMode;
+    void filterTournament;
+    void filterDays;
     syncUrl();
   });
 
