@@ -28,7 +28,10 @@
     loadRounds,
     normalizeKey,
   } from '../../lib/tournaments';
-  import BarChart from './BarChart.svelte';
+  // BarChart removed v3.4.12 — the two horizontal bar rows above the
+  // Leaderboard were redundant with the Leaderboard table itself.
+  // Reports now leans on sortable + filterable tables mirroring the
+  // History tab convention.
 
   type Props = {
     matches: MatchRecord[];
@@ -270,38 +273,142 @@
     return String(i + 1);
   }
 
-  // Player-summary chart data. Ranked list already sorted in
-  // buildPlayerSummary() by wins desc → boards desc → points desc.
-  // Reads from `viewReport` so a round filter narrows the charts
-  // alongside the leaderboard.
-  const winsChart = $derived(() => {
-    const r = viewReport();
-    return r
-      ? r.playerSummary.map((p, i) => ({
-          label: p.name,
-          value: p.wins,
-          // Alternate palette between the two side colours so the chart
-          // reads visually distinct from a solid bar block.
-          colour: i % 2 === 0 ? 'var(--side-a, #4fc3f7)' : 'var(--side-b, #ff8a65)',
-        }))
-      : [];
+  // ─────────────────────────────────────────────────────────────
+  // Leaderboard + Matches sort & filter state (v3.4.12).
+  //
+  // Reports mirror History's toolbar: sortable columns for the
+  // Leaderboard AND for the Matches table, plus a small filter row
+  // shared across the two (player-name search + mode chips for
+  // Matches; leaderboard picks up player-name search only).
+  //
+  // Persistence: only the sort keys are persisted, keyed on
+  // 'carromscore.reports.prefs.v1'. Filters are transient per-
+  // session — an organiser wants to jump to a player quickly but
+  // shouldn't come back tomorrow with a stale filter still applied.
+  // ─────────────────────────────────────────────────────────────
+  type LBSortKey = 'rank' | 'name' | 'matches' | 'wins' | 'losses' | 'draws' | 'boards' | 'points';
+  type MSortKey = 'endedAt' | 'mode' | 'sideA' | 'sideB' | 'setsA' | 'setsB' | 'points' | 'winner';
+  const REPORTS_PREFS_KEY = 'carromscore.reports.prefs.v1';
+  function loadReportsPrefs(): {
+    lbSortKey: LBSortKey;
+    lbSortDir: 'asc' | 'desc';
+    mSortKey: MSortKey;
+    mSortDir: 'asc' | 'desc';
+  } {
+    const fallback = {
+      lbSortKey: 'rank' as LBSortKey,
+      lbSortDir: 'asc' as const,
+      mSortKey: 'endedAt' as MSortKey,
+      mSortDir: 'desc' as const,
+    };
+    try {
+      const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(REPORTS_PREFS_KEY) : null;
+      if (!raw) return fallback;
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      const lbKeys: LBSortKey[] = ['rank', 'name', 'matches', 'wins', 'losses', 'draws', 'boards', 'points'];
+      const mKeys: MSortKey[] = ['endedAt', 'mode', 'sideA', 'sideB', 'setsA', 'setsB', 'points', 'winner'];
+      return {
+        lbSortKey: lbKeys.includes(parsed.lbSortKey as LBSortKey) ? (parsed.lbSortKey as LBSortKey) : 'rank',
+        lbSortDir: parsed.lbSortDir === 'desc' ? 'desc' : 'asc',
+        mSortKey: mKeys.includes(parsed.mSortKey as MSortKey) ? (parsed.mSortKey as MSortKey) : 'endedAt',
+        mSortDir: parsed.mSortDir === 'asc' ? 'asc' : 'desc',
+      };
+    } catch {
+      return fallback;
+    }
+  }
+  const initialReportsPrefs = loadReportsPrefs();
+  let lbSortKey = $state<LBSortKey>(initialReportsPrefs.lbSortKey);
+  let lbSortDir = $state<'asc' | 'desc'>(initialReportsPrefs.lbSortDir);
+  let mSortKey = $state<MSortKey>(initialReportsPrefs.mSortKey);
+  let mSortDir = $state<'asc' | 'desc'>(initialReportsPrefs.mSortDir);
+  let lbSearch = $state<string>('');
+  let mSearch = $state<string>('');
+  let mFilterMode = $state<'all' | 'singles' | 'doubles'>('all');
+  $effect(() => {
+    try {
+      localStorage.setItem(
+        REPORTS_PREFS_KEY,
+        JSON.stringify({ lbSortKey, lbSortDir, mSortKey, mSortDir }),
+      );
+    } catch { /* ignore */ }
   });
-  const pointsChart = $derived(() => {
+  function toggleLBSort(k: LBSortKey): void {
+    if (lbSortKey === k) {
+      lbSortDir = lbSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      lbSortKey = k;
+      // Text columns default to ascending; number columns default to
+      // descending so the biggest / best row jumps to the top.
+      lbSortDir = k === 'name' || k === 'rank' ? 'asc' : 'desc';
+    }
+  }
+  function toggleMSort(k: MSortKey): void {
+    if (mSortKey === k) {
+      mSortDir = mSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      mSortKey = k;
+      mSortDir = k === 'sideA' || k === 'sideB' || k === 'mode' || k === 'winner' ? 'asc' : 'desc';
+    }
+  }
+  const sortedLeaderboard = $derived(() => {
     const r = viewReport();
-    return r
-      ? r.playerSummary
-          .slice()
-          .sort((a, b) => b.pointsScored - a.pointsScored)
-          .map((p, i) => ({
-            label: p.name,
-            value: p.pointsScored,
-            colour: i % 2 === 0 ? 'var(--side-a, #4fc3f7)' : 'var(--side-b, #ff8a65)',
-          }))
-      : [];
+    if (!r) return [];
+    const q = lbSearch.trim().toLowerCase();
+    const arr = r.playerSummary.filter((p) => !q || p.name.toLowerCase().includes(q));
+    // Preserve buildPlayerSummary's baked-in tie-break order when
+    // sorting by 'rank' (its input order IS the rank).
+    if (lbSortKey === 'rank') {
+      return lbSortDir === 'asc' ? arr : arr.slice().reverse();
+    }
+    const dir = lbSortDir === 'asc' ? 1 : -1;
+    return arr.slice().sort((a, b) => {
+      let av: number | string = 0;
+      let bv: number | string = 0;
+      switch (lbSortKey) {
+        case 'name': av = a.name.toLowerCase(); bv = b.name.toLowerCase(); break;
+        case 'matches': av = a.matches; bv = b.matches; break;
+        case 'wins': av = a.wins; bv = b.wins; break;
+        case 'losses': av = a.losses; bv = b.losses; break;
+        case 'draws': av = a.draws; bv = b.draws; break;
+        case 'boards': av = a.boardsWon; bv = b.boardsWon; break;
+        case 'points': av = a.pointsScored; bv = b.pointsScored; break;
+      }
+      if (av < bv) return -1 * dir;
+      if (av > bv) return 1 * dir;
+      return 0;
+    });
   });
-  const anyDraws = $derived(() => {
+  const sortedMatches = $derived(() => {
     const r = viewReport();
-    return !!r && r.playerSummary.some((p) => p.draws > 0);
+    if (!r) return [];
+    const q = mSearch.trim().toLowerCase();
+    const arr = r.rows.filter((row) => {
+      if (mFilterMode !== 'all' && String(row.mode).toLowerCase() !== mFilterMode) return false;
+      if (q) {
+        const hay = `${row.sideA} ${row.sideB}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+    const dir = mSortDir === 'asc' ? 1 : -1;
+    return arr.slice().sort((a, b) => {
+      let av: number | string = 0;
+      let bv: number | string = 0;
+      switch (mSortKey) {
+        case 'endedAt': av = a.endedAtRaw ?? 0; bv = b.endedAtRaw ?? 0; break;
+        case 'mode': av = String(a.mode); bv = String(b.mode); break;
+        case 'sideA': av = String(a.sideA).toLowerCase(); bv = String(b.sideA).toLowerCase(); break;
+        case 'sideB': av = String(a.sideB).toLowerCase(); bv = String(b.sideB).toLowerCase(); break;
+        case 'setsA': av = a.setsA; bv = b.setsA; break;
+        case 'setsB': av = a.setsB; bv = b.setsB; break;
+        case 'points': av = a.pointsA + a.pointsB; bv = b.pointsA + b.pointsB; break;
+        case 'winner': av = String(a.winner); bv = String(b.winner); break;
+      }
+      if (av < bv) return -1 * dir;
+      if (av > bv) return 1 * dir;
+      return (b.endedAtRaw ?? 0) - (a.endedAtRaw ?? 0);
+    });
   });
 </script>
 
@@ -406,51 +513,61 @@
       </div>
     {/if}
 
-    <div class="charts">
-      <BarChart
-        title="Wins per player"
-        subtitle={anyDraws() ? 'Draws not counted' : undefined}
-        bars={winsChart()}
-        formatValue={(v) => (v === 1 ? '1 win' : `${v} wins`)}
-      />
-      <BarChart
-        title="Points scored per player"
-        subtitle={roundFilter ? 'Cumulative across the round' : 'Cumulative across the tournament'}
-        bars={pointsChart()}
-      />
-    </div>
-
     <div class="summary">
-      <h3 class="section-hdr">Leaderboard</h3>
+      <div class="tbl-toolbar">
+        <h3 class="section-hdr">Leaderboard</h3>
+        <input
+          type="search"
+          class="tbl-search"
+          placeholder="Search player…"
+          bind:value={lbSearch}
+          aria-label="Filter leaderboard by player name"
+        />
+      </div>
       <!--
-        Leaderboard-style player summary. Ranking column mirrors the
-        carrom-thane.web.app layout: first row shows its true rank
-        (1, 2, 3, ...), any subsequent tied row shows "—" so ties
-        visually group. Sort order is baked into buildPlayerSummary
-        (wins DESC → boards DESC → points DESC), so ties = all three
-        keys equal to the row above.
-
-        Horizontal scroll shell preserves the POINTS column on
-        narrow phones with long player names.
+        Leaderboard: sortable columns (v3.4.12). Rank column uses the
+        buildPlayerSummary baked-in order (wins DESC → boards DESC →
+        points DESC). Click any header to sort by it, click again to
+        flip direction. Rank column shows the row's raw rank (1..N in
+        the original order) so a re-sort doesn't relabel; the '—'
+        tie-collapse is disabled when a non-rank sort is active
+        because ties for the sort key wouldn't visually group.
       -->
       <div class="summary-scroll">
         <table class="summary-tbl leaderboard-tbl">
           <thead>
             <tr>
-              <th class="col-rank">#</th>
-              <th class="col-name">Player</th>
-              <th>Matches</th>
-              <th>W</th>
-              <th>L</th>
-              <th>D</th>
-              <th>Boards</th>
-              <th>Points</th>
+              <th class="col-rank hist-th-sortable" class:hist-th-sorted={lbSortKey === 'rank'} onclick={() => toggleLBSort('rank')}>
+                # {#if lbSortKey === 'rank'}<span class="sort-caret">{lbSortDir === 'asc' ? '▲' : '▼'}</span>{/if}
+              </th>
+              <th class="col-name hist-th-sortable" class:hist-th-sorted={lbSortKey === 'name'} onclick={() => toggleLBSort('name')}>
+                Player {#if lbSortKey === 'name'}<span class="sort-caret">{lbSortDir === 'asc' ? '▲' : '▼'}</span>{/if}
+              </th>
+              <th class="hist-th-sortable" class:hist-th-sorted={lbSortKey === 'matches'} onclick={() => toggleLBSort('matches')}>
+                Matches {#if lbSortKey === 'matches'}<span class="sort-caret">{lbSortDir === 'asc' ? '▲' : '▼'}</span>{/if}
+              </th>
+              <th class="hist-th-sortable" class:hist-th-sorted={lbSortKey === 'wins'} onclick={() => toggleLBSort('wins')}>
+                W {#if lbSortKey === 'wins'}<span class="sort-caret">{lbSortDir === 'asc' ? '▲' : '▼'}</span>{/if}
+              </th>
+              <th class="hist-th-sortable" class:hist-th-sorted={lbSortKey === 'losses'} onclick={() => toggleLBSort('losses')}>
+                L {#if lbSortKey === 'losses'}<span class="sort-caret">{lbSortDir === 'asc' ? '▲' : '▼'}</span>{/if}
+              </th>
+              <th class="hist-th-sortable" class:hist-th-sorted={lbSortKey === 'draws'} onclick={() => toggleLBSort('draws')}>
+                D {#if lbSortKey === 'draws'}<span class="sort-caret">{lbSortDir === 'asc' ? '▲' : '▼'}</span>{/if}
+              </th>
+              <th class="hist-th-sortable" class:hist-th-sorted={lbSortKey === 'boards'} onclick={() => toggleLBSort('boards')}>
+                Boards {#if lbSortKey === 'boards'}<span class="sort-caret">{lbSortDir === 'asc' ? '▲' : '▼'}</span>{/if}
+              </th>
+              <th class="hist-th-sortable" class:hist-th-sorted={lbSortKey === 'points'} onclick={() => toggleLBSort('points')}>
+                Points {#if lbSortKey === 'points'}<span class="sort-caret">{lbSortDir === 'asc' ? '▲' : '▼'}</span>{/if}
+              </th>
             </tr>
           </thead>
           <tbody>
-            {#each view.playerSummary as p, i (p.playerId)}
-              {@const rank = rankLabel(view.playerSummary, i)}
-              <tr class:leaderboard-top={i === 0}>
+            {#each sortedLeaderboard() as p, i (p.playerId)}
+              {@const raw = view.playerSummary.findIndex((x) => x.playerId === p.playerId)}
+              {@const rank = lbSortKey === 'rank' ? rankLabel(view.playerSummary, raw) : String(raw + 1)}
+              <tr class:leaderboard-top={lbSortKey === 'rank' && raw === 0 && lbSortDir === 'asc'}>
                 <td class="col-rank">{rank}</td>
                 <td class="col-name">{p.name}</td>
                 <td>{p.matches}</td>
@@ -467,41 +584,79 @@
     </div>
 
     <div class="tbl-hdr">
-      <h3 class="section-hdr">Matches ({view.matches})</h3>
+      <h3 class="section-hdr">Matches ({sortedMatches().length}{#if sortedMatches().length !== view.matches} / {view.matches}{/if})</h3>
       <div class="tbl-actions">
         <button
           type="button"
           class="btn btn-copy"
-          onclick={() => copyRows(view.rows, MAIN_COPY_KEY)}
+          onclick={() => copyRows(sortedMatches(), MAIN_COPY_KEY)}
           aria-label="Copy table to clipboard as tab-separated values"
         >
           {#if copiedKey === MAIN_COPY_KEY}<span aria-hidden="true">✓</span> Copied{:else}<span aria-hidden="true">⧉</span> Copy table{/if}
         </button>
       </div>
     </div>
+    <div class="tbl-filters">
+      <input
+        type="search"
+        class="tbl-search"
+        placeholder="Search player…"
+        bind:value={mSearch}
+        aria-label="Filter matches by player name"
+      />
+      <div class="tbl-chips" role="group" aria-label="Filter by mode">
+        {#each [ { m: 'all', label: 'All' }, { m: 'singles', label: 'Singles' }, { m: 'doubles', label: 'Doubles' } ] as opt (opt.m)}
+          <button
+            type="button"
+            class="tbl-chip"
+            class:tbl-chip-active={mFilterMode === opt.m}
+            onclick={() => (mFilterMode = opt.m as 'all' | 'singles' | 'doubles')}
+          >{opt.label}</button>
+        {/each}
+      </div>
+    </div>
     <!--
       Wrapper is horizontally scrollable on narrow screens so all
       columns stay readable — no wrapping cells or hidden data.
+      Column headers are sortable (v3.4.12).
     -->
     <div class="tbl-scroll">
       <table class="matches-tbl">
         <thead>
           <tr>
-            <th>Ended</th>
-            <th>Mode</th>
-            <th class="col-name">Side A</th>
-            <th class="col-name">Side B</th>
-            <th>Sets A</th>
-            <th>Sets B</th>
+            <th class="hist-th-sortable" class:hist-th-sorted={mSortKey === 'endedAt'} onclick={() => toggleMSort('endedAt')}>
+              Ended {#if mSortKey === 'endedAt'}<span class="sort-caret">{mSortDir === 'asc' ? '▲' : '▼'}</span>{/if}
+            </th>
+            <th class="hist-th-sortable" class:hist-th-sorted={mSortKey === 'mode'} onclick={() => toggleMSort('mode')}>
+              Mode {#if mSortKey === 'mode'}<span class="sort-caret">{mSortDir === 'asc' ? '▲' : '▼'}</span>{/if}
+            </th>
+            <th class="col-name hist-th-sortable" class:hist-th-sorted={mSortKey === 'sideA'} onclick={() => toggleMSort('sideA')}>
+              Side A {#if mSortKey === 'sideA'}<span class="sort-caret">{mSortDir === 'asc' ? '▲' : '▼'}</span>{/if}
+            </th>
+            <th class="col-name hist-th-sortable" class:hist-th-sorted={mSortKey === 'sideB'} onclick={() => toggleMSort('sideB')}>
+              Side B {#if mSortKey === 'sideB'}<span class="sort-caret">{mSortDir === 'asc' ? '▲' : '▼'}</span>{/if}
+            </th>
+            <th class="hist-th-sortable" class:hist-th-sorted={mSortKey === 'setsA'} onclick={() => toggleMSort('setsA')}>
+              Sets A {#if mSortKey === 'setsA'}<span class="sort-caret">{mSortDir === 'asc' ? '▲' : '▼'}</span>{/if}
+            </th>
+            <th class="hist-th-sortable" class:hist-th-sorted={mSortKey === 'setsB'} onclick={() => toggleMSort('setsB')}>
+              Sets B {#if mSortKey === 'setsB'}<span class="sort-caret">{mSortDir === 'asc' ? '▲' : '▼'}</span>{/if}
+            </th>
             <th>Boards A</th>
             <th>Boards B</th>
-            <th>Points A</th>
-            <th>Points B</th>
-            <th>Winner</th>
+            <th class="hist-th-sortable" class:hist-th-sorted={mSortKey === 'points'} onclick={() => toggleMSort('points')}>
+              Points A {#if mSortKey === 'points'}<span class="sort-caret">{mSortDir === 'asc' ? '▲' : '▼'}</span>{/if}
+            </th>
+            <th class="hist-th-sortable" class:hist-th-sorted={mSortKey === 'points'} onclick={() => toggleMSort('points')}>
+              Points B
+            </th>
+            <th class="hist-th-sortable" class:hist-th-sorted={mSortKey === 'winner'} onclick={() => toggleMSort('winner')}>
+              Winner {#if mSortKey === 'winner'}<span class="sort-caret">{mSortDir === 'asc' ? '▲' : '▼'}</span>{/if}
+            </th>
           </tr>
         </thead>
         <tbody>
-          {#each view.rows as r (r._matchId)}
+          {#each sortedMatches() as r (r._matchId)}
             <tr>
               <td>{r.endedAt}</td>
               <td>{r.mode}</td>
@@ -770,16 +925,6 @@
   .empty p { margin: 0.2rem 0; }
   .empty-sub { font-size: 0.85rem; line-height: 1.5; }
 
-  /* Charts row */
-  .charts {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 0.75rem;
-  }
-  @media (min-width: 720px) {
-    .charts { grid-template-columns: 1fr 1fr; }
-  }
-
   /* Summary card */
   .section-hdr {
     margin: 0 0 0.4rem;
@@ -865,6 +1010,87 @@
     justify-content: flex-end;
     gap: 0.4rem;
     margin: 0.2rem 0 0.5rem;
+  }
+
+  /* Sort + filter toolbar shared between Leaderboard and Matches
+     tables (v3.4.12). Mirrors the History tab's toolbar palette so
+     the two feel like one design language. */
+  .tbl-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.55rem;
+  }
+  .tbl-toolbar .section-hdr {
+    margin: 0;
+  }
+  .tbl-filters {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin: 0.55rem 0 0.6rem;
+  }
+  .tbl-search {
+    flex: 1 1 12rem;
+    min-width: 8rem;
+    max-width: 20rem;
+    padding: 0.4rem 0.6rem;
+    background: #141414;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 0.45rem;
+    color: var(--fg, #f5f5f5);
+    font-size: 0.85rem;
+  }
+  .tbl-search:focus {
+    outline: none;
+    border-color: rgba(255, 213, 74, 0.5);
+  }
+  .tbl-chips {
+    display: inline-flex;
+    gap: 0.25rem;
+    padding: 0.15rem;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 0.5rem;
+  }
+  .tbl-chip {
+    padding: 0.25rem 0.55rem;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 0.35rem;
+    color: var(--muted, #9aa0a6);
+    font-size: 0.8rem;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .tbl-chip:hover { color: var(--fg, #f5f5f5); }
+  .tbl-chip-active {
+    background: rgba(255, 213, 74, 0.12);
+    border-color: rgba(255, 213, 74, 0.45);
+    color: var(--accent, #ffd54a);
+  }
+  /* Sortable header cell (both tables). Same class name as the
+     History-tab tables so the visual language stays consistent. */
+  .summary-tbl th.hist-th-sortable,
+  .matches-tbl th.hist-th-sortable {
+    cursor: pointer;
+    user-select: none;
+  }
+  .summary-tbl th.hist-th-sortable:hover,
+  .matches-tbl th.hist-th-sortable:hover {
+    color: var(--fg, #f5f5f5);
+  }
+  .summary-tbl th.hist-th-sorted,
+  .matches-tbl th.hist-th-sorted {
+    color: var(--accent, #ffd54a);
+  }
+  .sort-caret {
+    margin-left: 0.2rem;
+    font-size: 0.62rem;
   }
 
   /* Matches table + toolbar */

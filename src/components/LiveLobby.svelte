@@ -897,6 +897,12 @@
     filterMode = 'all';
     filterTournament = '';
     filterDays = 0;
+    // Reset sort to the default (endedAt DESC) whenever filters are
+    // cleared. Reported 2026-08-30: after sorting by a column and
+    // then clearing filters, the table stayed on the manual sort
+    // instead of returning to a "just show me recent" view.
+    historySortKey = 'endedAt';
+    historySortDir = 'desc';
   }
   const anyFilterActive = $derived(
     filterSearch.trim() !== '' ||
