@@ -1,18 +1,25 @@
 <script lang="ts">
   /**
-   * Printer-friendly bracket sheet body (v3.6). Reads
-   * ?tournament=<key>&round=<key> and renders one page per planned
-   * match — big centered QR + player names + round + tournament.
+   * Printer-friendly board QR stickers (v3.6.1). Reads
+   * ?tournament=<key> and renders one page per physical board
+   * (Board 1, Board 2, …), each with a big centered QR that encodes
+   * `?tournament=<key>&board=<N>`.
    *
-   * The organiser hits browser Print (or ⌘P), the browser fits one
-   * match per page, and the organiser cuts along the borders and
-   * sticks each to a carrom board.
+   * Why per-board, not per-match: the QR sticker is permanent —
+   * printed once and stuck to the physical carrom board. Every
+   * round, the umpire on Board 3 scans the same QR; the app auto-
+   * advances to whichever match is currently assigned to Board 3
+   * (resolvePlannedByBoard in lib/planned.ts). Zero admin work
+   * between rounds. See MatchSetup's `?board=` deep-link handler.
    *
-   * No sign-in required to view (planned records are publicly
-   * readable — same posture as /live). The sheet is intended for
-   * private / one-off use during a tournament setup; anyone
-   * scanning a QR without organiser context just hits MatchSetup's
-   * planned deep-link handler, which claims and prefills normally.
+   * The set of boards printed is the union of all `board` values
+   * across every /planned record for this tournament (across all
+   * rounds), plus a fill from 1..maxBoard so gaps like "Board 1,
+   * 2, 4" still print a Board 3 sticker (dead board today, but
+   * the organiser might use it next round).
+   *
+   * No player names on the sticker — those change every round.
+   * Only the tournament name + Board N.
    */
   import { onMount } from 'svelte';
   import {
@@ -22,7 +29,6 @@
   import { qrToSVG } from '../../lib/qrcode';
 
   let tournamentKey = $state<string>('');
-  let roundKey = $state<string>('');
   let plannedMatches = $state<PlannedMatch[]>([]);
   let unsub: (() => void) | null = null;
   let ready = $state(false);
@@ -31,7 +37,6 @@
     if (typeof window === 'undefined') return () => {};
     const params = new URLSearchParams(window.location.search);
     tournamentKey = params.get('tournament') ?? '';
-    roundKey = params.get('round') ?? '';
     if (!tournamentKey) {
       ready = true;
       return () => {};
@@ -47,38 +52,49 @@
     };
   });
 
-  const rows = $derived(
-    plannedMatches
-      .filter((m) => !roundKey || m.roundKey === roundKey)
-      .sort((a, b) => (a.matchOrder ?? 0) - (b.matchOrder ?? 0)),
+  // Tournament display name: any record's tournament field works
+  // (they're all the same tournament). Empty when nothing planned.
+  const tournamentName = $derived<string>(
+    plannedMatches[0]?.tournament ?? tournamentKey,
   );
 
-  // QR SVG cache — one entry per mid. Regenerated on first render.
-  let qrByMid = $state<Record<string, string>>({});
+  // Board numbers to print: union of all `board` values across
+  // rounds, then filled 1..max so gaps still print a sticker.
+  const boards = $derived<number[]>(() => {
+    const set = new Set<number>();
+    let max = 0;
+    for (const m of plannedMatches) {
+      if (m.board && m.board >= 1 && m.board <= 99) {
+        set.add(m.board);
+        if (m.board > max) max = m.board;
+      }
+    }
+    if (max === 0) return [];
+    // Fill 1..max — a printed Board 3 sticker sitting unused today
+    // is still useful when the organiser assigns to Board 3 later.
+    const out: number[] = [];
+    for (let i = 1; i <= max; i += 1) out.push(i);
+    return out;
+  });
+
+  // QR SVG cache — one entry per board number. Regenerated on
+  // tournamentKey change.
+  let qrByBoard = $state<Record<number, string>>({});
   const scanBase = (() => {
     if (typeof window === 'undefined') return '';
-    // Target the app root (MatchSetup), NOT /score/ — the scan must
-    // land on the setup form so the umpire sees a preview and taps
-    // Start. See TournamentBracket.svelte for the full rationale
-    // (fix for 2026-08-30 issues #4, #5, #6).
     const base = import.meta.env.BASE_URL ?? '/';
     return `${window.location.origin}${base}`;
   })();
   $effect(() => {
-    for (const m of rows) {
-      if (qrByMid[m.mid]) continue;
-      const url = `${scanBase}?planned=${encodeURIComponent(m.mid)}`;
+    if (!tournamentKey) return;
+    for (const b of boards()) {
+      if (qrByBoard[b]) continue;
+      const url = `${scanBase}?tournament=${encodeURIComponent(tournamentKey)}&board=${b}`;
       void qrToSVG(url, 400).then((svg) => {
-        qrByMid = { ...qrByMid, [m.mid]: svg };
+        qrByBoard = { ...qrByBoard, [b]: svg };
       });
     }
   });
-
-  function labelPair(m: PlannedMatch): { a: string; b: string } {
-    const a = m.a2Name ? `${m.aName} & ${m.a2Name}` : m.aName;
-    const b = m.b2Name ? `${m.bName} & ${m.b2Name}` : m.bName;
-    return { a, b };
-  }
 </script>
 
 <div class="print-wrap">
@@ -86,40 +102,35 @@
     <p class="hint">Provide a <code>?tournament=&lt;key&gt;</code> URL param.</p>
   {:else if !ready}
     <p class="hint">Loading…</p>
-  {:else if rows.length === 0}
-    <p class="hint">No planned matches for this scope.</p>
+  {:else if boards().length === 0}
+    <p class="hint">
+      No boards assigned yet. Add matches to the bracket with a board
+      number, then come back and print.
+    </p>
   {:else}
     <div class="print-actions no-print">
       <button type="button" onclick={() => window.print()}>🖨 Print</button>
       <p class="hint">
-        Each page below prints as one carrom-board sticker. Cut along
-        the border after printing.
+        One page per board. Cut along the border, stick each sheet to
+        its physical carrom board. Umpires scan the same sticker every
+        round — the app resolves which match is currently on that
+        board automatically.
       </p>
     </div>
-    {#each rows as m (m.mid)}
-      {@const pair = labelPair(m)}
+    {#each boards() as b (b)}
       <section class="page">
         <div class="hdr">
-          <p class="tour">{m.tournament}</p>
-          <p class="round">{m.round}{m.matchOrder ? ` · Match ${m.matchOrder}` : ''}</p>
+          <p class="tour">{tournamentName}</p>
         </div>
-        <div class="players">
-          <div class="side">
-            <p class="side-name">{pair.a}</p>
-          </div>
-          <div class="vs">vs</div>
-          <div class="side">
-            <p class="side-name">{pair.b}</p>
-          </div>
-        </div>
+        <p class="board-label">Board {b}</p>
         <div class="qr-holder">
-          {#if qrByMid[m.mid]}
-            {@html qrByMid[m.mid]}
+          {#if qrByBoard[b]}
+            {@html qrByBoard[b]}
           {:else}
             <div class="qr-placeholder">generating…</div>
           {/if}
         </div>
-        <p class="cta">Scan to open scoreboard</p>
+        <p class="cta">Scan to open the current match on this board</p>
       </section>
     {/each}
   {/if}
@@ -170,64 +181,39 @@
     justify-content: center;
     min-height: 22rem;
     text-align: center;
-    /* One page per match when printing. `break-after: page`
-       ensures each row lands on its own printable sheet. */
     break-after: page;
     page-break-after: always;
   }
   .page:last-child { break-after: auto; page-break-after: auto; }
-  .hdr {
-    margin-bottom: 1rem;
-  }
+  .hdr { margin-bottom: 0.4rem; }
   .tour {
     margin: 0;
     font-size: 1rem;
     color: #444;
     font-weight: 600;
   }
-  .round {
-    margin: 0.2rem 0 0;
-    font-size: 1.4rem;
-    font-weight: 800;
+  .board-label {
+    margin: 0.4rem 0 1rem;
+    font-size: 2.4rem;
+    font-weight: 900;
     color: #000;
-  }
-  .players {
-    display: grid;
-    grid-template-columns: 1fr auto 1fr;
-    align-items: center;
-    gap: 1rem;
-    margin: 1.4rem 0 1rem;
-    width: 100%;
-    max-width: 40rem;
-  }
-  .side-name {
-    margin: 0;
-    font-size: 1.6rem;
-    font-weight: 700;
-    color: #000;
-    line-height: 1.2;
-  }
-  .vs {
-    color: #666;
-    font-size: 1rem;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
+    letter-spacing: 0.02em;
   }
   .qr-holder {
-    margin: 1rem 0;
+    margin: 0.4rem 0 0.6rem;
     background: #fff;
     padding: 0.5rem;
     border: 2px solid #000;
     line-height: 0;
   }
   .qr-holder :global(svg) {
-    width: 260px;
-    height: 260px;
+    width: 320px;
+    height: 320px;
     display: block;
   }
   .qr-placeholder {
-    width: 260px;
-    height: 260px;
+    width: 320px;
+    height: 320px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -236,14 +222,11 @@
     border: 1px dashed #ccc;
   }
   .cta {
-    margin: 0.5rem 0 0;
+    margin: 0.4rem 0 0;
     color: #333;
     font-size: 0.95rem;
   }
 
-  /* Print styles: hide the toolbar, remove the outer border, one
-     match per page. Chrome/Safari respect `break-after` in a print
-     context; Firefox uses `page-break-after` as a fallback. */
   @media print {
     :global(body) { background: #fff; }
     .no-print { display: none !important; }

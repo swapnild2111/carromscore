@@ -49,7 +49,12 @@
   import HelpTip from './HelpTip.svelte';
   import { logScreen } from '../lib/analytics';
   import { countryName, flagEmoji } from '../lib/countries';
-  import { loadPlannedMatch, claimPlannedMatch, type PlannedMatch } from '../lib/planned';
+  import {
+    loadPlannedMatch,
+    claimPlannedMatch,
+    resolvePlannedByBoard,
+    type PlannedMatch,
+  } from '../lib/planned';
   import { currentUser, awaitAuthReady } from '../lib/auth';
 
   const base: string = import.meta.env.BASE_URL;
@@ -78,7 +83,13 @@
     | { kind: 'loaded'; mid: string };
   let plannedState = $state<PlannedState>({ kind: 'idle' });
   let plannedMid = $state<string>('');
-  // Read the query param synchronously so the effect below knows
+  // Board-scan pending state: when the URL carries
+  // `?tournament=<key>&board=<N>` (the stable per-board sticker), we
+  // resolve to a concrete mid in an effect below, then hand off to
+  // the same planned-mid flow. During the resolve we render the
+  // 'loading' banner so the umpire sees feedback.
+  let boardScan = $state<{ tournamentKey: string; board: number } | null>(null);
+  // Read the query params synchronously so the effect below knows
   // whether to short-circuit the resume flow.
   if (typeof window !== 'undefined') {
     const params = new URLSearchParams(window.location.search);
@@ -86,8 +97,51 @@
     if (mid && /^[A-Za-z0-9_-]{4,24}$/.test(mid)) {
       plannedMid = mid;
       plannedState = { kind: 'loading', mid };
+    } else {
+      // v3.6.1: per-board scan. Board 1's fixed QR encodes
+      // `?tournament=<key>&board=1`. Resolve to a mid in the effect
+      // below (async — the mid isn't known until we query /planned).
+      const tKey = params.get('tournament') ?? '';
+      const boardRaw = params.get('board') ?? '';
+      const boardNum = Number(boardRaw);
+      if (
+        tKey &&
+        Number.isFinite(boardNum) &&
+        boardNum >= 1 &&
+        boardNum <= 99
+      ) {
+        boardScan = { tournamentKey: tKey, board: Math.floor(boardNum) };
+        // Render the loading banner while we resolve. The mid is
+        // populated once resolvePlannedByBoard returns.
+        plannedState = { kind: 'loading', mid: '' };
+      }
     }
   }
+
+  // Resolve a board scan to a concrete /planned mid, then defer to
+  // the mid-based effect. Runs once on mount when boardScan is set.
+  $effect(() => {
+    if (!boardScan) return;
+    const { tournamentKey: tKey, board } = boardScan;
+    boardScan = null;
+    (async () => {
+      await awaitAuthReady();
+      const outcome = await resolvePlannedByBoard(tKey, board);
+      if (outcome.ok === false || !outcome.match) {
+        // Reuse the not-found state — the QR is stale (no matches
+        // remain for this board) or the tournament key was
+        // mistyped in the sticker.
+        plannedState = { kind: 'not-found', mid: `board-${board}` };
+        return;
+      }
+      const match = outcome.match;
+      plannedMid = match.mid;
+      // Hand off to the mid-based fetch pipeline. It will re-read
+      // /planned/{mid}, apply cfg, and claim. The extra fetch is
+      // cheap and keeps the takeover-detection code path unified.
+      plannedState = { kind: 'loading', mid: match.mid };
+    })();
+  });
   $effect(() => {
     // Fetch the planned record once at mount and prefill cfg. Auth
     // must be ready before we call claimPlannedMatch (rule needs
@@ -95,6 +149,9 @@
     // session doesn't hang the flow forever.
     if (plannedState.kind !== 'loading') return;
     const mid = plannedState.mid;
+    // Empty mid means the board-scan resolver is still working —
+    // wait for it to populate mid and re-fire this effect.
+    if (!mid) return;
     (async () => {
       await awaitAuthReady();
       const outcome = await loadPlannedMatch(mid);

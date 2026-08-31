@@ -38,6 +38,14 @@ export type PlannedMatch = {
   roundKey: string;
   /** 1-based order within the round, for the organiser's own sort. */
   matchOrder: number;
+  /** 1..99 physical board number this match is scheduled on.
+   *  Optional for backwards compatibility with v3.6.0 planned records,
+   *  but the bracket UI (v3.6.1+) always sets it. The board number is
+   *  what makes the QR sticker reusable across rounds: Board 1's QR
+   *  encodes `?tournament=<key>&board=1` and stays valid every round;
+   *  each scan resolves to the lowest-ordered unclaimed match for
+   *  that board (see resolvePlannedByBoard). */
+  board?: number;
   // Side A
   aName: string;
   a2Name?: string;
@@ -78,6 +86,7 @@ export async function createPlannedMatch(input: {
   round: string;
   roundKey: string;
   matchOrder: number;
+  board?: number;
   aName: string;
   a2Name?: string;
   aResolvedId?: string;
@@ -112,6 +121,12 @@ export async function createPlannedMatch(input: {
       createdBy: trim64(input.createdBy),
       createdAt: Date.now(),
     };
+    if (typeof input.board === 'number' && Number.isFinite(input.board)) {
+      // 1..99 — same range as matchOrder's upper bound (999) is overkill;
+      // physical tournaments rarely exceed 20 boards in one venue.
+      const b = Math.max(1, Math.min(99, Math.floor(input.board)));
+      record.board = b;
+    }
     if (input.a2Name?.trim()) record.a2Name = trim80(input.a2Name);
     if (input.b2Name?.trim()) record.b2Name = trim80(input.b2Name);
     if (input.aResolvedId?.trim()) record.aResolvedId = trim64(input.aResolvedId);
@@ -206,6 +221,66 @@ export async function claimPlannedMatch(
  * tournament × handful of active tournaments"). Same pattern the
  * live-lobby uses for /live.
  */
+/**
+ * Resolve which planned match a Board N QR should point at right now.
+ * Called by MatchSetup when the URL carries `?tournament=<key>&board=<N>`
+ * (the stable board sticker). Auto-advance behaviour:
+ *
+ *   - Fetch every /planned record for this tournament + board.
+ *   - Prefer records that ARE NOT claimed (a claimed record is a
+ *     match currently in progress on another device — offer it as a
+ *     takeover candidate rather than picking a different one).
+ *   - Sort by roundKey then matchOrder ascending, pick the first.
+ *
+ * When all board-N slots have been played (records deleted on
+ * archive), returns { ok:true, match: null } — MatchSetup renders
+ * the same "not found" banner as with a stale ?planned=<mid> link.
+ *
+ * The claimed-record fallback lets the umpire (whoever tapped the
+ * board's QR first) resume mid-match by re-scanning: if their claim
+ * is on the top match, they get their own match back; if someone
+ * else claimed, they see the takeover banner.
+ */
+export async function resolvePlannedByBoard(
+  tournamentKey: string,
+  board: number,
+): Promise<PlannedReadOutcome> {
+  if (!tournamentKey || !board || board < 1 || board > 99) {
+    return { ok: false, error: 'invalid tournament or board' };
+  }
+  try {
+    const [{ getDatabase, ref, get }] = await Promise.all([
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    const snap = await get(ref(db, 'planned'));
+    const raw = snap.val() as Record<string, Omit<PlannedMatch, 'mid'>> | null;
+    if (!raw) return { ok: true, match: null };
+    const candidates: PlannedMatch[] = [];
+    for (const [mid, v] of Object.entries(raw)) {
+      if (!v || typeof v !== 'object') continue;
+      if (v.tournamentKey !== tournamentKey) continue;
+      if (v.board !== board) continue;
+      candidates.push({ mid, ...v });
+    }
+    if (candidates.length === 0) return { ok: true, match: null };
+    // Unclaimed first, then by roundKey/matchOrder ascending. A
+    // still-claimed record is legitimate mid-match state — return it
+    // so MatchSetup can render the takeover banner (or a plain
+    // "loaded" state if the same umpire re-scanned).
+    candidates.sort((a, b) => {
+      const aClaimed = a.claimedBy ? 1 : 0;
+      const bClaimed = b.claimedBy ? 1 : 0;
+      if (aClaimed !== bClaimed) return aClaimed - bClaimed;
+      if (a.roundKey !== b.roundKey) return a.roundKey.localeCompare(b.roundKey);
+      return (a.matchOrder ?? 0) - (b.matchOrder ?? 0);
+    });
+    return { ok: true, match: candidates[0] ?? null };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'resolve failed' };
+  }
+}
+
 export async function subscribePlannedByTournament(
   tournamentKey: string,
   cb: (matches: PlannedMatch[]) => void,

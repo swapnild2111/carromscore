@@ -96,6 +96,12 @@
   let addA2Name = $state<string>('');
   let addBName = $state<string>('');
   let addB2Name = $state<string>('');
+  // Physical board number this match is scheduled on (1..99). Auto-
+  // suggests as (max existing board in the tournament) + 1, so the
+  // organiser filling out Round 1 sees Board 1, 2, 3… roll forward.
+  // Then Round 2 Match 1 defaults back to Board 1 (highest board
+  // currently on Round 2 is 0 → 1) — the organiser can override.
+  let addBoard = $state<number>(1);
   let addBusy = $state(false);
 
   // ─── Player name autocomplete (v3.6.1) ─────────────────────────────
@@ -194,7 +200,27 @@
     addB2Name = '';
     resolvedIds = { aName: null, a2Name: null, bName: null, b2Name: null };
     mode = defaultMode;
+    // Auto-suggest next board number for this round: highest board
+    // used in the current round + 1. If no matches yet, start at 1.
+    // Organiser can override before adding.
+    const maxBoardInRound = rowsForRound.reduce(
+      (m, r) => (r.board && r.board > m ? r.board : m),
+      0,
+    );
+    addBoard = Math.max(1, maxBoardInRound + 1);
   }
+
+  // Also seed addBoard when the round changes / rows arrive so a
+  // brand-new modal opens with the right suggestion.
+  $effect(() => {
+    if (!addAName && !addA2Name && !addBName && !addB2Name) {
+      const maxBoardInRound = rowsForRound.reduce(
+        (m, r) => (r.board && r.board > m ? r.board : m),
+        0,
+      );
+      addBoard = Math.max(1, maxBoardInRound + 1);
+    }
+  });
 
   async function addRow() {
     inlineError = null;
@@ -212,6 +238,20 @@
       inlineError = 'Pick a round first';
       return;
     }
+    const board = Math.floor(addBoard);
+    if (!Number.isFinite(board) || board < 1 || board > 99) {
+      inlineError = 'Board number must be between 1 and 99';
+      return;
+    }
+    // Duplicate board check inside the current round: two matches
+    // both assigned to Board 3 in Round 1 would leave the QR scanner
+    // ambiguous. Auto-advance would pick the lowest matchOrder, but
+    // that's a surprise — flag it here instead.
+    const conflict = rowsForRound.find((r) => r.board === board);
+    if (conflict) {
+      inlineError = `Board ${board} already has a match in ${selectedRound.name} (${conflict.aName} vs ${conflict.bName}). Delete it first or pick another board.`;
+      return;
+    }
     addBusy = true;
     const nextOrder = (rowsForRound[rowsForRound.length - 1]?.matchOrder ?? 0) + 1;
     const outcome = await createPlannedMatch({
@@ -221,6 +261,7 @@
       round: selectedRound.name,
       roundKey: selectedRound.key,
       matchOrder: nextOrder,
+      board,
       aName,
       a2Name: mode === 'doubles' ? addA2Name.trim() : undefined,
       bName,
@@ -363,21 +404,34 @@
             singles league that runs one doubles exhibition match)
             doesn't need a second tournament tag.
           -->
-          <div class="mode-toggle" role="group" aria-label="Match mode">
-            <button
-              type="button"
-              class="mode-chip"
-              class:mode-chip-on={mode === 'singles'}
-              onclick={() => (mode = 'singles')}
-              disabled={addBusy}
-            >Singles</button>
-            <button
-              type="button"
-              class="mode-chip"
-              class:mode-chip-on={mode === 'doubles'}
-              onclick={() => (mode = 'doubles')}
-              disabled={addBusy}
-            >Doubles</button>
+          <div class="mode-and-board">
+            <div class="mode-toggle" role="group" aria-label="Match mode">
+              <button
+                type="button"
+                class="mode-chip"
+                class:mode-chip-on={mode === 'singles'}
+                onclick={() => (mode = 'singles')}
+                disabled={addBusy}
+              >Singles</button>
+              <button
+                type="button"
+                class="mode-chip"
+                class:mode-chip-on={mode === 'doubles'}
+                onclick={() => (mode = 'doubles')}
+                disabled={addBusy}
+              >Doubles</button>
+            </div>
+            <label class="board-picker">
+              <span>Board</span>
+              <input
+                type="number"
+                min="1"
+                max="99"
+                step="1"
+                bind:value={addBoard}
+                disabled={addBusy}
+              />
+            </label>
           </div>
 
           <div class="add-grid" class:add-grid-doubles={mode === 'doubles'}>
@@ -405,18 +459,25 @@
           <p class="empty">No planned matches in this round yet.</p>
         {:else}
           <div class="row-actions-top">
+            <!--
+              v3.6.1: print sheet is per-tournament (one page per board),
+              not per-round — the QR sticker is permanent on the board.
+              Umpires scan Board 1's fixed QR every round and get
+              whichever match is currently assigned to that board.
+            -->
             <a
               class="print-link"
-              href={`${import.meta.env.BASE_URL}print-bracket/?tournament=${encodeURIComponent(tournament.key)}&round=${encodeURIComponent(selectedRoundKey)}`}
+              href={`${import.meta.env.BASE_URL}print-bracket/?tournament=${encodeURIComponent(tournament.key)}`}
               target="_blank"
               rel="noopener"
-            >🖨 Print sheet for this round</a>
+            >🖨 Print board QR stickers</a>
           </div>
           <div class="rowtable-wrap">
             <table class="rowtable">
               <thead>
                 <tr>
                   <th class="col-num">#</th>
+                  <th class="col-board">Board</th>
                   <th>Side A</th>
                   <th>Side B</th>
                   <th class="col-status">Status</th>
@@ -427,6 +488,13 @@
                 {#each rowsForRound as m (m.mid)}
                   <tr>
                     <td class="col-num">{m.matchOrder ?? '—'}</td>
+                    <td class="col-board">
+                      {#if m.board}
+                        <span class="board-badge">B{m.board}</span>
+                      {:else}
+                        <span class="board-missing" title="No board assigned — this match won't be reachable by QR scan">—</span>
+                      {/if}
+                    </td>
                     <td>
                       {m.aName}{#if m.a2Name} + {m.a2Name}{/if}
                     </td>
@@ -606,10 +674,59 @@
   .add-btn:hover { background: rgba(255, 213, 74, 0.24); }
   .add-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
+  /* Mode toggle + board number sit on the same row above the name
+     fields, since both are per-match knobs the organiser chooses in
+     the same breath. On narrow phones the block wraps naturally. */
+  .mode-and-board {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.7rem;
+    margin-bottom: 0.6rem;
+  }
+  .board-picker {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: var(--muted, #9aa0a6);
+    font-size: 0.8rem;
+  }
+  .board-picker input {
+    width: 4rem;
+    padding: 0.3rem 0.4rem;
+    background: #141414;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 0.35rem;
+    color: var(--fg, #f5f5f5);
+    font: inherit;
+    font-size: 0.9rem;
+  }
+  .board-picker input:focus {
+    outline: none;
+    border-color: rgba(255, 213, 74, 0.5);
+  }
+  .col-board { width: 4rem; text-align: center; }
+  .board-badge {
+    display: inline-block;
+    padding: 0.15rem 0.5rem;
+    background: rgba(255, 213, 74, 0.1);
+    border: 1px solid rgba(255, 213, 74, 0.4);
+    color: var(--accent, #ffd54a);
+    border-radius: 0.35rem;
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .board-missing {
+    color: rgba(239, 83, 80, 0.75);
+    font-size: 0.85rem;
+    cursor: help;
+  }
+
   .mode-toggle {
     display: inline-flex;
     gap: 0.3rem;
-    margin-bottom: 0.55rem;
+    margin-bottom: 0;
   }
   .mode-chip {
     padding: 0.3rem 0.8rem;
@@ -737,6 +854,7 @@
     overflow-wrap: anywhere;
   }
   .rowtable .col-num,
+  .rowtable .col-board,
   .rowtable .col-status,
   .rowtable .col-actions { white-space: nowrap; }
   .rowtable tr:last-child td { border-bottom: 0; }

@@ -123,6 +123,7 @@
         "round":        { ".validate": "newData.isString() && newData.val().length <= 60" },
         "roundKey":     { ".validate": "newData.isString() && newData.val().length <= 60" },
         "matchOrder":   { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 999" },
+        "board":        { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 99" },
         "aName":        { ".validate": "newData.isString() && newData.val().length <= 80" },
         "a2Name":       { ".validate": "newData.isString() && newData.val().length <= 80" },
         "bName":        { ".validate": "newData.isString() && newData.val().length <= 80" },
