@@ -1025,12 +1025,32 @@
     </div>
   </aside>
 {:else if plannedState.kind === 'loaded'}
-  <aside class="planned-notice planned-notice-ok" aria-label="Planned match ready">
-    <p>
-      <strong>Bracket match ready.</strong>
-      {cfg.tournament ? cfg.tournament + ' · ' : ''}{cfg.round ?? ''}
+  <!--
+    Bracket-scan preview (v3.6.1). Renders the players + tournament +
+    round + mode + set/board format so the umpire can double-check
+    before tapping Start. If any detail is wrong they can edit the
+    fields below the banner as usual, then Start.
+  -->
+  <aside class="planned-notice planned-notice-ok planned-preview" aria-label="Planned match ready">
+    <p class="planned-title">
+      <span class="planned-badge">Bracket</span>
+      {#if cfg.tournament}<strong>{cfg.tournament}</strong>{/if}
+      {#if cfg.round}<span class="planned-sep">·</span>{cfg.round}{/if}
     </p>
-    <p class="planned-hint">Setup below is pre-filled from the bracket. Tap Start when ready.</p>
+    <p class="planned-players">
+      <span class="planned-side">
+        {cfg.playerA}{#if cfg.playerA2} <span class="planned-and">+</span> {cfg.playerA2}{/if}
+      </span>
+      <span class="planned-vs">vs</span>
+      <span class="planned-side">
+        {cfg.playerB}{#if cfg.playerB2} <span class="planned-and">+</span> {cfg.playerB2}{/if}
+      </span>
+    </p>
+    <p class="planned-format">
+      {cfg.mode === 'doubles' ? 'Doubles' : 'Singles'} ·
+      bo{cfg.bestOf} · target {cfg.pointsTarget}{cfg.maxBoards ? ` · max ${cfg.maxBoards} boards` : ''}
+    </p>
+    <p class="planned-hint">Review below and tap Start when the players are seated.</p>
   </aside>
 {/if}
 
@@ -2077,6 +2097,51 @@
     border-color: rgba(76, 175, 80, 0.4);
   }
   .planned-hint { color: var(--muted, #9aa0a6); font-size: 0.82rem; }
+  /* Bracket-scan preview banner — richer than the plain notice; shows
+     tournament, round, both sides, and the format the umpire is about
+     to start. Wraps on narrow screens (players stack vertically). */
+  .planned-preview .planned-title {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem;
+    margin: 0 0 0.35rem;
+    font-size: 0.95rem;
+  }
+  .planned-badge {
+    display: inline-block;
+    padding: 0.1rem 0.5rem;
+    background: rgba(255, 213, 74, 0.14);
+    border: 1px solid rgba(255, 213, 74, 0.55);
+    color: var(--accent, #ffd54a);
+    border-radius: 999px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .planned-sep { color: var(--muted, #9aa0a6); }
+  .planned-players {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.4rem;
+    margin: 0.25rem 0;
+    font-size: 1rem;
+  }
+  .planned-side { font-weight: 700; }
+  .planned-and { color: var(--muted, #9aa0a6); font-weight: 400; }
+  .planned-vs {
+    color: var(--muted, #9aa0a6);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .planned-format {
+    color: var(--muted, #9aa0a6);
+    font-size: 0.82rem;
+    margin: 0.15rem 0 0.4rem;
+  }
   .planned-actions {
     display: flex;
     gap: 0.5rem;

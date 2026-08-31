@@ -55,15 +55,19 @@
 
   // QR SVG cache — one entry per mid. Regenerated on first render.
   let qrByMid = $state<Record<string, string>>({});
-  const scoreBase = (() => {
+  const scanBase = (() => {
     if (typeof window === 'undefined') return '';
+    // Target the app root (MatchSetup), NOT /score/ — the scan must
+    // land on the setup form so the umpire sees a preview and taps
+    // Start. See TournamentBracket.svelte for the full rationale
+    // (fix for 2026-08-30 issues #4, #5, #6).
     const base = import.meta.env.BASE_URL ?? '/';
-    return `${window.location.origin}${base}score/`;
+    return `${window.location.origin}${base}`;
   })();
   $effect(() => {
     for (const m of rows) {
       if (qrByMid[m.mid]) continue;
-      const url = `${scoreBase}?planned=${encodeURIComponent(m.mid)}`;
+      const url = `${scanBase}?planned=${encodeURIComponent(m.mid)}`;
       void qrToSVG(url, 400).then((svg) => {
         qrByMid = { ...qrByMid, [m.mid]: svg };
       });

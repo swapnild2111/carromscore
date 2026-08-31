@@ -22,7 +22,6 @@
     subscribePlannedByTournament,
     type PlannedMatch,
   } from '../../lib/planned';
-  import { qrToDataUri } from '../../lib/qrcode';
   import type { Tournament, Round } from '../../lib/tournaments';
   import { loadAll as loadAllPlayers, subscribeStore as subscribePlayerStore } from '../../lib/players';
   import { flagEmoji, countryName } from '../../lib/countries';
@@ -264,30 +263,6 @@
     else flash('Match removed');
   }
 
-  // QR generation. Cached per mid so we don't regenerate every render.
-  // Map: mid → dataURI. Kept as $state so the template reruns when a
-  // new QR resolves.
-  let qrByMid = $state<Record<string, string>>({});
-  const scoreBase = (() => {
-    if (typeof window === 'undefined') return '';
-    // Use current origin + BASE_URL so QR works on beta/production
-    // without hard-coding a host.
-    const base = import.meta.env.BASE_URL ?? '/';
-    return `${window.location.origin}${base}score/`;
-  })();
-  $effect(() => {
-    // Generate QR for any row that doesn't have one yet. Fires on
-    // rows list change; existing entries stay cached.
-    for (const m of rowsForRound) {
-      if (qrByMid[m.mid]) continue;
-      const url = `${scoreBase}?planned=${encodeURIComponent(m.mid)}`;
-      void qrToDataUri(url, 96).then((data) => {
-        // Immutable-copy assignment to trigger reactivity.
-        qrByMid = { ...qrByMid, [m.mid]: data };
-      });
-    }
-  });
-
   function statusOf(m: PlannedMatch): 'planned' | 'claimed' {
     return m.claimedBy ? 'claimed' : 'planned';
   }
@@ -445,7 +420,6 @@
                   <th>Side A</th>
                   <th>Side B</th>
                   <th class="col-status">Status</th>
-                  <th class="col-qr">QR</th>
                   <th class="col-actions"></th>
                 </tr>
               </thead>
@@ -466,19 +440,6 @@
                         </span>
                       {:else}
                         <span class="pill pill-planned">ready</span>
-                      {/if}
-                    </td>
-                    <td class="col-qr">
-                      {#if qrByMid[m.mid]}
-                        <img
-                          src={qrByMid[m.mid]}
-                          alt="QR for {m.aName} vs {m.bName}"
-                          width="64"
-                          height="64"
-                          class="qr-inline"
-                        />
-                      {:else}
-                        <span class="qr-loading" aria-hidden="true">…</span>
                       {/if}
                     </td>
                     <td class="col-actions">
@@ -503,6 +464,7 @@
       <button type="button" class="cancel-btn" onclick={onClose}>Close</button>
     </div>
   </div>
+
 </div>
 
 <style>
@@ -599,6 +561,14 @@
   }
   .add-grid-doubles {
     grid-template-columns: 1fr 1fr;
+  }
+  /* Narrow phones (~≤ 400 px inside the modal after padding) — go
+     single-column so the autocomplete dropdown has room to render
+     without spilling out of the modal. */
+  @media (max-width: 32rem) {
+    .add-grid, .add-grid-doubles {
+      grid-template-columns: 1fr;
+    }
   }
   .add-grid label, .picker {
     display: flex;
@@ -759,8 +729,16 @@
     padding: 0.5rem 0.6rem;
     text-align: left;
     border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-    white-space: nowrap;
+    /* Allow long player names to wrap to a second line instead of
+       forcing horizontal scroll on narrow phones. The utility
+       columns (#, status, QR, actions) keep nowrap via their own
+       column-specific rules below. Reported 2026-08-30. */
+    word-break: break-word;
+    overflow-wrap: anywhere;
   }
+  .rowtable .col-num,
+  .rowtable .col-status,
+  .rowtable .col-actions { white-space: nowrap; }
   .rowtable tr:last-child td { border-bottom: 0; }
   .rowtable th {
     background: rgba(255, 255, 255, 0.04);
@@ -771,7 +749,6 @@
   }
   .col-num { width: 2rem; text-align: center; color: var(--muted, #9aa0a6); }
   .col-status { width: 8rem; }
-  .col-qr { width: 5rem; text-align: center; }
   .col-actions { width: 2.5rem; text-align: right; }
 
   .pill {
@@ -796,18 +773,6 @@
     letter-spacing: 0;
   }
 
-  .qr-inline {
-    display: block;
-    width: 4rem;
-    height: 4rem;
-    background: #fff;
-    border-radius: 0.3rem;
-    margin: 0 auto;
-  }
-  .qr-loading {
-    color: var(--muted, #9aa0a6);
-    font-size: 1rem;
-  }
 
   .row-del {
     background: transparent;
