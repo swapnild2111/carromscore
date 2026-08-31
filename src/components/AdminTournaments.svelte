@@ -22,6 +22,7 @@
     createOrTouchTournament,
     renameTournament,
     updateTournamentMeta,
+    updateTournamentDefaults,
     deleteTournamentAndMatches,
     deleteTournaments,
     countMatchesByTournamentKey,
@@ -88,9 +89,28 @@
   let editingName = $state('');
   let editingType = $state<'open' | 'closed'>('open');
   let editingCountry = $state('');
-  let editingOriginal = $state<{ name: string; type: 'open' | 'closed'; country: string } | null>(
-    null,
-  );
+  // Tournament-level match defaults (v3.6.1). Inherited by every
+  // planned match created under this tournament (bracket admin) and
+  // prefills the setup form when the tournament is picked. Empty
+  // string = "not set" (fall back to app defaults, which are
+  // singles / bo1 / target 25 / max 8 boards). Editable in the same
+  // Edit dialog as name/type/country so the organiser configures
+  // everything about the tournament in one place.
+  let editingDefaultMode = $state<'' | 'singles' | 'doubles'>('');
+  let editingDefaultBestOf = $state<string>('');
+  let editingDefaultPointsTarget = $state<string>('');
+  let editingDefaultMaxBoards = $state<string>('');
+  let editingOriginal = $state<{
+    name: string;
+    type: 'open' | 'closed';
+    country: string;
+    defaults: {
+      mode: '' | 'singles' | 'doubles';
+      bestOf: string;
+      pointsTarget: string;
+      maxBoards: string;
+    };
+  } | null>(null);
   let deleteConfirmKey = $state<string | null>(null);
   let deleteConfirmText = $state('');
   /** Live count of child matches that will be cascade-deleted when
@@ -311,10 +331,20 @@
     editingName = t.name;
     editingType = t.type ?? 'open';
     editingCountry = t.country ?? '';
+    editingDefaultMode = t.defaults?.mode ?? '';
+    editingDefaultBestOf = t.defaults?.bestOf != null ? String(t.defaults.bestOf) : '';
+    editingDefaultPointsTarget = t.defaults?.pointsTarget != null ? String(t.defaults.pointsTarget) : '';
+    editingDefaultMaxBoards = t.defaults?.maxBoards != null ? String(t.defaults.maxBoards) : '';
     editingOriginal = {
       name: t.name,
       type: t.type ?? 'open',
       country: t.country ?? '',
+      defaults: {
+        mode: editingDefaultMode,
+        bestOf: editingDefaultBestOf,
+        pointsTarget: editingDefaultPointsTarget,
+        maxBoards: editingDefaultMaxBoards,
+      },
     };
   }
   function cancelEdit() {
@@ -322,6 +352,10 @@
     editingName = '';
     editingType = 'open';
     editingCountry = '';
+    editingDefaultMode = '';
+    editingDefaultBestOf = '';
+    editingDefaultPointsTarget = '';
+    editingDefaultMaxBoards = '';
     editingOriginal = null;
   }
   async function saveEdit() {
@@ -341,7 +375,48 @@
     // Compare against the empty-string sentinel for "no country".
     const countryNext = editingCountry;
     const countryChanged = countryNext !== editingOriginal.country;
-    if (!nameChanged && !typeChanged && !countryChanged) {
+
+    // Parse + validate defaults. Empty string = clear the field (null
+    // patch), else the parsed number must fit the RTDB validate range.
+    type DefaultsPatch = {
+      mode?: 'singles' | 'doubles' | null;
+      bestOf?: number | null;
+      pointsTarget?: number | null;
+      maxBoards?: number | null;
+    };
+    const defaultsPatch: DefaultsPatch = {};
+    const modeOrig = editingOriginal.defaults.mode;
+    if (editingDefaultMode !== modeOrig) {
+      defaultsPatch.mode = editingDefaultMode === '' ? null : editingDefaultMode;
+    }
+    function parseIntField(raw: string, min: number, max: number, label: string): number | null | undefined {
+      if (raw === '') return null;
+      const n = Number(raw);
+      if (!Number.isFinite(n) || Math.floor(n) !== n || n < min || n > max) {
+        flash('err', `${label} must be between ${min} and ${max}`);
+        return undefined; // sentinel for "invalid"
+      }
+      return n;
+    }
+    if (editingDefaultBestOf !== editingOriginal.defaults.bestOf) {
+      const parsed = parseIntField(editingDefaultBestOf, 1, 15, 'Best of');
+      if (parsed === undefined) return;
+      defaultsPatch.bestOf = parsed;
+    }
+    if (editingDefaultPointsTarget !== editingOriginal.defaults.pointsTarget) {
+      const parsed = parseIntField(editingDefaultPointsTarget, 1, 100, 'Points target');
+      if (parsed === undefined) return;
+      defaultsPatch.pointsTarget = parsed;
+    }
+    if (editingDefaultMaxBoards !== editingOriginal.defaults.maxBoards) {
+      // maxBoards: 0 is legal (unlimited).
+      const parsed = parseIntField(editingDefaultMaxBoards, 0, 50, 'Max boards');
+      if (parsed === undefined) return;
+      defaultsPatch.maxBoards = parsed;
+    }
+    const defaultsChanged = Object.keys(defaultsPatch).length > 0;
+
+    if (!nameChanged && !typeChanged && !countryChanged && !defaultsChanged) {
       // No-op — close the dialog quietly. Prevents a bogus audit
       // entry for a "save with nothing changed" tap.
       cancelEdit();
@@ -374,6 +449,13 @@
           type: editingType,
           country: countryPatch,
         });
+        if (!r.ok) {
+          flash('err', r.error);
+          return;
+        }
+      }
+      if (defaultsChanged) {
+        const r = await updateTournamentDefaults(editingKey, defaultsPatch);
         if (!r.ok) {
           flash('err', r.error);
           return;
@@ -1053,6 +1135,75 @@
             ariaLabel="Tournament country"
           />
         </label>
+
+        <!--
+          Match defaults (v3.6.1). Each field is optional — leaving it
+          blank falls back to the app-wide defaults (singles / bo1 /
+          target 25 / max 8 boards). Bracket admin uses these to seed
+          new planned matches; MatchSetup uses them to seed the setup
+          form when this tournament is picked. Editable per-match too
+          (mode toggle in the bracket UI, all four in the setup form).
+        -->
+        <fieldset class="defaults-grid">
+          <legend>Match defaults</legend>
+          <p class="defaults-hint">
+            Prefills matches created under this tournament. Leave a
+            field blank to use the app default. Umpires can still
+            override per match.
+          </p>
+          <label class="edit-field">
+            <span>Mode</span>
+            <select
+              bind:value={editingDefaultMode}
+              disabled={saving}
+              aria-label="Default mode"
+            >
+              <option value="">(app default — singles)</option>
+              <option value="singles">Singles</option>
+              <option value="doubles">Doubles</option>
+            </select>
+          </label>
+          <label class="edit-field">
+            <span>Best of (sets)</span>
+            <input
+              type="number"
+              min="1"
+              max="15"
+              step="1"
+              bind:value={editingDefaultBestOf}
+              placeholder="app default (1)"
+              disabled={saving}
+              aria-label="Default best of"
+            />
+          </label>
+          <label class="edit-field">
+            <span>Points target</span>
+            <input
+              type="number"
+              min="1"
+              max="100"
+              step="1"
+              bind:value={editingDefaultPointsTarget}
+              placeholder="app default (25)"
+              disabled={saving}
+              aria-label="Default points target"
+            />
+          </label>
+          <label class="edit-field">
+            <span>Max boards <em class="hint-inline">(0 = unlimited)</em></span>
+            <input
+              type="number"
+              min="0"
+              max="50"
+              step="1"
+              bind:value={editingDefaultMaxBoards}
+              placeholder="app default (8)"
+              disabled={saving}
+              aria-label="Default max boards"
+            />
+          </label>
+        </fieldset>
+
         <div class="dialog-actions">
           <button type="button" class="btn" onclick={cancelEdit} disabled={saving}>Cancel</button>
           <button
@@ -1799,10 +1950,56 @@
     font: inherit;
     font-size: 0.9rem;
   }
-  .edit-field input[type="text"]:focus-visible {
+  .edit-field input[type="text"]:focus-visible,
+  .edit-field input[type="number"]:focus-visible,
+  .edit-field select:focus-visible {
     outline: 2px solid var(--accent, #ffd54a);
     outline-offset: 0;
     border-color: var(--accent, #ffd54a);
+  }
+  .edit-field input[type="number"],
+  .edit-field select {
+    background: #0f0f0f;
+    color: var(--fg);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 0.4rem;
+    padding: 0.5rem 0.6rem;
+    font: inherit;
+    font-size: 0.9rem;
+    font-family: inherit;
+  }
+
+  /* Defaults fieldset in the Edit dialog — 2 columns on wide screens
+     so the four small numeric fields don't stretch. Falls to a single
+     column on narrow phones (matches the CountrySelect + name fields
+     stacking). */
+  .defaults-grid {
+    margin: 0.7rem 0 0.4rem;
+    padding: 0.7rem 0.85rem 0.5rem;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 0.5rem;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0 0.85rem;
+  }
+  .defaults-grid legend {
+    padding: 0 0.4rem;
+    color: var(--accent, #ffd54a);
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .defaults-grid .edit-field { margin: 0.25rem 0; }
+  .defaults-hint {
+    grid-column: 1 / -1;
+    color: var(--muted, #9aa0a6);
+    font-size: 0.78rem;
+    margin: 0 0 0.35rem;
+    line-height: 1.4;
+  }
+  @media (max-width: 30rem) {
+    .defaults-grid { grid-template-columns: 1fr; }
   }
 
   .add-country-label {

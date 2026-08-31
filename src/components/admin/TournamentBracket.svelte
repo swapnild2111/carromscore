@@ -23,6 +23,7 @@
     type PlannedMatch,
   } from '../../lib/planned';
   import type { Tournament, Round } from '../../lib/tournaments';
+  import { loadAssignedPlayers } from '../../lib/tournaments';
   import { loadAll as loadAllPlayers, subscribeStore as subscribePlayerStore } from '../../lib/players';
   import { flagEmoji, countryName } from '../../lib/countries';
 
@@ -121,20 +122,44 @@
     });
     return () => unsubStore();
   });
+
+  // Assigned-player roster for invite-only tournaments. Empty set
+  // when the tournament is open (roster gate disabled). Loaded once
+  // on mount and refreshed if the tournament flips type in another
+  // tab (defensively — actual re-open of the modal is the common
+  // path, so this stays cheap).
+  let assignedPlayerIds = $state<Set<string>>(new Set());
+  const isInviteOnly = $derived<boolean>(tournament.type === 'closed');
+  onMount(() => {
+    if (!isInviteOnly) return;
+    void loadAssignedPlayers(tournament.key).then((set) => {
+      assignedPlayerIds = set;
+    }).catch(() => {
+      // Silent — an empty set means "nothing assigned" from the UI's
+      // POV, which is safer than pretending everyone is assigned.
+      assignedPlayerIds = new Set();
+    });
+  });
   type Suggestion = { id: string; name: string; country?: string };
   function suggestPlayers(query: string): Suggestion[] {
     // Read tick so the derivation re-runs on store updates.
     void identityTick;
     const q = query.trim().toLowerCase();
     if (!q) return [];
-    return loadAllPlayers()
-      .filter((p) => p.canonicalName.toLowerCase().includes(q))
-      .slice(0, 8)
-      .map((p) => ({
-        id: p.id,
-        name: p.canonicalName,
-        ...(p.country ? { country: p.country } : {}),
-      }));
+    // Invite-only: only suggest players who are on the tournament's
+    // roster. Free-text is still allowed in the input (so the
+    // organiser can type ahead of an assignment), but the add-row
+    // guard below will reject unresolved / off-roster picks.
+    const pool = loadAllPlayers().filter((p) => {
+      if (!p.canonicalName.toLowerCase().includes(q)) return false;
+      if (isInviteOnly && !assignedPlayerIds.has(p.id)) return false;
+      return true;
+    });
+    return pool.slice(0, 8).map((p) => ({
+      id: p.id,
+      name: p.canonicalName,
+      ...(p.country ? { country: p.country } : {}),
+    }));
   }
   // Which of the four inputs' dropdown is currently open. Null = none.
   type PickerKey = 'aName' | 'a2Name' | 'bName' | 'b2Name';
@@ -233,6 +258,29 @@
     if (mode === 'doubles' && (!addA2Name.trim() || !addB2Name.trim())) {
       inlineError = 'Doubles needs two players per side';
       return;
+    }
+    // Invite-only roster gate: every named side must resolve to an
+    // assigned player. Free-text (unresolved) or a resolved-but-not-
+    // assigned player is rejected here rather than at scan-time —
+    // catching the mistake at bracket build time saves the organiser
+    // a re-print when they discover it on match day.
+    if (isInviteOnly) {
+      const offenders: string[] = [];
+      const check = (label: string, name: string, key: PickerKey, active: boolean) => {
+        if (!active) return;
+        if (!name.trim()) return; // covered by name-required checks above
+        const rid = resolvedIds[key];
+        if (!rid) offenders.push(`${label} (${name.trim()}) — pick from suggestions`);
+        else if (!assignedPlayerIds.has(rid)) offenders.push(`${label} (${name.trim()}) — not assigned to this tournament`);
+      };
+      check('Side A', addAName, 'aName', true);
+      check('Side A partner', addA2Name, 'a2Name', mode === 'doubles');
+      check('Side B', addBName, 'bName', true);
+      check('Side B partner', addB2Name, 'b2Name', mode === 'doubles');
+      if (offenders.length > 0) {
+        inlineError = `Invite-only tournament: ${offenders.join('; ')}. Add them to the roster first via the tournament's Players button.`;
+        return;
+      }
     }
     if (!selectedRound) {
       inlineError = 'Pick a round first';
@@ -396,6 +444,17 @@
             {#if tournament.defaults?.maxBoards}, max {tournament.defaults.maxBoards} boards{/if}.
           {/if}
         </p>
+
+        {#if isInviteOnly}
+          <p class="invite-hint" role="note">
+            <span aria-hidden="true">🔒</span>
+            Invite-only tournament — only players on the roster
+            ({assignedPlayerIds.size} assigned) can be added to the bracket.
+            {#if assignedPlayerIds.size === 0}
+              Nobody assigned yet: use this tournament's <strong>Players</strong> button first.
+            {/if}
+          </p>
+        {/if}
 
         <div class="bracket-add">
           <!--
@@ -585,6 +644,19 @@
     font-size: 0.85rem;
     margin: 0.4rem 0 0.7rem;
   }
+  /* Invite-only banner above the add form. Amber tint so the
+     organiser notices before typing off-roster names. */
+  .invite-hint {
+    margin: 0 0 0.7rem;
+    padding: 0.45rem 0.7rem;
+    background: rgba(255, 213, 74, 0.08);
+    border: 1px solid rgba(255, 213, 74, 0.35);
+    color: var(--accent, #ffd54a);
+    border-radius: 0.4rem;
+    font-size: 0.82rem;
+    line-height: 1.4;
+  }
+  .invite-hint strong { color: var(--accent, #ffd54a); }
   .round-nav {
     display: flex;
     flex-wrap: wrap;
