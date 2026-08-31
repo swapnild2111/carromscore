@@ -22,6 +22,7 @@
     createOrTouchTournament,
     renameTournament,
     updateTournamentMeta,
+    updateTournamentDefaults,
     deleteTournamentAndMatches,
     deleteTournaments,
     countMatchesByTournamentKey,
@@ -35,6 +36,7 @@
     addRound,
     renameRound,
     setRoundState,
+    startRound,
     deleteRound,
     countMatchesByRoundKey,
     type Round,
@@ -52,6 +54,7 @@
   import AdminBulkBar from './AdminBulkBar.svelte';
   import CountrySelect from './CountrySelect.svelte';
   import { countryName, flagEmoji } from '../lib/countries';
+  import TournamentBracket from './admin/TournamentBracket.svelte';
 
   /**
    * Current-user role gating: super sees every row's actions; a
@@ -87,9 +90,35 @@
   let editingName = $state('');
   let editingType = $state<'open' | 'closed'>('open');
   let editingCountry = $state('');
-  let editingOriginal = $state<{ name: string; type: 'open' | 'closed'; country: string } | null>(
-    null,
-  );
+  // Tournament-level match defaults (v3.6.1). Inherited by every
+  // planned match created under this tournament (bracket admin) and
+  // prefills the setup form when the tournament is picked. Always
+  // concrete values in the UI — seeded from the tournament record if
+  // set, else from these fallbacks so the fields never render blank.
+  // Editable in the same Edit dialog as name/type/country so the
+  // organiser configures everything about the tournament in one
+  // place. Umpires can still override per match.
+  const FALLBACK_TOURNAMENT_DEFAULTS = {
+    mode: 'singles' as 'singles' | 'doubles',
+    bestOf: 3,
+    pointsTarget: 25,
+    maxBoards: 8,
+  };
+  let editingDefaultMode = $state<'singles' | 'doubles'>('singles');
+  let editingDefaultBestOf = $state<string>('');
+  let editingDefaultPointsTarget = $state<string>('');
+  let editingDefaultMaxBoards = $state<string>('');
+  let editingOriginal = $state<{
+    name: string;
+    type: 'open' | 'closed';
+    country: string;
+    defaults: {
+      mode: 'singles' | 'doubles';
+      bestOf: string;
+      pointsTarget: string;
+      maxBoards: string;
+    };
+  } | null>(null);
   let deleteConfirmKey = $state<string | null>(null);
   let deleteConfirmText = $state('');
   /** Live count of child matches that will be cascade-deleted when
@@ -169,17 +198,82 @@
   let roundsDeletingCount = $state<number | null>(null);
   let roundsSaving = $state(false);
 
+  /**
+   * Bracket modal state (v3.6). Same shape as roundsKey — null
+   * closes the modal, a tournament key opens it. The modal itself
+   * (TournamentBracket.svelte) handles round selection, add/delete
+   * of planned match slots, and inline QR rendering.
+   */
+  let bracketKey = $state<string | null>(null);
+  function startBracket(t: Tournament) {
+    bracketKey = t.key;
+  }
+  function stopBracket() {
+    bracketKey = null;
+  }
+
+  // Per-tournament counts shown on the row action buttons (2026-08-31).
+  // Populated by the /planned subscription below (once, at mount) and
+  // by lazy loadAssignedPlayers calls per closed tournament in the
+  // visible list. Both are advisory — an absent count just omits the
+  // '(N)' suffix on the button.
+  let plannedCountByKey = $state<Record<string, number>>({});
+  let assignedCountByKey = $state<Record<string, number>>({});
+  let unsubPlannedGlobal: (() => void) | null = null;
+
   onMount(() => {
     void subscribeTournaments();
     void subscribePlayers();
     const unsub = subscribeStore(() => (tick += 1));
     const unsubRole = subscribeCurrentUserRole((r) => (role = r));
     const unsubPlayers = subscribePlayersStore(() => (playersTick += 1));
+    // /planned tree is small (a few dozen active matches at most) —
+    // client-side aggregation is cheap. onValue keeps counts fresh as
+    // matches are added / claimed / deleted.
+    (async () => {
+      const [{ getDatabase, ref, onValue }, { firebaseApp }] = await Promise.all([
+        import('firebase/database'),
+        import('../lib/firebase'),
+      ]);
+      const db = getDatabase(firebaseApp());
+      unsubPlannedGlobal = onValue(ref(db, 'planned'), (snap) => {
+        const raw = snap.val() as Record<string, { tournamentKey?: string }> | null;
+        const counts: Record<string, number> = {};
+        if (raw) {
+          for (const v of Object.values(raw)) {
+            if (!v || typeof v !== 'object') continue;
+            const k = v.tournamentKey;
+            if (!k) continue;
+            counts[k] = (counts[k] ?? 0) + 1;
+          }
+        }
+        plannedCountByKey = counts;
+      });
+    })();
     return () => {
       unsub();
       unsubRole();
       unsubPlayers();
+      unsubPlannedGlobal?.();
     };
+  });
+
+  // Lazy-load assigned-player counts for closed tournaments in the
+  // current filtered list. Runs whenever the list changes. Ignores
+  // errors silently (missing count just hides the '(N)' suffix).
+  $effect(() => {
+    const seen = new Set<string>();
+    for (const t of filtered()) {
+      if (t.type !== 'closed') continue;
+      if (assignedCountByKey[t.key] !== undefined) continue;
+      if (seen.has(t.key)) continue;
+      seen.add(t.key);
+      void loadAssignedPlayers(t.key).then((set) => {
+        assignedCountByKey = { ...assignedCountByKey, [t.key]: set.size };
+      }).catch(() => {
+        // silent — count just stays absent
+      });
+    }
   });
 
   const list = $derived(() => {
@@ -245,10 +339,24 @@
     editingName = t.name;
     editingType = t.type ?? 'open';
     editingCountry = t.country ?? '';
+    // Seed with concrete values so the fields never look empty. If the
+    // tournament has no stored default, use the sensible fallback
+    // (bo3 / 25 / 8 / singles) rather than a placeholder — the
+    // organiser sees a real number they can edit directly.
+    editingDefaultMode = t.defaults?.mode ?? FALLBACK_TOURNAMENT_DEFAULTS.mode;
+    editingDefaultBestOf = String(t.defaults?.bestOf ?? FALLBACK_TOURNAMENT_DEFAULTS.bestOf);
+    editingDefaultPointsTarget = String(t.defaults?.pointsTarget ?? FALLBACK_TOURNAMENT_DEFAULTS.pointsTarget);
+    editingDefaultMaxBoards = String(t.defaults?.maxBoards ?? FALLBACK_TOURNAMENT_DEFAULTS.maxBoards);
     editingOriginal = {
       name: t.name,
       type: t.type ?? 'open',
       country: t.country ?? '',
+      defaults: {
+        mode: editingDefaultMode,
+        bestOf: editingDefaultBestOf,
+        pointsTarget: editingDefaultPointsTarget,
+        maxBoards: editingDefaultMaxBoards,
+      },
     };
   }
   function cancelEdit() {
@@ -256,6 +364,10 @@
     editingName = '';
     editingType = 'open';
     editingCountry = '';
+    editingDefaultMode = 'singles';
+    editingDefaultBestOf = '';
+    editingDefaultPointsTarget = '';
+    editingDefaultMaxBoards = '';
     editingOriginal = null;
   }
   async function saveEdit() {
@@ -275,7 +387,51 @@
     // Compare against the empty-string sentinel for "no country".
     const countryNext = editingCountry;
     const countryChanged = countryNext !== editingOriginal.country;
-    if (!nameChanged && !typeChanged && !countryChanged) {
+
+    // Parse + validate defaults. Every field must be a concrete
+    // number now (blank fields are a UI regression, not a "clear"
+    // command). The parsed number must fit the RTDB validate range.
+    type DefaultsPatch = {
+      mode?: 'singles' | 'doubles';
+      bestOf?: number;
+      pointsTarget?: number;
+      maxBoards?: number;
+    };
+    const defaultsPatch: DefaultsPatch = {};
+    if (editingDefaultMode !== editingOriginal.defaults.mode) {
+      defaultsPatch.mode = editingDefaultMode;
+    }
+    function parseIntField(raw: string, min: number, max: number, label: string): number | undefined {
+      if (raw === '' || raw == null) {
+        flash('err', `${label} is required`);
+        return undefined;
+      }
+      const n = Number(raw);
+      if (!Number.isFinite(n) || Math.floor(n) !== n || n < min || n > max) {
+        flash('err', `${label} must be between ${min} and ${max}`);
+        return undefined;
+      }
+      return n;
+    }
+    if (editingDefaultBestOf !== editingOriginal.defaults.bestOf) {
+      const parsed = parseIntField(editingDefaultBestOf, 1, 15, 'Best of');
+      if (parsed === undefined) return;
+      defaultsPatch.bestOf = parsed;
+    }
+    if (editingDefaultPointsTarget !== editingOriginal.defaults.pointsTarget) {
+      const parsed = parseIntField(editingDefaultPointsTarget, 1, 100, 'Points target');
+      if (parsed === undefined) return;
+      defaultsPatch.pointsTarget = parsed;
+    }
+    if (editingDefaultMaxBoards !== editingOriginal.defaults.maxBoards) {
+      // maxBoards: 0 is legal (unlimited).
+      const parsed = parseIntField(editingDefaultMaxBoards, 0, 50, 'Max boards');
+      if (parsed === undefined) return;
+      defaultsPatch.maxBoards = parsed;
+    }
+    const defaultsChanged = Object.keys(defaultsPatch).length > 0;
+
+    if (!nameChanged && !typeChanged && !countryChanged && !defaultsChanged) {
       // No-op — close the dialog quietly. Prevents a bogus audit
       // entry for a "save with nothing changed" tap.
       cancelEdit();
@@ -308,6 +464,13 @@
           type: editingType,
           country: countryPatch,
         });
+        if (!r.ok) {
+          flash('err', r.error);
+          return;
+        }
+      }
+      if (defaultsChanged) {
+        const r = await updateTournamentDefaults(editingKey, defaultsPatch);
         if (!r.ok) {
           flash('err', r.error);
           return;
@@ -738,11 +901,29 @@
     }
   }
 
-  async function toggleRoundState(r: Round) {
+  /**
+   * ▶ Start round handler (v3.6.2). Stamps `startedAt = now` on the
+   * round record. UI-wise this flips the round from 'pending' to
+   * 'running' — Start disables, Close enables. Close is terminal
+   * (no Reopen); the organiser can create a fresh round later if
+   * they need to score more matches under a new label.
+   */
+  async function startSelectedRound(r: Round) {
     if (!roundsKey) return;
-    const next = r.state === 'closed' ? 'open' : 'closed';
     roundsSaving = true;
-    const outcome = await setRoundState(roundsKey, r.key, next);
+    const outcome = await startRound(roundsKey, r.key);
+    roundsSaving = false;
+    if (!outcome.ok) flash('err', outcome.error);
+    else flash('ok', `${r.name} started`);
+  }
+  async function closeSelectedRound(r: Round) {
+    if (!roundsKey) return;
+    // Terminal action — confirm so an organiser doesn't lose the
+    // 'running' state to an accidental tap.
+    // eslint-disable-next-line no-alert
+    if (!window.confirm(`Close ${r.name}? This can't be undone — a closed round can't be reopened.`)) return;
+    roundsSaving = true;
+    const outcome = await setRoundState(roundsKey, r.key, 'closed');
     roundsSaving = false;
     if (!outcome.ok) flash('err', outcome.error);
   }
@@ -842,7 +1023,23 @@
             <span class="row-check row-check-spacer" aria-hidden="true"></span>
           {/if}
             <div class="row-name">
-              <div class="row-name-text">{t.name}</div>
+              <!--
+                Clicking the tournament name opens the rename / settings
+                dialog. This matches the direct-manipulation shape the
+                user asked for (2026-08-31): name is the affordance for
+                metadata; sibling buttons open Players / Rounds /
+                Bracket in their own modals.
+              -->
+              {#if canManageTournament(t)}
+                <button
+                  type="button"
+                  class="row-name-btn"
+                  onclick={() => startEdit(t)}
+                  title="Rename, change type, edit defaults"
+                >{t.name}</button>
+              {:else}
+                <div class="row-name-text">{t.name}</div>
+              {/if}
               <div class="row-name-meta">
                 {#if t.type === 'closed'}
                   <span class="chip chip-type chip-invite" title="Invite-only — assigned-roster tournament, country-scoped">
@@ -863,12 +1060,55 @@
             </div>
             {#if canManageTournament(t)}
               <div class="row-actions">
-                <button type="button" class="btn btn-primary" onclick={() => startEdit(t)}>Edit</button>
+                <!--
+                  Per-row Players / Rounds / Bracket direct-launch
+                  buttons (2026-08-31). Each opens its own modal in
+                  isolation — no longer nested inside an outer 'Edit
+                  tournament' dialog. Count suffix keeps the buttons
+                  self-describing at a glance.
+                -->
+                {#if t.type === 'closed'}
+                  <button
+                    type="button"
+                    class="btn"
+                    onclick={() => startAssign(t)}
+                    title="Assigned players (invite-only)"
+                  >Players{assignedCountByKey[t.key] !== undefined ? ` (${assignedCountByKey[t.key]})` : ''}</button>
+                {/if}
+                <button
+                  type="button"
+                  class="btn"
+                  onclick={() => startRounds(t)}
+                  title="Add / rename rounds"
+                >Rounds{t.rounds && t.rounds.length > 0 ? ` (${t.rounds.length})` : ''}</button>
+                <button
+                  type="button"
+                  class="btn"
+                  onclick={() => startBracket(t)}
+                  title="Add matches to bracket"
+                >Bracket{plannedCountByKey[t.key] !== undefined && plannedCountByKey[t.key] > 0 ? ` (${plannedCountByKey[t.key]})` : ''}</button>
+                <!--
+                  Print pack (v3.6.1): opens the print-bracket page for
+                  this tournament in a new tab. Same URL the bracket
+                  admin used to expose from inside its own modal, but
+                  now available at the tournament level so the
+                  organiser doesn't have to open Bracket first.
+                -->
+                <a
+                  class="btn btn-print"
+                  href={`${import.meta.env.BASE_URL}print-bracket/?tournament=${encodeURIComponent(t.key)}`}
+                  target="_blank"
+                  rel="noopener"
+                  aria-label="Print tournament pack"
+                  title="Print tournament pack (cover sheet + board QR stickers)"
+                >🖨</a>
                 <button
                   type="button"
                   class="btn btn-danger"
                   onclick={() => startDelete(t.key)}
-                >Delete</button>
+                  aria-label="Delete tournament"
+                  title="Delete tournament"
+                >🗑</button>
               </div>
             {/if}
         </li>
@@ -890,28 +1130,12 @@
         <h3>Edit tournament</h3>
 
         <!--
-          v3.3: absorb the standalone Rounds and Players affordances
-          into the Edit dialog as launch buttons. Each opens the
-          existing modal on top of this one — nested dialogs are fine
-          per the existing pattern (see Delete confirmation inside
-          Rounds modal). Cancel here still closes both.
+          v3.6.1: Rounds / Bracket / Assigned players are now direct
+          row buttons on the tournament list (no longer nested here).
+          This dialog focuses on the tournament's own metadata: name,
+          type, country, and defaults. The row buttons open their
+          respective modals side-by-side, not stacked.
         -->
-        <div class="edit-section-nav">
-          <button
-            type="button"
-            class="btn"
-            onclick={() => editingTournament && startRounds(editingTournament)}
-            disabled={saving || !editingTournament}
-          >Rounds{editingTournament?.rounds && editingTournament.rounds.length > 0 ? ` (${editingTournament.rounds.length})` : ''}</button>
-          {#if editingType === 'closed' && editingTournament}
-            <button
-              type="button"
-              class="btn"
-              onclick={() => startAssign(editingTournament)}
-              disabled={saving}
-            >Assigned players</button>
-          {/if}
-        </div>
 
         <label class="edit-field">
           <span>Name</span>
@@ -959,6 +1183,70 @@
             ariaLabel="Tournament country"
           />
         </label>
+
+        <!--
+          Match defaults (v3.6.1). Each field is optional — leaving it
+          blank falls back to the app-wide defaults (singles / bo1 /
+          target 25 / max 8 boards). Bracket admin uses these to seed
+          new planned matches; MatchSetup uses them to seed the setup
+          form when this tournament is picked. Editable per-match too
+          (mode toggle in the bracket UI, all four in the setup form).
+        -->
+        <fieldset class="defaults-grid">
+          <legend>Match defaults</legend>
+          <p class="defaults-hint">
+            Prefills matches created under this tournament. Umpires
+            can still override per match.
+          </p>
+          <label class="edit-field">
+            <span>Mode</span>
+            <select
+              bind:value={editingDefaultMode}
+              disabled={saving}
+              aria-label="Default mode"
+            >
+              <option value="singles">Singles</option>
+              <option value="doubles">Doubles</option>
+            </select>
+          </label>
+          <label class="edit-field">
+            <span>Best of (sets)</span>
+            <input
+              type="number"
+              min="1"
+              max="15"
+              step="1"
+              bind:value={editingDefaultBestOf}
+              disabled={saving}
+              aria-label="Default best of"
+            />
+          </label>
+          <label class="edit-field">
+            <span>Points target</span>
+            <input
+              type="number"
+              min="1"
+              max="100"
+              step="1"
+              bind:value={editingDefaultPointsTarget}
+              disabled={saving}
+              aria-label="Default points target"
+            />
+          </label>
+          <label class="edit-field">
+            <span>Max boards <em class="hint-inline">(0 = unlimited)</em></span>
+            <input
+              type="number"
+              min="0"
+              max="50"
+              step="1"
+              bind:value={editingDefaultMaxBoards}
+              disabled={saving}
+              aria-label="Default max boards"
+            />
+          </label>
+        </fieldset>
+
         <div class="dialog-actions">
           <button type="button" class="btn" onclick={cancelEdit} disabled={saving}>Cancel</button>
           <button
@@ -1350,6 +1638,14 @@
                         <span class="chip chip-closed" title="Closed — not offered to umpires">
                           CLOSED
                         </span>
+                      {:else if r.startedAt}
+                        <span class="chip chip-running" title="Running — umpires can start matches under this round">
+                          RUNNING
+                        </span>
+                      {:else}
+                        <span class="chip chip-pending" title="Pending — hit ▶ Start to activate for umpires">
+                          PENDING
+                        </span>
                       {/if}
                     </div>
                   </div>
@@ -1360,18 +1656,48 @@
                       onclick={() => startRenameRound(r)}
                       disabled={roundsSaving}
                     >Rename</button>
+                    <!--
+                      v3.6.2: three-state round lifecycle with two
+                      dedicated buttons (media-player style):
+                        ▶ Start   — enabled only when pending
+                                    (state='open' AND !startedAt)
+                        ⏹ Close   — enabled only when running
+                                    (state='open' AND startedAt)
+                      Close is terminal; there's no Reopen. Closed
+                      rounds show neither button. If the organiser
+                      needs to score more matches after closing, they
+                      add a fresh round with a new label.
+                      Legacy rounds (created pre-v3.6.2) have no
+                      startedAt, so they render as pending — the
+                      organiser can either start them (records
+                      startedAt=now) or close them directly.
+                    -->
+                    {#if r.state !== 'closed'}
+                      <button
+                        type="button"
+                        class="btn btn-icon btn-round-start"
+                        onclick={() => startSelectedRound(r)}
+                        disabled={roundsSaving || !!r.startedAt}
+                        aria-label="Start round"
+                        title={r.startedAt ? 'Round already started' : 'Start round — umpires can score under it now'}
+                      >▶</button>
+                      <button
+                        type="button"
+                        class="btn btn-icon btn-round-close"
+                        onclick={() => closeSelectedRound(r)}
+                        disabled={roundsSaving || !r.startedAt}
+                        aria-label="Close round"
+                        title={!r.startedAt ? 'Round not started yet' : 'Close round — terminal, no reopen'}
+                      >⏹</button>
+                    {/if}
                     <button
                       type="button"
-                      class="btn"
-                      onclick={() => toggleRoundState(r)}
-                      disabled={roundsSaving}
-                    >{r.state === 'closed' ? 'Reopen' : 'Close'}</button>
-                    <button
-                      type="button"
-                      class="btn btn-danger"
+                      class="btn btn-danger btn-icon"
                       onclick={() => startDeleteRound(r)}
                       disabled={roundsSaving}
-                    >Delete</button>
+                      aria-label="Delete round"
+                      title="Delete round"
+                    >🗑</button>
                   </div>
                 {/if}
               </li>
@@ -1414,6 +1740,19 @@
           </div>
         </div>
       </div>
+    {/if}
+  {/if}
+
+  {#if bracketKey}
+    {@const t = list().find((x) => x.key === bracketKey)}
+    {#if t}
+      {@const myUid = currentUser()?.uid ?? ''}
+      <TournamentBracket
+        tournament={t}
+        rounds={t.rounds ?? []}
+        myUid={myUid}
+        onClose={stopBracket}
+      />
     {/if}
   {/if}
 </section>
@@ -1538,6 +1877,37 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  /* Row-name button: same visual as the text version but clickable to
+     open the rename / settings dialog. Underline on hover signals the
+     affordance without adding a separate 'Edit' pill. Uses the same
+     ellipsis rules so long names don't blow the row wide. */
+  .row-name-btn {
+    background: transparent;
+    border: 0;
+    padding: 0;
+    color: var(--fg);
+    font: inherit;
+    font-weight: 600;
+    font-size: 0.95rem;
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+    display: block;
+  }
+  .row-name-btn:hover {
+    color: var(--accent, #ffd54a);
+    text-decoration: underline;
+    text-underline-offset: 0.15em;
+  }
+  .row-name-btn:focus-visible {
+    outline: 2px solid rgba(255, 213, 74, 0.6);
+    outline-offset: 2px;
+    border-radius: 0.2rem;
+  }
   .row-name-meta {
     display: flex;
     flex-wrap: wrap;
@@ -1589,6 +1959,26 @@
     color: var(--accent, #ffd54a);
     background: rgba(255, 213, 74, 0.16);
     border-color: rgba(255, 213, 74, 0.4);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 700;
+  }
+  /* v3.6.2: round lifecycle status chips. Pending = muted grey
+     (waiting), running = green (live), closed = amber (terminal,
+     already defined above). Match the button tints so status pill
+     and action button read as the same colour language. */
+  .chip-pending {
+    color: var(--muted, #9aa0a6);
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.14);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 700;
+  }
+  .chip-running {
+    color: #a6dfa9;
+    background: rgba(76, 175, 80, 0.14);
+    border-color: rgba(76, 175, 80, 0.45);
     text-transform: uppercase;
     letter-spacing: 0.05em;
     font-weight: 700;
@@ -1661,10 +2051,56 @@
     font: inherit;
     font-size: 0.9rem;
   }
-  .edit-field input[type="text"]:focus-visible {
+  .edit-field input[type="text"]:focus-visible,
+  .edit-field input[type="number"]:focus-visible,
+  .edit-field select:focus-visible {
     outline: 2px solid var(--accent, #ffd54a);
     outline-offset: 0;
     border-color: var(--accent, #ffd54a);
+  }
+  .edit-field input[type="number"],
+  .edit-field select {
+    background: #0f0f0f;
+    color: var(--fg);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 0.4rem;
+    padding: 0.5rem 0.6rem;
+    font: inherit;
+    font-size: 0.9rem;
+    font-family: inherit;
+  }
+
+  /* Defaults fieldset in the Edit dialog — 2 columns on wide screens
+     so the four small numeric fields don't stretch. Falls to a single
+     column on narrow phones (matches the CountrySelect + name fields
+     stacking). */
+  .defaults-grid {
+    margin: 0.7rem 0 0.4rem;
+    padding: 0.7rem 0.85rem 0.5rem;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 0.5rem;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0 0.85rem;
+  }
+  .defaults-grid legend {
+    padding: 0 0.4rem;
+    color: var(--accent, #ffd54a);
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .defaults-grid .edit-field { margin: 0.25rem 0; }
+  .defaults-hint {
+    grid-column: 1 / -1;
+    color: var(--muted, #9aa0a6);
+    font-size: 0.78rem;
+    margin: 0 0 0.35rem;
+    line-height: 1.4;
+  }
+  @media (max-width: 30rem) {
+    .defaults-grid { grid-template-columns: 1fr; }
   }
 
   .add-country-label {
@@ -1843,6 +2279,54 @@
   }
   .btn-danger:hover:not(:disabled) { background: rgba(239, 83, 80, 0.22); }
   .btn-sm { padding: 0.25rem 0.6rem; font-size: 0.75rem; }
+  /* Print icon anchor: highlighted accent button so it visibly reads
+     as the tournament's primary output action (organiser thinks:
+     'I'm ready — print the pack'). Same shape as sibling .btn
+     buttons but with the accent tint the row uses for tournament
+     name affordances. */
+  .btn-print {
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 2rem;
+    background: rgba(255, 213, 74, 0.14);
+    border-color: rgba(255, 213, 74, 0.55);
+    color: var(--accent, #ffd54a);
+    font-weight: 700;
+  }
+  .btn-print:hover:not(:disabled) {
+    background: rgba(255, 213, 74, 0.24);
+    border-color: var(--accent, #ffd54a);
+  }
+  /* Compact square icon buttons for the round start/close toggle.
+     Two tinted variants so the meaning reads at a glance:
+       start (green-ish) — matches 'go' semantics
+       close (amber)     — matches 'wrap up' semantics
+     Both share the same size + font metrics as the neighbouring
+     Rename / Delete buttons so the row stays aligned. */
+  .btn-icon {
+    min-width: 2rem;
+    padding: 0.25rem 0.55rem;
+    font-size: 0.95rem;
+    line-height: 1;
+  }
+  .btn-round-start {
+    background: rgba(76, 175, 80, 0.14);
+    border-color: rgba(76, 175, 80, 0.5);
+    color: #a6dfa9;
+  }
+  .btn-round-start:hover:not(:disabled) {
+    background: rgba(76, 175, 80, 0.22);
+  }
+  .btn-round-close {
+    background: rgba(255, 213, 74, 0.12);
+    border-color: rgba(255, 213, 74, 0.45);
+    color: var(--accent, #ffd54a);
+  }
+  .btn-round-close:hover:not(:disabled) {
+    background: rgba(255, 213, 74, 0.2);
+  }
 
   .dialog {
     position: fixed;

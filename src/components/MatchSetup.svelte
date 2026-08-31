@@ -49,10 +49,204 @@
   import HelpTip from './HelpTip.svelte';
   import { logScreen } from '../lib/analytics';
   import { countryName, flagEmoji } from '../lib/countries';
+  import {
+    loadPlannedMatch,
+    claimPlannedMatch,
+    resolvePlannedByBoard,
+    type PlannedMatch,
+  } from '../lib/planned';
+  import { currentUser, awaitAuthReady } from '../lib/auth';
 
   const base: string = import.meta.env.BASE_URL;
 
   let cfg = $state<MatchConfig>({ ...DEFAULT_CONFIG });
+
+  /**
+   * Planned-match deep-link state (v3.6). URL `?planned=<mid>` opens
+   * the setup screen with a pre-created bracket slot's fields
+   * loaded. States:
+   *   - 'idle'      — no ?planned= param present; normal setup flow
+   *   - 'loading'   — reading /planned/{mid} from RTDB
+   *   - 'not-found' — mid didn't resolve; the slot was deleted (match
+   *                   probably already scored, or organiser removed it)
+   *   - 'takeover'  — slot exists but claimedBy is another uid; ask
+   *                   the umpire to confirm takeover
+   *   - 'loaded'    — slot fetched and cfg has been prefilled; the
+   *                   normal setup renders below
+   * See docs/plan/tournament-brackets.md for the flow.
+   */
+  type PlannedState =
+    | { kind: 'idle' }
+    | { kind: 'loading'; mid: string }
+    | { kind: 'not-found'; mid: string }
+    | { kind: 'takeover'; mid: string; match: PlannedMatch; claimerName: string }
+    | { kind: 'loaded'; mid: string };
+  let plannedState = $state<PlannedState>({ kind: 'idle' });
+  let plannedMid = $state<string>('');
+  // Board-scan pending state: when the URL carries
+  // `?tournament=<key>&board=<N>` (the stable per-board sticker), we
+  // resolve to a concrete mid in an effect below, then hand off to
+  // the same planned-mid flow. During the resolve we render the
+  // 'loading' banner so the umpire sees feedback.
+  let boardScan = $state<{ tournamentKey: string; board: number } | null>(null);
+  // Read the query params synchronously so the effect below knows
+  // whether to short-circuit the resume flow.
+  if (typeof window !== 'undefined') {
+    const params = new URLSearchParams(window.location.search);
+    const mid = params.get('planned');
+    if (mid && /^[A-Za-z0-9_-]{4,24}$/.test(mid)) {
+      plannedMid = mid;
+      plannedState = { kind: 'loading', mid };
+    } else {
+      // v3.6.1: per-board scan. Board 1's fixed QR encodes
+      // `?tournament=<key>&board=1`. Resolve to a mid in the effect
+      // below (async — the mid isn't known until we query /planned).
+      const tKey = params.get('tournament') ?? '';
+      const boardRaw = params.get('board') ?? '';
+      const boardNum = Number(boardRaw);
+      if (
+        tKey &&
+        Number.isFinite(boardNum) &&
+        boardNum >= 1 &&
+        boardNum <= 99
+      ) {
+        boardScan = { tournamentKey: tKey, board: Math.floor(boardNum) };
+        // Render the loading banner while we resolve. The mid is
+        // populated once resolvePlannedByBoard returns.
+        plannedState = { kind: 'loading', mid: '' };
+      }
+    }
+  }
+
+  // Resolve a board scan to a concrete /planned mid, then defer to
+  // the mid-based effect. Runs once on mount when boardScan is set.
+  $effect(() => {
+    if (!boardScan) return;
+    const { tournamentKey: tKey, board } = boardScan;
+    boardScan = null;
+    (async () => {
+      await awaitAuthReady();
+      const outcome = await resolvePlannedByBoard(tKey, board);
+      if (outcome.ok === false || !outcome.match) {
+        // Reuse the not-found state — the QR is stale (no matches
+        // remain for this board) or the tournament key was
+        // mistyped in the sticker.
+        plannedState = { kind: 'not-found', mid: `board-${board}` };
+        return;
+      }
+      const match = outcome.match;
+      plannedMid = match.mid;
+      // Hand off to the mid-based fetch pipeline. It will re-read
+      // /planned/{mid}, apply cfg, and claim. The extra fetch is
+      // cheap and keeps the takeover-detection code path unified.
+      plannedState = { kind: 'loading', mid: match.mid };
+    })();
+  });
+  $effect(() => {
+    // Fetch the planned record once at mount and prefill cfg. Auth
+    // must be ready before we call claimPlannedMatch (rule needs
+    // auth.uid). awaitAuthReady bounds the wait so a broken auth
+    // session doesn't hang the flow forever.
+    if (plannedState.kind !== 'loading') return;
+    const mid = plannedState.mid;
+    // Empty mid means the board-scan resolver is still working —
+    // wait for it to populate mid and re-fire this effect.
+    if (!mid) return;
+    (async () => {
+      await awaitAuthReady();
+      const outcome = await loadPlannedMatch(mid);
+      if (outcome.ok === false) {
+        plannedState = { kind: 'not-found', mid };
+        return;
+      }
+      const match = outcome.match;
+      if (!match) {
+        plannedState = { kind: 'not-found', mid };
+        return;
+      }
+      const uid = currentUser()?.uid;
+      // Someone else already claimed it — offer takeover.
+      if (match.claimedBy && uid && match.claimedBy !== uid) {
+        plannedState = {
+          kind: 'takeover',
+          mid,
+          match,
+          claimerName: `user ${match.claimedBy.slice(0, 6)}`,
+        };
+        return;
+      }
+      applyPlannedToCfg(match);
+      // Claim (or refresh claim) — silent-on-failure so a signed-out
+      // umpire can still see the prefilled setup; they just won't
+      // stamp claimedBy.
+      if (uid) void claimPlannedMatch(mid, uid);
+      plannedState = { kind: 'loaded', mid };
+    })();
+  });
+
+  /**
+   * Populate cfg from a fetched PlannedMatch. Falls back to the
+   * tournament's defaults for any config field the planned record
+   * didn't specify; app defaults from DEFAULT_CONFIG win beyond that.
+   */
+  function applyPlannedToCfg(m: PlannedMatch) {
+    // Look up the tournament for its defaults. The tournament store
+    // may not be hydrated yet at this exact moment — that's fine, we
+    // fall back through to DEFAULT_CONFIG.
+    const t = loadAllTournaments().find((x) => x.key === m.tournamentKey);
+    const td = t?.defaults;
+    cfg.mode = m.mode;
+    cfg.playerA = m.aName;
+    cfg.playerA2 = m.a2Name ?? '';
+    cfg.playerB = m.bName;
+    cfg.playerB2 = m.b2Name ?? '';
+    cfg.tournament = m.tournament;
+    cfg.round = m.round ?? '';
+    // Config precedence: planned.cfg > tournament.defaults > DEFAULT_CONFIG.
+    cfg.bestOf = m.cfg?.bestOf ?? td?.bestOf ?? DEFAULT_CONFIG.bestOf;
+    cfg.pointsTarget = m.cfg?.pointsTarget ?? td?.pointsTarget ?? DEFAULT_CONFIG.pointsTarget;
+    cfg.maxBoards = m.cfg?.maxBoards ?? td?.maxBoards ?? DEFAULT_CONFIG.maxBoards;
+    // Stamp resolved player ids so finishMatch stamps playerAId
+    // etc. on the archive. resolvedPlayerIds is the local map that
+    // MatchSetup already maintains via the picker's onSelect.
+    resolvedPlayerIds.playerA = m.aResolvedId ?? null;
+    resolvedPlayerIds.playerA2 = m.a2ResolvedId ?? null;
+    resolvedPlayerIds.playerB = m.bResolvedId ?? null;
+    resolvedPlayerIds.playerB2 = m.b2ResolvedId ?? null;
+  }
+
+  /**
+   * User confirmed takeover from the takeover screen. Claim the slot
+   * for their uid, apply the record to cfg, and drop into the normal
+   * setup flow.
+   */
+  async function confirmTakeover() {
+    if (plannedState.kind !== 'takeover') return;
+    const { mid, match } = plannedState;
+    const uid = currentUser()?.uid;
+    if (!uid) return;
+    applyPlannedToCfg(match);
+    void claimPlannedMatch(mid, uid);
+    plannedState = { kind: 'loaded', mid };
+  }
+  function cancelTakeover() {
+    // Return to the plain setup screen — clear the ?planned= param
+    // so a refresh doesn't re-open the same choice.
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('planned');
+      window.history.replaceState({}, '', url.toString());
+    }
+    plannedState = { kind: 'idle' };
+  }
+  function dismissNotFound() {
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('planned');
+      window.history.replaceState({}, '', url.toString());
+    }
+    plannedState = { kind: 'idle' };
+  }
 
   // Per-device roster grown from past match setups. Merged with the
   // Firebase identity store below so a name typed on this device
@@ -680,7 +874,11 @@
     rememberPlayers(cfg.playerA, cfg.playerA2, cfg.playerB, cfg.playerB2);
     // Remember this match so a mistakenly-closed /score/ tab can be
     // resumed from Home. Cleared on End paths in ScoreBoard.
-    const scoreUrl = `${base}score/?${encodeConfig(cfg)}`;
+    // v3.6: if this setup came from a planned-match QR scan, thread
+    // the mid through to the score URL. ScoreBoard reads ?planned=<mid>
+    // and deletes /planned/{mid} once the match archives.
+    const plannedSuffix = plannedMid ? `&planned=${encodeURIComponent(plannedMid)}` : '';
+    const scoreUrl = `${base}score/?${encodeConfig(cfg)}${plannedSuffix}`;
     saveResume({
       mid: cfg.mid,
       scoreUrl,
@@ -853,6 +1051,65 @@
   </label>
 {/snippet}
 
+
+{#if plannedState.kind === 'loading'}
+  <aside class="planned-notice" aria-label="Loading planned match">
+    <p>Loading match…</p>
+  </aside>
+{:else if plannedState.kind === 'not-found'}
+  <aside class="planned-notice planned-notice-warn" aria-label="Planned match not available">
+    <h3>Match not available</h3>
+    <p>This match slot isn't around anymore. It may have already been
+    played, or the organiser removed it. Ask them for a fresh QR.</p>
+    <div class="planned-actions">
+      <button type="button" class="planned-btn" onclick={dismissNotFound}>
+        Set up a match manually
+      </button>
+    </div>
+  </aside>
+{:else if plannedState.kind === 'takeover'}
+  <aside class="planned-notice planned-notice-warn" aria-label="Match in progress">
+    <h3>Match already being scored</h3>
+    <p>Someone is already scoring this match ({plannedState.claimerName}).
+    If you're taking over, confirm below and continue. Otherwise cancel.</p>
+    <div class="planned-actions">
+      <button type="button" class="planned-btn planned-btn-primary" onclick={confirmTakeover}>
+        Take over
+      </button>
+      <button type="button" class="planned-btn" onclick={cancelTakeover}>
+        Cancel
+      </button>
+    </div>
+  </aside>
+{:else if plannedState.kind === 'loaded'}
+  <!--
+    Bracket-scan preview (v3.6.1). Renders the players + tournament +
+    round + mode + set/board format so the umpire can double-check
+    before tapping Start. If any detail is wrong they can edit the
+    fields below the banner as usual, then Start.
+  -->
+  <aside class="planned-notice planned-notice-ok planned-preview" aria-label="Planned match ready">
+    <p class="planned-title">
+      <span class="planned-badge">Bracket</span>
+      {#if cfg.tournament}<strong>{cfg.tournament}</strong>{/if}
+      {#if cfg.round}<span class="planned-sep">·</span>{cfg.round}{/if}
+    </p>
+    <p class="planned-players">
+      <span class="planned-side">
+        {cfg.playerA}{#if cfg.playerA2} <span class="planned-and">+</span> {cfg.playerA2}{/if}
+      </span>
+      <span class="planned-vs">vs</span>
+      <span class="planned-side">
+        {cfg.playerB}{#if cfg.playerB2} <span class="planned-and">+</span> {cfg.playerB2}{/if}
+      </span>
+    </p>
+    <p class="planned-format">
+      {cfg.mode === 'doubles' ? 'Doubles' : 'Singles'} ·
+      bo{cfg.bestOf} · target {cfg.pointsTarget}{cfg.maxBoards ? ` · max ${cfg.maxBoards} boards` : ''}
+    </p>
+    <p class="planned-hint">Review below and tap Start when the players are seated.</p>
+  </aside>
+{/if}
 
 {#if resumeVisible && resumeCandidate}
   <!-- Resume-match chip. Appears when the last-started /score/ tab
@@ -1868,4 +2125,102 @@
     .row3 { grid-template-columns: 1fr 1fr; }
     .player-row { grid-template-columns: 1fr; }
   }
+
+  /* Planned-match banners (v3.6) — shown when the setup screen was
+     opened via a bracket QR (?planned=<mid>). Same visual family
+     as the resume-chip so users recognise it as an actionable
+     header rather than a permanent decoration. */
+  .planned-notice {
+    background: rgba(255, 213, 74, 0.06);
+    border: 1px solid rgba(255, 213, 74, 0.35);
+    color: var(--fg, #f5f5f5);
+    border-radius: 0.6rem;
+    padding: 0.85rem 1rem;
+    margin: 0.75rem 0;
+  }
+  .planned-notice h3 {
+    margin: 0 0 0.4rem;
+    color: var(--accent, #ffd54a);
+    font-size: 1rem;
+  }
+  .planned-notice p { margin: 0.2rem 0; font-size: 0.9rem; line-height: 1.4; }
+  .planned-notice-warn {
+    background: rgba(239, 83, 80, 0.06);
+    border-color: rgba(239, 83, 80, 0.4);
+  }
+  .planned-notice-warn h3 { color: rgba(239, 83, 80, 0.95); }
+  .planned-notice-ok {
+    background: rgba(76, 175, 80, 0.06);
+    border-color: rgba(76, 175, 80, 0.4);
+  }
+  .planned-hint { color: var(--muted, #9aa0a6); font-size: 0.82rem; }
+  /* Bracket-scan preview banner — richer than the plain notice; shows
+     tournament, round, both sides, and the format the umpire is about
+     to start. Wraps on narrow screens (players stack vertically). */
+  .planned-preview .planned-title {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem;
+    margin: 0 0 0.35rem;
+    font-size: 0.95rem;
+  }
+  .planned-badge {
+    display: inline-block;
+    padding: 0.1rem 0.5rem;
+    background: rgba(255, 213, 74, 0.14);
+    border: 1px solid rgba(255, 213, 74, 0.55);
+    color: var(--accent, #ffd54a);
+    border-radius: 999px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .planned-sep { color: var(--muted, #9aa0a6); }
+  .planned-players {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.4rem;
+    margin: 0.25rem 0;
+    font-size: 1rem;
+  }
+  .planned-side { font-weight: 700; }
+  .planned-and { color: var(--muted, #9aa0a6); font-weight: 400; }
+  .planned-vs {
+    color: var(--muted, #9aa0a6);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .planned-format {
+    color: var(--muted, #9aa0a6);
+    font-size: 0.82rem;
+    margin: 0.15rem 0 0.4rem;
+  }
+  .planned-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.65rem;
+    flex-wrap: wrap;
+  }
+  .planned-btn {
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: var(--fg, #f5f5f5);
+    padding: 0.45rem 0.9rem;
+    border-radius: 0.4rem;
+    font: inherit;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .planned-btn:hover { background: rgba(255, 255, 255, 0.06); }
+  .planned-btn-primary {
+    background: rgba(255, 213, 74, 0.14);
+    border-color: rgba(255, 213, 74, 0.55);
+    color: var(--accent, #ffd54a);
+    font-weight: 700;
+  }
+  .planned-btn-primary:hover { background: rgba(255, 213, 74, 0.24); }
 </style>

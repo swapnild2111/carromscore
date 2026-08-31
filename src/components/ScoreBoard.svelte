@@ -32,6 +32,7 @@
   import { subscribeCurrentUserRole, type Role } from '../lib/roles';
   import { subscribeAuth, currentUser } from '../lib/auth';
   import { clearResume } from '../lib/resume';
+  import { deletePlannedMatch } from '../lib/planned';
   import { normalizeKey, findByKey } from '../lib/tournaments';
   import type { MatchRecord } from '../lib/history';
   import { subscribeConnectivity, getConnectivity } from '../lib/connectivity';
@@ -46,6 +47,15 @@
   type Colour = 'a' | 'b';
 
   let cfg = $state<MatchConfig>({ ...DEFAULT_CONFIG });
+  /**
+   * Planned-match mid (v3.6). Populated in onMount from the URL's
+   * ?planned=<mid> if present. When set, endMatch's archive path
+   * also deletes /planned/{mid} so the bracket admin's row flips
+   * from "scoring" to gone (a rescan would then show the
+   * archived match's popup instead of trying to open a stale slot).
+   * Empty string means this match wasn't launched from a bracket QR.
+   */
+  let plannedMid = $state<string>('');
   let sideA = $state<Side>({ name: 'First Player', note: '', sets: 0, points: 0 });
   let sideB = $state<Side>({ name: 'Second Player', note: '', sets: 0, points: 0 });
   // Which colour token is painted on each seat. Flipped by swapSides().
@@ -524,6 +534,17 @@
     void logScreen('score');
     const q = new URLSearchParams(window.location.search);
     cfg = decodeConfig(q);
+    // v3.6: pull the planned-match mid off the URL. Present when
+    // the setup screen was reached via a bracket QR scan and the
+    // Start button navigated here. Retained on the score screen so
+    // End Match can delete /planned/{mid} in the same pass as the
+    // archive write — the bracket admin then shows this row as
+    // "done" (or, if the admin subscribes to /matches too, links
+    // straight to the archive).
+    const plannedParam = q.get('planned');
+    if (plannedParam && /^[A-Za-z0-9_-]{4,24}$/.test(plannedParam)) {
+      plannedMid = plannedParam;
+    }
     sideA.name = teamLabel(cfg.playerA, cfg.playerA2, cfg.mode) || 'First Player';
     sideB.name = teamLabel(cfg.playerB, cfg.playerB2, cfg.mode) || 'Second Player';
     sideA.note = cfg.noteA;
@@ -2106,6 +2127,15 @@
         // Successful archive — remember the id so the end-recap
         // "Fix this match" link can hand it to the edit modal.
         archivedMatchId = matchId;
+        // v3.6: if this match was launched from a bracket QR, delete
+        // the planned slot now that the archive lives at /matches.
+        // Fire-and-forget: a failed delete just leaves the slot on
+        // disk (bracket admin can clean up manually) — the RTDB
+        // rule permits the umpire (claimedBy) to delete their own
+        // claim, so this should succeed in the common path.
+        if (plannedMid) {
+          void deletePlannedMatch(plannedMid);
+        }
       });
       // Clear the handoff so a "same names again" match after this one
       // doesn't accidentally reuse the same startedAt / resolutions.

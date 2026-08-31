@@ -51,6 +51,19 @@ export type Tournament = {
    * inside `loadRounds`.
    */
   rounds?: Round[];
+  /**
+   * Tournament-level match defaults (v3.6). Inherited by pre-created
+   * planned matches (see /planned/{mid}) when they don't override
+   * per-match. Also read by the score-setup flow to prefill the
+   * config form. Absent field = fall back to the app defaults
+   * (bo3 / 25 / 8 singles).
+   */
+  defaults?: {
+    mode?: 'singles' | 'doubles';
+    bestOf?: number;
+    pointsTarget?: number;
+    maxBoards?: number;
+  };
 };
 
 /**
@@ -73,6 +86,19 @@ export type Round = {
   order: number;           // 1-indexed display order (R16=1, QF=2, …)
   state: 'open' | 'closed';
   createdAt: number;
+  /**
+   * Epoch ms when the organiser hit ▶ Start on this round. Absent
+   * means the round is still pending (created but not started yet).
+   * Combined with `state` this yields a three-state lifecycle in
+   * the UI:
+   *   - pending: state='open' AND !startedAt   (▶ enabled, ⏹ disabled)
+   *   - running: state='open' AND startedAt    (▶ disabled, ⏹ enabled)
+   *   - closed:  state='closed'                 (terminal — no reopen)
+   * Rounds from v3.6.1 and earlier never carry startedAt; the UI
+   * treats them as pending (organiser can start or close manually).
+   * Added 2026-08-31.
+   */
+  startedAt?: number;
 };
 
 /** Meta arg accepted by createOrTouchTournament for v3.1+. */
@@ -280,6 +306,25 @@ export async function subscribeTournaments(): Promise<void> {
   }
 }
 
+/**
+ * Parse the tournament's `defaults` sub-node. Absent → undefined
+ * (caller keeps app defaults). Present with any subset of fields
+ * → return the sanitised subset. Silent-skip on invalid values.
+ */
+function parseDefaults(raw: unknown): Tournament['defaults'] | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const v = raw as Record<string, unknown>;
+  const out: NonNullable<Tournament['defaults']> = {};
+  if (v.mode === 'singles' || v.mode === 'doubles') out.mode = v.mode;
+  const bestOf = Number(v.bestOf);
+  if (Number.isFinite(bestOf) && bestOf >= 1 && bestOf <= 15) out.bestOf = Math.floor(bestOf);
+  const points = Number(v.pointsTarget);
+  if (Number.isFinite(points) && points >= 1 && points <= 100) out.pointsTarget = Math.floor(points);
+  const maxBoards = Number(v.maxBoards);
+  if (Number.isFinite(maxBoards) && maxBoards >= 0 && maxBoards <= 50) out.maxBoards = Math.floor(maxBoards);
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 function parseRounds(raw: unknown): Round[] | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
   const rounds: Round[] = [];
@@ -291,7 +336,18 @@ function parseRounds(raw: unknown): Round[] | undefined {
     const order = typeof v.order === 'number' && Number.isFinite(v.order) ? v.order : 0;
     const state = v.state === 'closed' ? 'closed' : 'open';
     const createdAt = typeof v.createdAt === 'number' ? v.createdAt : 0;
-    rounds.push({ key, name, order, state, createdAt });
+    const startedAt =
+      typeof v.startedAt === 'number' && Number.isFinite(v.startedAt)
+        ? v.startedAt
+        : undefined;
+    rounds.push({
+      key,
+      name,
+      order,
+      state,
+      createdAt,
+      ...(startedAt !== undefined ? { startedAt } : {}),
+    });
   }
   // Sort by `order` ascending — that's the display order both in
   // History (R16 → QF → SF → F) and in the setup round picker.
@@ -312,6 +368,7 @@ function mergeRemote(raw: Record<string, unknown>): void {
       v.type === 'open' || v.type === 'closed' ? (v.type as 'open' | 'closed') : undefined;
     const country = typeof v.country === 'string' ? v.country : undefined;
     const rounds = parseRounds(v.rounds);
+    const defaults = parseDefaults(v.defaults);
     const existing = memoryStore.find((t) => t.key === key);
     if (existing) {
       existing.name = name;
@@ -328,6 +385,7 @@ function mergeRemote(raw: Record<string, unknown>): void {
       // but empty object still yields `[]`, which correctly wipes any
       // stale local list.
       if (rounds !== undefined) existing.rounds = rounds;
+      if (defaults !== undefined) existing.defaults = defaults;
     } else {
       memoryStore.push({
         key,
@@ -338,6 +396,7 @@ function mergeRemote(raw: Record<string, unknown>): void {
         ...(type ? { type } : {}),
         ...(country ? { country } : {}),
         ...(rounds !== undefined ? { rounds } : {}),
+        ...(defaults !== undefined ? { defaults } : {}),
       });
     }
   }
@@ -561,6 +620,57 @@ export async function updateTournamentMeta(
         ...(nextCountry ? { country: nextCountry } : {}),
       },
     });
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg || 'Update failed' };
+  }
+}
+
+/**
+ * Update tournament-level match defaults (v3.6). Same rule surface
+ * as updateTournamentMeta — organiser owns their tournament, super
+ * can touch any. Callers pass a partial patch; only present fields
+ * are written, rest are left untouched. Pass `null` on a specific
+ * field to remove that individual default (fall back to app default).
+ */
+export async function updateTournamentDefaults(
+  key: string,
+  patch: Partial<{
+    mode: 'singles' | 'doubles' | null;
+    bestOf: number | null;
+    pointsTarget: number | null;
+    maxBoards: number | null;
+  }>,
+): Promise<TournamentWriteOutcome> {
+  if (!key) return { ok: false, error: 'Missing tournament key' };
+  const t = memoryStore.find((x) => x.key === key);
+  if (!t) return { ok: false, error: 'Tournament not found in local store' };
+  try {
+    const [{ firebaseApp }, { getDatabase, ref, update }] = await Promise.all([
+      import('./firebase'),
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    const payload: Record<string, unknown> = {
+      [`tournaments/${key}/lastActive`]: Date.now(),
+    };
+    const nextLocal: NonNullable<Tournament['defaults']> = { ...(t.defaults ?? {}) };
+    for (const [field, value] of Object.entries(patch)) {
+      const path = `tournaments/${key}/defaults/${field}`;
+      if (value === null) {
+        payload[path] = null;
+        delete (nextLocal as Record<string, unknown>)[field];
+      } else if (value !== undefined) {
+        payload[path] = value;
+        (nextLocal as Record<string, unknown>)[field] = value;
+      }
+    }
+    await update(ref(db, '/'), payload);
+    if (Object.keys(nextLocal).length > 0) t.defaults = nextLocal;
+    else delete t.defaults;
+    t.lastActive = Date.now();
+    notify();
     return { ok: true };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -1140,6 +1250,53 @@ export async function addRound(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return { ok: false, error: msg || 'Add round failed' };
+  }
+}
+
+/**
+ * Mark a round as started by stamping `startedAt = now`. Idempotent
+ * — a subsequent call refreshes the timestamp. Called by the ▶
+ * Start button on the round row (v3.6.2). Rounds without a
+ * startedAt render as 'pending' in the admin UI; rounds with one
+ * render as 'running' until the organiser closes them.
+ */
+export async function startRound(
+  tournamentKey: string,
+  roundKey: string,
+): Promise<TournamentWriteOutcome> {
+  if (!tournamentKey || !roundKey)
+    return { ok: false, error: 'Missing tournament or round key' };
+  try {
+    const [{ firebaseApp }, { getDatabase, ref, update }] = await Promise.all([
+      import('./firebase'),
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    const startedAt = Date.now();
+    // Also ensure state=open — a round can't be running and closed
+    // at the same time. This is a no-op if the round is already open.
+    await update(ref(db, `tournaments/${tournamentKey}/rounds/${roundKey}`), {
+      startedAt,
+      state: 'open',
+    });
+    const local = memoryStore.find((t) => t.key === tournamentKey);
+    if (local?.rounds) {
+      const r = local.rounds.find((x) => x.key === roundKey);
+      if (r) {
+        r.startedAt = startedAt;
+        r.state = 'open';
+        notify();
+      }
+    }
+    void logAudit({
+      action: 'round.start',
+      path: `tournaments/${tournamentKey}/rounds/${roundKey}`,
+      after: { startedAt },
+    });
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg || 'Start round failed' };
   }
 }
 
