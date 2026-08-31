@@ -1,25 +1,30 @@
 <script lang="ts">
   /**
-   * Printer-friendly board QR stickers (v3.6.1). Reads
-   * ?tournament=<key> and renders one page per physical board
-   * (Board 1, Board 2, …), each with a big centered QR that encodes
-   * `?tournament=<key>&board=<N>`.
+   * Printer-friendly tournament pack (v3.6.2). Reads
+   * `?tournament=<key>` and renders:
    *
-   * Why per-board, not per-match: the QR sticker is permanent —
+   *   Page 1 — cover: tournament name, mode + config, country (if
+   *     closed), player roster with country flags. This is the
+   *     "team briefing" page an organiser hands out at check-in.
+   *   Pages 2..N — one page per physical board (Board 1, Board 2,
+   *     …), each with a big centered QR that encodes
+   *     `?tournament=<key>&board=<N>`. These are the stickers that
+   *     get cut out and stuck on each physical board.
+   *
+   * Why per-board QR (not per-match): the sticker is permanent —
    * printed once and stuck to the physical carrom board. Every
    * round, the umpire on Board 3 scans the same QR; the app auto-
    * advances to whichever match is currently assigned to Board 3
    * (resolvePlannedByBoard in lib/planned.ts). Zero admin work
    * between rounds. See MatchSetup's `?board=` deep-link handler.
    *
-   * The set of boards printed is the union of all `board` values
-   * across every /planned record for this tournament (across all
-   * rounds), plus a fill from 1..maxBoard so gaps like "Board 1,
-   * 2, 4" still print a Board 3 sticker (dead board today, but
-   * the organiser might use it next round).
-   *
-   * No player names on the sticker — those change every round.
-   * Only the tournament name + Board N.
+   * Roster source:
+   *   - Closed tournament: /tournaments/{key}/assignedPlayerIds is
+   *     authoritative. We look each id up in the /players store to
+   *     get canonical name + country.
+   *   - Open tournament: gather unique player names from every
+   *     /planned record for this tournament. No country pill unless
+   *     the name resolves cleanly against the /players store.
    */
   import { onMount } from 'svelte';
   import {
@@ -27,11 +32,35 @@
     type PlannedMatch,
   } from '../../lib/planned';
   import { qrToSVG } from '../../lib/qrcode';
+  import {
+    subscribeTournaments,
+    loadAll as loadAllTournaments,
+    loadAssignedPlayers,
+    subscribeStore as subscribeTournamentStore,
+    type Tournament,
+  } from '../../lib/tournaments';
+  import {
+    subscribePlayers,
+    loadAll as loadAllPlayersFn,
+    subscribeStore as subscribePlayerStore,
+    type Player,
+  } from '../../lib/players';
+  import { countryName, flagEmoji } from '../../lib/countries';
 
   let tournamentKey = $state<string>('');
   let plannedMatches = $state<PlannedMatch[]>([]);
   let unsub: (() => void) | null = null;
   let ready = $state(false);
+
+  // Reactive ticks — nudge derivations when the tournament and
+  // player stores refresh from Firebase, without threading the raw
+  // arrays through the template.
+  let tournamentTick = $state(0);
+  let playerTick = $state(0);
+
+  // Assigned-player id set for closed tournaments (empty for open).
+  // Populated once when the tournament record is known.
+  let assignedIds = $state<Set<string>>(new Set());
 
   onMount(() => {
     if (typeof window === 'undefined') return () => {};
@@ -41,6 +70,10 @@
       ready = true;
       return () => {};
     }
+    void subscribeTournaments();
+    void subscribePlayers();
+    const unsubT = subscribeTournamentStore(() => (tournamentTick += 1));
+    const unsubP = subscribePlayerStore(() => (playerTick += 1));
     (async () => {
       unsub = await subscribePlannedByTournament(tournamentKey, (arr) => {
         plannedMatches = arr;
@@ -49,36 +82,103 @@
     })();
     return () => {
       unsub?.();
+      unsubT();
+      unsubP();
     };
   });
 
-  // Tournament display name: any record's tournament field works
-  // (they're all the same tournament). Empty when nothing planned.
-  const tournamentName = $derived<string>(
-    plannedMatches[0]?.tournament ?? tournamentKey,
-  );
+  // Tournament record (name, type, country, defaults). Nudged by
+  // tournamentTick. Falls back to a minimal shim when the record
+  // isn't in the local mirror yet.
+  const tournament = $derived<Tournament | null>(() => {
+    void tournamentTick;
+    if (!tournamentKey) return null;
+    return loadAllTournaments().find((t) => t.key === tournamentKey) ?? null;
+  });
+
+  // Load assigned-player set once when we have both the tournament
+  // and its type. Silent-on-failure: an empty set just hides the
+  // roster section for a closed tournament, which is safer than a
+  // partial list.
+  $effect(() => {
+    const t = tournament();
+    if (!t || t.type !== 'closed') {
+      assignedIds = new Set();
+      return;
+    }
+    void loadAssignedPlayers(t.key).then((set) => {
+      assignedIds = set;
+    }).catch(() => {
+      assignedIds = new Set();
+    });
+  });
+
+  // Player roster to render on the cover page. For closed
+  // tournaments this is the assigned set resolved against /players.
+  // For open tournaments it's unique names gathered from planned
+  // records, each attempted to resolve against /players for a
+  // country pill.
+  type RosterRow = { name: string; country?: string };
+  const roster = $derived<RosterRow[]>(() => {
+    void playerTick;
+    void tournamentTick;
+    const t = tournament();
+    if (!t) return [];
+    const players: Player[] = loadAllPlayersFn();
+    const byId = new Map(players.map((p) => [p.id, p]));
+    const byName = new Map<string, Player>();
+    for (const p of players) byName.set(p.canonicalName.toLowerCase(), p);
+
+    const out: RosterRow[] = [];
+    if (t.type === 'closed') {
+      for (const id of assignedIds) {
+        const p = byId.get(id);
+        if (!p) continue;
+        out.push({
+          name: p.canonicalName,
+          ...(p.country ? { country: p.country } : {}),
+        });
+      }
+    } else {
+      const seen = new Set<string>();
+      for (const m of plannedMatches) {
+        for (const raw of [m.aName, m.a2Name, m.bName, m.b2Name]) {
+          if (!raw) continue;
+          const trimmed = raw.trim();
+          if (!trimmed) continue;
+          const key = trimmed.toLowerCase();
+          if (seen.has(key)) continue;
+          seen.add(key);
+          const p = byName.get(key);
+          out.push({
+            name: p ? p.canonicalName : trimmed,
+            ...(p?.country ? { country: p.country } : {}),
+          });
+        }
+      }
+    }
+    // Alphabetical by canonical name so the roster reads like a
+    // check-in sheet, not a bracket seed order.
+    out.sort((a, b) => a.name.localeCompare(b.name));
+    return out;
+  });
 
   // Board numbers to print: union of all `board` values across
   // rounds, then filled 1..max so gaps still print a sticker.
   const boards = $derived<number[]>(() => {
-    const set = new Set<number>();
     let max = 0;
     for (const m of plannedMatches) {
-      if (m.board && m.board >= 1 && m.board <= 99) {
-        set.add(m.board);
-        if (m.board > max) max = m.board;
+      if (m.board && m.board >= 1 && m.board <= 99 && m.board > max) {
+        max = m.board;
       }
     }
     if (max === 0) return [];
-    // Fill 1..max — a printed Board 3 sticker sitting unused today
-    // is still useful when the organiser assigns to Board 3 later.
     const out: number[] = [];
     for (let i = 1; i <= max; i += 1) out.push(i);
     return out;
   });
 
-  // QR SVG cache — one entry per board number. Regenerated on
-  // tournamentKey change.
+  // QR SVG cache — one entry per board number.
   let qrByBoard = $state<Record<number, string>>({});
   const scanBase = (() => {
     if (typeof window === 'undefined') return '';
@@ -95,6 +195,27 @@
       });
     }
   });
+
+  // Human-readable config line for the cover page. Uses the same
+  // fallbacks that AdminTournaments seeds new tournaments with when
+  // a field is missing (bo3 / 25 / 8 / singles).
+  const configLine = $derived<string>(() => {
+    const d = tournament()?.defaults ?? {};
+    const mode = d.mode === 'doubles' ? 'Doubles' : 'Singles';
+    const bo = d.bestOf ?? 3;
+    const pts = d.pointsTarget ?? 25;
+    const mb = d.maxBoards ?? 8;
+    const mbTxt = mb === 0 ? 'unlimited boards' : `max ${mb} boards`;
+    return `${mode} · best of ${bo} · target ${pts} points · ${mbTxt}`;
+  });
+
+  const tournamentName = $derived<string>(
+    tournament()?.name ?? plannedMatches[0]?.tournament ?? tournamentKey,
+  );
+
+  // Match count for the cover — reads directly from the /planned
+  // subscription so it reflects every round.
+  const matchCount = $derived<number>(plannedMatches.length);
 </script>
 
 <div class="print-wrap">
@@ -111,14 +232,78 @@
     <div class="print-actions no-print">
       <button type="button" onclick={() => window.print()}>🖨 Print</button>
       <p class="hint">
-        One page per board. Cut along the border, stick each sheet to
-        its physical carrom board. Umpires scan the same sticker every
-        round — the app resolves which match is currently on that
-        board automatically.
+        Page 1 is the tournament pack cover — hand it out at check-in.
+        Following pages are one board sticker each; cut along the
+        border and stick to the physical board.
       </p>
     </div>
+
+    <!-- ─── COVER PAGE ─────────────────────────────────────────────
+         Tournament name banner, then config line, then the roster.
+         Layout tuned so the whole page fits on A4 portrait even for
+         tournaments with ~40 players (two columns of names). -->
+    <section class="page cover">
+      <div class="cover-hdr">
+        <p class="brand">Carromscore</p>
+        <h1 class="cover-name">{tournamentName}</h1>
+        {#if tournament()?.country}
+          <p class="cover-country">
+            <span aria-hidden="true">{flagEmoji(tournament()?.country ?? '')}</span>
+            {countryName(tournament()?.country ?? '')}
+          </p>
+        {/if}
+      </div>
+
+      <div class="cover-meta">
+        <div class="meta-row">
+          <span class="meta-label">Format</span>
+          <span class="meta-value">{configLine()}</span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">Type</span>
+          <span class="meta-value">
+            {tournament()?.type === 'closed' ? 'Invite-only (assigned roster)' : 'Open'}
+          </span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">Boards</span>
+          <span class="meta-value">{boards().length}</span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">Matches</span>
+          <span class="meta-value">{matchCount()}</span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">Players</span>
+          <span class="meta-value">{roster().length}</span>
+        </div>
+      </div>
+
+      {#if roster().length > 0}
+        <h2 class="cover-section">
+          Players ({roster().length})
+        </h2>
+        <ol class="roster">
+          {#each roster() as p (p.name)}
+            <li class="roster-row">
+              <span class="roster-name">{p.name}</span>
+              {#if p.country && p.country !== 'Unknown'}
+                <span class="roster-country">
+                  <span aria-hidden="true">{flagEmoji(p.country)}</span>
+                  {countryName(p.country)}
+                </span>
+              {/if}
+            </li>
+          {/each}
+        </ol>
+      {:else}
+        <p class="cover-empty">No players registered yet.</p>
+      {/if}
+    </section>
+
+    <!-- ─── BOARD PAGES (one per physical board) ─────────────────── -->
     {#each boards() as b (b)}
-      <section class="page">
+      <section class="page board-page">
         <div class="hdr">
           <p class="tour">{tournamentName}</p>
         </div>
@@ -175,16 +360,119 @@
     padding: 2rem;
     border: 1px solid #ccc;
     margin: 1rem 0;
+    break-after: page;
+    page-break-after: always;
+  }
+  .page:last-child { break-after: auto; page-break-after: auto; }
+
+  /* ─── Cover page ─────────────────────────────────────────────── */
+  .cover {
+    display: flex;
+    flex-direction: column;
+    min-height: 26rem;
+  }
+  .cover-hdr {
+    text-align: center;
+    padding-bottom: 0.9rem;
+    border-bottom: 3px solid #000;
+  }
+  .brand {
+    margin: 0 0 0.4rem;
+    font-size: 0.9rem;
+    color: #888;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    font-weight: 600;
+  }
+  .cover-name {
+    margin: 0.2rem 0 0.3rem;
+    font-size: 2.1rem;
+    font-weight: 900;
+    color: #000;
+    letter-spacing: 0.01em;
+    line-height: 1.15;
+  }
+  .cover-country {
+    margin: 0.3rem 0 0;
+    font-size: 1rem;
+    color: #333;
+    font-weight: 500;
+  }
+
+  .cover-meta {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.4rem 1.2rem;
+    padding: 1rem 0 1rem;
+    border-bottom: 1px solid #ddd;
+  }
+  .meta-row {
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+    font-size: 0.95rem;
+  }
+  .meta-label {
+    color: #666;
+    font-size: 0.78rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    min-width: 4.5rem;
+  }
+  .meta-value {
+    color: #000;
+    font-weight: 600;
+  }
+
+  .cover-section {
+    margin: 1.1rem 0 0.5rem;
+    font-size: 1.05rem;
+    color: #000;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 800;
+  }
+  .roster {
+    list-style: decimal;
+    padding-left: 1.6rem;
+    margin: 0.4rem 0 0;
+    /* Two columns on wide-ish pages so a ~30-player list fits on one
+       A4 sheet. Each row is a single line, so the columns balance
+       reasonably even with uneven names. */
+    column-count: 2;
+    column-gap: 2rem;
+  }
+  .roster-row {
+    break-inside: avoid;
+    -webkit-column-break-inside: avoid;
+    page-break-inside: avoid;
+    padding: 0.15rem 0;
+    font-size: 0.92rem;
+    color: #111;
+  }
+  .roster-name { font-weight: 600; }
+  .roster-country {
+    color: #555;
+    font-size: 0.82rem;
+    margin-left: 0.35rem;
+    white-space: nowrap;
+  }
+  .cover-empty {
+    color: #666;
+    font-style: italic;
+    margin: 1rem 0 0;
+  }
+
+  /* ─── Board pages ─────────────────────────────────────────────── */
+  .board-page {
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     min-height: 22rem;
     text-align: center;
-    break-after: page;
-    page-break-after: always;
   }
-  .page:last-child { break-after: auto; page-break-after: auto; }
   .hdr { margin-bottom: 0.4rem; }
   .tour {
     margin: 0;
@@ -235,6 +523,19 @@
       margin: 0;
       padding: 1.5rem;
       min-height: 0;
+    }
+    /* Roster column count survives print — keep it at 2. On very
+       narrow paper (Letter portrait ~ 7in wide after margins) this
+       is still comfortable. */
+  }
+
+  /* Narrow phone preview: single-column meta + roster so the
+     preview reads sensibly before the user prints. */
+  @media (max-width: 34rem) {
+    .cover-meta,
+    .roster {
+      grid-template-columns: 1fr;
+      column-count: 1;
     }
   }
 </style>

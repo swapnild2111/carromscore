@@ -1066,8 +1066,23 @@
                   type="button"
                   class="btn"
                   onclick={() => startBracket(t)}
-                  title="Add matches to bracket, print board QR stickers"
+                  title="Add matches to bracket"
                 >Bracket{plannedCountByKey[t.key] !== undefined && plannedCountByKey[t.key] > 0 ? ` (${plannedCountByKey[t.key]})` : ''}</button>
+                <!--
+                  Print pack (v3.6.1): opens the print-bracket page for
+                  this tournament in a new tab. Same URL the bracket
+                  admin used to expose from inside its own modal, but
+                  now available at the tournament level so the
+                  organiser doesn't have to open Bracket first.
+                -->
+                <a
+                  class="btn btn-print"
+                  href={`${import.meta.env.BASE_URL}print-bracket/?tournament=${encodeURIComponent(t.key)}`}
+                  target="_blank"
+                  rel="noopener"
+                  aria-label="Print tournament pack"
+                  title="Print tournament pack (cover sheet + board QR stickers)"
+                >🖨</a>
                 <button
                   type="button"
                   class="btn btn-danger"
@@ -1614,18 +1629,35 @@
                       onclick={() => startRenameRound(r)}
                       disabled={roundsSaving}
                     >Rename</button>
+                    <!--
+                      v3.6.2: iconify the state toggle so the two
+                      lifecycle actions read clearly at a glance:
+                        ▶ Start round  (round was closed — reopen it
+                                        to matches; umpires can score
+                                        under this round tag again)
+                        ⏹ Close round  (round is done — hide from new
+                                        matches; keeps history intact)
+                      Same setRoundState call underneath, just clearer
+                      labelling. Icon + hidden text keeps it accessible.
+                    -->
                     <button
                       type="button"
-                      class="btn"
+                      class="btn btn-icon"
+                      class:btn-round-start={r.state === 'closed'}
+                      class:btn-round-close={r.state !== 'closed'}
                       onclick={() => toggleRoundState(r)}
                       disabled={roundsSaving}
-                    >{r.state === 'closed' ? 'Reopen' : 'Close'}</button>
+                      aria-label={r.state === 'closed' ? 'Start round' : 'Close round'}
+                      title={r.state === 'closed' ? 'Start round — reopen so umpires can pick it' : 'Close round — no new matches, history preserved'}
+                    >{r.state === 'closed' ? '▶' : '⏹'}</button>
                     <button
                       type="button"
-                      class="btn btn-danger"
+                      class="btn btn-danger btn-icon"
                       onclick={() => startDeleteRound(r)}
                       disabled={roundsSaving}
-                    >Delete</button>
+                      aria-label="Delete round"
+                      title="Delete round"
+                    >🗑</button>
                   </div>
                 {/if}
               </li>
@@ -2187,6 +2219,43 @@
   }
   .btn-danger:hover:not(:disabled) { background: rgba(239, 83, 80, 0.22); }
   .btn-sm { padding: 0.25rem 0.6rem; font-size: 0.75rem; }
+  /* Print icon anchor styled to match the sibling .btn buttons — it
+     lives in .row-actions so needs the same shape/spacing. */
+  .btn-print {
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 2rem;
+  }
+  /* Compact square icon buttons for the round start/close toggle.
+     Two tinted variants so the meaning reads at a glance:
+       start (green-ish) — matches 'go' semantics
+       close (amber)     — matches 'wrap up' semantics
+     Both share the same size + font metrics as the neighbouring
+     Rename / Delete buttons so the row stays aligned. */
+  .btn-icon {
+    min-width: 2rem;
+    padding: 0.25rem 0.55rem;
+    font-size: 0.95rem;
+    line-height: 1;
+  }
+  .btn-round-start {
+    background: rgba(76, 175, 80, 0.14);
+    border-color: rgba(76, 175, 80, 0.5);
+    color: #a6dfa9;
+  }
+  .btn-round-start:hover:not(:disabled) {
+    background: rgba(76, 175, 80, 0.22);
+  }
+  .btn-round-close {
+    background: rgba(255, 213, 74, 0.12);
+    border-color: rgba(255, 213, 74, 0.45);
+    color: var(--accent, #ffd54a);
+  }
+  .btn-round-close:hover:not(:disabled) {
+    background: rgba(255, 213, 74, 0.2);
+  }
 
   .dialog {
     position: fixed;

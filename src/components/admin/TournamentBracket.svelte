@@ -517,20 +517,13 @@
         {#if rowsForRound.length === 0}
           <p class="empty">No planned matches in this round yet.</p>
         {:else}
-          <div class="row-actions-top">
-            <!--
-              v3.6.1: print sheet is per-tournament (one page per board),
-              not per-round — the QR sticker is permanent on the board.
-              Umpires scan Board 1's fixed QR every round and get
-              whichever match is currently assigned to that board.
-            -->
-            <a
-              class="print-link"
-              href={`${import.meta.env.BASE_URL}print-bracket/?tournament=${encodeURIComponent(tournament.key)}`}
-              target="_blank"
-              rel="noopener"
-            >🖨 Print board QR stickers</a>
-          </div>
+          <!--
+            v3.6.1: 'Print' moved to a dedicated printer-icon button
+            on the Tournaments row (AdminTournaments.svelte). Rationale:
+            printing produces the tournament PACK — cover sheet + board
+            QR stickers — which is a tournament-level artefact, not a
+            per-round one.
+          -->
           <div class="rowtable-wrap">
             <table class="rowtable">
               <thead>
@@ -978,27 +971,6 @@
     border-color: rgba(239, 83, 80, 0.5);
   }
 
-  .row-actions-top {
-    display: flex;
-    justify-content: flex-end;
-    margin: 0.4rem 0 0.4rem;
-  }
-  .print-link {
-    display: inline-block;
-    padding: 0.35rem 0.75rem;
-    background: rgba(255, 213, 74, 0.08);
-    border: 1px solid rgba(255, 213, 74, 0.35);
-    color: var(--accent, #ffd54a);
-    border-radius: 0.4rem;
-    text-decoration: none;
-    font: inherit;
-    font-size: 0.85rem;
-    font-weight: 700;
-  }
-  .print-link:hover {
-    background: rgba(255, 213, 74, 0.16);
-    border-color: rgba(255, 213, 74, 0.55);
-  }
 
   .footer-actions {
     display: flex;
