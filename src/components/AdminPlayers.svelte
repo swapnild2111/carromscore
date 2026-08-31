@@ -144,17 +144,14 @@
     void tick;
     const q = query.trim().toLowerCase();
     let all = loadAll();
-    // v3.3: organisers see only players they created. Super sees
-    // everything. Reads on /players are public (the home picker
-    // needs them), but the admin list is scoped to "records you can
-    // act on" so the surface isn't noisy with untouchable rows.
-    if (role && !role.isSuper) {
-      if (!role.isOrganiser) {
-        all = [];
-      } else {
-        const myUid = currentUser()?.uid;
-        all = myUid ? all.filter((p) => p.createdBy === myUid) : [];
-      }
+    // v3.6.2: organisers see the FULL roster (everyone's players), not
+    // just their own. Rationale: a name-clash resolution (alias-onto-
+    // existing) needs the organiser to see records they didn't create
+    // as candidates. Row-level actions (rename/delete) stay gated to
+    // canManagePlayer(p) which respects createdBy. Non-organisers still
+    // see nothing — the admin page isn't for them.
+    if (role && !role.isSuper && !role.isOrganiser) {
+      all = [];
     }
     if (!q) return all.slice(0, 200);
     return all
@@ -669,6 +666,17 @@
                 {#if Object.keys(p.aliases).length > 0}
                   <span class="chip">{Object.keys(p.aliases).length} alias{Object.keys(p.aliases).length === 1 ? '' : 'es'}</span>
                 {/if}
+                {#if !manageable}
+                  <!--
+                    v3.6.2: read-only marker so organisers understand
+                    why they see the row without action buttons — this
+                    is another organiser's or super's record. They can
+                    still alias-onto-it from the Add dialog.
+                  -->
+                  <span class="chip chip-readonly" title="Created by another organiser — read-only for you">
+                    read-only
+                  </span>
+                {/if}
               </div>
             </div>
             {#if manageable}
@@ -1155,6 +1163,17 @@
     display: inline-flex;
     align-items: center;
     gap: 0.25rem;
+  }
+  /* Read-only marker for player rows an organiser can't manage
+     (created by another organiser or a super). Muted grey so it
+     doesn't compete with the country chip. */
+  .chip-readonly {
+    color: var(--muted, #9aa0a6);
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(255, 255, 255, 0.12);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 700;
   }
   .row-actions {
     display: flex;
