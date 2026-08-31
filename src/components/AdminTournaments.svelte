@@ -91,12 +91,19 @@
   let editingCountry = $state('');
   // Tournament-level match defaults (v3.6.1). Inherited by every
   // planned match created under this tournament (bracket admin) and
-  // prefills the setup form when the tournament is picked. Empty
-  // string = "not set" (fall back to app defaults, which are
-  // singles / bo1 / target 25 / max 8 boards). Editable in the same
-  // Edit dialog as name/type/country so the organiser configures
-  // everything about the tournament in one place.
-  let editingDefaultMode = $state<'' | 'singles' | 'doubles'>('');
+  // prefills the setup form when the tournament is picked. Always
+  // concrete values in the UI — seeded from the tournament record if
+  // set, else from these fallbacks so the fields never render blank.
+  // Editable in the same Edit dialog as name/type/country so the
+  // organiser configures everything about the tournament in one
+  // place. Umpires can still override per match.
+  const FALLBACK_TOURNAMENT_DEFAULTS = {
+    mode: 'singles' as 'singles' | 'doubles',
+    bestOf: 3,
+    pointsTarget: 25,
+    maxBoards: 8,
+  };
+  let editingDefaultMode = $state<'singles' | 'doubles'>('singles');
   let editingDefaultBestOf = $state<string>('');
   let editingDefaultPointsTarget = $state<string>('');
   let editingDefaultMaxBoards = $state<string>('');
@@ -105,7 +112,7 @@
     type: 'open' | 'closed';
     country: string;
     defaults: {
-      mode: '' | 'singles' | 'doubles';
+      mode: 'singles' | 'doubles';
       bestOf: string;
       pointsTarget: string;
       maxBoards: string;
@@ -331,10 +338,14 @@
     editingName = t.name;
     editingType = t.type ?? 'open';
     editingCountry = t.country ?? '';
-    editingDefaultMode = t.defaults?.mode ?? '';
-    editingDefaultBestOf = t.defaults?.bestOf != null ? String(t.defaults.bestOf) : '';
-    editingDefaultPointsTarget = t.defaults?.pointsTarget != null ? String(t.defaults.pointsTarget) : '';
-    editingDefaultMaxBoards = t.defaults?.maxBoards != null ? String(t.defaults.maxBoards) : '';
+    // Seed with concrete values so the fields never look empty. If the
+    // tournament has no stored default, use the sensible fallback
+    // (bo3 / 25 / 8 / singles) rather than a placeholder — the
+    // organiser sees a real number they can edit directly.
+    editingDefaultMode = t.defaults?.mode ?? FALLBACK_TOURNAMENT_DEFAULTS.mode;
+    editingDefaultBestOf = String(t.defaults?.bestOf ?? FALLBACK_TOURNAMENT_DEFAULTS.bestOf);
+    editingDefaultPointsTarget = String(t.defaults?.pointsTarget ?? FALLBACK_TOURNAMENT_DEFAULTS.pointsTarget);
+    editingDefaultMaxBoards = String(t.defaults?.maxBoards ?? FALLBACK_TOURNAMENT_DEFAULTS.maxBoards);
     editingOriginal = {
       name: t.name,
       type: t.type ?? 'open',
@@ -352,7 +363,7 @@
     editingName = '';
     editingType = 'open';
     editingCountry = '';
-    editingDefaultMode = '';
+    editingDefaultMode = 'singles';
     editingDefaultBestOf = '';
     editingDefaultPointsTarget = '';
     editingDefaultMaxBoards = '';
@@ -376,25 +387,28 @@
     const countryNext = editingCountry;
     const countryChanged = countryNext !== editingOriginal.country;
 
-    // Parse + validate defaults. Empty string = clear the field (null
-    // patch), else the parsed number must fit the RTDB validate range.
+    // Parse + validate defaults. Every field must be a concrete
+    // number now (blank fields are a UI regression, not a "clear"
+    // command). The parsed number must fit the RTDB validate range.
     type DefaultsPatch = {
-      mode?: 'singles' | 'doubles' | null;
-      bestOf?: number | null;
-      pointsTarget?: number | null;
-      maxBoards?: number | null;
+      mode?: 'singles' | 'doubles';
+      bestOf?: number;
+      pointsTarget?: number;
+      maxBoards?: number;
     };
     const defaultsPatch: DefaultsPatch = {};
-    const modeOrig = editingOriginal.defaults.mode;
-    if (editingDefaultMode !== modeOrig) {
-      defaultsPatch.mode = editingDefaultMode === '' ? null : editingDefaultMode;
+    if (editingDefaultMode !== editingOriginal.defaults.mode) {
+      defaultsPatch.mode = editingDefaultMode;
     }
-    function parseIntField(raw: string, min: number, max: number, label: string): number | null | undefined {
-      if (raw === '') return null;
+    function parseIntField(raw: string, min: number, max: number, label: string): number | undefined {
+      if (raw === '' || raw == null) {
+        flash('err', `${label} is required`);
+        return undefined;
+      }
       const n = Number(raw);
       if (!Number.isFinite(n) || Math.floor(n) !== n || n < min || n > max) {
         flash('err', `${label} must be between ${min} and ${max}`);
-        return undefined; // sentinel for "invalid"
+        return undefined;
       }
       return n;
     }
@@ -1147,9 +1161,8 @@
         <fieldset class="defaults-grid">
           <legend>Match defaults</legend>
           <p class="defaults-hint">
-            Prefills matches created under this tournament. Leave a
-            field blank to use the app default. Umpires can still
-            override per match.
+            Prefills matches created under this tournament. Umpires
+            can still override per match.
           </p>
           <label class="edit-field">
             <span>Mode</span>
@@ -1158,7 +1171,6 @@
               disabled={saving}
               aria-label="Default mode"
             >
-              <option value="">(app default — singles)</option>
               <option value="singles">Singles</option>
               <option value="doubles">Doubles</option>
             </select>
@@ -1171,7 +1183,6 @@
               max="15"
               step="1"
               bind:value={editingDefaultBestOf}
-              placeholder="app default (1)"
               disabled={saving}
               aria-label="Default best of"
             />
@@ -1184,7 +1195,6 @@
               max="100"
               step="1"
               bind:value={editingDefaultPointsTarget}
-              placeholder="app default (25)"
               disabled={saving}
               aria-label="Default points target"
             />
@@ -1197,7 +1207,6 @@
               max="50"
               step="1"
               bind:value={editingDefaultMaxBoards}
-              placeholder="app default (8)"
               disabled={saving}
               aria-label="Default max boards"
             />
