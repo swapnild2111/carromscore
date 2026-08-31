@@ -134,7 +134,15 @@
   // Tournament record (name, type, country, defaults). Nudged by
   // tournamentTick. Falls back to a minimal shim when the record
   // isn't in the local mirror yet.
-  const tournament = $derived<Tournament | null>(() => {
+  //
+  // NOTE (v3.6.2 fix, 2026-08-31): use `$derived.by(fn)` for anything
+  // whose body needs to run at derive time; `$derived(() => …)` in
+  // Svelte 5 stores the ARROW as the value (not its return), which
+  // caused a runtime 'a(...) is not a function' when the template
+  // referenced the derived under paths where Svelte's compiler had
+  // already auto-invoked the getter. `.by(fn)` is the explicit
+  // "call fn every time deps change" form.
+  const tournament = $derived.by<Tournament | null>(() => {
     void tournamentTick;
     if (!tournamentKey) return null;
     return loadAllTournaments().find((t) => t.key === tournamentKey) ?? null;
@@ -145,7 +153,7 @@
   // roster section for a closed tournament, which is safer than a
   // partial list.
   $effect(() => {
-    const t = tournament();
+    const t = tournament;
     if (!t || t.type !== 'closed') {
       assignedIds = new Set();
       return;
@@ -163,10 +171,10 @@
   // records, each attempted to resolve against /players for a
   // country pill.
   type RosterRow = { name: string; country?: string };
-  const roster = $derived<RosterRow[]>(() => {
+  const roster = $derived.by<RosterRow[]>(() => {
     void playerTick;
     void tournamentTick;
-    const t = tournament();
+    const t = tournament;
     if (!t) return [];
     const players: Player[] = loadAllPlayersFn();
     const byId = new Map(players.map((p) => [p.id, p]));
@@ -209,7 +217,7 @@
 
   // Board numbers to print: union of all `board` values across
   // rounds, then filled 1..max so gaps still print a sticker.
-  const boards = $derived<number[]>(() => {
+  const boards = $derived.by<number[]>(() => {
     let max = 0;
     for (const m of plannedMatches) {
       if (m.board && m.board >= 1 && m.board <= 99 && m.board > max) {
@@ -231,7 +239,7 @@
   })();
   $effect(() => {
     if (!tournamentKey) return;
-    for (const b of boards()) {
+    for (const b of boards) {
       if (qrByBoard[b]) continue;
       const url = `${scanBase}?tournament=${encodeURIComponent(tournamentKey)}&board=${b}`;
       void qrToSVG(url, 400).then((svg) => {
@@ -243,8 +251,8 @@
   // Human-readable config line for the cover page. Uses the same
   // fallbacks that AdminTournaments seeds new tournaments with when
   // a field is missing (bo3 / 25 / 8 / singles).
-  const configLine = $derived<string>(() => {
-    const d = tournament()?.defaults ?? {};
+  const configLine = $derived.by<string>(() => {
+    const d = tournament?.defaults ?? {};
     const mode = d.mode === 'doubles' ? 'Doubles' : 'Singles';
     const bo = d.bestOf ?? 3;
     const pts = d.pointsTarget ?? 25;
@@ -254,7 +262,7 @@
   });
 
   const tournamentName = $derived<string>(
-    tournament()?.name ?? plannedMatches[0]?.tournament ?? tournamentKey,
+    tournament?.name ?? plannedMatches[0]?.tournament ?? tournamentKey,
   );
 
   // Match count for the cover — reads directly from the /planned
@@ -276,7 +284,7 @@
       No matches planned yet for <strong>{tournamentKey}</strong>.
       Open the tournament's Bracket and add matches first.
     </p>
-  {:else if boards().length === 0}
+  {:else if boards.length === 0}
     <p class="hint">
       Matches exist but none have a board number assigned. Edit each
       bracket row and set a Board (1..99), then come back and print.
@@ -299,10 +307,10 @@
       <div class="cover-hdr">
         <p class="brand">Carromscore</p>
         <h1 class="cover-name">{tournamentName}</h1>
-        {#if tournament()?.country}
+        {#if tournament?.country}
           <p class="cover-country">
-            <span aria-hidden="true">{flagEmoji(tournament()?.country ?? '')}</span>
-            {countryName(tournament()?.country ?? '')}
+            <span aria-hidden="true">{flagEmoji(tournament?.country ?? '')}</span>
+            {countryName(tournament?.country ?? '')}
           </p>
         {/if}
       </div>
@@ -310,34 +318,34 @@
       <div class="cover-meta">
         <div class="meta-row">
           <span class="meta-label">Format</span>
-          <span class="meta-value">{configLine()}</span>
+          <span class="meta-value">{configLine}</span>
         </div>
         <div class="meta-row">
           <span class="meta-label">Type</span>
           <span class="meta-value">
-            {tournament()?.type === 'closed' ? 'Invite-only (assigned roster)' : 'Open'}
+            {tournament?.type === 'closed' ? 'Invite-only (assigned roster)' : 'Open'}
           </span>
         </div>
         <div class="meta-row">
           <span class="meta-label">Boards</span>
-          <span class="meta-value">{boards().length}</span>
+          <span class="meta-value">{boards.length}</span>
         </div>
         <div class="meta-row">
           <span class="meta-label">Matches</span>
-          <span class="meta-value">{matchCount()}</span>
+          <span class="meta-value">{matchCount}</span>
         </div>
         <div class="meta-row">
           <span class="meta-label">Players</span>
-          <span class="meta-value">{roster().length}</span>
+          <span class="meta-value">{roster.length}</span>
         </div>
       </div>
 
-      {#if roster().length > 0}
+      {#if roster.length > 0}
         <h2 class="cover-section">
-          Players ({roster().length})
+          Players ({roster.length})
         </h2>
         <ol class="roster">
-          {#each roster() as p (p.name)}
+          {#each roster as p (p.name)}
             <li class="roster-row">
               <span class="roster-name">{p.name}</span>
               {#if p.country && p.country !== 'Unknown'}
@@ -355,7 +363,7 @@
     </section>
 
     <!-- ─── BOARD PAGES (one per physical board) ─────────────────── -->
-    {#each boards() as b (b)}
+    {#each boards as b (b)}
       <section class="page board-page">
         <div class="hdr">
           <p class="tour">{tournamentName}</p>
