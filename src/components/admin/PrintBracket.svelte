@@ -51,6 +51,10 @@
   let plannedMatches = $state<PlannedMatch[]>([]);
   let unsub: (() => void) | null = null;
   let ready = $state(false);
+  // Error surface when the RTDB fetch stalls or the tournament key
+  // can't be found. Prevents the print page from hanging on the
+  // 'Loading…' text forever if something upstream is wrong.
+  let loadError = $state<string | null>(null);
 
   // Reactive ticks — nudge derivations when the tournament and
   // player stores refresh from Firebase, without threading the raw
@@ -74,16 +78,56 @@
     void subscribePlayers();
     const unsubT = subscribeTournamentStore(() => (tournamentTick += 1));
     const unsubP = subscribePlayerStore(() => (playerTick += 1));
+    // Belt-and-braces load path (v3.6.2 fix): do a one-shot get()
+    // against /planned so the page renders even if the onValue
+    // subscription can't fire (misconfigured rules, malformed
+    // legacy record throwing in the callback, etc.). Then attach
+    // the subscription on top for live updates when boards are
+    // added/removed. Either data source flips `ready`.
+    (async () => {
+      try {
+        const [{ getDatabase, ref, get }, { firebaseApp }] = await Promise.all([
+          import('firebase/database'),
+          import('../../lib/firebase'),
+        ]);
+        const db = getDatabase(firebaseApp());
+        const snap = await get(ref(db, 'planned'));
+        const raw = snap.val() as Record<string, Omit<PlannedMatch, 'mid'>> | null;
+        const out: PlannedMatch[] = [];
+        if (raw) {
+          for (const [mid, v] of Object.entries(raw)) {
+            if (!v || typeof v !== 'object') continue;
+            if (v.tournamentKey !== tournamentKey) continue;
+            out.push({ mid, ...v });
+          }
+        }
+        plannedMatches = out;
+        ready = true;
+      } catch (err) {
+        loadError = err instanceof Error ? err.message : String(err);
+        ready = true;
+      }
+    })();
     (async () => {
       unsub = await subscribePlannedByTournament(tournamentKey, (arr) => {
         plannedMatches = arr;
         ready = true;
       });
     })();
+    // Safety timeout — if neither the get nor the subscribe fired
+    // within 8s, stop showing Loading… and surface a hint so the
+    // user knows something is wrong (network, rules, key typo).
+    const timeoutId = window.setTimeout(() => {
+      if (!ready) {
+        loadError = 'Timed out reading /planned. Check your connection and the tournament key.';
+        ready = true;
+      }
+    }, 8000);
     return () => {
       unsub?.();
       unsubT();
       unsubP();
+      window.clearTimeout(timeoutId);
     };
   });
 
@@ -223,10 +267,19 @@
     <p class="hint">Provide a <code>?tournament=&lt;key&gt;</code> URL param.</p>
   {:else if !ready}
     <p class="hint">Loading…</p>
+  {:else if loadError}
+    <p class="hint">
+      Couldn't load this tournament's bracket. {loadError}
+    </p>
+  {:else if plannedMatches.length === 0}
+    <p class="hint">
+      No matches planned yet for <strong>{tournamentKey}</strong>.
+      Open the tournament's Bracket and add matches first.
+    </p>
   {:else if boards().length === 0}
     <p class="hint">
-      No boards assigned yet. Add matches to the bracket with a board
-      number, then come back and print.
+      Matches exist but none have a board number assigned. Edit each
+      bracket row and set a Board (1..99), then come back and print.
     </p>
   {:else}
     <div class="print-actions no-print">

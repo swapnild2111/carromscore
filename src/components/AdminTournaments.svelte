@@ -36,6 +36,7 @@
     addRound,
     renameRound,
     setRoundState,
+    startRound,
     deleteRound,
     countMatchesByRoundKey,
     type Round,
@@ -900,11 +901,29 @@
     }
   }
 
-  async function toggleRoundState(r: Round) {
+  /**
+   * ▶ Start round handler (v3.6.2). Stamps `startedAt = now` on the
+   * round record. UI-wise this flips the round from 'pending' to
+   * 'running' — Start disables, Close enables. Close is terminal
+   * (no Reopen); the organiser can create a fresh round later if
+   * they need to score more matches under a new label.
+   */
+  async function startSelectedRound(r: Round) {
     if (!roundsKey) return;
-    const next = r.state === 'closed' ? 'open' : 'closed';
     roundsSaving = true;
-    const outcome = await setRoundState(roundsKey, r.key, next);
+    const outcome = await startRound(roundsKey, r.key);
+    roundsSaving = false;
+    if (!outcome.ok) flash('err', outcome.error);
+    else flash('ok', `${r.name} started`);
+  }
+  async function closeSelectedRound(r: Round) {
+    if (!roundsKey) return;
+    // Terminal action — confirm so an organiser doesn't lose the
+    // 'running' state to an accidental tap.
+    // eslint-disable-next-line no-alert
+    if (!window.confirm(`Close ${r.name}? This can't be undone — a closed round can't be reopened.`)) return;
+    roundsSaving = true;
+    const outcome = await setRoundState(roundsKey, r.key, 'closed');
     roundsSaving = false;
     if (!outcome.ok) flash('err', outcome.error);
   }
@@ -1619,6 +1638,14 @@
                         <span class="chip chip-closed" title="Closed — not offered to umpires">
                           CLOSED
                         </span>
+                      {:else if r.startedAt}
+                        <span class="chip chip-running" title="Running — umpires can start matches under this round">
+                          RUNNING
+                        </span>
+                      {:else}
+                        <span class="chip chip-pending" title="Pending — hit ▶ Start to activate for umpires">
+                          PENDING
+                        </span>
                       {/if}
                     </div>
                   </div>
@@ -1630,26 +1657,39 @@
                       disabled={roundsSaving}
                     >Rename</button>
                     <!--
-                      v3.6.2: iconify the state toggle so the two
-                      lifecycle actions read clearly at a glance:
-                        ▶ Start round  (round was closed — reopen it
-                                        to matches; umpires can score
-                                        under this round tag again)
-                        ⏹ Close round  (round is done — hide from new
-                                        matches; keeps history intact)
-                      Same setRoundState call underneath, just clearer
-                      labelling. Icon + hidden text keeps it accessible.
+                      v3.6.2: three-state round lifecycle with two
+                      dedicated buttons (media-player style):
+                        ▶ Start   — enabled only when pending
+                                    (state='open' AND !startedAt)
+                        ⏹ Close   — enabled only when running
+                                    (state='open' AND startedAt)
+                      Close is terminal; there's no Reopen. Closed
+                      rounds show neither button. If the organiser
+                      needs to score more matches after closing, they
+                      add a fresh round with a new label.
+                      Legacy rounds (created pre-v3.6.2) have no
+                      startedAt, so they render as pending — the
+                      organiser can either start them (records
+                      startedAt=now) or close them directly.
                     -->
-                    <button
-                      type="button"
-                      class="btn btn-icon"
-                      class:btn-round-start={r.state === 'closed'}
-                      class:btn-round-close={r.state !== 'closed'}
-                      onclick={() => toggleRoundState(r)}
-                      disabled={roundsSaving}
-                      aria-label={r.state === 'closed' ? 'Start round' : 'Close round'}
-                      title={r.state === 'closed' ? 'Start round — reopen so umpires can pick it' : 'Close round — no new matches, history preserved'}
-                    >{r.state === 'closed' ? '▶' : '⏹'}</button>
+                    {#if r.state !== 'closed'}
+                      <button
+                        type="button"
+                        class="btn btn-icon btn-round-start"
+                        onclick={() => startSelectedRound(r)}
+                        disabled={roundsSaving || !!r.startedAt}
+                        aria-label="Start round"
+                        title={r.startedAt ? 'Round already started' : 'Start round — umpires can score under it now'}
+                      >▶</button>
+                      <button
+                        type="button"
+                        class="btn btn-icon btn-round-close"
+                        onclick={() => closeSelectedRound(r)}
+                        disabled={roundsSaving || !r.startedAt}
+                        aria-label="Close round"
+                        title={!r.startedAt ? 'Round not started yet' : 'Close round — terminal, no reopen'}
+                      >⏹</button>
+                    {/if}
                     <button
                       type="button"
                       class="btn btn-danger btn-icon"
@@ -1919,6 +1959,26 @@
     color: var(--accent, #ffd54a);
     background: rgba(255, 213, 74, 0.16);
     border-color: rgba(255, 213, 74, 0.4);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 700;
+  }
+  /* v3.6.2: round lifecycle status chips. Pending = muted grey
+     (waiting), running = green (live), closed = amber (terminal,
+     already defined above). Match the button tints so status pill
+     and action button read as the same colour language. */
+  .chip-pending {
+    color: var(--muted, #9aa0a6);
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.14);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 700;
+  }
+  .chip-running {
+    color: #a6dfa9;
+    background: rgba(76, 175, 80, 0.14);
+    border-color: rgba(76, 175, 80, 0.45);
     text-transform: uppercase;
     letter-spacing: 0.05em;
     font-weight: 700;
@@ -2219,14 +2279,25 @@
   }
   .btn-danger:hover:not(:disabled) { background: rgba(239, 83, 80, 0.22); }
   .btn-sm { padding: 0.25rem 0.6rem; font-size: 0.75rem; }
-  /* Print icon anchor styled to match the sibling .btn buttons — it
-     lives in .row-actions so needs the same shape/spacing. */
+  /* Print icon anchor: highlighted accent button so it visibly reads
+     as the tournament's primary output action (organiser thinks:
+     'I'm ready — print the pack'). Same shape as sibling .btn
+     buttons but with the accent tint the row uses for tournament
+     name affordances. */
   .btn-print {
     text-decoration: none;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     min-width: 2rem;
+    background: rgba(255, 213, 74, 0.14);
+    border-color: rgba(255, 213, 74, 0.55);
+    color: var(--accent, #ffd54a);
+    font-weight: 700;
+  }
+  .btn-print:hover:not(:disabled) {
+    background: rgba(255, 213, 74, 0.24);
+    border-color: var(--accent, #ffd54a);
   }
   /* Compact square icon buttons for the round start/close toggle.
      Two tinted variants so the meaning reads at a glance:

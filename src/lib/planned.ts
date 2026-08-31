@@ -304,8 +304,14 @@ export async function subscribePlannedByTournament(
         out.push({ mid, ...v });
       }
       out.sort((a, b) => {
-        // Group by round then matchOrder for a stable list.
-        if (a.roundKey !== b.roundKey) return a.roundKey.localeCompare(b.roundKey);
+        // Group by round then matchOrder for a stable list. Coerce
+        // to '' when a legacy record is missing roundKey — otherwise
+        // .localeCompare on `undefined` throws and kills the whole
+        // subscription callback (symptom: PrintBracket stuck on
+        // 'Loading…' because `ready` never flips).
+        const ak = a.roundKey ?? '';
+        const bk = b.roundKey ?? '';
+        if (ak !== bk) return ak.localeCompare(bk);
         return (a.matchOrder ?? 0) - (b.matchOrder ?? 0);
       });
       cb(out);

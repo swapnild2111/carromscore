@@ -97,6 +97,7 @@
             "order":     { ".validate": "newData.isNumber()" },
             "state":     { ".validate": "newData.isString() && (newData.val() == 'open' || newData.val() == 'closed')" },
             "createdAt": { ".validate": "newData.isNumber()" },
+            "startedAt": { ".validate": "newData.isNumber() && newData.val() >= 0" },
             "$other":    { ".validate": false }
           }
         },

@@ -86,6 +86,19 @@ export type Round = {
   order: number;           // 1-indexed display order (R16=1, QF=2, …)
   state: 'open' | 'closed';
   createdAt: number;
+  /**
+   * Epoch ms when the organiser hit ▶ Start on this round. Absent
+   * means the round is still pending (created but not started yet).
+   * Combined with `state` this yields a three-state lifecycle in
+   * the UI:
+   *   - pending: state='open' AND !startedAt   (▶ enabled, ⏹ disabled)
+   *   - running: state='open' AND startedAt    (▶ disabled, ⏹ enabled)
+   *   - closed:  state='closed'                 (terminal — no reopen)
+   * Rounds from v3.6.1 and earlier never carry startedAt; the UI
+   * treats them as pending (organiser can start or close manually).
+   * Added 2026-08-31.
+   */
+  startedAt?: number;
 };
 
 /** Meta arg accepted by createOrTouchTournament for v3.1+. */
@@ -323,7 +336,18 @@ function parseRounds(raw: unknown): Round[] | undefined {
     const order = typeof v.order === 'number' && Number.isFinite(v.order) ? v.order : 0;
     const state = v.state === 'closed' ? 'closed' : 'open';
     const createdAt = typeof v.createdAt === 'number' ? v.createdAt : 0;
-    rounds.push({ key, name, order, state, createdAt });
+    const startedAt =
+      typeof v.startedAt === 'number' && Number.isFinite(v.startedAt)
+        ? v.startedAt
+        : undefined;
+    rounds.push({
+      key,
+      name,
+      order,
+      state,
+      createdAt,
+      ...(startedAt !== undefined ? { startedAt } : {}),
+    });
   }
   // Sort by `order` ascending — that's the display order both in
   // History (R16 → QF → SF → F) and in the setup round picker.
@@ -1226,6 +1250,53 @@ export async function addRound(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return { ok: false, error: msg || 'Add round failed' };
+  }
+}
+
+/**
+ * Mark a round as started by stamping `startedAt = now`. Idempotent
+ * — a subsequent call refreshes the timestamp. Called by the ▶
+ * Start button on the round row (v3.6.2). Rounds without a
+ * startedAt render as 'pending' in the admin UI; rounds with one
+ * render as 'running' until the organiser closes them.
+ */
+export async function startRound(
+  tournamentKey: string,
+  roundKey: string,
+): Promise<TournamentWriteOutcome> {
+  if (!tournamentKey || !roundKey)
+    return { ok: false, error: 'Missing tournament or round key' };
+  try {
+    const [{ firebaseApp }, { getDatabase, ref, update }] = await Promise.all([
+      import('./firebase'),
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    const startedAt = Date.now();
+    // Also ensure state=open — a round can't be running and closed
+    // at the same time. This is a no-op if the round is already open.
+    await update(ref(db, `tournaments/${tournamentKey}/rounds/${roundKey}`), {
+      startedAt,
+      state: 'open',
+    });
+    const local = memoryStore.find((t) => t.key === tournamentKey);
+    if (local?.rounds) {
+      const r = local.rounds.find((x) => x.key === roundKey);
+      if (r) {
+        r.startedAt = startedAt;
+        r.state = 'open';
+        notify();
+      }
+    }
+    void logAudit({
+      action: 'round.start',
+      path: `tournaments/${tournamentKey}/rounds/${roundKey}`,
+      after: { startedAt },
+    });
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg || 'Start round failed' };
   }
 }
 
