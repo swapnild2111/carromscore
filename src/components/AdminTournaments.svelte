@@ -184,17 +184,68 @@
     bracketKey = null;
   }
 
+  // Per-tournament counts shown on the row action buttons (2026-08-31).
+  // Populated by the /planned subscription below (once, at mount) and
+  // by lazy loadAssignedPlayers calls per closed tournament in the
+  // visible list. Both are advisory — an absent count just omits the
+  // '(N)' suffix on the button.
+  let plannedCountByKey = $state<Record<string, number>>({});
+  let assignedCountByKey = $state<Record<string, number>>({});
+  let unsubPlannedGlobal: (() => void) | null = null;
+
   onMount(() => {
     void subscribeTournaments();
     void subscribePlayers();
     const unsub = subscribeStore(() => (tick += 1));
     const unsubRole = subscribeCurrentUserRole((r) => (role = r));
     const unsubPlayers = subscribePlayersStore(() => (playersTick += 1));
+    // /planned tree is small (a few dozen active matches at most) —
+    // client-side aggregation is cheap. onValue keeps counts fresh as
+    // matches are added / claimed / deleted.
+    (async () => {
+      const [{ getDatabase, ref, onValue }, { firebaseApp }] = await Promise.all([
+        import('firebase/database'),
+        import('../lib/firebase'),
+      ]);
+      const db = getDatabase(firebaseApp());
+      unsubPlannedGlobal = onValue(ref(db, 'planned'), (snap) => {
+        const raw = snap.val() as Record<string, { tournamentKey?: string }> | null;
+        const counts: Record<string, number> = {};
+        if (raw) {
+          for (const v of Object.values(raw)) {
+            if (!v || typeof v !== 'object') continue;
+            const k = v.tournamentKey;
+            if (!k) continue;
+            counts[k] = (counts[k] ?? 0) + 1;
+          }
+        }
+        plannedCountByKey = counts;
+      });
+    })();
     return () => {
       unsub();
       unsubRole();
       unsubPlayers();
+      unsubPlannedGlobal?.();
     };
+  });
+
+  // Lazy-load assigned-player counts for closed tournaments in the
+  // current filtered list. Runs whenever the list changes. Ignores
+  // errors silently (missing count just hides the '(N)' suffix).
+  $effect(() => {
+    const seen = new Set<string>();
+    for (const t of filtered()) {
+      if (t.type !== 'closed') continue;
+      if (assignedCountByKey[t.key] !== undefined) continue;
+      if (seen.has(t.key)) continue;
+      seen.add(t.key);
+      void loadAssignedPlayers(t.key).then((set) => {
+        assignedCountByKey = { ...assignedCountByKey, [t.key]: set.size };
+      }).catch(() => {
+        // silent — count just stays absent
+      });
+    }
   });
 
   const list = $derived(() => {
@@ -857,7 +908,23 @@
             <span class="row-check row-check-spacer" aria-hidden="true"></span>
           {/if}
             <div class="row-name">
-              <div class="row-name-text">{t.name}</div>
+              <!--
+                Clicking the tournament name opens the rename / settings
+                dialog. This matches the direct-manipulation shape the
+                user asked for (2026-08-31): name is the affordance for
+                metadata; sibling buttons open Players / Rounds /
+                Bracket in their own modals.
+              -->
+              {#if canManageTournament(t)}
+                <button
+                  type="button"
+                  class="row-name-btn"
+                  onclick={() => startEdit(t)}
+                  title="Rename, change type, edit defaults"
+                >{t.name}</button>
+              {:else}
+                <div class="row-name-text">{t.name}</div>
+              {/if}
               <div class="row-name-meta">
                 {#if t.type === 'closed'}
                   <span class="chip chip-type chip-invite" title="Invite-only — assigned-roster tournament, country-scoped">
@@ -878,12 +945,40 @@
             </div>
             {#if canManageTournament(t)}
               <div class="row-actions">
-                <button type="button" class="btn btn-primary" onclick={() => startEdit(t)}>Edit</button>
+                <!--
+                  Per-row Players / Rounds / Bracket direct-launch
+                  buttons (2026-08-31). Each opens its own modal in
+                  isolation — no longer nested inside an outer 'Edit
+                  tournament' dialog. Count suffix keeps the buttons
+                  self-describing at a glance.
+                -->
+                {#if t.type === 'closed'}
+                  <button
+                    type="button"
+                    class="btn"
+                    onclick={() => startAssign(t)}
+                    title="Assigned players (invite-only)"
+                  >Players{assignedCountByKey[t.key] !== undefined ? ` (${assignedCountByKey[t.key]})` : ''}</button>
+                {/if}
+                <button
+                  type="button"
+                  class="btn"
+                  onclick={() => startRounds(t)}
+                  title="Add / rename rounds"
+                >Rounds{t.rounds && t.rounds.length > 0 ? ` (${t.rounds.length})` : ''}</button>
+                <button
+                  type="button"
+                  class="btn"
+                  onclick={() => startBracket(t)}
+                  title="Add matches to bracket, print board QR stickers"
+                >Bracket{plannedCountByKey[t.key] !== undefined && plannedCountByKey[t.key] > 0 ? ` (${plannedCountByKey[t.key]})` : ''}</button>
                 <button
                   type="button"
                   class="btn btn-danger"
                   onclick={() => startDelete(t.key)}
-                >Delete</button>
+                  aria-label="Delete tournament"
+                  title="Delete tournament"
+                >🗑</button>
               </div>
             {/if}
         </li>
@@ -905,34 +1000,12 @@
         <h3>Edit tournament</h3>
 
         <!--
-          v3.3: absorb the standalone Rounds and Players affordances
-          into the Edit dialog as launch buttons. Each opens the
-          existing modal on top of this one — nested dialogs are fine
-          per the existing pattern (see Delete confirmation inside
-          Rounds modal). Cancel here still closes both.
+          v3.6.1: Rounds / Bracket / Assigned players are now direct
+          row buttons on the tournament list (no longer nested here).
+          This dialog focuses on the tournament's own metadata: name,
+          type, country, and defaults. The row buttons open their
+          respective modals side-by-side, not stacked.
         -->
-        <div class="edit-section-nav">
-          <button
-            type="button"
-            class="btn"
-            onclick={() => editingTournament && startRounds(editingTournament)}
-            disabled={saving || !editingTournament}
-          >Rounds{editingTournament?.rounds && editingTournament.rounds.length > 0 ? ` (${editingTournament.rounds.length})` : ''}</button>
-          <button
-            type="button"
-            class="btn"
-            onclick={() => editingTournament && startBracket(editingTournament)}
-            disabled={saving || !editingTournament}
-          >Bracket</button>
-          {#if editingType === 'closed' && editingTournament}
-            <button
-              type="button"
-              class="btn"
-              onclick={() => startAssign(editingTournament)}
-              disabled={saving}
-            >Assigned players</button>
-          {/if}
-        </div>
 
         <label class="edit-field">
           <span>Name</span>
@@ -1571,6 +1644,37 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  /* Row-name button: same visual as the text version but clickable to
+     open the rename / settings dialog. Underline on hover signals the
+     affordance without adding a separate 'Edit' pill. Uses the same
+     ellipsis rules so long names don't blow the row wide. */
+  .row-name-btn {
+    background: transparent;
+    border: 0;
+    padding: 0;
+    color: var(--fg);
+    font: inherit;
+    font-weight: 600;
+    font-size: 0.95rem;
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+    display: block;
+  }
+  .row-name-btn:hover {
+    color: var(--accent, #ffd54a);
+    text-decoration: underline;
+    text-underline-offset: 0.15em;
+  }
+  .row-name-btn:focus-visible {
+    outline: 2px solid rgba(255, 213, 74, 0.6);
+    outline-offset: 2px;
+    border-radius: 0.2rem;
   }
   .row-name-meta {
     display: flex;
