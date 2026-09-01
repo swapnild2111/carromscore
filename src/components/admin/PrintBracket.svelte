@@ -349,27 +349,33 @@
     </p>
   {:else}
     <div class="print-actions no-print">
-      <div class="print-mode-toggle">
-        <span class="mode-toggle-label">QR type:</span>
-        <button
-          type="button"
-          class="mode-chip"
-          class:mode-chip-on={qrMode === 'board'}
-          onclick={() => setQrMode('board')}
-        >Per board</button>
-        <button
-          type="button"
-          class="mode-chip"
-          class:mode-chip-on={qrMode === 'match'}
-          onclick={() => setQrMode('match')}
-        >Per match</button>
+      <div class="print-toolbar">
+        <div class="qr-type-group" role="group" aria-label="QR type">
+          <span class="qr-type-label">QR type</span>
+          <div class="seg-ctrl">
+            <button
+              type="button"
+              class="seg-btn"
+              class:seg-active={qrMode === 'board'}
+              aria-pressed={qrMode === 'board'}
+              onclick={() => setQrMode('board')}
+            >Per board</button>
+            <button
+              type="button"
+              class="seg-btn"
+              class:seg-active={qrMode === 'match'}
+              aria-pressed={qrMode === 'match'}
+              onclick={() => setQrMode('match')}
+            >Per match</button>
+          </div>
+        </div>
+        <button type="button" class="print-btn" onclick={() => window.print()}>🖨 Print</button>
       </div>
-      <button type="button" onclick={() => window.print()}>🖨 Print</button>
       <p class="hint">
         {#if qrMode === 'board'}
-          Page 1 is the tournament cover. Following pages are board stickers — cut out and stick to each physical board. Same QR used every round.
+          Board stickers — permanent QR per board, same every round. Cut out and stick to each physical board.
         {:else}
-          Page 1 is the tournament cover. Following pages show each match with its QR — cut out and place at the board for that match.
+          Match cards — one QR per match. Cut out and place at the board for that match.
         {/if}
       </p>
     </div>
@@ -546,45 +552,74 @@
   .print-actions {
     background: #f8f8f8;
     border: 1px dashed #bbb;
-    padding: 1rem;
-    text-align: center;
+    border-radius: 0.5rem;
+    padding: 0.9rem 1rem 0.75rem;
     margin-bottom: 1rem;
   }
-  .print-actions button {
-    background: #ffd54a;
-    border: 1px solid #b8990a;
-    padding: 0.6rem 1.4rem;
-    font-size: 1rem;
-    font-weight: 700;
-    border-radius: 0.4rem;
-    cursor: pointer;
-  }
-  .print-actions button:hover { background: #ffe07a; }
-  .print-actions .hint { padding: 0.75rem 0 0; color: #666; }
-  .print-mode-toggle {
-    display: inline-flex;
+  .print-toolbar {
+    display: flex;
     align-items: center;
-    gap: 0.4rem;
-    margin-bottom: 0.75rem;
-    flex-wrap: wrap;
     justify-content: center;
+    gap: 1rem;
+    flex-wrap: wrap;
   }
-  .mode-toggle-label { font-size: 0.9rem; color: #555; font-weight: 600; }
-  .mode-chip {
-    padding: 0.3rem 0.8rem;
-    border: 1px solid #bbb;
-    border-radius: 1rem;
-    background: #fff;
-    color: #333;
-    font-size: 0.85rem;
-    cursor: pointer;
-    font-weight: 500;
+  .qr-type-group {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
   }
-  .mode-chip-on {
-    background: #ffd54a;
-    border-color: #b8990a;
+  .qr-type-label {
+    font-size: 0.78rem;
     font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: #666;
+  }
+  /* Segmented control */
+  .seg-ctrl {
+    display: inline-flex;
+    background: #e8e8e8;
+    border: 1px solid #ccc;
+    border-radius: 999px;
+    padding: 3px;
+    gap: 2px;
+  }
+  .seg-btn {
+    padding: 0.3rem 0.9rem;
+    border: none;
+    border-radius: 999px;
+    background: transparent;
+    color: #555;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+    white-space: nowrap;
+  }
+  .seg-btn:hover:not(.seg-active) { background: rgba(0,0,0,0.06); color: #222; }
+  .seg-active {
+    background: #ffd54a;
     color: #000;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.18);
+  }
+  /* Print action button — visually distinct from the selector */
+  .print-btn {
+    background: #222;
+    color: #fff;
+    border: none;
+    padding: 0.45rem 1.2rem;
+    font-size: 0.95rem;
+    font-weight: 700;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .print-btn:hover { background: #000; }
+  .print-actions .hint {
+    padding: 0.6rem 0 0;
+    color: #666;
+    font-size: 0.82rem;
+    text-align: center;
   }
 
   .page {
