@@ -268,6 +268,41 @@
   // Match count for the cover — reads directly from the /planned
   // subscription so it reflects every round.
   const matchCount = $derived<number>(plannedMatches.length);
+
+  // Rounds + matches grouped for the schedule section. Each entry has
+  // the round display name, order, and its matches sorted by matchOrder.
+  type ScheduleRound = {
+    roundKey: string;
+    roundName: string;
+    order: number;
+    matches: PlannedMatch[];
+  };
+  const schedule = $derived.by<ScheduleRound[]>(() => {
+    void tournamentTick;
+    const byRound = new Map<string, ScheduleRound>();
+    for (const m of plannedMatches) {
+      if (!m.roundKey) continue;
+      if (!byRound.has(m.roundKey)) {
+        // Try to get display name + order from the tournament record's rounds array.
+        const t = tournament;
+        const r = t?.rounds?.find((rx) => rx.key === m.roundKey);
+        byRound.set(m.roundKey, {
+          roundKey: m.roundKey,
+          roundName: r?.name ?? m.round ?? m.roundKey,
+          order: r?.order ?? 0,
+          matches: [],
+        });
+      }
+      byRound.get(m.roundKey)!.matches.push(m);
+    }
+    // Sort matches within each round by matchOrder, then sort rounds by order.
+    const out = [...byRound.values()];
+    for (const r of out) {
+      r.matches.sort((a, b) => (a.matchOrder ?? 0) - (b.matchOrder ?? 0));
+    }
+    out.sort((a, b) => a.order - b.order);
+    return out;
+  });
 </script>
 
 <div class="print-wrap">
@@ -359,6 +394,39 @@
         </ol>
       {:else}
         <p class="cover-empty">No players registered yet.</p>
+      {/if}
+
+      {#if schedule.length > 0}
+        <h2 class="cover-section" style="margin-top:1.4rem">
+          Schedule ({matchCount} {matchCount === 1 ? 'match' : 'matches'})
+        </h2>
+        {#each schedule as round (round.roundKey)}
+          <div class="sched-round">
+            <p class="sched-round-name">{round.roundName}</p>
+            <table class="sched-table">
+              <thead>
+                <tr>
+                  <th>Board</th>
+                  <th>#</th>
+                  <th>Side A</th>
+                  <th>vs</th>
+                  <th>Side B</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each round.matches as m (m.mid)}
+                  <tr>
+                    <td class="sched-board">{m.board ? `B${m.board}` : '—'}</td>
+                    <td class="sched-num">{m.matchOrder ?? '—'}</td>
+                    <td class="sched-player">{m.aName}{#if m.a2Name} + {m.a2Name}{/if}</td>
+                    <td class="sched-vs">vs</td>
+                    <td class="sched-player">{m.bName}{#if m.b2Name} + {m.b2Name}{/if}</td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+        {/each}
       {/if}
     </section>
 
@@ -523,6 +591,60 @@
     color: #666;
     font-style: italic;
     margin: 1rem 0 0;
+  }
+
+  /* ─── Schedule section ───────────────────────────────────────── */
+  .sched-round {
+    margin: 0.8rem 0 1.2rem;
+  }
+  .sched-round-name {
+    margin: 0 0 0.35rem;
+    font-size: 0.88rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: #444;
+    border-bottom: 1px solid #ddd;
+    padding-bottom: 0.2rem;
+  }
+  .sched-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.84rem;
+  }
+  .sched-table thead th {
+    text-align: left;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #888;
+    padding: 0.15rem 0.4rem 0.2rem 0;
+    border-bottom: 1px solid #eee;
+  }
+  .sched-table tbody tr:nth-child(even) { background: #f9f9f9; }
+  .sched-table td {
+    padding: 0.2rem 0.4rem 0.2rem 0;
+    color: #111;
+    vertical-align: middle;
+  }
+  .sched-board {
+    font-weight: 700;
+    white-space: nowrap;
+    width: 2.8rem;
+    color: #000;
+  }
+  .sched-num {
+    color: #999;
+    width: 1.6rem;
+    font-size: 0.78rem;
+  }
+  .sched-player { font-weight: 600; }
+  .sched-vs {
+    color: #aaa;
+    font-size: 0.75rem;
+    width: 1.8rem;
+    text-align: center;
   }
 
   /* ─── Board pages ─────────────────────────────────────────────── */
