@@ -253,26 +253,50 @@ export async function resolvePlannedByBoard(
       import('firebase/database'),
     ]);
     const db = getDatabase(firebaseApp());
-    const snap = await get(ref(db, 'planned'));
-    const raw = snap.val() as Record<string, Omit<PlannedMatch, 'mid'>> | null;
+
+    // Read tournament rounds and planned matches in parallel.
+    const [plannedSnap, tournamentSnap] = await Promise.all([
+      get(ref(db, 'planned')),
+      get(ref(db, `tournaments/${tournamentKey}/rounds`)),
+    ]);
+
+    // Build set of roundKeys that are currently RUNNING (open + startedAt).
+    // If we can't read rounds (permissions, missing) fall back to all rounds.
+    const runningRoundKeys = new Set<string>();
+    let hasRoundData = false;
+    const roundsRaw = tournamentSnap.val() as Record<string, {
+      state?: string;
+      startedAt?: number;
+    }> | null;
+    if (roundsRaw) {
+      hasRoundData = true;
+      for (const [rk, rv] of Object.entries(roundsRaw)) {
+        if (!rv || typeof rv !== 'object') continue;
+        if (rv.state !== 'closed' && rv.startedAt) {
+          runningRoundKeys.add(rk);
+        }
+      }
+    }
+
+    const raw = plannedSnap.val() as Record<string, Omit<PlannedMatch, 'mid'>> | null;
     if (!raw) return { ok: true, match: null };
+
     const candidates: PlannedMatch[] = [];
     for (const [mid, v] of Object.entries(raw)) {
       if (!v || typeof v !== 'object') continue;
       if (v.tournamentKey !== tournamentKey) continue;
       if (v.board !== board) continue;
+      // Only include matches whose round is currently running.
+      // If round data is unavailable, include all (safe fallback).
+      if (hasRoundData && v.roundKey && !runningRoundKeys.has(v.roundKey)) continue;
       candidates.push({ mid, ...v });
     }
     if (candidates.length === 0) return { ok: true, match: null };
-    // Unclaimed first, then by roundKey/matchOrder ascending. A
-    // still-claimed record is legitimate mid-match state — return it
-    // so MatchSetup can render the takeover banner (or a plain
-    // "loaded" state if the same umpire re-scanned).
+    // Unclaimed first, then by matchOrder ascending within the running round.
     candidates.sort((a, b) => {
       const aClaimed = a.claimedBy ? 1 : 0;
       const bClaimed = b.claimedBy ? 1 : 0;
       if (aClaimed !== bClaimed) return aClaimed - bClaimed;
-      if (a.roundKey !== b.roundKey) return a.roundKey.localeCompare(b.roundKey);
       return (a.matchOrder ?? 0) - (b.matchOrder ?? 0);
     });
     return { ok: true, match: candidates[0] ?? null };
