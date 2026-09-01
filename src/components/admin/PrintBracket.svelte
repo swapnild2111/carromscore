@@ -513,9 +513,6 @@
         {/each}
       {/if}
 
-      {#if printOrganizerName}
-        <p class="cover-organizer">Organised by {printOrganizerName}</p>
-      {/if}
     </section>
 
     {#if qrMode === 'board'}
@@ -575,6 +572,17 @@
         </section>
       {/each}
     {/if}
+  {/if}
+
+  {#if printOrganizerName || printLogoUrl}
+    <div class="print-footer" aria-hidden="true">
+      {#if printLogoUrl}
+        <img src={printLogoUrl} alt="Organiser logo" class="print-footer-logo" />
+      {/if}
+      {#if printOrganizerName}
+        <span class="print-footer-org">Organised by {printOrganizerName}</span>
+      {/if}
+    </div>
   {/if}
 </div>
 
@@ -728,15 +736,6 @@
     color: #555;
     line-height: 1.45;
   }
-  .cover-organizer {
-    margin-top: 1.4rem;
-    text-align: center;
-    font-size: 0.82rem;
-    color: #777;
-    font-style: italic;
-    letter-spacing: 0.01em;
-  }
-
   .cover-meta {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -1005,6 +1004,11 @@
   }
   .mqr-qr-holder :global(svg) { width: 180px !important; height: 180px !important; }
 
+  /* Print footer — hidden on screen, fixed to bottom of every page in print. */
+  .print-footer {
+    display: none;
+  }
+
   @media print {
     :global(body) { background: #fff; margin: 0; padding: 0; }
     .no-print { display: none !important; }
@@ -1012,10 +1016,33 @@
     .page {
       border: none;
       margin: 0;
-      padding: 1.2cm 1.4cm;
+      padding: 1.2cm 1.4cm 2cm;
       min-height: 0;
     }
     /* Roster column count survives print — keep it at 2. */
+    .print-footer {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 0.5rem;
+      position: fixed;
+      bottom: 0.6cm;
+      left: 1.4cm;
+      right: 1.4cm;
+      border-top: 1px solid #ddd;
+      padding-top: 0.25cm;
+    }
+    .print-footer-logo {
+      max-height: 1.4rem;
+      max-width: 3rem;
+      object-fit: contain;
+    }
+    .print-footer-org {
+      font-size: 0.72rem;
+      color: #888;
+      font-style: italic;
+      letter-spacing: 0.01em;
+    }
   }
 
   /* Narrow phone preview: single-column meta + roster so the

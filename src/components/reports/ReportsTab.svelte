@@ -565,10 +565,6 @@
       <img src={printLogoUrl} alt="Tournament logo" class="rep-print-logo" />
     {/if}
   </div>
-  {#if printOrganizerName}
-    <p class="rep-print-organizer">Organised by {printOrganizerName}</p>
-  {/if}
-
   <!--
     Shared filter bar (v3.4.12) — replaces both the top tournament
     chip strip AND the per-table search rows we had earlier.
@@ -1017,6 +1013,17 @@
       </div>
     {/if}
   {/if}
+
+  {#if printOrganizerName || printLogoUrl}
+    <div class="rep-print-footer" aria-hidden="true">
+      {#if printLogoUrl}
+        <img src={printLogoUrl} alt="Organiser logo" class="rep-print-footer-logo" />
+      {/if}
+      {#if printOrganizerName}
+        <span class="rep-print-footer-org">Organised by {printOrganizerName}</span>
+      {/if}
+    </div>
+  {/if}
 </section>
 
 <style>
@@ -1117,7 +1124,7 @@
   /* These elements are print-only; hidden on screen */
   .rep-print-hdr,
   .rep-print-logo,
-  .rep-print-organizer { display: none; }
+  .rep-print-footer { display: none; }
   .rep-print {
     display: inline-flex;
     align-items: center;
@@ -1195,13 +1202,28 @@
       object-fit: contain;
       flex-shrink: 0;
     }
-    .rep-print-organizer {
-      display: block !important;
-      text-align: right;
-      font-size: 0.8rem;
-      color: #777;
+    .rep-print-footer {
+      display: flex !important;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 0.5rem;
+      position: fixed;
+      bottom: 0.6cm;
+      left: 1cm;
+      right: 1cm;
+      border-top: 1px solid #ddd;
+      padding-top: 0.25cm;
+    }
+    .rep-print-footer-logo {
+      max-height: 1.4rem;
+      max-width: 3rem;
+      object-fit: contain;
+    }
+    .rep-print-footer-org {
+      font-size: 0.72rem;
+      color: #888;
       font-style: italic;
-      margin: -0.4rem 0 0.6rem;
+      letter-spacing: 0.01em;
     }
 
     /* ── Stat tiles: horizontal strip, compact ── */
