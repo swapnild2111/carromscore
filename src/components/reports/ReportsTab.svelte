@@ -1207,12 +1207,9 @@
       align-items: center;
       justify-content: flex-end;
       gap: 0.5rem;
-      position: fixed;
-      bottom: 0.6cm;
-      left: 1cm;
-      right: 1cm;
+      margin-top: 1.2rem;
+      padding-top: 0.3cm;
       border-top: 1px solid #ddd;
-      padding-top: 0.25cm;
     }
     .rep-print-footer-logo {
       max-height: 1.4rem;

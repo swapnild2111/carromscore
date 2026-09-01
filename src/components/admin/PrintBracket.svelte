@@ -513,6 +513,16 @@
         {/each}
       {/if}
 
+      {#if printOrganizerName || printLogoUrl}
+        <div class="page-footer">
+          {#if printLogoUrl}
+            <img src={printLogoUrl} alt="Organiser logo" class="page-footer-logo" />
+          {/if}
+          {#if printOrganizerName}
+            <span class="page-footer-org">Organised by {printOrganizerName}</span>
+          {/if}
+        </div>
+      {/if}
     </section>
 
     {#if qrMode === 'board'}
@@ -538,6 +548,16 @@
             </div>
           {/each}
         </div>
+        {#if printOrganizerName || printLogoUrl}
+          <div class="page-footer">
+            {#if printLogoUrl}
+              <img src={printLogoUrl} alt="Organiser logo" class="page-footer-logo" />
+            {/if}
+            {#if printOrganizerName}
+              <span class="page-footer-org">Organised by {printOrganizerName}</span>
+            {/if}
+          </div>
+        {/if}
       </section>
     {:else}
       <!-- ─── PER-MATCH QR CARDS (one QR per planned match) ─────────── -->
@@ -569,21 +589,21 @@
               </div>
             {/each}
           </div>
+          {#if printOrganizerName || printLogoUrl}
+            <div class="page-footer">
+              {#if printLogoUrl}
+                <img src={printLogoUrl} alt="Organiser logo" class="page-footer-logo" />
+              {/if}
+              {#if printOrganizerName}
+                <span class="page-footer-org">Organised by {printOrganizerName}</span>
+              {/if}
+            </div>
+          {/if}
         </section>
       {/each}
     {/if}
   {/if}
 
-  {#if printOrganizerName || printLogoUrl}
-    <div class="print-footer" aria-hidden="true">
-      {#if printLogoUrl}
-        <img src={printLogoUrl} alt="Organiser logo" class="print-footer-logo" />
-      {/if}
-      {#if printOrganizerName}
-        <span class="print-footer-org">Organised by {printOrganizerName}</span>
-      {/if}
-    </div>
-  {/if}
 </div>
 
 <style>
@@ -683,6 +703,14 @@
     page-break-after: always;
   }
   .page:last-child { break-after: auto; page-break-after: auto; }
+
+  /* ─── Per-page footer (logo + "Organised by") ───────────────── */
+  /* Sits at the bottom of every .page via margin-top: auto in a
+     flex-column page. Hidden on screen (content-only pages look
+     fine without it); shown only in print. */
+  .page-footer {
+    display: none;
+  }
 
   /* ─── Cover page ─────────────────────────────────────────────── */
   .cover {
@@ -1004,11 +1032,6 @@
   }
   .mqr-qr-holder :global(svg) { width: 180px !important; height: 180px !important; }
 
-  /* Print footer — hidden on screen, fixed to bottom of every page in print. */
-  .print-footer {
-    display: none;
-  }
-
   @media print {
     :global(body) { background: #fff; margin: 0; padding: 0; }
     .no-print { display: none !important; }
@@ -1016,28 +1039,29 @@
     .page {
       border: none;
       margin: 0;
-      padding: 1.2cm 1.4cm 2cm;
+      padding: 1.2cm 1.4cm;
       min-height: 0;
+      /* flex-column already set on .cover; add it to QR pages too
+         so margin-top:auto on .page-footer pushes it to the bottom */
+      display: flex;
+      flex-direction: column;
     }
     /* Roster column count survives print — keep it at 2. */
-    .print-footer {
+    .page-footer {
       display: flex;
       align-items: center;
       justify-content: flex-end;
       gap: 0.5rem;
-      position: fixed;
-      bottom: 0.6cm;
-      left: 1.4cm;
-      right: 1.4cm;
+      margin-top: auto;
+      padding-top: 0.3cm;
       border-top: 1px solid #ddd;
-      padding-top: 0.25cm;
     }
-    .print-footer-logo {
+    .page-footer-logo {
       max-height: 1.4rem;
       max-width: 3rem;
       object-fit: contain;
     }
-    .print-footer-org {
+    .page-footer-org {
       font-size: 0.72rem;
       color: #888;
       font-style: italic;
