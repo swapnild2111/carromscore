@@ -151,7 +151,7 @@
   }
 </script>
 
-<div class="profile-wrap">
+<div class="profile-wrap admin-tab-scrollself">
   {#if flashMsg}
     <div class="flash flash-{flashMsg.kind}" role="status">{flashMsg.text}</div>
   {/if}
@@ -258,9 +258,19 @@
 
 <style>
   .profile-wrap {
+    /* admin-tab-scrollself makes this div the scroll container in
+       AdminHome's fixed-height flex column, so the footer stays visible.
+       The AdminHome :global(> div) rule forces flex-direction: column on
+       this element — use align-items to keep the centered max-width form. */
+    max-width: 100%;
+    padding: 1rem 1rem 2rem;
+    box-sizing: border-box;
+    align-items: stretch;
+  }
+  .profile-form {
     max-width: 36rem;
     margin: 0 auto;
-    padding: 1rem 0 6rem;
+    width: 100%;
   }
   .flash {
     padding: 0.55rem 0.85rem;
