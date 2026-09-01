@@ -333,11 +333,18 @@
       if (seen.has(t.key)) continue;
       seen.add(t.key);
       void loadAssignedPlayers(t.key).then((set) => {
-        // Only assign when the value actually changed, otherwise
-        // the immutable-copy assignment would trigger a re-render
-        // loop against `tick` / `playersTick`.
-        if (assignedCountByKey[t.key] !== set.size) {
-          assignedCountByKey = { ...assignedCountByKey, [t.key]: set.size };
+        // Filter out ghost IDs — assignedPlayerIds pointing at
+        // players that no longer exist. Reported 2026-09-01:
+        // 'Players (3)' badge with only 2 visible checkboxes
+        // because the 3rd ID belonged to a deleted player. Count
+        // now matches what the admin actually sees in the assign
+        // dialog. (The cleanup write happens in startAssign so
+        // the ghost is deleted for good on the next open.)
+        const known = new Set(loadAllPlayers().map((p) => p.id));
+        let realCount = 0;
+        for (const id of set) if (known.has(id)) realCount += 1;
+        if (assignedCountByKey[t.key] !== realCount) {
+          assignedCountByKey = { ...assignedCountByKey, [t.key]: realCount };
         }
       }).catch(() => {
         // silent — count just stays absent
@@ -846,7 +853,32 @@
     assignOpen = true;
     assignLoading = true;
     try {
-      assignedIds = await loadAssignedPlayers(t.key);
+      const raw = await loadAssignedPlayers(t.key);
+      // v3.6.3 (2026-09-01): sweep ghost IDs — assigned playerIds
+      // whose player record no longer exists. Symptom: 'Players (3)'
+      // badge while only 2 checkboxes are ticked; the third ID
+      // pointed at a deleted player and had no visible row. Clean
+      // them out of both the local Set (so the header size + row
+      // count agree) and RTDB (so the ghost doesn't come back on
+      // reopen). Fire-and-forget on the deletes.
+      const known = new Set(loadAllPlayers().map((p) => p.id));
+      const cleaned = new Set<string>();
+      for (const id of raw) {
+        if (known.has(id)) {
+          cleaned.add(id);
+        } else if (assignKey) {
+          void unassignPlayer(assignKey, id);
+        }
+      }
+      assignedIds = cleaned;
+      // Also refresh the row badge so it shows the cleaned count
+      // without waiting for the next tick.
+      if (assignKey && assignedCountByKey[assignKey] !== cleaned.size) {
+        assignedCountByKey = {
+          ...assignedCountByKey,
+          [assignKey]: cleaned.size,
+        };
+      }
     } finally {
       assignLoading = false;
     }
