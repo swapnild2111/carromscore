@@ -9,7 +9,8 @@
    *   displayName   — shown as "Organised by …" on print covers
    *   orgName       — organisation / federation name
    *   address       — free text, multi-line
-   *   contact       — phone / email contact string
+   *   phone         — phone number
+   *   email         — email address
    *   website       — URL
    *   instagram / facebook / youtube / x — social handles (no @)
    *   logoUrl       — base64 data URL (≤ 2 MB image)
@@ -24,7 +25,8 @@
     displayName: string;
     orgName: string;
     address: string;
-    contact: string;
+    phone: string;
+    email: string;
     website: string;
     instagram: string;
     facebook: string;
@@ -37,7 +39,8 @@
     displayName: '',
     orgName: '',
     address: '',
-    contact: '',
+    phone: '',
+    email: '',
     website: '',
     instagram: '',
     facebook: '',
@@ -164,17 +167,23 @@
           <input type="text" bind:value={profile.displayName} maxlength="120" placeholder="e.g. Swapnil Deshpande" disabled={saving} />
         </label>
         <label class="prof-field">
-          <span>Organisation / federation <em class="prof-hint">(shown as "Organised by …" on print covers)</em></span>
+          <span>Organisation / federation</span>
           <input type="text" bind:value={profile.orgName} maxlength="120" placeholder="e.g. Danish Carrom Federation" disabled={saving} />
         </label>
         <label class="prof-field">
-          <span>Address <em class="prof-hint">(optional, for official prints)</em></span>
+          <span>Address</span>
           <textarea bind:value={profile.address} maxlength="300" rows="2" placeholder="Street, City, Country" disabled={saving}></textarea>
         </label>
-        <label class="prof-field">
-          <span>Contact <em class="prof-hint">(phone or email)</em></span>
-          <input type="text" bind:value={profile.contact} maxlength="120" placeholder="+45 … or organiser@example.com" disabled={saving} />
-        </label>
+        <div class="contact-row">
+          <label class="prof-field">
+            <span>Phone</span>
+            <input type="tel" bind:value={profile.phone} maxlength="40" placeholder="+45 …" disabled={saving} />
+          </label>
+          <label class="prof-field">
+            <span>Email</span>
+            <input type="email" bind:value={profile.email} maxlength="120" placeholder="organiser@example.com" disabled={saving} />
+          </label>
+        </div>
         <label class="prof-field">
           <span>Website</span>
           <input type="url" bind:value={profile.website} maxlength="200" placeholder="https://…" disabled={saving} />
@@ -182,7 +191,7 @@
       </section>
 
       <section class="prof-section">
-        <h2 class="prof-section-title">Socials <em class="prof-hint">(handles only, no @)</em></h2>
+        <h2 class="prof-section-title">Socials</h2>
         <div class="socials-grid">
           <label class="prof-field">
             <span>Instagram</span>
@@ -204,7 +213,7 @@
       </section>
 
       <section class="prof-section">
-        <h2 class="prof-section-title">Logo <em class="prof-hint">(≤ 2 MB, shown top-right on print covers)</em></h2>
+        <h2 class="prof-section-title">Logo</h2>
         {#if profile.logoUrl}
           <div class="logo-row">
             <img src={profile.logoUrl} alt="Your logo" class="logo-preview" />
@@ -309,6 +318,13 @@
     outline: none;
     border-color: var(--accent, #ffd54a);
   }
+
+  .contact-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+  }
+  @media (max-width: 28rem) { .contact-row { grid-template-columns: 1fr; } }
 
   .socials-grid {
     display: grid;
