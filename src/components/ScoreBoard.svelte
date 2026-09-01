@@ -730,35 +730,25 @@
   // slow to notice — writes queue for seconds before landing. Cycling
   // via goOffline/goOnline recovers immediately. See
   // `nudgeFirebaseReconnect` for detail.
-  let hiddenSince: number | null = null;
-  const HIDDEN_NUDGE_THRESHOLD_MS = 2000;
   function onVisibilityChange() {
-    if (document.visibilityState === 'hidden') {
-      hiddenSince = Date.now();
-      return;
-    }
+    if (document.visibilityState === 'hidden') return;
     if (document.visibilityState === 'visible') {
       if (!wakeLock) requestWakeLock();
       if (!document.fullscreenElement) landscapeLocked = false;
-      // Only nudge if we've been hidden long enough that the OS
-      // could have suspended background sockets. Quick focus-blur
-      // flickers (Chrome popup, notification banner) skip this.
-      if (
-        cfg.live &&
-        cfg.mid &&
-        hiddenSince !== null &&
-        Date.now() - hiddenSince > HIDDEN_NUDGE_THRESHOLD_MS
-      ) {
-        void nudgeFirebaseReconnect();
-      }
-      hiddenSince = null;
+      // Always nudge on resume — BaseLayout does the same globally, but
+      // ScoreBoard also nudges here to cover the live-broadcast path
+      // (cfg.live / cfg.mid available here for score-screen-specific
+      // logic if needed in future).
+      void nudgeFirebaseReconnect();
     }
   }
-  // Belt-and-braces backup for Android WebView / Chrome edge cases where
-  // `visibilitychange` doesn't refire on unlock (some devices only send
-  // `focus`). Cheap to try — requestWakeLock is a no-op if already held.
+  // Belt-and-braces: some Android versions fire focus but not
+  // visibilitychange on app-switch-back. Nudge here too.
   function onFocus() {
-    if (document.visibilityState === 'visible' && !wakeLock) requestWakeLock();
+    if (document.visibilityState === 'visible') {
+      if (!wakeLock) requestWakeLock();
+      void nudgeFirebaseReconnect();
+    }
   }
   function onFullscreenChange() {
     if (!document.fullscreenElement && landscapeLocked) {

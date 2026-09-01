@@ -227,32 +227,28 @@ const base = import.meta.env.BASE_URL;
           // that the banner stuck on Xiaomi until the user minimised
           // and reopened the app. Hoisting it to BaseLayout means
           // every route benefits.
-          let hiddenSince: number | null = null;
-          const NUDGE_MS = 2000;
+          // Reconnect nudge: force-cycle the Firebase WebSocket whenever
+          // the app returns to focus. Android Chrome / TWA kills the
+          // background socket aggressively; the SDK can take several
+          // seconds to notice. Nudging immediately on resume clears the
+          // "I have WiFi but app shows offline" symptom. We no longer
+          // gate on a minimum hidden duration — the cycle is cheap and
+          // the false-positive cost (nudging after a 1-second background)
+          // is negligible. Two paths cover all Android resume scenarios:
+          //   1. visibilitychange → visible (standard Chrome tab / TWA).
+          //   2. window focus (some Android WebView / Chrome versions fire
+          //      focus but not visibilitychange on app-switch-back).
+          // Both paths trust navigator.onLine to immediately clear the
+          // banner; Firebase will re-confirm within ~1s and re-show the
+          // banner if we were actually offline.
+          const nudgeOnResume = () => {
+            if (navigator.onLine !== false) apply(true);
+            void live.nudgeFirebaseReconnect();
+          };
           document.addEventListener('visibilitychange', () => {
-            if (document.visibilityState === 'hidden') {
-              hiddenSince = Date.now();
-              return;
-            }
-            if (document.visibilityState === 'visible') {
-              if (hiddenSince !== null && Date.now() - hiddenSince > NUDGE_MS) {
-                // Aggressive banner-hide on resume (v3.4.11): if the
-                // browser says we're online, hide the banner immediately.
-                // Chrome mobile suspends the tab process while backgrounded;
-                // Firebase's .info/connected can stay stale-true or stale-
-                // false after resume even though the actual socket died.
-                // The banner then either gets stuck or blinks. Trusting
-                // navigator.onLine here — combined with the reconnect nudge
-                // below — clears the stuck-banner case for the "usually
-                // online" majority. If we're truly offline, the Firebase
-                // side will flip .info/connected to false within a few
-                // seconds and the banner will re-appear.
-                if (navigator.onLine !== false) apply(true);
-                void live.nudgeFirebaseReconnect();
-              }
-              hiddenSince = null;
-            }
+            if (document.visibilityState === 'visible') nudgeOnResume();
           });
+          window.addEventListener('focus', nudgeOnResume);
         }).catch(() => {
           // Modules failed to load (e.g. offline first-visit and
           // SW cache is empty). Fall back to raw navigator.onLine.
