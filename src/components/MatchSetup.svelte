@@ -1320,13 +1320,27 @@
     {/if}
     <label>
       <span>{cfg.mode === 'practice' ? 'Boards per set' : 'Boards'}</span>
-      <input type="number" min={cfg.mode === 'practice' ? 1 : 0} step="1" bind:value={cfg.maxBoards} />
-      {#if cfg.mode !== 'practice'}<em class="rules-hint">0 = ∞</em>{/if}
+      <div class="rules-val-row">
+        <input type="number" min={cfg.mode === 'practice' ? 1 : 0} step="1" bind:value={cfg.maxBoards} />
+        {#if cfg.mode !== 'practice'}<em class="rules-hint">0 = ∞</em>{/if}
+      </div>
     </label>
     <label>
-      <span>Timer</span>
-      <input type="number" min="0" max="300" step="1" bind:value={cfg.timerDuration} />
-      <em class="rules-hint">mins · 0 = off</em>
+      <span>Timer <em class="rules-label-hint">(mins)</em></span>
+      <div class="rules-val-row">
+        <input
+          type="number"
+          min="0"
+          max="300"
+          step="1"
+          bind:value={cfg.timerDuration}
+          onblur={(e) => {
+            const v = (e.currentTarget as HTMLInputElement).value;
+            if (v === '' || v === null) cfg.timerDuration = 0;
+          }}
+        />
+        <em class="rules-hint">0 = off</em>
+      </div>
     </label>
   </fieldset>
 
@@ -1787,9 +1801,9 @@
     }
     .opt-title { font-size: 0.82rem; }
     .opt-meta { font-size: 0.62rem; }
-    fieldset.rules label { padding: 0.5rem 0.55rem; }
+    fieldset.rules label { padding: 0.5rem 0.4rem; }
     fieldset.rules label > span { font-size: 0.62rem; }
-    fieldset.rules input[type='number'] { font-size: 1rem; }
+    fieldset.rules input[type='number'] { font-size: 0.95rem; width: 2.5ch; }
     legend { font-size: 0.7rem; }
   }
 
@@ -1810,12 +1824,14 @@
   fieldset.rules label {
     display: flex;
     flex-direction: column;
-    gap: 0.25rem;
+    align-items: center;
+    gap: 0.2rem;
     background: #141414;
     border: 1.5px solid #232323;
     border-radius: 0.6rem;
-    padding: 0.55rem 0.85rem 0.45rem;
+    padding: 0.55rem 0.75rem 0.5rem;
     cursor: default;
+    text-align: center;
   }
   fieldset.rules label:focus-within { border-color: var(--accent); }
   fieldset.rules label > span {
@@ -1824,6 +1840,22 @@
     text-transform: uppercase;
     letter-spacing: 0.08em;
     line-height: 1.2;
+    white-space: nowrap;
+  }
+  .rules-label-hint {
+    color: var(--muted);
+    font-style: normal;
+    font-size: 0.85em;
+    text-transform: none;
+    letter-spacing: 0;
+    opacity: 0.7;
+  }
+  .rules-val-row {
+    display: flex;
+    align-items: baseline;
+    gap: 0.35rem;
+    justify-content: center;
+    width: 100%;
   }
   fieldset.rules input[type='number'] {
     background: transparent;
@@ -1834,8 +1866,9 @@
     font-weight: 700;
     font-family: inherit;
     outline: none;
-    width: 100%;
     min-width: 0;
+    width: 2.8ch;
+    text-align: center;
     line-height: 1.2;
   }
   .rules-hint {
@@ -1844,8 +1877,8 @@
     font-size: 0.62rem;
     letter-spacing: 0.02em;
     opacity: 0.7;
-    line-height: 1.2;
-    margin-top: 0.05rem;
+    line-height: 1;
+    white-space: nowrap;
   }
   .hint-inline {
     color: var(--muted);
