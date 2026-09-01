@@ -52,6 +52,23 @@ export type Tournament = {
    */
   rounds?: Round[];
   /**
+   * Optional free-text description for the tournament. Shown on the
+   * print-bracket cover page below the tournament name. E.g. venue,
+   * date range, short blurb. Max 300 chars.
+   */
+  description?: string;
+  /**
+   * Name of the person or organisation running the tournament. Shown
+   * in the print-bracket cover footer as "Organised by …".
+   */
+  organizerName?: string;
+  /**
+   * Firebase Storage download URL for the tournament logo. Shown
+   * top-right on the print-bracket cover. Stored as an HTTPS URL
+   * written by the admin panel after upload. Absent = no logo shown.
+   */
+  logoUrl?: string;
+  /**
    * Tournament-level match defaults (v3.6). Inherited by pre-created
    * planned matches (see /planned/{mid}) when they don't override
    * per-match. Also read by the score-setup flow to prefill the
@@ -382,31 +399,28 @@ function mergeRemote(raw: Record<string, unknown>): void {
     const type =
       v.type === 'open' || v.type === 'closed' ? (v.type as 'open' | 'closed') : undefined;
     const country = typeof v.country === 'string' ? v.country : undefined;
+    const description = typeof v.description === 'string' && v.description.trim() ? v.description.trim() : undefined;
+    const organizerName = typeof v.organizerName === 'string' && v.organizerName.trim() ? v.organizerName.trim() : undefined;
+    const logoUrl = typeof v.logoUrl === 'string' && v.logoUrl.trim() ? v.logoUrl.trim() : undefined;
     const rounds = parseRounds(v.rounds);
     const defaults = parseDefaults(v.defaults);
     const existing = memoryStore.find((t) => t.key === key);
     if (existing) {
       existing.name = name;
       existing.createdAt = createdAt || existing.createdAt;
-      // Take the newer lastActive between what we have and what
-      // arrived, so a stale local touch doesn't demote a fresher one.
       existing.lastActive = Math.max(existing.lastActive, lastActive);
-      // v3.6.3: the snapshot is authoritative — treat absent fields
-      // as a REMOVAL, not a "keep local." Previously an admin
-      // clearing type / country / defaults on tournament X wouldn't
-      // reflect in other tabs / devices because the merger kept
-      // the stale local value.
       if (createdBy) existing.createdBy = createdBy;
       else delete existing.createdBy;
       if (type) existing.type = type;
       else delete existing.type;
       if (country) existing.country = country;
       else delete existing.country;
-      // Rounds are authoritative from the snapshot — if the remote
-      // dropped a round, we drop it locally too. `parseRounds` returns
-      // undefined only when the `rounds` sub-node is absent; a present
-      // but empty object still yields `[]`, which correctly wipes any
-      // stale local list.
+      if (description) existing.description = description;
+      else delete existing.description;
+      if (organizerName) existing.organizerName = organizerName;
+      else delete existing.organizerName;
+      if (logoUrl) existing.logoUrl = logoUrl;
+      else delete existing.logoUrl;
       if (rounds !== undefined) existing.rounds = rounds;
       else delete existing.rounds;
       if (defaults !== undefined) existing.defaults = defaults;
@@ -420,6 +434,9 @@ function mergeRemote(raw: Record<string, unknown>): void {
         ...(createdBy ? { createdBy } : {}),
         ...(type ? { type } : {}),
         ...(country ? { country } : {}),
+        ...(description ? { description } : {}),
+        ...(organizerName ? { organizerName } : {}),
+        ...(logoUrl ? { logoUrl } : {}),
         ...(rounds !== undefined ? { rounds } : {}),
         ...(defaults !== undefined ? { defaults } : {}),
       });
@@ -589,24 +606,38 @@ async function renameTournamentToNewKey(
  */
 export async function updateTournamentMeta(
   key: string,
-  patch: { type?: 'open' | 'closed'; country?: string | null },
+  patch: {
+    type?: 'open' | 'closed';
+    country?: string | null;
+    description?: string | null;
+    organizerName?: string | null;
+    logoUrl?: string | null;
+  },
 ): Promise<TournamentWriteOutcome> {
   if (!key) return { ok: false, error: 'Missing tournament key' };
   const t = memoryStore.find((x) => x.key === key);
   if (!t) return { ok: false, error: 'Tournament not found in local store' };
   const nextType = patch.type ?? t.type ?? 'open';
-  // Country: explicit null clears; string sets; undefined keeps.
-  const nextCountry =
-    patch.country === null
-      ? undefined
-      : patch.country !== undefined
-        ? patch.country.trim()
-        : t.country;
-  // Consistency guardrail: closed tournaments require a country.
-  // A caller can't ship "closed + no country" — the rule set demands
-  // one, and the assignment UI would blow up trying to filter.
+  function resolveOptStr(v: string | null | undefined, current: string | undefined): string | undefined {
+    if (v === null) return undefined;
+    if (v !== undefined) return v.trim() || undefined;
+    return current;
+  }
+  const nextCountry = resolveOptStr(patch.country ?? undefined, t.country);
+  const nextDescription = resolveOptStr(patch.description ?? undefined, t.description);
+  const nextOrganizerName = resolveOptStr(patch.organizerName ?? undefined, t.organizerName);
+  const nextLogoUrl = resolveOptStr(patch.logoUrl ?? undefined, t.logoUrl);
   if (nextType === 'closed' && !nextCountry) {
     return { ok: false, error: 'Closed tournaments must have a country' };
+  }
+  function applyField(
+    payload: Record<string, unknown>,
+    field: string,
+    patchVal: string | null | undefined,
+    nextVal: string | undefined,
+  ) {
+    if (patchVal === null) payload[`tournaments/${key}/${field}`] = null;
+    else if (nextVal !== undefined) payload[`tournaments/${key}/${field}`] = nextVal;
   }
   try {
     const [{ firebaseApp }, { getDatabase, ref, update }] = await Promise.all([
@@ -614,36 +645,31 @@ export async function updateTournamentMeta(
       import('firebase/database'),
     ]);
     const db = getDatabase(firebaseApp());
-    // Multi-path update over the two scalars. We can't use a nested
-    // update object with `country: null` — Firebase treats that as
-    // "delete the child". Use two explicit path writes: one for
-    // type, one for country (delete or set).
     const payload: Record<string, unknown> = {
       [`tournaments/${key}/type`]: nextType,
       [`tournaments/${key}/lastActive`]: Date.now(),
     };
-    if (patch.country === null) {
-      payload[`tournaments/${key}/country`] = null;
-    } else if (nextCountry !== undefined) {
-      payload[`tournaments/${key}/country`] = nextCountry;
-    }
+    applyField(payload, 'country', patch.country ?? undefined, nextCountry);
+    applyField(payload, 'description', patch.description ?? undefined, nextDescription);
+    applyField(payload, 'organizerName', patch.organizerName ?? undefined, nextOrganizerName);
+    applyField(payload, 'logoUrl', patch.logoUrl ?? undefined, nextLogoUrl);
     await update(ref(db, '/'), payload);
     t.type = nextType;
     if (patch.country === null) delete t.country;
     else if (nextCountry !== undefined) t.country = nextCountry;
+    if (patch.description === null) delete t.description;
+    else if (nextDescription !== undefined) t.description = nextDescription;
+    if (patch.organizerName === null) delete t.organizerName;
+    else if (nextOrganizerName !== undefined) t.organizerName = nextOrganizerName;
+    if (patch.logoUrl === null) delete t.logoUrl;
+    else if (nextLogoUrl !== undefined) t.logoUrl = nextLogoUrl;
     t.lastActive = Date.now();
     notify();
     void logAudit({
       action: 'tournament.update',
       path: `tournaments/${key}`,
-      before: {
-        type: t.type,
-        ...(t.country ? { country: t.country } : {}),
-      },
-      after: {
-        type: nextType,
-        ...(nextCountry ? { country: nextCountry } : {}),
-      },
+      before: { type: t.type },
+      after: { type: nextType },
     });
     return { ok: true };
   } catch (err) {

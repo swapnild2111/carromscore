@@ -110,10 +110,17 @@
   let editingDefaultPointsTarget = $state<string>('');
   let editingDefaultMaxBoards = $state<string>('');
   let editingDefaultTimerDuration = $state<string>('');
+  let editingDescription = $state<string>('');
+  let editingOrganizerName = $state<string>('');
+  let editingLogoUrl = $state<string>('');
+  let logoUploading = $state(false);
   let editingOriginal = $state<{
     name: string;
     type: 'open' | 'closed';
     country: string;
+    description: string;
+    organizerName: string;
+    logoUrl: string;
     defaults: {
       mode: 'singles' | 'doubles';
       bestOf: string;
@@ -434,10 +441,16 @@
     editingDefaultPointsTarget = String(t.defaults?.pointsTarget ?? FALLBACK_TOURNAMENT_DEFAULTS.pointsTarget);
     editingDefaultMaxBoards = String(t.defaults?.maxBoards ?? FALLBACK_TOURNAMENT_DEFAULTS.maxBoards);
     editingDefaultTimerDuration = String(t.defaults?.timerDuration ?? FALLBACK_TOURNAMENT_DEFAULTS.timerDuration);
+    editingDescription = t.description ?? '';
+    editingOrganizerName = t.organizerName ?? '';
+    editingLogoUrl = t.logoUrl ?? '';
     editingOriginal = {
       name: t.name,
       type: t.type ?? 'open',
       country: t.country ?? '',
+      description: t.description ?? '',
+      organizerName: t.organizerName ?? '',
+      logoUrl: t.logoUrl ?? '',
       defaults: {
         mode: editingDefaultMode,
         bestOf: editingDefaultBestOf,
@@ -452,6 +465,9 @@
     editingName = '';
     editingType = 'open';
     editingCountry = '';
+    editingDescription = '';
+    editingOrganizerName = '';
+    editingLogoUrl = '';
     editingDefaultMode = 'singles';
     editingDefaultBestOf = '';
     editingDefaultPointsTarget = '';
@@ -527,7 +543,12 @@
     }
     const defaultsChanged = Object.keys(defaultsPatch).length > 0;
 
-    if (!nameChanged && !typeChanged && !countryChanged && !defaultsChanged) {
+    const descriptionChanged = editingDescription !== editingOriginal.description;
+    const organizerNameChanged = editingOrganizerName !== editingOriginal.organizerName;
+    const logoUrlChanged = editingLogoUrl !== editingOriginal.logoUrl;
+    const metaExtraChanged = descriptionChanged || organizerNameChanged || logoUrlChanged;
+
+    if (!nameChanged && !typeChanged && !countryChanged && !defaultsChanged && !metaExtraChanged) {
       // No-op — close the dialog quietly. Prevents a bogus audit
       // entry for a "save with nothing changed" tap.
       cancelEdit();
@@ -551,14 +572,15 @@
         const nextRec = list().find((x) => x.name === norm);
         if (nextRec) editingKey = nextRec.key;
       }
-      if (typeChanged || countryChanged) {
-        // Open + blank country → clear the country field explicitly
-        // (null path) so RTDB drops it. Closed + a country → set.
+      if (typeChanged || countryChanged || metaExtraChanged) {
         const countryPatch =
           editingType === 'open' && !countryNext ? null : countryNext;
         const r = await updateTournamentMeta(editingKey, {
           type: editingType,
           country: countryPatch,
+          ...(descriptionChanged ? { description: editingDescription || null } : {}),
+          ...(organizerNameChanged ? { organizerName: editingOrganizerName || null } : {}),
+          ...(logoUrlChanged ? { logoUrl: editingLogoUrl || null } : {}),
         });
         if (!r.ok) {
           flash('err', r.error);
@@ -585,6 +607,35 @@
       cancelEdit();
     } finally {
       saving = false;
+    }
+  }
+
+  async function uploadLogo(file: File) {
+    if (!editingKey) return;
+    if (file.size > 2 * 1024 * 1024) {
+      flash('err', 'Logo must be under 2 MB');
+      return;
+    }
+    if (!file.type.startsWith('image/')) {
+      flash('err', 'Only image files are accepted');
+      return;
+    }
+    logoUploading = true;
+    try {
+      const [{ firebaseApp }, { getStorage, ref: storageRef, uploadBytes, getDownloadURL }] = await Promise.all([
+        import('../lib/firebase'),
+        import('firebase/storage'),
+      ]);
+      const storage = getStorage(firebaseApp());
+      const path = `tournament-logos/${editingKey}/${Date.now()}_${file.name.replace(/[^a-z0-9._-]/gi, '_')}`;
+      const snap = await uploadBytes(storageRef(storage, path), file);
+      const url = await getDownloadURL(snap.ref);
+      editingLogoUrl = url;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      flash('err', `Upload failed: ${msg}`);
+    } finally {
+      logoUploading = false;
     }
   }
 
@@ -1336,6 +1387,59 @@
             ariaLabel="Tournament country"
           />
         </label>
+
+        <label class="edit-field">
+          <span>Description <em class="hint-inline">(optional, shown on print cover)</em></span>
+          <textarea
+            bind:value={editingDescription}
+            placeholder="Venue, date range, short blurb…"
+            maxlength="300"
+            rows="2"
+            disabled={saving}
+            aria-label="Tournament description"
+          ></textarea>
+        </label>
+
+        <label class="edit-field">
+          <span>Organiser name <em class="hint-inline">(optional, shown on print footer)</em></span>
+          <input
+            type="text"
+            bind:value={editingOrganizerName}
+            placeholder="Danish Carrom Federation"
+            maxlength="80"
+            disabled={saving}
+            aria-label="Organiser name"
+          />
+        </label>
+
+        <div class="edit-field logo-field">
+          <span class="logo-label">Logo <em class="hint-inline">(optional, ≤ 2 MB, shown on print cover)</em></span>
+          {#if editingLogoUrl}
+            <div class="logo-preview">
+              <img src={editingLogoUrl} alt="Tournament logo preview" class="logo-img" />
+              <button
+                type="button"
+                class="btn btn-danger btn-sm logo-remove"
+                onclick={() => (editingLogoUrl = '')}
+                disabled={saving || logoUploading}
+              >Remove</button>
+            </div>
+          {/if}
+          <label class="logo-upload-btn" class:logo-uploading={logoUploading}>
+            <input
+              type="file"
+              accept="image/*"
+              class="logo-file-input"
+              disabled={saving || logoUploading}
+              onchange={(e) => {
+                const f = (e.currentTarget as HTMLInputElement).files?.[0];
+                if (f) void uploadLogo(f);
+                (e.currentTarget as HTMLInputElement).value = '';
+              }}
+            />
+            {logoUploading ? 'Uploading…' : editingLogoUrl ? 'Replace logo' : 'Upload logo'}
+          </label>
+        </div>
 
         <!--
           Match defaults (v3.6.1). Each field is optional — leaving it
@@ -2308,6 +2412,72 @@
     font: inherit;
     font-size: 0.9rem;
     font-family: inherit;
+  }
+
+  .edit-field textarea {
+    background: #0f0f0f;
+    color: var(--fg);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 0.4rem;
+    padding: 0.5rem 0.6rem;
+    font: inherit;
+    font-size: 0.9rem;
+    resize: vertical;
+    min-height: 3.5rem;
+  }
+  .edit-field textarea:focus-visible {
+    outline: 2px solid var(--accent, #ffd54a);
+    outline-offset: 0;
+    border-color: var(--accent, #ffd54a);
+  }
+  .hint-inline {
+    color: var(--muted);
+    font-style: normal;
+    font-size: 0.85em;
+    text-transform: none;
+    letter-spacing: 0;
+    opacity: 0.7;
+  }
+  .logo-field { gap: 0.5rem; }
+  .logo-label {
+    color: var(--muted);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .logo-preview {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+  .logo-img {
+    max-height: 3.5rem;
+    max-width: 8rem;
+    border-radius: 0.35rem;
+    border: 1px solid rgba(255,255,255,0.1);
+    object-fit: contain;
+    background: #1a1a1a;
+  }
+  .logo-remove { flex-shrink: 0; }
+  .logo-upload-btn {
+    display: inline-block;
+    cursor: pointer;
+    padding: 0.4rem 0.85rem;
+    border-radius: 0.45rem;
+    border: 1px solid rgba(255,255,255,0.18);
+    background: #1a1a1a;
+    color: var(--fg);
+    font-size: 0.82rem;
+    font-weight: 600;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .logo-upload-btn:hover { border-color: var(--accent); }
+  .logo-upload-btn.logo-uploading { opacity: 0.6; cursor: wait; }
+  .logo-file-input {
+    position: absolute;
+    width: 1px; height: 1px;
+    opacity: 0; overflow: hidden;
+    pointer-events: none;
   }
 
   /* Defaults fieldset in the Edit dialog — 2 columns on wide screens

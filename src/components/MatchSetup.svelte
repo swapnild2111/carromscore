@@ -1319,15 +1319,14 @@
       </label>
     {/if}
     <label>
-      <span>
-        {cfg.mode === 'practice' ? 'Boards per set' : 'Boards'}
-        {#if cfg.mode !== 'practice'}<em class="hint-inline">(0 = ∞)</em>{/if}
-      </span>
+      <span>{cfg.mode === 'practice' ? 'Boards per set' : 'Boards'}</span>
       <input type="number" min={cfg.mode === 'practice' ? 1 : 0} step="1" bind:value={cfg.maxBoards} />
+      {#if cfg.mode !== 'practice'}<em class="rules-hint">0 = ∞</em>{/if}
     </label>
     <label>
-      <span>Timer <em class="hint-inline">(mins, 0 = off)</em></span>
+      <span>Timer</span>
       <input type="number" min="0" max="300" step="1" bind:value={cfg.timerDuration} />
+      <em class="rules-hint">mins · 0 = off</em>
     </label>
   </fieldset>
 
@@ -1811,11 +1810,11 @@
   fieldset.rules label {
     display: flex;
     flex-direction: column;
-    gap: 0.35rem;
+    gap: 0.25rem;
     background: #141414;
     border: 1.5px solid #232323;
     border-radius: 0.6rem;
-    padding: 0.55rem 0.85rem;
+    padding: 0.55rem 0.85rem 0.45rem;
     cursor: default;
   }
   fieldset.rules label:focus-within { border-color: var(--accent); }
@@ -1824,18 +1823,29 @@
     font-size: 0.7rem;
     text-transform: uppercase;
     letter-spacing: 0.08em;
+    line-height: 1.2;
   }
   fieldset.rules input[type='number'] {
     background: transparent;
     border: none;
     color: var(--fg);
     padding: 0;
-    font-size: 1.1rem;
-    font-weight: 600;
+    font-size: 1.15rem;
+    font-weight: 700;
     font-family: inherit;
     outline: none;
     width: 100%;
     min-width: 0;
+    line-height: 1.2;
+  }
+  .rules-hint {
+    color: var(--muted);
+    font-style: normal;
+    font-size: 0.62rem;
+    letter-spacing: 0.02em;
+    opacity: 0.7;
+    line-height: 1.2;
+    margin-top: 0.05rem;
   }
   .hint-inline {
     color: var(--muted);

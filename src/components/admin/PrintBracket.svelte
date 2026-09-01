@@ -386,6 +386,9 @@
          tournaments with ~40 players (two columns of names). -->
     <section class="page cover">
       <div class="cover-hdr">
+        {#if tournament?.logoUrl}
+          <img src={tournament.logoUrl} alt="Tournament logo" class="cover-logo" />
+        {/if}
         <p class="brand">Carromscore</p>
         <h1 class="cover-name">{tournamentName}</h1>
         {#if tournament?.country}
@@ -393,6 +396,9 @@
             <span aria-hidden="true">{flagEmoji(tournament?.country ?? '')}</span>
             {countryName(tournament?.country ?? '')}
           </p>
+        {/if}
+        {#if tournament?.description}
+          <p class="cover-description">{tournament.description}</p>
         {/if}
       </div>
 
@@ -472,6 +478,10 @@
             </table>
           </div>
         {/each}
+      {/if}
+
+      {#if tournament?.organizerName}
+        <p class="cover-organizer">Organised by {tournament.organizerName}</p>
       {/if}
     </section>
 
@@ -640,9 +650,18 @@
     min-height: 26rem;
   }
   .cover-hdr {
+    position: relative;
     text-align: center;
     padding-bottom: 0.9rem;
     border-bottom: 3px solid #000;
+  }
+  .cover-logo {
+    position: absolute;
+    top: 0;
+    right: 0;
+    max-height: 3.5rem;
+    max-width: 6rem;
+    object-fit: contain;
   }
   .brand {
     margin: 0 0 0.4rem;
@@ -665,6 +684,22 @@
     font-size: 1rem;
     color: #333;
     font-weight: 500;
+  }
+  .cover-description {
+    margin: 0.5rem auto 0;
+    max-width: 32rem;
+    font-size: 0.92rem;
+    color: #555;
+    line-height: 1.45;
+  }
+  .cover-organizer {
+    margin-top: auto;
+    padding-top: 1.2rem;
+    text-align: center;
+    font-size: 0.82rem;
+    color: #777;
+    font-style: italic;
+    letter-spacing: 0.01em;
   }
 
   .cover-meta {
