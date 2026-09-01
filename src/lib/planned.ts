@@ -38,6 +38,10 @@ export type PlannedMatch = {
   roundKey: string;
   /** 1-based order within the round, for the organiser's own sort. */
   matchOrder: number;
+  /** Set when the match has been played and archived (v3.6.2+). */
+  completedAt?: number;
+  completedBy?: string;
+  result?: { setsA: number; setsB: number; winner: 'a' | 'b' | 'draw' };
   /** 1..99 physical board number this match is scheduled on.
    *  Optional for backwards compatibility with v3.6.0 planned records,
    *  but the bracket UI (v3.6.1+) always sets it. The board number is
@@ -188,6 +192,35 @@ export async function deletePlannedMatch(mid: string): Promise<PlannedWriteOutco
 }
 
 /**
+ * Mark a planned slot as complete after the match has been archived.
+ * Replaces deletePlannedMatch at match end — the record stays so the
+ * bracket shows a "done" state for every played match.
+ */
+export async function markPlannedComplete(
+  mid: string,
+  result: { setsA: number; setsB: number; winner: 'a' | 'b' | 'draw' },
+  uid: string,
+): Promise<PlannedWriteOutcome> {
+  if (!mid) return { ok: false, error: 'no mid' };
+  try {
+    const [{ getDatabase, ref, get, update }] = await Promise.all([
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    const snap = await get(ref(db, `planned/${mid}`));
+    if (!snap.exists()) return { ok: false, error: 'not found' };
+    await update(ref(db, `planned/${mid}`), {
+      completedAt: Date.now(),
+      completedBy: uid,
+      result,
+    });
+    return { ok: true, mid };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'complete failed' };
+  }
+}
+
+/**
  * Claim (or take over) a planned match by writing claimedBy: uid.
  * Called by MatchSetup when the umpire scans the QR. Bumps
  * claimedAt too so the admin UI can show "claimed 3 min ago".
@@ -286,6 +319,8 @@ export async function resolvePlannedByBoard(
       if (!v || typeof v !== 'object') continue;
       if (v.tournamentKey !== tournamentKey) continue;
       if (v.board !== board) continue;
+      // Skip completed slots — they've already been played.
+      if ((v as PlannedMatch).completedAt) continue;
       // Only include matches whose round is currently running.
       // If round data is unavailable, include all (safe fallback).
       if (hasRoundData && v.roundKey && !runningRoundKeys.has(v.roundKey)) continue;

@@ -286,12 +286,14 @@
       ]);
       const db = getDatabase(firebaseApp());
       unsubPlannedGlobal = onValue(ref(db, 'planned'), (snap) => {
-        const raw = snap.val() as Record<string, { tournamentKey?: string; roundKey?: string }> | null;
+        const raw = snap.val() as Record<string, { tournamentKey?: string; roundKey?: string; completedAt?: number }> | null;
         const counts: Record<string, number> = {};
         const roundCounts: Record<string, number> = {};
         if (raw) {
           for (const v of Object.values(raw)) {
             if (!v || typeof v !== 'object') continue;
+            // Completed slots don't count toward pending bracket totals.
+            if (v.completedAt) continue;
             const k = v.tournamentKey;
             if (k) counts[k] = (counts[k] ?? 0) + 1;
             const rk = v.roundKey;

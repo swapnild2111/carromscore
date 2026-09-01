@@ -32,7 +32,7 @@
   import { subscribeCurrentUserRole, type Role } from '../lib/roles';
   import { subscribeAuth, currentUser } from '../lib/auth';
   import { clearResume } from '../lib/resume';
-  import { deletePlannedMatch } from '../lib/planned';
+  import { markPlannedComplete } from '../lib/planned';
   import { normalizeKey, findByKey } from '../lib/tournaments';
   import type { MatchRecord } from '../lib/history';
   import { subscribeConnectivity, getConnectivity } from '../lib/connectivity';
@@ -2124,7 +2124,12 @@
         // rule permits the umpire (claimedBy) to delete their own
         // claim, so this should succeed in the common path.
         if (plannedMid) {
-          void deletePlannedMatch(plannedMid);
+          const uid = currentUser()?.uid ?? '';
+          void markPlannedComplete(
+            plannedMid,
+            { setsA: sideA.sets, setsB: sideB.sets, winner: matchResult ?? 'draw' },
+            uid,
+          );
         }
       });
       // Clear the handoff so a "same names again" match after this one

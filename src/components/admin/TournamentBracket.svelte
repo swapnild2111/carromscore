@@ -352,7 +352,8 @@
     else flash('Match removed');
   }
 
-  function statusOf(m: PlannedMatch): 'planned' | 'claimed' {
+  function statusOf(m: PlannedMatch): 'planned' | 'claimed' | 'complete' {
+    if (m.completedAt) return 'complete';
     return m.claimedBy ? 'claimed' : 'planned';
   }
 
@@ -554,7 +555,16 @@
                       {m.bName}{#if m.b2Name} + {m.b2Name}{/if}
                     </td>
                     <td class="col-status">
-                      {#if statusOf(m) === 'claimed'}
+                      {#if statusOf(m) === 'complete'}
+                        {@const r = m.result}
+                        <span class="pill pill-complete" title="Match complete">
+                          {#if r}
+                            {r.winner === 'a' ? m.aName.split(' ')[0] : r.winner === 'b' ? m.bName.split(' ')[0] : 'Draw'} · {r.setsA}–{r.setsB}
+                          {:else}
+                            done
+                          {/if}
+                        </span>
+                      {:else if statusOf(m) === 'claimed'}
                         <span class="pill pill-claimed" title="Being scored right now">
                           scoring · {claimAge(m)}
                         </span>
@@ -952,6 +962,13 @@
     background: rgba(76, 175, 80, 0.14);
     border: 1px solid rgba(76, 175, 80, 0.45);
     color: #a6dfa9;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+  .pill-complete {
+    background: rgba(100, 180, 230, 0.12);
+    border: 1px solid rgba(100, 180, 230, 0.35);
+    color: #7ec8e3;
     text-transform: none;
     letter-spacing: 0;
   }

@@ -138,6 +138,14 @@
         "createdAt":    { ".validate": "newData.isNumber()" },
         "claimedBy":    { ".validate": "newData.isString() && newData.val().length <= 64" },
         "claimedAt":    { ".validate": "newData.isNumber()" },
+        "completedAt":  { ".validate": "newData.isNumber()" },
+        "completedBy":  { ".validate": "newData.isString() && newData.val().length <= 64" },
+        "result":       { ".validate": "newData.hasChildren(['setsA', 'setsB', 'winner'])",
+          "setsA":      { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 15" },
+          "setsB":      { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 15" },
+          "winner":     { ".validate": "newData.isString() && (newData.val() == 'a' || newData.val() == 'b' || newData.val() == 'draw')" },
+          "$other":     { ".validate": false }
+        },
         "$other":       { ".validate": false }
       }
     },

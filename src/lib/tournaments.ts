@@ -836,6 +836,7 @@ export async function deleteTournamentAndMatches(
   // for callers that don't need the cascade. Same trick used elsewhere
   // in the codebase (see finishMatch → auth import).
   const { deleteMatch, loadHistory } = await import('./history');
+  const { deletePlannedMatch } = await import('./planned');
   const matches = await loadHistory();
   const toDelete = matches
     .filter((m) => m.tournamentKey === key)
@@ -846,6 +847,25 @@ export async function deleteTournamentAndMatches(
     const r = await deleteMatch(id);
     if (r.ok) deletedCount += 1;
     else failedCount += 1;
+  }
+  // Also delete any planned match slots for this tournament so the
+  // bracket doesn't show stale counts if the tournament is re-created
+  // with the same key.
+  {
+    const [{ firebaseApp }, { getDatabase, ref, get }] = await Promise.all([
+      import('./firebase'),
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    const snap = await get(ref(db, 'planned'));
+    const raw = snap.val() as Record<string, { tournamentKey?: string }> | null;
+    if (raw) {
+      for (const [mid, v] of Object.entries(raw)) {
+        if (v?.tournamentKey === key) {
+          await deletePlannedMatch(mid);
+        }
+      }
+    }
   }
   // Delete the tournament record last so partial failure still
   // reflects on the tournament's remaining orphan matches. If the

@@ -602,6 +602,23 @@
         aria-label="Clear filters"
       >✕ Clear</button>
     {/if}
+    {#if viewReport && viewReport.rows.length > 0}
+      <button
+        type="button"
+        class="rep-print"
+        onclick={() => window.print()}
+        aria-label="Print report"
+        title="Print landscape report"
+      >
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true" style="flex-shrink:0">
+          <rect x="2" y="5" width="10" height="6" rx="1" stroke="currentColor" stroke-width="1.3"/>
+          <path d="M4 5V2.5a.5.5 0 01.5-.5h5a.5.5 0 01.5.5V5" stroke="currentColor" stroke-width="1.3"/>
+          <rect x="4" y="8" width="6" height="2" rx=".3" fill="currentColor" opacity=".6"/>
+          <rect x="10" y="6.5" width="1" height="1" rx=".2" fill="currentColor" opacity=".8"/>
+        </svg>
+        Print
+      </button>
+    {/if}
   </div>
 
   <!-- Round chip strip removed v3.4.12 — merged into the filter bar
@@ -1046,6 +1063,37 @@
     cursor: pointer;
   }
   .rep-clear:hover { background: rgba(239, 83, 80, 0.08); }
+  .rep-print {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin-left: auto;
+    padding: 0.35rem 0.65rem;
+    background: transparent;
+    border: 1px solid rgba(255, 213, 74, 0.45);
+    border-radius: 0.45rem;
+    color: var(--accent, #ffd54a);
+    font: inherit;
+    font-size: 0.78rem;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .rep-print:hover { background: rgba(255, 213, 74, 0.08); }
+  @media print {
+    @page { size: A4 landscape; margin: 1.2cm; }
+    :global(body) { background: #fff !important; color: #111 !important; }
+    :global(.offline-banner),
+    :global(nav),
+    :global(.tab-bar),
+    :global(.lobby-tabs),
+    :global(.lobby-header),
+    :global(.reports-filters) { display: none !important; }
+    :global(.tab-content),
+    :global(.reports-tab) { padding: 0 !important; }
+    .stat-tile { border: 1px solid #ccc !important; background: #fff !important; color: #111 !important; }
+    .matches-tbl th, .matches-tbl td { border-color: #ccc !important; color: #111 !important; background: #fff !important; }
+    .matches-tbl thead tr { background: #f0f0f0 !important; }
+  }
   .chips {
     display: flex;
     gap: 0.4rem;
