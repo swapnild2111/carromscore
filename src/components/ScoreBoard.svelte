@@ -337,8 +337,18 @@
   // Timer: elapsed milliseconds since matchStartedAt.
   // Only meaningful when cfg.timerDuration > 0. Updated every second
   // by a setInterval started in onMount and cleaned up on unmount.
+  // Frozen (interval stopped) when matchResult becomes non-null so the
+  // displayed time stays at the moment the match ended rather than
+  // resetting or continuing to tick on the winner screen.
   let timerElapsedMs = $state(0);
   let timerIntervalId: number | null = null;
+
+  $effect(() => {
+    if (matchResult !== null && timerIntervalId !== null) {
+      window.clearInterval(timerIntervalId);
+      timerIntervalId = null;
+    }
+  });
 
   /*
    * Practice mode: solo drill. Player runs N sets × M boards and records
@@ -658,16 +668,21 @@
 
     // Timer tick. Only runs when a timerDuration is configured so
     // overhead is zero for the common (no-timer) case.
+    // Intentionally delayed by 1 s so the score screen paints the
+    // full starting time (e.g. 10:00) for a visible beat before the
+    // countdown begins — avoids the jarring jump to 9:59 on first
+    // render immediately after the Setup countdown lands here.
     if (cfg.timerDuration > 0) {
       const key = matchStateKey(cfg.mode, cfg.playerA, cfg.playerB);
       const startedAt = loadMatchStart(key);
-      if (startedAt !== null) {
-        timerElapsedMs = Date.now() - startedAt;
-      }
-      timerIntervalId = window.setInterval(() => {
-        const k = matchStateKey(cfg.mode, cfg.playerA, cfg.playerB);
-        const t0 = loadMatchStart(k);
-        timerElapsedMs = t0 !== null ? Date.now() - t0 : 0;
+      // Seed immediately so the display isn't blank on first paint.
+      timerElapsedMs = startedAt !== null ? Date.now() - startedAt : 0;
+      window.setTimeout(() => {
+        timerIntervalId = window.setInterval(() => {
+          const k = matchStateKey(cfg.mode, cfg.playerA, cfg.playerB);
+          const t0 = loadMatchStart(k);
+          timerElapsedMs = t0 !== null ? Date.now() - t0 : 0;
+        }, 1000);
       }, 1000);
     }
 
@@ -4188,16 +4203,17 @@
   /* Match timer pill — sits centered in the footer. */
   .timer-pill {
     font-family: 'DSEG7 Classic', monospace;
-    font-size: 1.6rem;
+    font-size: 2.2rem;
     font-weight: 700;
     letter-spacing: 0.06em;
     color: var(--accent);
-    padding: 0.15rem 0.9rem;
+    padding: 0.1rem 1rem;
     border-radius: 999px;
     background: rgba(255, 213, 74, 0.12);
     border: 1px solid rgba(255, 213, 74, 0.3);
-    min-width: 5.5rem;
+    min-width: 6.5rem;
     text-align: center;
+    line-height: 1;
     transition: background 0.3s, border-color 0.3s, color 0.3s;
   }
   .timer-pill.timer-warn {
@@ -4264,7 +4280,7 @@
     .foot { min-height: 2rem; padding: 0.15rem 0.35rem; }
     .hint { font-size: 0.65rem; }
     .winner { font-size: 0.72rem; padding: 0.15rem 0.6rem 0.15rem 0.4rem; }
-    .timer-pill { font-size: 1.1rem; padding: 0.1rem 0.6rem; min-width: 4rem; }
+    .timer-pill { font-size: 1.4rem; padding: 0.1rem 0.7rem; min-width: 5rem; }
   }
 
   .dialog {
