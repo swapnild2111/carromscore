@@ -334,6 +334,12 @@
   let livePublishFailedMsg = $state('');
   let livePublishFailedSuppressed = $state(false);
 
+  // Timer: elapsed milliseconds since matchStartedAt.
+  // Only meaningful when cfg.timerDuration > 0. Updated every second
+  // by a setInterval started in onMount and cleaned up on unmount.
+  let timerElapsedMs = $state(0);
+  let timerIntervalId: number | null = null;
+
   /*
    * Practice mode: solo drill. Player runs N sets × M boards and records
    * the number of MISSED shots per board (lower is better). No winner —
@@ -650,6 +656,21 @@
     // still flip this so the score screen's first tap saves.
     hydrated = true;
 
+    // Timer tick. Only runs when a timerDuration is configured so
+    // overhead is zero for the common (no-timer) case.
+    if (cfg.timerDuration > 0) {
+      const key = matchStateKey(cfg.mode, cfg.playerA, cfg.playerB);
+      const startedAt = loadMatchStart(key);
+      if (startedAt !== null) {
+        timerElapsedMs = Date.now() - startedAt;
+      }
+      timerIntervalId = window.setInterval(() => {
+        const k = matchStateKey(cfg.mode, cfg.playerA, cfg.playerB);
+        const t0 = loadMatchStart(k);
+        timerElapsedMs = t0 !== null ? Date.now() - t0 : 0;
+      }, 1000);
+    }
+
     updateOrientation();
     requestWakeLock();
 
@@ -673,6 +694,10 @@
       if (flushIntervalId !== null) {
         window.clearInterval(flushIntervalId);
         flushIntervalId = null;
+      }
+      if (timerIntervalId !== null) {
+        window.clearInterval(timerIntervalId);
+        timerIntervalId = null;
       }
     };
   });
@@ -813,6 +838,11 @@
       // shots (sum across all sets + boards) as sideA.points. Same
       // aggregate is already computed for the localStorage write above.
       const publishedPointsA = isPractice ? practicePoints : sideA.points;
+      const liveStartedAt = (() => {
+        if (cfg.timerDuration <= 0) return undefined;
+        const k = matchStateKey(cfg.mode, cfg.playerA, cfg.playerB);
+        return loadMatchStart(k) ?? undefined;
+      })();
       const payload: LivePayload = {
         sideA: { points: publishedPointsA, sets: sideA.sets },
         sideB: { points: sideB.points, sets: sideB.sets },
@@ -820,6 +850,7 @@
         currentBreak,
         queenHolder,
         matchResult,
+        ...(liveStartedAt !== undefined ? { matchStartedAt: liveStartedAt } : {}),
         ...(!isPractice && boardLog.length > 0 ? { boardLog } : {}),
         ...(!isPractice && setWinners.length > 0 ? { setWinners } : {}),
         ...(isPractice ? { practiceBoards, practiceSetIdx } : {}),
@@ -857,6 +888,7 @@
         // tournament makes no sense.
         ...(cfg.tournament && cfg.round ? { round: cfg.round } : {}),
         ...(cfg.tournament && roundKey ? { roundKey } : {}),
+        ...(cfg.timerDuration > 0 ? { timerDuration: cfg.timerDuration } : {}),
       };
       if (getConnectivity().online) {
         // v3.3.2: publishLive now returns { ok, error? }. Surface
@@ -2756,6 +2788,15 @@
         <strong>{matchResult === 'a' ? sideA.name : sideB.name}</strong>
         wins {sideA.sets}–{sideB.sets}
       </span>
+    {:else if cfg.timerDuration > 0}
+      {@const timerTotalMs = cfg.timerDuration * 60 * 1000}
+      {@const timerOver = timerElapsedMs > timerTotalMs}
+      {@const timerDisplayMs = timerOver ? timerElapsedMs - timerTotalMs : timerTotalMs - timerElapsedMs}
+      {@const timerMins = Math.floor(timerDisplayMs / 60000)}
+      {@const timerSecs = Math.floor((timerDisplayMs % 60000) / 1000)}
+      <span class="timer-pill" class:timer-over={timerOver} class:timer-warn={!timerOver && timerTotalMs - timerElapsedMs < 60000}>
+        {timerOver ? '+' : ''}{timerMins}:{String(timerSecs).padStart(2, '0')}
+      </span>
     {:else}
       <span class="hint">
         © 2026 Swapnil Deshpande
@@ -4131,6 +4172,39 @@
     letter-spacing: 0.02em;
   }
   .winner strong { color: var(--accent); letter-spacing: 0.04em; }
+
+  /* Match timer pill — sits in the footer where the version hint usually is. */
+  .timer-pill {
+    font-family: 'DSEG7 Classic', monospace;
+    font-size: 1.15rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    color: var(--accent);
+    padding: 0.1rem 0.6rem;
+    border-radius: 999px;
+    background: rgba(255, 213, 74, 0.12);
+    border: 1px solid rgba(255, 213, 74, 0.3);
+    min-width: 4.5rem;
+    text-align: center;
+    transition: background 0.3s, border-color 0.3s, color 0.3s;
+  }
+  .timer-pill.timer-warn {
+    color: #ffb300;
+    background: rgba(255, 179, 0, 0.18);
+    border-color: rgba(255, 179, 0, 0.5);
+    animation: timer-warn-pulse 1s ease-in-out infinite;
+  }
+  .timer-pill.timer-over {
+    color: var(--danger);
+    background: rgba(239, 83, 80, 0.15);
+    border-color: rgba(239, 83, 80, 0.5);
+    animation: timer-warn-pulse 0.6s ease-in-out infinite;
+  }
+  @keyframes timer-warn-pulse {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.65; }
+  }
+
   .winner-dot {
     width: 0.55rem;
     height: 0.55rem;

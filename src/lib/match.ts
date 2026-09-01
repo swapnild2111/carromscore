@@ -60,6 +60,13 @@ export type MatchConfig = {
    * inside the tournament in History/Reports). See v3.2 plan.
    */
   round: string;
+  /**
+   * Optional match time limit in minutes. 0 = no timer. When set,
+   * the ScoreBoard footer shows a countdown and broadcasts
+   * `matchStartedAt` on the live payload so spectators see a
+   * synchronised elapsed/remaining clock.
+   */
+  timerDuration: number;
 };
 
 export const DEFAULT_CONFIG: MatchConfig = {
@@ -82,6 +89,7 @@ export const DEFAULT_CONFIG: MatchConfig = {
   mid: '',
   tournament: '',
   round: '',
+  timerDuration: 0,
 };
 
 export function formatPreset(format: Format): Partial<MatchConfig> {
@@ -122,6 +130,7 @@ const QUERY_KEYS: (keyof MatchConfig)[] = [
   'mid',
   'tournament',
   'round',
+  'timerDuration',
 ];
 
 export function encodeConfig(cfg: MatchConfig): string {
@@ -190,6 +199,11 @@ export function decodeConfig(query: URLSearchParams): MatchConfig {
   // inside the tournament in History/Reports).
   const round = (query.get('round') ?? '').trim().slice(0, 60);
   if (round) out.round = round;
+
+  // timerDuration: 0 is the "no timer" sentinel. Only values ≥ 0 are
+  // valid; fractional / negative inputs are ignored and default to 0.
+  const timerDuration = parseInRange(query.get('timerDuration'), 0, 300);
+  if (timerDuration !== null) out.timerDuration = timerDuration;
 
   return out;
 }

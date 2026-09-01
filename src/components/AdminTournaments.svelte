@@ -103,11 +103,13 @@
     bestOf: 3,
     pointsTarget: 25,
     maxBoards: 8,
+    timerDuration: 0,
   };
   let editingDefaultMode = $state<'singles' | 'doubles'>('singles');
   let editingDefaultBestOf = $state<string>('');
   let editingDefaultPointsTarget = $state<string>('');
   let editingDefaultMaxBoards = $state<string>('');
+  let editingDefaultTimerDuration = $state<string>('');
   let editingOriginal = $state<{
     name: string;
     type: 'open' | 'closed';
@@ -117,6 +119,7 @@
       bestOf: string;
       pointsTarget: string;
       maxBoards: string;
+      timerDuration: string;
     };
   } | null>(null);
   let deleteConfirmKey = $state<string | null>(null);
@@ -430,6 +433,7 @@
     editingDefaultBestOf = String(t.defaults?.bestOf ?? FALLBACK_TOURNAMENT_DEFAULTS.bestOf);
     editingDefaultPointsTarget = String(t.defaults?.pointsTarget ?? FALLBACK_TOURNAMENT_DEFAULTS.pointsTarget);
     editingDefaultMaxBoards = String(t.defaults?.maxBoards ?? FALLBACK_TOURNAMENT_DEFAULTS.maxBoards);
+    editingDefaultTimerDuration = String(t.defaults?.timerDuration ?? FALLBACK_TOURNAMENT_DEFAULTS.timerDuration);
     editingOriginal = {
       name: t.name,
       type: t.type ?? 'open',
@@ -439,6 +443,7 @@
         bestOf: editingDefaultBestOf,
         pointsTarget: editingDefaultPointsTarget,
         maxBoards: editingDefaultMaxBoards,
+        timerDuration: editingDefaultTimerDuration,
       },
     };
   }
@@ -451,6 +456,7 @@
     editingDefaultBestOf = '';
     editingDefaultPointsTarget = '';
     editingDefaultMaxBoards = '';
+    editingDefaultTimerDuration = '';
     editingOriginal = null;
   }
   async function saveEdit() {
@@ -479,6 +485,7 @@
       bestOf?: number;
       pointsTarget?: number;
       maxBoards?: number;
+      timerDuration?: number;
     };
     const defaultsPatch: DefaultsPatch = {};
     if (editingDefaultMode !== editingOriginal.defaults.mode) {
@@ -511,6 +518,12 @@
       const parsed = parseIntField(editingDefaultMaxBoards, 0, 50, 'Max boards');
       if (parsed === undefined) return;
       defaultsPatch.maxBoards = parsed;
+    }
+    if (editingDefaultTimerDuration !== editingOriginal.defaults.timerDuration) {
+      // timerDuration: 0 = no timer.
+      const parsed = parseIntField(editingDefaultTimerDuration, 0, 300, 'Timer duration');
+      if (parsed === undefined) return;
+      defaultsPatch.timerDuration = parsed;
     }
     const defaultsChanged = Object.keys(defaultsPatch).length > 0;
 
@@ -1383,6 +1396,18 @@
               bind:value={editingDefaultMaxBoards}
               disabled={saving}
               aria-label="Default max boards"
+            />
+          </label>
+          <label class="edit-field">
+            <span>Timer <em class="hint-inline">(mins, 0 = off)</em></span>
+            <input
+              type="number"
+              min="0"
+              max="300"
+              step="1"
+              bind:value={editingDefaultTimerDuration}
+              disabled={saving}
+              aria-label="Default timer duration"
             />
           </label>
         </fieldset>

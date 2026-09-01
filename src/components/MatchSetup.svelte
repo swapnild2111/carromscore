@@ -205,6 +205,7 @@
     cfg.bestOf = m.cfg?.bestOf ?? td?.bestOf ?? DEFAULT_CONFIG.bestOf;
     cfg.pointsTarget = m.cfg?.pointsTarget ?? td?.pointsTarget ?? DEFAULT_CONFIG.pointsTarget;
     cfg.maxBoards = m.cfg?.maxBoards ?? td?.maxBoards ?? DEFAULT_CONFIG.maxBoards;
+    cfg.timerDuration = m.cfg?.timerDuration ?? td?.timerDuration ?? DEFAULT_CONFIG.timerDuration;
     // Stamp resolved player ids so finishMatch stamps playerAId
     // etc. on the archive. resolvedPlayerIds is the local map that
     // MatchSetup already maintains via the picker's onSelect.
@@ -1200,7 +1201,7 @@
     </p>
     <p class="planned-format">
       {cfg.mode === 'doubles' ? 'Doubles' : 'Singles'} ·
-      bo{cfg.bestOf} · target {cfg.pointsTarget}{cfg.maxBoards ? ` · max ${cfg.maxBoards} boards` : ''}
+      bo{cfg.bestOf} · target {cfg.pointsTarget}{cfg.maxBoards ? ` · max ${cfg.maxBoards} boards` : ''}{cfg.timerDuration ? ` · ${cfg.timerDuration} min timer` : ''}
     </p>
     <p class="planned-hint">Review below and tap Start when the players are seated.</p>
   </aside>
@@ -1285,6 +1286,10 @@
         {#if cfg.mode !== 'practice'}<em class="hint-inline">(0 = ∞)</em>{/if}
       </span>
       <input type="number" min={cfg.mode === 'practice' ? 1 : 0} step="1" bind:value={cfg.maxBoards} />
+    </label>
+    <label>
+      <span>Timer <em class="hint-inline">(mins, 0 = off)</em></span>
+      <input type="number" min="0" max="300" step="1" bind:value={cfg.timerDuration} />
     </label>
   </fieldset>
 

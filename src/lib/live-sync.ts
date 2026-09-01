@@ -51,6 +51,14 @@ export type LivePayload = {
   currentBreak: 'a' | 'b' | null;
   queenHolder: 'a' | 'b' | null;
   matchResult: 'a' | 'b' | 'draw' | null;
+  /**
+   * Unix ms timestamp of when the umpire tapped Start. Present when
+   * `timerDuration > 0` on the meta; absent otherwise. Spectators
+   * use this together with `meta.timerDuration` to render an
+   * elapsed / countdown clock that stays in sync across devices
+   * without a server-side timer.
+   */
+  matchStartedAt?: number;
   boardLog?: BoardLogEntry[];
   /**
    * Ordered per-set credit log (v3.4.12). Same shape + semantics as
@@ -120,6 +128,12 @@ export type LiveMeta = {
    */
   round?: string;
   roundKey?: string;
+  /**
+   * Match time limit in minutes. 0 / absent = no timer. Passed
+   * through from `cfg.timerDuration` so spectators can render a
+   * countdown without knowing the original config.
+   */
+  timerDuration?: number;
 };
 
 /** Metadata + payload — what actually lives at `/live/{mid}`. */
@@ -208,6 +222,9 @@ export async function publishLive(
       currentBreak: payload.currentBreak,
       queenHolder: payload.queenHolder,
       matchResult: payload.matchResult,
+      ...(typeof payload.matchStartedAt === 'number'
+        ? { matchStartedAt: payload.matchStartedAt }
+        : {}),
       ...(payload.boardLog && payload.boardLog.length > 0
         ? { boardLog: payload.boardLog }
         : {}),
@@ -234,6 +251,7 @@ export async function publishLive(
     if (meta.tournamentKey) metaClean.tournamentKey = meta.tournamentKey;
     if (meta.round) metaClean.round = meta.round;
     if (meta.roundKey) metaClean.roundKey = meta.roundKey;
+    if (meta.timerDuration) metaClean.timerDuration = meta.timerDuration;
     // Stamp `createdBy` when signed in. Anonymous stays anonymous —
     // field absent. RTDB validator on live/$mid/createdBy accepts a
     // string ≤ 64 chars (rules updated 2026-08-09).
