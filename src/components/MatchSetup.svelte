@@ -948,7 +948,6 @@
       ...(aCountry ? { aCountry } : {}),
       ...(bCountry ? { bCountry } : {}),
     });
-    saveMatchStart(key, Date.now());
     // Remember these names in the per-device roster so the picker
     // autocompletes them next time. Practice mode contributes only
     // playerA; Doubles contributes all four.
@@ -979,8 +978,11 @@
       },
     });
     if (cfg.timerDuration > 0) {
-      beginCountdown(scoreUrl);
+      // saveMatchStart is called inside beginCountdown when the countdown
+      // reaches 0 — stamping it now would eat the 10-second delay.
+      beginCountdown(scoreUrl, key);
     } else {
+      saveMatchStart(key, Date.now());
       window.location.href = scoreUrl;
     }
   }
@@ -1001,7 +1003,7 @@
     pendingScoreUrl = '';
   }
 
-  function beginCountdown(url: string) {
+  function beginCountdown(url: string, startKey: string) {
     countdownSecs = 10;
     pendingScoreUrl = url;
     countdownIntervalId = setInterval(() => {
@@ -1009,6 +1011,9 @@
       if ((countdownSecs ?? 0) <= 0) {
         clearInterval(countdownIntervalId!);
         countdownIntervalId = null;
+        // Stamp the match start exactly when the countdown hits 0 so
+        // the timer on the score screen begins from the right moment.
+        saveMatchStart(startKey, Date.now());
         window.location.href = pendingScoreUrl;
       }
     }, 1000);
