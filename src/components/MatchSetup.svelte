@@ -444,12 +444,12 @@
     cfg.round = '';
   }
 
-  const tourSuggestions = $derived<Tournament[]>(() => {
+  const tourSuggestions = $derived.by<Tournament[]>(() => {
     void tournamentTick;
     return rankTournaments(cfg.tournament, 8);
   });
-  const tourDropdownVisible = $derived<boolean>(
-    showTournamentPicker && tourSuggestions().length > 0,
+  const tourDropdownVisible = $derived.by<boolean>(
+    () => showTournamentPicker && tourSuggestions.length > 0,
   );
 
   function onTournamentKeydown(e: KeyboardEvent, suggestions: Tournament[]) {
@@ -1311,7 +1311,7 @@
       placeholder="Event name — Silver Cup 2026, Sunday Club Night, …"
       value={cfg.tournament}
       role="combobox"
-      aria-expanded={tourDropdownVisible()}
+      aria-expanded={tourDropdownVisible}
       aria-autocomplete="list"
       oninput={(e) => {
         const nextValue = (e.currentTarget as HTMLInputElement).value;
@@ -1323,12 +1323,12 @@
       }}
       onfocus={() => { showTournamentPicker = true; tournamentHighlight = -1; }}
       onblur={() => setTimeout(() => { if (!suppressTournamentBlur) { showTournamentPicker = false; tournamentHighlight = -1; } suppressTournamentBlur = false; }, 200)}
-      onkeydown={(e) => onTournamentKeydown(e, tourSuggestions())}
+      onkeydown={(e) => onTournamentKeydown(e, tourSuggestions)}
       maxlength="60"
     />
-    {#if tourDropdownVisible()}
+    {#if tourDropdownVisible}
       <ul class="suggest">
-        {#each tourSuggestions() as t, ti (t.key)}
+        {#each tourSuggestions as t, ti (t.key)}
           <li>
             <button
               type="button"
