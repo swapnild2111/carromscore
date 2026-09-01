@@ -2775,7 +2775,7 @@
   </div>
   {/if}
 
-  <div class="foot">
+  <div class="foot" class:foot-timer={cfg.timerDuration > 0 && !matchResult}>
     {#if matchResult === 'draw'}
       <span class="winner">
         <span class="winner-dot"></span>
@@ -2794,6 +2794,8 @@
       {@const timerDisplayMs = timerOver ? timerElapsedMs - timerTotalMs : timerTotalMs - timerElapsedMs}
       {@const timerMins = Math.floor(timerDisplayMs / 60000)}
       {@const timerSecs = Math.floor((timerDisplayMs % 60000) / 1000)}
+      <!-- spacer keeps the pill truly centered against the buttons on the right -->
+      <span class="timer-spacer" aria-hidden="true"></span>
       <span class="timer-pill" class:timer-over={timerOver} class:timer-warn={!timerOver && timerTotalMs - timerElapsedMs < 60000}>
         {timerOver ? '+' : ''}{timerMins}:{String(timerSecs).padStart(2, '0')}
       </span>
@@ -4173,18 +4175,28 @@
   }
   .winner strong { color: var(--accent); letter-spacing: 0.04em; }
 
-  /* Match timer pill — sits in the footer where the version hint usually is. */
+  /* When an active timer is showing, use a 3-column grid so the pill
+     sits dead-center regardless of button count on the right. */
+  .foot-timer {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+  }
+  .foot-timer .foot-actions { justify-self: end; }
+  .timer-spacer { /* occupies the left "ghost" column */ }
+
+  /* Match timer pill — sits centered in the footer. */
   .timer-pill {
     font-family: 'DSEG7 Classic', monospace;
-    font-size: 1.15rem;
+    font-size: 1.6rem;
     font-weight: 700;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.06em;
     color: var(--accent);
-    padding: 0.1rem 0.6rem;
+    padding: 0.15rem 0.9rem;
     border-radius: 999px;
     background: rgba(255, 213, 74, 0.12);
     border: 1px solid rgba(255, 213, 74, 0.3);
-    min-width: 4.5rem;
+    min-width: 5.5rem;
     text-align: center;
     transition: background 0.3s, border-color 0.3s, color 0.3s;
   }
@@ -4252,6 +4264,7 @@
     .foot { min-height: 2rem; padding: 0.15rem 0.35rem; }
     .hint { font-size: 0.65rem; }
     .winner { font-size: 0.72rem; padding: 0.15rem 0.6rem 0.15rem 0.4rem; }
+    .timer-pill { font-size: 1.1rem; padding: 0.1rem 0.6rem; min-width: 4rem; }
   }
 
   .dialog {

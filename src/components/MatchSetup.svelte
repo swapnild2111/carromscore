@@ -978,7 +978,40 @@
         ...(cfg.tournament ? { tournament: cfg.tournament } : {}),
       },
     });
-    window.location.href = scoreUrl;
+    if (cfg.timerDuration > 0) {
+      beginCountdown(scoreUrl);
+    } else {
+      window.location.href = scoreUrl;
+    }
+  }
+
+  // 10-second "Get ready" countdown shown after Start is tapped
+  // (only when timerDuration > 0). Once it hits 0 the browser
+  // navigates to the score screen.
+  let countdownSecs = $state<number | null>(null);
+  let pendingScoreUrl = $state('');
+  let countdownIntervalId: ReturnType<typeof setInterval> | null = null;
+
+  function cancelCountdown() {
+    if (countdownIntervalId !== null) {
+      clearInterval(countdownIntervalId);
+      countdownIntervalId = null;
+    }
+    countdownSecs = null;
+    pendingScoreUrl = '';
+  }
+
+  function beginCountdown(url: string) {
+    countdownSecs = 10;
+    pendingScoreUrl = url;
+    countdownIntervalId = setInterval(() => {
+      countdownSecs = (countdownSecs ?? 1) - 1;
+      if ((countdownSecs ?? 0) <= 0) {
+        clearInterval(countdownIntervalId!);
+        countdownIntervalId = null;
+        window.location.href = pendingScoreUrl;
+      }
+    }, 1000);
   }
 
   // PWA install prompt. Android/desktop Chrome fires `beforeinstallprompt`; iOS
@@ -1559,6 +1592,17 @@
   </div>
 </form>
 
+{#if countdownSecs !== null}
+  <div class="countdown-overlay" role="dialog" aria-label="Match starting" aria-modal="true">
+    <div class="countdown-inner">
+      <p class="countdown-label">Get ready!</p>
+      <div class="countdown-digit">{countdownSecs}</div>
+      <p class="countdown-hint">Match starts in {countdownSecs} second{countdownSecs === 1 ? '' : 's'}</p>
+      <button type="button" class="countdown-cancel" onclick={cancelCountdown}>Cancel</button>
+    </div>
+  </div>
+{/if}
+
 <!-- FeedbackPopup owns its own trigger + dialog; see foot-links above. -->
 
 <style>
@@ -1727,6 +1771,11 @@
   /* Very narrow phones (≤ 360px): trim padding + text so the three-
      column Mode / Match-rules grids fit without spilling out of the
      container. Label text still wraps if needed. */
+  @media (max-width: 480px) {
+    /* 4 cols is too tight on phones — collapse to 2×2 */
+    fieldset.rules { grid-template-columns: 1fr 1fr; }
+    fieldset.rules-practice { grid-template-columns: 1fr 1fr; }
+  }
   @media (max-width: 380px) {
     fieldset label {
       padding: 0.5rem 0.4rem;
@@ -1747,11 +1796,12 @@
      sizes since they're compact numeric fields. */
   fieldset.rules {
     display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
+    grid-template-columns: 1fr 1fr 1fr 1fr;
     gap: 0.6rem;
   }
+  /* Practice hides Points, so 3 cells → 3-col keeps them wide */
   fieldset.rules-practice {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr 1fr 1fr;
   }
   fieldset.rules label {
     display: flex;
@@ -2340,4 +2390,61 @@
     font-weight: 700;
   }
   .planned-btn-primary:hover { background: rgba(255, 213, 74, 0.24); }
+
+  /* 10-second "Get ready" countdown overlay */
+  .countdown-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9000;
+    background: rgba(11, 11, 11, 0.97);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .countdown-inner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+    text-align: center;
+    padding: 2rem;
+  }
+  .countdown-label {
+    font-size: 1.1rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent, #ffd54a);
+  }
+  .countdown-digit {
+    font-family: 'DSEG7 Classic', monospace;
+    font-size: clamp(6rem, 25vw, 10rem);
+    font-weight: 700;
+    color: var(--accent, #ffd54a);
+    line-height: 1;
+    text-shadow: 0 0 40px rgba(255, 213, 74, 0.5);
+    animation: countdown-pop 0.25s ease-out;
+  }
+  @keyframes countdown-pop {
+    from { transform: scale(1.25); opacity: 0.5; }
+    to   { transform: scale(1);    opacity: 1; }
+  }
+  .countdown-hint {
+    font-size: 0.95rem;
+    color: var(--muted, #888);
+    letter-spacing: 0.04em;
+  }
+  .countdown-cancel {
+    margin-top: 0.5rem;
+    background: transparent;
+    border: 1px solid #333;
+    color: var(--muted, #888);
+    border-radius: 0.4rem;
+    padding: 0.4rem 1.2rem;
+    font: inherit;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s;
+  }
+  .countdown-cancel:hover { border-color: #666; color: var(--fg, #eee); }
 </style>

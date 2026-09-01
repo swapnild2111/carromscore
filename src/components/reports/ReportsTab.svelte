@@ -1326,10 +1326,13 @@
   .stat-tile {
     background: rgba(255, 255, 255, 0.02);
     border: 1px solid rgba(255, 255, 255, 0.08);
+    border-top: 2px solid rgba(255, 213, 74, 0.35);
     border-radius: 0.6rem;
     padding: 0.75rem 0.9rem;
     display: flex;
     flex-direction: column;
+    align-items: center;
+    text-align: center;
     gap: 0.1rem;
     min-width: 0;
   }
@@ -1337,7 +1340,7 @@
     font-size: 1.5rem;
     font-weight: 700;
     line-height: 1.1;
-    color: var(--fg, #f5f5f5);
+    color: var(--accent, #ffd54a);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -1355,6 +1358,7 @@
   .stat-tile-leader {
     background: rgba(255, 213, 74, 0.05);
     border-color: rgba(255, 213, 74, 0.22);
+    border-top-color: rgba(255, 213, 74, 0.55);
   }
   /* Podium tile (v3.4.12) — replaces the single "Leader" tile with
      a compact top-3 list. Player column first, medal + wins on the
