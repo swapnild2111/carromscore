@@ -114,6 +114,7 @@
   let editingOrganizerName = $state<string>('');
   let editingLogoUrl = $state<string>('');
   let logoUploading = $state(false);
+  let logoUploadProgress = $state(0);
   let editingOriginal = $state<{
     name: string;
     type: 'open' | 'closed';
@@ -173,6 +174,11 @@
   /** Country code — only meaningful when addingType === 'closed'.
    *  Required in that case; blocks Save. */
   let addingCountry = $state('');
+  let addingDescription = $state('');
+  let addingOrganizerName = $state('');
+  let addingLogoUrl = $state('');
+  let addingLogoUploading = $state(false);
+  let addingLogoUploadProgress = $state(0);
 
   /** Per-row "Assigned players" dialog state (closed tournaments). */
   let assignOpen = $state(false);
@@ -610,33 +616,60 @@
     }
   }
 
-  async function uploadLogo(file: File) {
-    if (!editingKey) return;
-    if (file.size > 2 * 1024 * 1024) {
-      flash('err', 'Logo must be under 2 MB');
-      return;
-    }
-    if (!file.type.startsWith('image/')) {
-      flash('err', 'Only image files are accepted');
-      return;
-    }
-    logoUploading = true;
+  async function doLogoUpload(
+    file: File,
+    keyHint: string,
+    setUploading: (v: boolean) => void,
+    setProgress: (pct: number) => void,
+    setUrl: (url: string) => void,
+  ) {
+    if (file.size > 2 * 1024 * 1024) { flash('err', 'Logo must be under 2 MB'); return; }
+    if (!file.type.startsWith('image/')) { flash('err', 'Only image files are accepted'); return; }
+    setUploading(true);
+    setProgress(0);
     try {
-      const [{ firebaseApp }, { getStorage, ref: storageRef, uploadBytes, getDownloadURL }] = await Promise.all([
+      const [{ firebaseApp }, { getStorage, ref: storageRef, uploadBytesResumable, getDownloadURL }] = await Promise.all([
         import('../lib/firebase'),
         import('firebase/storage'),
       ]);
       const storage = getStorage(firebaseApp());
-      const path = `tournament-logos/${editingKey}/${Date.now()}_${file.name.replace(/[^a-z0-9._-]/gi, '_')}`;
-      const snap = await uploadBytes(storageRef(storage, path), file);
-      const url = await getDownloadURL(snap.ref);
-      editingLogoUrl = url;
+      const path = `tournament-logos/${keyHint}/${Date.now()}_${file.name.replace(/[^a-z0-9._-]/gi, '_')}`;
+      const task = uploadBytesResumable(storageRef(storage, path), file);
+      await new Promise<void>((resolve, reject) => {
+        task.on(
+          'state_changed',
+          (snap) => setProgress(Math.round((snap.bytesTransferred / snap.totalBytes) * 100)),
+          reject,
+          resolve,
+        );
+      });
+      setUrl(await getDownloadURL(task.snapshot.ref));
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      flash('err', `Upload failed: ${msg}`);
+      flash('err', `Upload failed: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
-      logoUploading = false;
+      setUploading(false);
+      setProgress(0);
     }
+  }
+
+  async function uploadLogo(file: File) {
+    await doLogoUpload(
+      file,
+      editingKey ?? 'new',
+      (v) => { logoUploading = v; },
+      (pct) => { logoUploadProgress = pct; },
+      (url) => { editingLogoUrl = url; },
+    );
+  }
+
+  async function uploadLogoForAdd(file: File) {
+    await doLogoUpload(
+      file,
+      'new',
+      (v) => { addingLogoUploading = v; },
+      (pct) => { addingLogoUploadProgress = pct; },
+      (url) => { addingLogoUrl = url; },
+    );
   }
 
   function startDelete(key: string) {
@@ -881,12 +914,19 @@
     addingName = '';
     addingType = 'open';
     addingCountry = '';
+    addingDescription = '';
+    addingOrganizerName = '';
+    addingLogoUrl = '';
   }
   function closeAdd() {
     addingOpen = false;
     addingName = '';
     addingType = 'open';
     addingCountry = '';
+    addingDescription = '';
+    addingOrganizerName = '';
+    addingLogoUrl = '';
+    addingLogoUploading = false;
   }
   async function saveAdd() {
     const trimmed = addingName.trim();
@@ -896,19 +936,27 @@
       return;
     }
     saving = true;
-    // v3.3: createOrTouchTournament is now async and reports RTDB
-    // outcomes back to the caller. A rule-denied write is rolled
-    // back client-side (the local push is undone) so the admin list
-    // never shows a phantom record that vanishes on next page load.
     const outcome = await createOrTouchTournament(trimmed, {
       type: addingType,
       ...(addingType === 'closed' && addingCountry ? { country: addingCountry } : {}),
     });
-    saving = false;
     if (!outcome.ok) {
+      saving = false;
       flash('err', outcome.error);
       return;
     }
+    // Write optional meta fields if provided.
+    const desc = addingDescription.trim();
+    const org = addingOrganizerName.trim();
+    const logo = addingLogoUrl.trim();
+    if (desc || org || logo) {
+      await updateTournamentMeta(outcome.record.key, {
+        ...(desc ? { description: desc } : {}),
+        ...(org ? { organizerName: org } : {}),
+        ...(logo ? { logoUrl: logo } : {}),
+      });
+    }
+    saving = false;
     flash('ok', `"${outcome.record.name}" added`);
     closeAdd();
   }
@@ -1437,8 +1485,13 @@
                 (e.currentTarget as HTMLInputElement).value = '';
               }}
             />
-            {logoUploading ? 'Uploading…' : editingLogoUrl ? 'Replace logo' : 'Upload logo'}
+            {logoUploading ? `Uploading… ${logoUploadProgress}%` : editingLogoUrl ? 'Replace logo' : 'Upload logo'}
           </label>
+          {#if logoUploading}
+            <div class="upload-progress-bar" role="progressbar" aria-valuenow={logoUploadProgress} aria-valuemin={0} aria-valuemax={100}>
+              <div class="upload-progress-fill" style="width: {logoUploadProgress}%"></div>
+            </div>
+          {/if}
         </div>
 
         <!--
@@ -1731,13 +1784,72 @@
             />
           </label>
         {/if}
+
+        <label class="edit-field">
+          <span>Description <em class="hint-inline">(optional, shown on print cover)</em></span>
+          <textarea
+            bind:value={addingDescription}
+            placeholder="e.g. Season finale knockout — top 8 ranked players"
+            maxlength="300"
+            rows="2"
+            disabled={saving}
+            aria-label="Tournament description"
+          ></textarea>
+        </label>
+
+        <label class="edit-field">
+          <span>Organiser name <em class="hint-inline">(optional, shown on print footer)</em></span>
+          <input
+            type="text"
+            bind:value={addingOrganizerName}
+            placeholder="Danish Carrom Federation"
+            maxlength="80"
+            disabled={saving}
+            aria-label="Organiser name"
+          />
+        </label>
+
+        <div class="edit-field logo-field">
+          <span class="logo-label">Logo <em class="hint-inline">(optional, ≤ 2 MB, shown on print cover)</em></span>
+          {#if addingLogoUrl}
+            <div class="logo-preview">
+              <img src={addingLogoUrl} alt="Tournament logo preview" class="logo-img" />
+              <button
+                type="button"
+                class="btn btn-danger btn-sm logo-remove"
+                onclick={() => (addingLogoUrl = '')}
+                disabled={saving || addingLogoUploading}
+              >Remove</button>
+            </div>
+          {/if}
+          <label class="logo-upload-btn" class:logo-uploading={addingLogoUploading}>
+            <input
+              type="file"
+              accept="image/*"
+              class="logo-file-input"
+              disabled={saving || addingLogoUploading}
+              onchange={(e) => {
+                const f = (e.currentTarget as HTMLInputElement).files?.[0];
+                if (f) void uploadLogoForAdd(f);
+                (e.currentTarget as HTMLInputElement).value = '';
+              }}
+            />
+            {addingLogoUploading ? `Uploading… ${addingLogoUploadProgress}%` : addingLogoUrl ? 'Replace logo' : 'Upload logo'}
+          </label>
+          {#if addingLogoUploading}
+            <div class="upload-progress-bar" role="progressbar" aria-valuenow={addingLogoUploadProgress} aria-valuemin={0} aria-valuemax={100}>
+              <div class="upload-progress-fill" style="width: {addingLogoUploadProgress}%"></div>
+            </div>
+          {/if}
+        </div>
+
         <div class="dialog-actions">
           <button type="button" class="btn" onclick={closeAdd} disabled={saving}>Cancel</button>
           <button
             type="button"
             class="btn btn-primary"
             onclick={saveAdd}
-            disabled={saving || !addingName.trim() || (addingType === 'closed' && !addingCountry)}
+            disabled={saving || addingLogoUploading || !addingName.trim() || (addingType === 'closed' && !addingCountry)}
           >{saving ? 'Adding…' : 'Add'}</button>
         </div>
       </div>
@@ -2478,6 +2590,20 @@
     width: 1px; height: 1px;
     opacity: 0; overflow: hidden;
     pointer-events: none;
+  }
+  .upload-progress-bar {
+    width: 100%;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 2px;
+    overflow: hidden;
+    margin-top: 0.35rem;
+  }
+  .upload-progress-fill {
+    height: 100%;
+    background: var(--accent, #00c4a0);
+    border-radius: 2px;
+    transition: width 0.15s ease;
   }
 
   /* Defaults fieldset in the Edit dialog — 2 columns on wide screens

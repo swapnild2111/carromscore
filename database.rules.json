@@ -75,7 +75,10 @@
         "lastActive": { ".validate": "newData.isNumber()" },
         "createdBy":  { ".validate": "newData.isString() && newData.val().length <= 64" },
         "type":       { ".validate": "newData.isString() && (newData.val() == 'open' || newData.val() == 'closed')" },
-        "country":    { ".validate": "newData.isString() && newData.val().length <= 40" },
+        "country":       { ".validate": "newData.isString() && newData.val().length <= 40" },
+        "description":   { ".validate": "newData.isString() && newData.val().length <= 300" },
+        "organizerName": { ".validate": "newData.isString() && newData.val().length <= 120" },
+        "logoUrl":       { ".validate": "newData.isString() && newData.val().length <= 512 && (newData.val().length == 0 || newData.val().matches(/^https:\\/\\//g))" },
         "organisers": {
           ".read": "auth != null",
           "$uid": {

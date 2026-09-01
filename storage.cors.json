@@ -1,0 +1,8 @@
+[
+  {
+    "origin": ["https://swapnild2111.github.io"],
+    "method": ["GET", "HEAD", "PUT", "POST", "DELETE"],
+    "responseHeader": ["Content-Type", "x-goog-meta-*", "x-goog-content-length-range"],
+    "maxAgeSeconds": 3600
+  }
+]
