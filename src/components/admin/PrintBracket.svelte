@@ -173,11 +173,17 @@
     })();
   });
 
-  // Derived print values — prefer tournament-level overrides (desc stays on
-  // tournament), fall back to organiser profile for logo + organizer name.
-  const printLogoUrl = $derived(orgProfile?.logoUrl ?? null);
+  // Derived print values.
+  // Logo: organiser profile first, then fall back to the legacy per-tournament
+  // logoUrl (tournaments created before the profile system stored the logo directly).
+  // Organizer name: organiser profile only (the old per-tournament organizerName
+  // field was removed from the add/edit dialogs).
+  const printLogoUrl = $derived(
+    orgProfile?.logoUrl ?? tournament?.logoUrl ?? null,
+  );
   const printOrganizerName = $derived(
-    orgProfile?.orgName || orgProfile?.displayName || null,
+    orgProfile?.orgName || orgProfile?.displayName ||
+    tournament?.organizerName || null,
   );
 
   // Load assigned-player set once when we have both the tournament
