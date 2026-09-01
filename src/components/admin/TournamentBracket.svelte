@@ -164,6 +164,8 @@
   // Which of the four inputs' dropdown is currently open. Null = none.
   type PickerKey = 'aName' | 'a2Name' | 'bName' | 'b2Name';
   let openPicker = $state<PickerKey | null>(null);
+  // Keyboard-highlighted suggestion index (-1 = none).
+  let highlightedIdx = $state<number>(-1);
   function setField(key: PickerKey, value: string) {
     if (key === 'aName') addAName = value;
     else if (key === 'a2Name') addA2Name = value;
@@ -209,6 +211,70 @@
     resolvedIds = { ...resolvedIds, [key]: hit };
     openPicker = key;
   }
+  function onPickerKeydown(key: PickerKey, e: KeyboardEvent) {
+    const suggestions = suggestPlayers(getField(key));
+    const open = openPicker === key && suggestions.length > 0;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (!open) { openPicker = key; highlightedIdx = 0; return; }
+      highlightedIdx = Math.min(highlightedIdx + 1, suggestions.length - 1);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      highlightedIdx = Math.max(highlightedIdx - 1, 0);
+    } else if ((e.key === 'Enter' || e.key === ' ') && open && highlightedIdx >= 0) {
+      e.preventDefault();
+      const s = suggestions[highlightedIdx];
+      if (s) pickSuggestion(key, s);
+    } else if (e.key === 'Escape') {
+      openPicker = null;
+      highlightedIdx = -1;
+    } else if (e.key === 'Tab') {
+      // Let Tab move focus naturally; if a suggestion is highlighted pick it first.
+      if (open && highlightedIdx >= 0) {
+        e.preventDefault();
+        const s = suggestions[highlightedIdx];
+        if (s) pickSuggestion(key, s);
+      } else {
+        openPicker = null;
+        highlightedIdx = -1;
+      }
+    } else {
+      // Any other key resets highlight to first item when dropdown is open.
+      if (open) highlightedIdx = 0;
+    }
+  }
+
+  let clearBusy = $state(false);
+  let clearConfirm = $state(false);
+  async function clearAllPlanned() {
+    if (!clearConfirm) { clearConfirm = true; return; }
+    clearBusy = true;
+    clearConfirm = false;
+    try {
+      const [{ getDatabase, ref, get }, { firebaseApp }] = await Promise.all([
+        import('firebase/database'),
+        import('../../lib/firebase'),
+      ]);
+      const db = getDatabase(firebaseApp());
+      const snap = await get(ref(db, 'planned'));
+      const raw = snap.val() as Record<string, { tournamentKey?: string }> | null;
+      let deleted = 0;
+      if (raw) {
+        for (const [mid, v] of Object.entries(raw)) {
+          if (v?.tournamentKey === tournament.key) {
+            await deletePlannedMatch(mid);
+            deleted++;
+          }
+        }
+      }
+      flash(`Cleared ${deleted} planned record${deleted === 1 ? '' : 's'}`);
+    } catch {
+      inlineError = 'Clear failed — check permissions';
+    } finally {
+      clearBusy = false;
+    }
+  }
+
   let inlineError = $state<string | null>(null);
   let flashOk = $state<string | null>(null);
   let flashTimer: number | null = null;
@@ -381,17 +447,25 @@
       value={typed}
       maxlength="80"
       disabled={addBusy}
-      oninput={(e) => onNameInput(key, (e.currentTarget as HTMLInputElement).value)}
-      onfocus={() => (openPicker = key)}
-      onblur={() => setTimeout(() => { if (openPicker === key) openPicker = null; }, 200)}
+      role="combobox"
+      aria-expanded={dropdownVisible}
+      aria-autocomplete="list"
+      aria-activedescendant={dropdownVisible && highlightedIdx >= 0 ? `sug-${key}-${highlightedIdx}` : undefined}
+      oninput={(e) => { highlightedIdx = 0; onNameInput(key, (e.currentTarget as HTMLInputElement).value); }}
+      onfocus={() => { openPicker = key; highlightedIdx = -1; }}
+      onblur={() => setTimeout(() => { if (openPicker === key) { openPicker = null; highlightedIdx = -1; } }, 200)}
+      onkeydown={(e) => onPickerKeydown(key, e)}
     />
     {#if dropdownVisible}
-      <ul class="suggest">
-        {#each suggestions as p (p.id)}
-          <li>
+      <ul class="suggest" role="listbox">
+        {#each suggestions as p, i (p.id)}
+          <li role="option" aria-selected={i === highlightedIdx}>
             <button
+              id="sug-{key}-{i}"
               type="button"
+              class:suggest-highlighted={i === highlightedIdx}
               onmousedown={(e) => e.preventDefault()}
+              onmouseenter={() => (highlightedIdx = i)}
               onclick={() => pickSuggestion(key, p)}
             >
               <span class="pname">{p.name}</span>
@@ -591,7 +665,17 @@
     {/if}
 
     <div class="footer-actions">
-      <button type="button" class="cancel-btn" onclick={onClose}>Close</button>
+      <button
+        type="button"
+        class="clear-bracket-btn"
+        class:clear-bracket-confirm={clearConfirm}
+        onclick={clearAllPlanned}
+        disabled={clearBusy}
+        title="Delete all planned records for this tournament (use to fix stale bracket counts)"
+      >
+        {#if clearBusy}Clearing…{:else if clearConfirm}Tap again to confirm{:else}Clear all bracket records{/if}
+      </button>
+      <button type="button" class="cancel-btn" onclick={() => { clearConfirm = false; onClose(); }}>Close</button>
     </div>
   </div>
 
@@ -873,7 +957,8 @@
     cursor: pointer;
     font-family: inherit;
   }
-  .suggest button:hover { background: #1c1c1c; }
+  .suggest button:hover,
+  .suggest button.suggest-highlighted { background: #1c1c1c; outline: 2px solid rgba(255, 213, 74, 0.5); outline-offset: -2px; }
   .pname { flex: 1; }
   .pcountry {
     color: var(--muted, #9aa0a6);
@@ -993,12 +1078,31 @@
 
   .footer-actions {
     display: flex;
-    justify-content: flex-end;
+    justify-content: space-between;
+    align-items: center;
     gap: 0.5rem;
     padding-top: 0.9rem;
     margin-top: 0.75rem;
     border-top: 1px solid rgba(255, 255, 255, 0.08);
+    flex-wrap: wrap;
   }
+  .clear-bracket-btn {
+    background: transparent;
+    border: 1px solid rgba(239, 83, 80, 0.35);
+    color: #ef5350;
+    padding: 0.4rem 0.9rem;
+    border-radius: 0.4rem;
+    font: inherit;
+    font-size: 0.8rem;
+    cursor: pointer;
+  }
+  .clear-bracket-btn:hover { background: rgba(239, 83, 80, 0.07); }
+  .clear-bracket-btn.clear-bracket-confirm {
+    border-color: rgba(239, 83, 80, 0.7);
+    background: rgba(239, 83, 80, 0.12);
+    font-weight: 700;
+  }
+  .clear-bracket-btn:disabled { opacity: 0.5; cursor: default; }
   .cancel-btn {
     background: transparent;
     border: 1px solid rgba(255, 255, 255, 0.2);
