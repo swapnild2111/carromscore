@@ -386,19 +386,21 @@
          tournaments with ~40 players (two columns of names). -->
     <section class="page cover">
       <div class="cover-hdr">
+        <div class="cover-hdr-main">
+          <p class="brand">Carromscore</p>
+          <h1 class="cover-name">{tournamentName}</h1>
+          {#if tournament?.country}
+            <p class="cover-country">
+              <span aria-hidden="true">{flagEmoji(tournament?.country ?? '')}</span>
+              {countryName(tournament?.country ?? '')}
+            </p>
+          {/if}
+          {#if tournament?.description}
+            <p class="cover-description">{tournament.description}</p>
+          {/if}
+        </div>
         {#if tournament?.logoUrl}
           <img src={tournament.logoUrl} alt="Tournament logo" class="cover-logo" />
-        {/if}
-        <p class="brand">Carromscore</p>
-        <h1 class="cover-name">{tournamentName}</h1>
-        {#if tournament?.country}
-          <p class="cover-country">
-            <span aria-hidden="true">{flagEmoji(tournament?.country ?? '')}</span>
-            {countryName(tournament?.country ?? '')}
-          </p>
-        {/if}
-        {#if tournament?.description}
-          <p class="cover-description">{tournament.description}</p>
         {/if}
       </div>
 
@@ -647,21 +649,24 @@
   .cover {
     display: flex;
     flex-direction: column;
-    min-height: 26rem;
   }
   .cover-hdr {
-    position: relative;
-    text-align: center;
+    display: flex;
+    align-items: flex-start;
+    gap: 1rem;
     padding-bottom: 0.9rem;
     border-bottom: 3px solid #000;
   }
+  .cover-hdr-main {
+    flex: 1;
+    text-align: center;
+  }
   .cover-logo {
-    position: absolute;
-    top: 0;
-    right: 0;
-    max-height: 3.5rem;
-    max-width: 6rem;
+    flex-shrink: 0;
+    max-height: 4rem;
+    max-width: 7rem;
     object-fit: contain;
+    align-self: center;
   }
   .brand {
     margin: 0 0 0.4rem;
@@ -693,8 +698,7 @@
     line-height: 1.45;
   }
   .cover-organizer {
-    margin-top: auto;
-    padding-top: 1.2rem;
+    margin-top: 1.4rem;
     text-align: center;
     font-size: 0.82rem;
     color: #777;
@@ -971,17 +975,16 @@
   .mqr-qr-holder :global(svg) { width: 180px !important; height: 180px !important; }
 
   @media print {
-    :global(body) { background: #fff; }
+    :global(body) { background: #fff; margin: 0; padding: 0; }
     .no-print { display: none !important; }
+    .print-wrap { padding: 0; margin: 0; max-width: none; }
     .page {
       border: none;
       margin: 0;
-      padding: 1.5rem;
+      padding: 1.2cm 1.4cm;
       min-height: 0;
     }
-    /* Roster column count survives print — keep it at 2. On very
-       narrow paper (Letter portrait ~ 7in wide after margins) this
-       is still comfortable. */
+    /* Roster column count survives print — keep it at 2. */
   }
 
   /* Narrow phone preview: single-column meta + roster so the

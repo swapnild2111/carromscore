@@ -23,6 +23,7 @@
   } from '../../lib/reports';
   import {
     loadAll as loadAllTournaments,
+    findByKey,
     subscribeStore as subscribeTournamentsStore,
     subscribeTournaments,
     loadRounds,
@@ -136,6 +137,12 @@
       ? null
       : buildTournamentReport(matches, selection, currentRoundRoster),
   );
+
+  const currentTournamentRecord = $derived.by(() => {
+    void tournamentTick;
+    if (!selection) return null;
+    return findByKey(normalizeKey(selection));
+  });
 
   /**
    * Round filter (v3.3.3). Chip strip below the tournament picker
@@ -524,6 +531,23 @@
 </script>
 
 <section class="reports" data-print-title={printTitle}>
+  <!-- Print-only cover header: logo + title + description + organizer -->
+  <div class="rep-print-hdr" aria-hidden="true">
+    <div class="rep-print-hdr-main">
+      <p class="rep-print-brand">Carromscore</p>
+      <h1 class="rep-print-title">{printTitle}</h1>
+      {#if currentTournamentRecord?.description}
+        <p class="rep-print-desc">{currentTournamentRecord.description}</p>
+      {/if}
+    </div>
+    {#if currentTournamentRecord?.logoUrl}
+      <img src={currentTournamentRecord.logoUrl} alt="Tournament logo" class="rep-print-logo" />
+    {/if}
+  </div>
+  {#if currentTournamentRecord?.organizerName}
+    <p class="rep-print-organizer">Organised by {currentTournamentRecord.organizerName}</p>
+  {/if}
+
   <!--
     Shared filter bar (v3.4.12) — replaces both the top tournament
     chip strip AND the per-table search rows we had earlier.
@@ -1069,6 +1093,10 @@
     cursor: pointer;
   }
   .rep-clear:hover { background: rgba(239, 83, 80, 0.08); }
+  /* These elements are print-only; hidden on screen */
+  .rep-print-hdr,
+  .rep-print-logo,
+  .rep-print-organizer { display: none; }
   .rep-print {
     display: inline-flex;
     align-items: center;
@@ -1108,17 +1136,51 @@
     :global(.reports-tab),
     :global(.reports) { padding: 0 !important; background: #fff !important; }
 
-    /* ── Print header injected via ::before on .reports ── */
-    .reports::before {
-      content: attr(data-print-title);
-      display: block;
+    /* ── Print cover header ── */
+    .rep-print-hdr {
+      display: flex !important;
+      align-items: center;
+      gap: 1rem;
+      padding-bottom: 0.6rem;
+      margin-bottom: 0.8rem;
+      border-bottom: 3px solid #000;
+    }
+    .rep-print-hdr-main { flex: 1; }
+    .rep-print-brand {
+      margin: 0 0 0.2rem;
+      font-size: 0.78rem;
+      color: #888;
+      letter-spacing: 0.3em;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+    .rep-print-title {
+      margin: 0;
       font-size: 1.5rem;
       font-weight: 900;
       color: #111;
       letter-spacing: 0.01em;
-      padding-bottom: 0.5rem;
-      margin-bottom: 0.8rem;
-      border-bottom: 3px solid #000;
+      line-height: 1.2;
+    }
+    .rep-print-desc {
+      margin: 0.3rem 0 0;
+      font-size: 0.88rem;
+      color: #555;
+    }
+    .rep-print-logo {
+      display: block !important;
+      max-height: 3.5rem;
+      max-width: 6rem;
+      object-fit: contain;
+      flex-shrink: 0;
+    }
+    .rep-print-organizer {
+      display: block !important;
+      text-align: right;
+      font-size: 0.8rem;
+      color: #777;
+      font-style: italic;
+      margin: -0.4rem 0 0.6rem;
     }
 
     /* ── Stat tiles: horizontal strip, compact ── */

@@ -2923,9 +2923,10 @@
     background: rgba(0, 0, 0, 0.6);
     z-index: 400;
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: center;
     padding: 1rem;
+    overflow-y: auto;
   }
   .dialog-card {
     background: #141414;
@@ -2934,6 +2935,7 @@
     padding: 1rem;
     max-width: 28rem;
     width: 100%;
+    margin: auto;
   }
   .dialog-card-wide {
     max-width: 32rem;
