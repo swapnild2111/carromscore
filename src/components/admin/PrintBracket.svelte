@@ -406,21 +406,19 @@
             <table class="sched-table">
               <thead>
                 <tr>
-                  <th>Board</th>
-                  <th>#</th>
-                  <th>Side A</th>
-                  <th>vs</th>
-                  <th>Side B</th>
+                  <th class="sched-th-board">Board</th>
+                  <th class="sched-th-match">Match</th>
                 </tr>
               </thead>
               <tbody>
                 {#each round.matches as m (m.mid)}
                   <tr>
                     <td class="sched-board">{m.board ? `B${m.board}` : '—'}</td>
-                    <td class="sched-num">{m.matchOrder ?? '—'}</td>
-                    <td class="sched-player">{m.aName}{#if m.a2Name} + {m.a2Name}{/if}</td>
-                    <td class="sched-vs">vs</td>
-                    <td class="sched-player">{m.bName}{#if m.b2Name} + {m.b2Name}{/if}</td>
+                    <td class="sched-matchup">
+                      <span class="sched-player">{m.aName}{#if m.a2Name} + {m.a2Name}{/if}</span>
+                      <span class="sched-vs">vs</span>
+                      <span class="sched-player">{m.bName}{#if m.b2Name} + {m.b2Name}{/if}</span>
+                    </td>
                   </tr>
                 {/each}
               </tbody>
@@ -430,23 +428,29 @@
       {/if}
     </section>
 
-    <!-- ─── BOARD PAGES (one per physical board) ─────────────────── -->
-    {#each boards as b (b)}
-      <section class="page board-page">
-        <div class="hdr">
-          <p class="tour">{tournamentName}</p>
-        </div>
-        <p class="board-label">Board {b}</p>
-        <div class="qr-holder">
-          {#if qrByBoard[b]}
-            {@html qrByBoard[b]}
-          {:else}
-            <div class="qr-placeholder">generating…</div>
-          {/if}
-        </div>
-        <p class="cta">Scan to open the current match on this board</p>
-      </section>
-    {/each}
+    <!-- ─── BOARD PAGES (2-column grid, 2 QR stickers per row) ────── -->
+    <section class="page qr-grid-page">
+      <div class="qr-grid-hdr">
+        <p class="brand">Carromscore</p>
+        <p class="qr-grid-title">{tournamentName} — Board QR Codes</p>
+        <p class="qr-grid-sub">Cut out each sticker and stick it on the physical board. Scan every round.</p>
+      </div>
+      <div class="qr-grid">
+        {#each boards as b (b)}
+          <div class="qr-cell">
+            <p class="qr-cell-board">Board {b}</p>
+            <div class="qr-holder">
+              {#if qrByBoard[b]}
+                {@html qrByBoard[b]}
+              {:else}
+                <div class="qr-placeholder">generating…</div>
+              {/if}
+            </div>
+            <p class="cta">Scan to start current match</p>
+          </div>
+        {/each}
+      </div>
+    </section>
   {/if}
 </div>
 
@@ -595,114 +599,140 @@
 
   /* ─── Schedule section ───────────────────────────────────────── */
   .sched-round {
-    margin: 0.8rem 0 1.2rem;
+    margin: 0.8rem 0 1.1rem;
   }
   .sched-round-name {
-    margin: 0 0 0.35rem;
-    font-size: 0.88rem;
+    margin: 0 0 0.3rem;
+    font-size: 0.82rem;
     font-weight: 800;
     text-transform: uppercase;
-    letter-spacing: 0.07em;
-    color: #444;
-    border-bottom: 1px solid #ddd;
+    letter-spacing: 0.08em;
+    color: #555;
+    border-bottom: 2px solid #000;
     padding-bottom: 0.2rem;
   }
   .sched-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 0.84rem;
+    font-size: 0.88rem;
     table-layout: fixed;
   }
   .sched-table thead th {
     text-align: left;
-    font-size: 0.72rem;
+    font-size: 0.7rem;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: #888;
-    padding: 0.15rem 0.5rem 0.2rem 0;
-    border-bottom: 1px solid #eee;
+    letter-spacing: 0.06em;
+    color: #999;
+    padding: 0.2rem 0 0.2rem;
+    border-bottom: 1px solid #ddd;
   }
-  .sched-table tbody tr:nth-child(even) { background: #f9f9f9; }
+  .sched-th-board { width: 4rem; }
+  .sched-th-match { }
+  .sched-table tbody tr:nth-child(even) { background: #f5f5f5; }
   .sched-table td {
-    padding: 0.2rem 0.5rem 0.2rem 0;
+    padding: 0.28rem 0;
     color: #111;
     vertical-align: middle;
   }
   .sched-board {
-    font-weight: 700;
+    font-weight: 800;
     white-space: nowrap;
-    width: 3rem;
+    width: 4rem;
     color: #000;
+    font-size: 0.9rem;
   }
-  .sched-num {
-    color: #999;
-    width: 1.6rem;
-    font-size: 0.78rem;
+  .sched-matchup {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: nowrap;
   }
   .sched-player {
     font-weight: 600;
-    width: 38%;
+    flex: 1 1 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
   .sched-vs {
-    color: #aaa;
-    font-size: 0.75rem;
-    width: 2.5rem;
-    text-align: center;
+    color: #bbb;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    flex-shrink: 0;
   }
 
-  /* ─── Board pages ─────────────────────────────────────────────── */
-  .board-page {
+  /* ─── QR grid page ────────────────────────────────────────────── */
+  .qr-grid-page {
+    break-after: page;
+    page-break-after: always;
+  }
+  .qr-grid-hdr {
+    text-align: center;
+    padding-bottom: 1rem;
+    border-bottom: 2px solid #000;
+    margin-bottom: 1.2rem;
+  }
+  .qr-grid-title {
+    margin: 0.2rem 0 0.2rem;
+    font-size: 1.2rem;
+    font-weight: 800;
+    color: #000;
+  }
+  .qr-grid-sub {
+    margin: 0.2rem 0 0;
+    font-size: 0.8rem;
+    color: #666;
+  }
+  .qr-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem 2rem;
+  }
+  .qr-cell {
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
-    min-height: 22rem;
     text-align: center;
+    border: 1.5px dashed #ccc;
+    padding: 1rem 0.8rem 0.8rem;
+    break-inside: avoid;
+    page-break-inside: avoid;
   }
-  .hdr { margin-bottom: 0.4rem; }
-  .tour {
-    margin: 0;
-    font-size: 1rem;
-    color: #444;
-    font-weight: 600;
-  }
-  .board-label {
-    margin: 0.4rem 0 1rem;
-    font-size: 2.4rem;
+  .qr-cell-board {
+    margin: 0 0 0.6rem;
+    font-size: 1.5rem;
     font-weight: 900;
     color: #000;
     letter-spacing: 0.02em;
   }
   .qr-holder {
-    margin: 0.4rem 0 0.6rem;
     background: #fff;
-    padding: 0.5rem;
+    padding: 0.4rem;
     border: 2px solid #000;
     line-height: 0;
   }
   .qr-holder :global(svg) {
-    width: 320px;
-    height: 320px;
+    width: 220px;
+    height: 220px;
     display: block;
   }
   .qr-placeholder {
-    width: 320px;
-    height: 320px;
+    width: 220px;
+    height: 220px;
     display: flex;
     align-items: center;
     justify-content: center;
     color: #999;
-    font-size: 0.9rem;
+    font-size: 0.85rem;
     border: 1px dashed #ccc;
   }
   .cta {
-    margin: 0.4rem 0 0;
-    color: #333;
-    font-size: 0.95rem;
+    margin: 0.5rem 0 0;
+    color: #555;
+    font-size: 0.78rem;
   }
 
   @media print {
