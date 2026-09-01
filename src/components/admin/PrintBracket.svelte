@@ -70,6 +70,7 @@
     if (typeof window === 'undefined') return () => {};
     const params = new URLSearchParams(window.location.search);
     tournamentKey = params.get('tournament') ?? '';
+    if (params.get('qrMode') === 'match') qrMode = 'match';
     if (!tournamentKey) {
       ready = true;
       return () => {};
@@ -230,20 +231,42 @@
     return out;
   });
 
-  // QR SVG cache — one entry per board number.
+  // QR mode: 'board' = one permanent sticker per physical board (default),
+  //          'match' = one QR per planned match showing who plays who.
+  let qrMode = $state<'board' | 'match'>('board');
+
+  // QR SVG cache — keyed by board number (board mode) or mid (match mode).
   let qrByBoard = $state<Record<number, string>>({});
+  let qrByMid = $state<Record<string, string>>({});
   const scanBase = (() => {
     if (typeof window === 'undefined') return '';
     const base = import.meta.env.BASE_URL ?? '/';
     return `${window.location.origin}${base}`;
   })();
+
+  function setQrMode(m: 'board' | 'match') {
+    qrMode = m;
+    const url = new URL(window.location.href);
+    url.searchParams.set('qrMode', m);
+    window.history.replaceState(null, '', url.toString());
+  }
+
   $effect(() => {
     if (!tournamentKey) return;
+    // Board QRs.
     for (const b of boards) {
       if (qrByBoard[b]) continue;
       const url = `${scanBase}?tournament=${encodeURIComponent(tournamentKey)}&board=${b}`;
       void qrToSVG(url, 400).then((svg) => {
         qrByBoard = { ...qrByBoard, [b]: svg };
+      });
+    }
+    // Match QRs.
+    for (const m of plannedMatches) {
+      if (qrByMid[m.mid]) continue;
+      const url = `${scanBase}?planned=${encodeURIComponent(m.mid)}`;
+      void qrToSVG(url, 280).then((svg) => {
+        qrByMid = { ...qrByMid, [m.mid]: svg };
       });
     }
   });
@@ -326,11 +349,28 @@
     </p>
   {:else}
     <div class="print-actions no-print">
+      <div class="print-mode-toggle">
+        <span class="mode-toggle-label">QR type:</span>
+        <button
+          type="button"
+          class="mode-chip"
+          class:mode-chip-on={qrMode === 'board'}
+          onclick={() => setQrMode('board')}
+        >Per board</button>
+        <button
+          type="button"
+          class="mode-chip"
+          class:mode-chip-on={qrMode === 'match'}
+          onclick={() => setQrMode('match')}
+        >Per match</button>
+      </div>
       <button type="button" onclick={() => window.print()}>🖨 Print</button>
       <p class="hint">
-        Page 1 is the tournament pack cover — hand it out at check-in.
-        Following pages are one board sticker each; cut along the
-        border and stick to the physical board.
+        {#if qrMode === 'board'}
+          Page 1 is the tournament cover. Following pages are board stickers — cut out and stick to each physical board. Same QR used every round.
+        {:else}
+          Page 1 is the tournament cover. Following pages show each match with its QR — cut out and place at the board for that match.
+        {/if}
       </p>
     </div>
 
@@ -428,29 +468,62 @@
       {/if}
     </section>
 
-    <!-- ─── BOARD PAGES (2-column grid, 2 QR stickers per row) ────── -->
-    <section class="page qr-grid-page">
-      <div class="qr-grid-hdr">
-        <p class="brand">Carromscore</p>
-        <p class="qr-grid-title">{tournamentName} — Board QR Codes</p>
-        <p class="qr-grid-sub">Cut out each sticker and stick it on the physical board. Scan every round.</p>
-      </div>
-      <div class="qr-grid">
-        {#each boards as b (b)}
-          <div class="qr-cell">
-            <p class="qr-cell-board">Board {b}</p>
-            <div class="qr-holder">
-              {#if qrByBoard[b]}
-                {@html qrByBoard[b]}
-              {:else}
-                <div class="qr-placeholder">generating…</div>
-              {/if}
+    {#if qrMode === 'board'}
+      <!-- ─── BOARD STICKERS (permanent per-board QR, 2-column grid) ── -->
+      <section class="page qr-grid-page">
+        <div class="qr-grid-hdr">
+          <p class="brand">Carromscore</p>
+          <p class="qr-grid-title">{tournamentName} — Board QR Codes</p>
+          <p class="qr-grid-sub">Cut out each sticker and stick it on the physical board. Same QR used every round.</p>
+        </div>
+        <div class="qr-grid">
+          {#each boards as b (b)}
+            <div class="qr-cell">
+              <p class="qr-cell-board">Board {b}</p>
+              <div class="qr-holder">
+                {#if qrByBoard[b]}
+                  {@html qrByBoard[b]}
+                {:else}
+                  <div class="qr-placeholder">generating…</div>
+                {/if}
+              </div>
+              <p class="cta">Scan to start current match</p>
             </div>
-            <p class="cta">Scan to start current match</p>
+          {/each}
+        </div>
+      </section>
+    {:else}
+      <!-- ─── PER-MATCH QR CARDS (one QR per planned match) ─────────── -->
+      {#each schedule as round (round.roundKey)}
+        <section class="page qr-grid-page">
+          <div class="qr-grid-hdr">
+            <p class="brand">Carromscore</p>
+            <p class="qr-grid-title">{tournamentName} — {round.roundName}</p>
+            <p class="qr-grid-sub">Cut out each card and place at the board for that match. Scan to start scoring.</p>
           </div>
-        {/each}
-      </div>
-    </section>
+          <div class="match-qr-grid">
+            {#each round.matches as m (m.mid)}
+              <div class="match-qr-cell">
+                {#if m.board}<p class="mqr-board">Board {m.board}</p>{/if}
+                <div class="mqr-matchup">
+                  <span class="mqr-side">{m.aName}{#if m.a2Name}<br/><span class="mqr-partner">{m.a2Name}</span>{/if}</span>
+                  <span class="mqr-vs">vs</span>
+                  <span class="mqr-side">{m.bName}{#if m.b2Name}<br/><span class="mqr-partner">{m.b2Name}</span>{/if}</span>
+                </div>
+                <div class="mqr-qr-holder">
+                  {#if qrByMid[m.mid]}
+                    {@html qrByMid[m.mid]}
+                  {:else}
+                    <div class="qr-placeholder">generating…</div>
+                  {/if}
+                </div>
+                <p class="cta">Scan to start scoring</p>
+              </div>
+            {/each}
+          </div>
+        </section>
+      {/each}
+    {/if}
   {/if}
 </div>
 
@@ -486,6 +559,31 @@
   }
   .print-actions button:hover { background: #ffe07a; }
   .print-actions .hint { padding: 0.75rem 0 0; color: #666; }
+  .print-mode-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-bottom: 0.75rem;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .mode-toggle-label { font-size: 0.9rem; color: #555; font-weight: 600; }
+  .mode-chip {
+    padding: 0.3rem 0.8rem;
+    border: 1px solid #bbb;
+    border-radius: 1rem;
+    background: #fff;
+    color: #333;
+    font-size: 0.85rem;
+    cursor: pointer;
+    font-weight: 500;
+  }
+  .mode-chip-on {
+    background: #ffd54a;
+    border-color: #b8990a;
+    font-weight: 700;
+    color: #000;
+  }
 
   .page {
     background: #fff;
@@ -734,6 +832,68 @@
     color: #555;
     font-size: 0.78rem;
   }
+
+  /* ─── Per-match QR grid ─────────────────────────────────────── */
+  .match-qr-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.2rem 1.5rem;
+    margin-top: 1rem;
+  }
+  .match-qr-cell {
+    border: 1px dashed #bbb;
+    border-radius: 0.5rem;
+    padding: 0.7rem 0.9rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  .mqr-board {
+    margin: 0 0 0.3rem;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .mqr-matchup {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    width: 100%;
+    margin-bottom: 0.5rem;
+  }
+  .mqr-side {
+    flex: 1 1 0;
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: #111;
+    line-height: 1.25;
+    text-align: center;
+  }
+  .mqr-partner {
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: #444;
+  }
+  .mqr-vs {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: #999;
+    flex-shrink: 0;
+  }
+  .mqr-qr-holder {
+    width: 180px;
+    height: 180px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .mqr-qr-holder :global(svg) { width: 180px !important; height: 180px !important; }
 
   @media print {
     :global(body) { background: #fff; }

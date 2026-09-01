@@ -166,6 +166,9 @@
   let openPicker = $state<PickerKey | null>(null);
   // Keyboard-highlighted suggestion index (-1 = none).
   let highlightedIdx = $state<number>(-1);
+  // When true, suppress the blur-close so keyboard interactions don't
+  // accidentally dismiss the dropdown mid-navigation.
+  let suppressBlurClose = false;
   function setField(key: PickerKey, value: string) {
     if (key === 'aName') addAName = value;
     else if (key === 'a2Name') addA2Name = value;
@@ -216,30 +219,36 @@
     const open = openPicker === key && suggestions.length > 0;
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      if (!open) { openPicker = key; highlightedIdx = 0; return; }
-      highlightedIdx = Math.min(highlightedIdx + 1, suggestions.length - 1);
+      suppressBlurClose = true;
+      if (!open) { openPicker = key; highlightedIdx = 0; }
+      else highlightedIdx = Math.min(highlightedIdx + 1, suggestions.length - 1);
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
+      suppressBlurClose = true;
       highlightedIdx = Math.max(highlightedIdx - 1, 0);
     } else if ((e.key === 'Enter' || e.key === ' ') && open && highlightedIdx >= 0) {
       e.preventDefault();
+      suppressBlurClose = true;
       const s = suggestions[highlightedIdx];
-      if (s) pickSuggestion(key, s);
+      if (s) { pickSuggestion(key, s); suppressBlurClose = false; }
     } else if (e.key === 'Escape') {
+      suppressBlurClose = false;
       openPicker = null;
       highlightedIdx = -1;
     } else if (e.key === 'Tab') {
-      // Let Tab move focus naturally; if a suggestion is highlighted pick it first.
+      // Tab: if a suggestion is highlighted, select it first then move focus.
       if (open && highlightedIdx >= 0) {
         e.preventDefault();
+        suppressBlurClose = true;
         const s = suggestions[highlightedIdx];
-        if (s) pickSuggestion(key, s);
+        if (s) { pickSuggestion(key, s); suppressBlurClose = false; }
       } else {
+        suppressBlurClose = false;
         openPicker = null;
         highlightedIdx = -1;
       }
     } else {
-      // Any other key resets highlight to first item when dropdown is open.
+      // Any other key: reset highlight to first item when dropdown is open.
       if (open) highlightedIdx = 0;
     }
   }
@@ -453,7 +462,7 @@
       aria-activedescendant={dropdownVisible && highlightedIdx >= 0 ? `sug-${key}-${highlightedIdx}` : undefined}
       oninput={(e) => { highlightedIdx = 0; onNameInput(key, (e.currentTarget as HTMLInputElement).value); }}
       onfocus={() => { openPicker = key; highlightedIdx = -1; }}
-      onblur={() => setTimeout(() => { if (openPicker === key) { openPicker = null; highlightedIdx = -1; } }, 200)}
+      onblur={() => setTimeout(() => { if (!suppressBlurClose && openPicker === key) { openPicker = null; highlightedIdx = -1; } suppressBlurClose = false; }, 200)}
       onkeydown={(e) => onPickerKeydown(key, e)}
     />
     {#if dropdownVisible}
