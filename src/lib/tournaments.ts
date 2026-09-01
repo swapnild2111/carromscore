@@ -296,8 +296,12 @@ export async function subscribeTournaments(): Promise<void> {
       tRef,
       (snap) => {
         const raw = snap.val() as Record<string, unknown> | null;
-        if (!raw) return;
-        mergeRemote(raw);
+        // Empty snapshot (tree cleared): treat as "no remote records"
+        // and let mergeRemote reconcile — it'll drop every local
+        // record whose key isn't in the empty set. Reported
+        // 2026-09-01: remote deletes weren't reflecting across
+        // tabs / devices because the null branch short-circuited.
+        mergeRemote(raw ?? {});
       },
       () => {},
     );
@@ -356,6 +360,17 @@ function parseRounds(raw: unknown): Round[] | undefined {
 }
 
 function mergeRemote(raw: Record<string, unknown>): void {
+  // v3.6.3: reconcile local memoryStore with the snapshot — drop
+  // records whose key isn't in the incoming set. Previously only
+  // added / updated; deletes on other clients silently accumulated
+  // stale rows in this client's memory. Reported 2026-09-01.
+  const remoteKeys = new Set(Object.keys(raw));
+  for (let i = memoryStore.length - 1; i >= 0; i -= 1) {
+    const t = memoryStore[i];
+    if (t && !remoteKeys.has(t.key)) {
+      memoryStore.splice(i, 1);
+    }
+  }
   for (const [key, val] of Object.entries(raw)) {
     if (!val || typeof val !== 'object') continue;
     const v = val as Record<string, unknown>;
@@ -376,16 +391,26 @@ function mergeRemote(raw: Record<string, unknown>): void {
       // Take the newer lastActive between what we have and what
       // arrived, so a stale local touch doesn't demote a fresher one.
       existing.lastActive = Math.max(existing.lastActive, lastActive);
-      if (createdBy && !existing.createdBy) existing.createdBy = createdBy;
+      // v3.6.3: the snapshot is authoritative — treat absent fields
+      // as a REMOVAL, not a "keep local." Previously an admin
+      // clearing type / country / defaults on tournament X wouldn't
+      // reflect in other tabs / devices because the merger kept
+      // the stale local value.
+      if (createdBy) existing.createdBy = createdBy;
+      else delete existing.createdBy;
       if (type) existing.type = type;
+      else delete existing.type;
       if (country) existing.country = country;
+      else delete existing.country;
       // Rounds are authoritative from the snapshot — if the remote
       // dropped a round, we drop it locally too. `parseRounds` returns
       // undefined only when the `rounds` sub-node is absent; a present
       // but empty object still yields `[]`, which correctly wipes any
       // stale local list.
       if (rounds !== undefined) existing.rounds = rounds;
+      else delete existing.rounds;
       if (defaults !== undefined) existing.defaults = defaults;
+      else delete existing.defaults;
     } else {
       memoryStore.push({
         key,

@@ -199,6 +199,53 @@
   let roundsSaving = $state(false);
 
   /**
+   * In-app confirm modal (v3.6.3). Replaces window.confirm for
+   * round Close / Reopen so the popup matches the app's dark
+   * dialog style instead of the browser's native (purple-tinted
+   * on Chrome) chrome. Reported 2026-09-01: 'dialog popup doesn't
+   * match style with other app popup styles.'
+   *
+   * Usage: `await askConfirm({ title, body, confirmLabel, kind })`.
+   * Returns true on OK, false on Cancel / backdrop tap. Kind
+   * changes the OK button tint — 'danger' for destructive,
+   * 'primary' for restore/proceed.
+   */
+  type ConfirmKind = 'primary' | 'danger';
+  let confirmPrompt = $state<{
+    title: string;
+    body: string;
+    confirmLabel: string;
+    kind: ConfirmKind;
+    resolve: (v: boolean) => void;
+  } | null>(null);
+  function askConfirm(opts: {
+    title: string;
+    body: string;
+    confirmLabel?: string;
+    kind?: ConfirmKind;
+  }): Promise<boolean> {
+    return new Promise((resolve) => {
+      // If a prior confirm is somehow still open, resolve it false
+      // so the promise doesn't leak. Shouldn't happen in practice
+      // (buttons disabled while a modal is up).
+      if (confirmPrompt) confirmPrompt.resolve(false);
+      confirmPrompt = {
+        title: opts.title,
+        body: opts.body,
+        confirmLabel: opts.confirmLabel ?? 'OK',
+        kind: opts.kind ?? 'primary',
+        resolve,
+      };
+    });
+  }
+  function resolveConfirm(v: boolean) {
+    const p = confirmPrompt;
+    if (!p) return;
+    confirmPrompt = null;
+    p.resolve(v);
+  }
+
+  /**
    * Bracket modal state (v3.6). Same shape as roundsKey — null
    * closes the modal, a tournament key opens it. The modal itself
    * (TournamentBracket.svelte) handles round selection, add/delete
@@ -258,18 +305,40 @@
     };
   });
 
-  // Lazy-load assigned-player counts for closed tournaments in the
-  // current filtered list. Runs whenever the list changes. Ignores
-  // errors silently (missing count just hides the '(N)' suffix).
+  /**
+   * Live assigned-player counts (v3.6.3). Previously the effect
+   * skipped any key that already had a count — meaning that once
+   * loaded, the badge never refreshed when the organiser
+   * assigned / unassigned players from the Players modal or from
+   * another device. Reported 2026-09-01.
+   *
+   * Now the effect refires on:
+   *   - tick        (tournament-store changes; e.g. a tournament
+   *                   record was renamed, so the row re-appears)
+   *   - playersTick (player identity store changes; roster is
+   *                   built on top of /players so counts can
+   *                   move as players get added / removed)
+   * And re-fetches every visible closed tournament's assigned
+   * count each time. loadAssignedPlayers is a single
+   * /tournaments/{key}/assignedPlayerIds `get` — cheap enough
+   * that a re-run on every tick is fine at the admin scale.
+   */
   $effect(() => {
+    // Depend on the ticks so the effect reruns on remote changes.
+    void tick;
+    void playersTick;
     const seen = new Set<string>();
     for (const t of filtered()) {
       if (t.type !== 'closed') continue;
-      if (assignedCountByKey[t.key] !== undefined) continue;
       if (seen.has(t.key)) continue;
       seen.add(t.key);
       void loadAssignedPlayers(t.key).then((set) => {
-        assignedCountByKey = { ...assignedCountByKey, [t.key]: set.size };
+        // Only assign when the value actually changed, otherwise
+        // the immutable-copy assignment would trigger a re-render
+        // loop against `tick` / `playersTick`.
+        if (assignedCountByKey[t.key] !== set.size) {
+          assignedCountByKey = { ...assignedCountByKey, [t.key]: set.size };
+        }
       }).catch(() => {
         // silent — count just stays absent
       });
@@ -919,11 +988,16 @@
   async function closeSelectedRound(r: Round) {
     if (!roundsKey) return;
     // v3.6.3: close is no longer terminal — accidental closes were
-    // reported 2026-09-01 as unrecoverable, so reopen is back as an
-    // escape hatch. Still confirm-gated so a stray tap doesn't
-    // silently hide the round from umpires.
-    // eslint-disable-next-line no-alert
-    if (!window.confirm(`Close ${r.name}? Umpires won't be able to add new matches to it. You can reopen later if this was a mistake.`)) return;
+    // reported 2026-09-01 as unrecoverable, so reopen is back as
+    // an escape hatch. Still confirm-gated. Uses the themed in-app
+    // modal (askConfirm) instead of the native window.confirm.
+    const ok = await askConfirm({
+      title: `Close ${r.name}?`,
+      body: `Umpires won't be able to add new matches to it. You can reopen later if this was a mistake.`,
+      confirmLabel: 'Close round',
+      kind: 'danger',
+    });
+    if (!ok) return;
     roundsSaving = true;
     const outcome = await setRoundState(roundsKey, r.key, 'closed');
     roundsSaving = false;
@@ -941,8 +1015,13 @@
    */
   async function reopenSelectedRound(r: Round) {
     if (!roundsKey) return;
-    // eslint-disable-next-line no-alert
-    if (!window.confirm(`Reopen ${r.name}? Umpires will be able to add new matches to it again.`)) return;
+    const ok = await askConfirm({
+      title: `Reopen ${r.name}?`,
+      body: 'Umpires will be able to add new matches to it again.',
+      confirmLabel: 'Reopen',
+      kind: 'primary',
+    });
+    if (!ok) return;
     roundsSaving = true;
     const outcome = await setRoundState(roundsKey, r.key, 'open');
     roundsSaving = false;
@@ -1788,6 +1867,42 @@
       />
     {/if}
   {/if}
+
+  <!--
+    In-app confirm modal (v3.6.3). Themed to match the other dialogs
+    on this page. Backdrop tap = cancel. Escape key also cancels
+    via the tabindex + onkeydown on the backdrop.
+  -->
+  {#if confirmPrompt}
+    <div
+      class="dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="confirm-title"
+      onclick={(e) => { if (e.target === e.currentTarget) resolveConfirm(false); }}
+      onkeydown={(e) => { if (e.key === 'Escape') resolveConfirm(false); }}
+      tabindex="-1"
+    >
+      <div class="dialog-card confirm-card">
+        <h3 id="confirm-title">{confirmPrompt.title}</h3>
+        <p class="confirm-body">{confirmPrompt.body}</p>
+        <div class="dialog-actions">
+          <button
+            type="button"
+            class="btn"
+            onclick={() => resolveConfirm(false)}
+          >Cancel</button>
+          <button
+            type="button"
+            class="btn"
+            class:btn-primary={confirmPrompt.kind === 'primary'}
+            class:btn-danger={confirmPrompt.kind === 'danger'}
+            onclick={() => resolveConfirm(true)}
+          >{confirmPrompt.confirmLabel}</button>
+        </div>
+      </div>
+    </div>
+  {/if}
 </section>
 
 <style>
@@ -2424,6 +2539,21 @@
   }
   .btn-round-reopen:hover:not(:disabled) {
     background: rgba(79, 195, 247, 0.24);
+  }
+
+  /* In-app confirm modal (v3.6.3). Compact card, dark theme, two
+     buttons on the right. Body copy sits below the title with a
+     comfortable reading measure. */
+  .confirm-card {
+    max-width: 24rem;
+    width: min(24rem, 96vw);
+  }
+  .confirm-body {
+    margin: 0.35rem 0 0.9rem;
+    color: var(--fg, #f5f5f5);
+    font-size: 0.95rem;
+    line-height: 1.45;
+    opacity: 0.9;
   }
 
   .dialog {
