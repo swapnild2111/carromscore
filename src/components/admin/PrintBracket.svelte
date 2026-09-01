@@ -745,15 +745,17 @@
   .sched-matchup {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: 0.4rem;
     flex-wrap: nowrap;
   }
   .sched-player {
     font-weight: 600;
-    flex: 1 1 0;
+    /* Don't stretch — sit as tight as the name allows */
+    flex: 0 1 auto;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    min-width: 0;
   }
   .sched-vs {
     color: #bbb;
@@ -762,6 +764,7 @@
     text-transform: uppercase;
     letter-spacing: 0.05em;
     flex-shrink: 0;
+    padding: 0 0.15rem;
   }
 
   /* ─── QR grid page ────────────────────────────────────────────── */
