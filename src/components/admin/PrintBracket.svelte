@@ -611,6 +611,7 @@
     width: 100%;
     border-collapse: collapse;
     font-size: 0.84rem;
+    table-layout: fixed;
   }
   .sched-table thead th {
     text-align: left;
@@ -619,19 +620,19 @@
     text-transform: uppercase;
     letter-spacing: 0.05em;
     color: #888;
-    padding: 0.15rem 0.4rem 0.2rem 0;
+    padding: 0.15rem 0.5rem 0.2rem 0;
     border-bottom: 1px solid #eee;
   }
   .sched-table tbody tr:nth-child(even) { background: #f9f9f9; }
   .sched-table td {
-    padding: 0.2rem 0.4rem 0.2rem 0;
+    padding: 0.2rem 0.5rem 0.2rem 0;
     color: #111;
     vertical-align: middle;
   }
   .sched-board {
     font-weight: 700;
     white-space: nowrap;
-    width: 2.8rem;
+    width: 3rem;
     color: #000;
   }
   .sched-num {
@@ -639,11 +640,17 @@
     width: 1.6rem;
     font-size: 0.78rem;
   }
-  .sched-player { font-weight: 600; }
+  .sched-player {
+    font-weight: 600;
+    width: 38%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .sched-vs {
     color: #aaa;
     font-size: 0.75rem;
-    width: 1.8rem;
+    width: 2.5rem;
     text-align: center;
   }
 
