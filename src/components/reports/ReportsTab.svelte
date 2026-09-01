@@ -687,10 +687,6 @@
           <div class="stat-value">{stats.boardsCount}</div>
           <div class="stat-label">{stats.boardsCount === 1 ? 'Board' : 'Boards'}</div>
         </div>
-        <div class="stat-tile">
-          <div class="stat-value">{tournamentsCount}</div>
-          <div class="stat-label">{tournamentsCount === 1 ? 'Tournament' : 'Tournaments'}</div>
-        </div>
       </div>
     {/if}
 

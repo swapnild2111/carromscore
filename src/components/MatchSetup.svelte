@@ -528,6 +528,45 @@
 
   // Which picker's suggestions are currently visible (by key).
   let openPicker = $state<string | null>(null);
+  // Keyboard highlight index per picker (-1 = none).
+  let pickerHighlight = $state<number>(-1);
+  // Suppress blur-close while keyboard-navigating the dropdown.
+  let suppressPickerBlur = false;
+
+  function onPickerKeydown(key: keyof MatchConfig, e: KeyboardEvent, suggestions: PlayerRow[]) {
+    const open = openPicker === key && suggestions.length > 0;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      suppressPickerBlur = true;
+      if (!open) { openPicker = key; pickerHighlight = 0; }
+      else pickerHighlight = Math.min(pickerHighlight + 1, suggestions.length - 1);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      suppressPickerBlur = true;
+      pickerHighlight = Math.max(pickerHighlight - 1, 0);
+    } else if ((e.key === 'Enter' || e.key === ' ') && open && pickerHighlight >= 0) {
+      e.preventDefault();
+      const s = suggestions[pickerHighlight];
+      if (s) { pick(key, s); suppressPickerBlur = false; pickerHighlight = -1; }
+    } else if (e.key === 'Escape') {
+      suppressPickerBlur = false;
+      openPicker = null;
+      pickerHighlight = -1;
+    } else if (e.key === 'Tab') {
+      if (open && pickerHighlight >= 0) {
+        e.preventDefault();
+        suppressPickerBlur = true;
+        const s = suggestions[pickerHighlight];
+        if (s) { pick(key, s); suppressPickerBlur = false; pickerHighlight = -1; }
+      } else {
+        suppressPickerBlur = false;
+        openPicker = null;
+        pickerHighlight = -1;
+      }
+    } else {
+      if (open) pickerHighlight = 0;
+    }
+  }
 
   // ─── Player identity resolution ───────────────────────────────────────
   // Which Firebase playerId each input field currently resolves to (or
@@ -990,15 +1029,24 @@
       autocomplete="off"
       placeholder="Type a name…"
       value={typed}
-      oninput={(e) => onNameInput(key, (e.currentTarget as HTMLInputElement).value)}
-      onfocus={() => (openPicker = key)}
-      onblur={() => setTimeout(() => { if (openPicker === key) openPicker = null; }, 200)}
+      role="combobox"
+      aria-expanded={dropdownVisible}
+      aria-autocomplete="list"
+      oninput={(e) => { pickerHighlight = 0; onNameInput(key, (e.currentTarget as HTMLInputElement).value); }}
+      onfocus={() => { openPicker = key; pickerHighlight = -1; }}
+      onblur={() => setTimeout(() => { if (!suppressPickerBlur && openPicker === key) { openPicker = null; pickerHighlight = -1; } suppressPickerBlur = false; }, 200)}
+      onkeydown={(e) => onPickerKeydown(key, e, suggestions)}
     />
     {#if dropdownVisible}
       <ul class="suggest">
-        {#each suggestions as p (p.name + '|' + p.source + '|' + (p.country ?? ''))}
+        {#each suggestions as p, i (p.name + '|' + p.source + '|' + (p.country ?? ''))}
           <li>
-            <button type="button" onclick={() => pick(key, p)}>
+            <button
+              type="button"
+              class:suggest-highlighted={i === pickerHighlight}
+              onmouseenter={() => (pickerHighlight = i)}
+              onmousedown={(e) => e.preventDefault()}
+              onclick={() => { pick(key, p); pickerHighlight = -1; }}
               <span class="pname">{p.name}</span>
               {#if p.country && p.country !== 'Unknown'}
                 <span class="pcountry" title={countryName(p.country)} aria-hidden="true">
@@ -1598,7 +1646,19 @@
     border-color: var(--accent);
     background: #1a1613;
   }
-  fieldset input[type='radio'] { display: none; }
+  fieldset input[type='radio'] {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+    margin: 0;
+    pointer-events: none;
+  }
+  fieldset input[type='radio']:focus-visible + .opt-title {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 0.2rem;
+  }
   .opt-title {
     font-weight: 700;
     font-size: 0.95rem;
@@ -1818,7 +1878,8 @@
     cursor: pointer;
     font: inherit;
   }
-  .suggest button:hover { background: #1c1c1c; }
+  .suggest button:hover,
+  .suggest button.suggest-highlighted { background: #1c1c1c; outline: 2px solid rgba(255, 213, 74, 0.5); outline-offset: -2px; }
   .pname { font-size: 0.95rem; }
   .pmeta { color: var(--muted); font-size: 0.75rem; }
   /* Country pill in the picker dropdown — muted so it doesn't compete
