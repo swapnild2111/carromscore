@@ -1047,6 +1047,7 @@
               onmouseenter={() => (pickerHighlight = i)}
               onmousedown={(e) => e.preventDefault()}
               onclick={() => { pick(key, p); pickerHighlight = -1; }}
+            >
               <span class="pname">{p.name}</span>
               {#if p.country && p.country !== 'Unknown'}
                 <span class="pcountry" title={countryName(p.country)} aria-hidden="true">
@@ -1649,8 +1650,8 @@
   fieldset input[type='radio'] {
     position: absolute;
     opacity: 0;
-    width: 0;
-    height: 0;
+    width: 1px;
+    height: 1px;
     margin: 0;
     pointer-events: none;
   }
