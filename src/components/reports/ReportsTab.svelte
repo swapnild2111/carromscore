@@ -1096,6 +1096,8 @@
     :global(.lobby-header),
     :global(.footer),
     :global(.foot-block),
+    :global(.hdr),
+    :global(.tabs),
     .reports-filters,
     .tbl-hdr .tbl-actions,
     .btn-copy,
@@ -1297,28 +1299,25 @@
     grid-template-columns: repeat(2, 1fr);
     gap: 0.6rem;
   }
-  /* Wider viewport: 4 number tiles + podium spanning 2 columns.
-     Total 6 cols. Podium is the wider block on the right so all
-     three medal rows fit comfortably. */
+  /* Wider viewport: 3 number tiles + podium spanning 2 = 5 cols. */
   @media (min-width: 720px) {
     .stat-row {
-      grid-template-columns: repeat(6, 1fr);
+      grid-template-columns: repeat(5, 1fr);
     }
     .stat-tile-podium {
       grid-column: span 2;
     }
   }
-  /* Mid-width tablet: 2-col grid for the 4 number tiles, podium
-     spans full width on its own row. */
+  /* Mid-width tablet: 3 number tiles in a row, podium spans full width. */
   @media (min-width: 560px) and (max-width: 719px) {
     .stat-row {
-      grid-template-columns: repeat(4, 1fr);
+      grid-template-columns: repeat(3, 1fr);
     }
     .stat-tile-podium {
-      grid-column: span 4;
+      grid-column: span 3;
     }
   }
-  /* Narrow phones: number tiles remain 2-col, podium spans full width. */
+  /* Narrow phones: number tiles 2-col, podium spans full width. */
   @media (max-width: 559px) {
     .stat-tile-podium {
       grid-column: span 2;
