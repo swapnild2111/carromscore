@@ -431,8 +431,11 @@ export async function subscribePlayers(): Promise<void> {
       playersRef,
       (snap) => {
         const raw = snap.val() as Record<string, unknown> | null;
-        if (!raw) return;
-        mergeRemotePlayers(raw);
+        // v3.6.3: empty snapshot must still run the merger so
+        // remote-gone players get reconciled out of memory.
+        // Reported 2026-09-01: deletes from another tab/device
+        // weren't reflecting until page refresh.
+        mergeRemotePlayers(raw ?? {});
       },
       // Silent on error — the local snapshot is enough to keep the picker
       // usable. Users notice missing-remote-players only when a name they
@@ -446,14 +449,31 @@ export async function subscribePlayers(): Promise<void> {
 }
 
 /**
- * Merge a Firebase snapshot into the in-memory store. Locally-created
- * players not present in the snapshot are preserved (they may not have
- * flushed to RTDB yet). Auto-deletion of remote-gone players is
- * deliberately not done here — v2.0 has no admin UI for deletion, so
- * any player missing from the snapshot is either brand-new-local or
- * an anomaly best handled offline.
+ * Merge a Firebase snapshot into the in-memory store.
+ *
+ * v3.6.3 (2026-09-01): reconciliation now also DELETES records that
+ * were in memory but are no longer in the snapshot. Previously
+ * mergeRemote only added / updated, so a delete from another tab
+ * / device silently kept the stale row until page refresh.
+ *
+ * Locally-created players not yet flushed to RTDB are preserved:
+ * we key that on `createdAt === 0` (Wikipedia seed) OR the
+ * `createdBy` field being present but the id being absent from
+ * the snapshot for < 30s after creation. Simpler heuristic used
+ * below: any player with `createdAt === 0` survives; any player
+ * with `createdAt > 0` (i.e. came from RTDB at some point) is
+ * treated as authoritative-from-snapshot and dropped if missing.
  */
 function mergeRemotePlayers(raw: Record<string, unknown>): void {
+  const remoteIds = new Set(Object.keys(raw));
+  for (let i = memoryStore.length - 1; i >= 0; i -= 1) {
+    const p = memoryStore[i];
+    if (!p) continue;
+    // Seed / unflushed: keep.
+    if (!p.createdAt) continue;
+    // Previously synced but now gone from the snapshot: drop.
+    if (!remoteIds.has(p.id)) memoryStore.splice(i, 1);
+  }
   for (const [id, val] of Object.entries(raw)) {
     mergeOneRemotePlayer(id, val);
   }

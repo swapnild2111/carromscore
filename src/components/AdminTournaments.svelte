@@ -199,6 +199,53 @@
   let roundsSaving = $state(false);
 
   /**
+   * In-app confirm modal (v3.6.3). Replaces window.confirm for
+   * round Close / Reopen so the popup matches the app's dark
+   * dialog style instead of the browser's native (purple-tinted
+   * on Chrome) chrome. Reported 2026-09-01: 'dialog popup doesn't
+   * match style with other app popup styles.'
+   *
+   * Usage: `await askConfirm({ title, body, confirmLabel, kind })`.
+   * Returns true on OK, false on Cancel / backdrop tap. Kind
+   * changes the OK button tint — 'danger' for destructive,
+   * 'primary' for restore/proceed.
+   */
+  type ConfirmKind = 'primary' | 'danger';
+  let confirmPrompt = $state<{
+    title: string;
+    body: string;
+    confirmLabel: string;
+    kind: ConfirmKind;
+    resolve: (v: boolean) => void;
+  } | null>(null);
+  function askConfirm(opts: {
+    title: string;
+    body: string;
+    confirmLabel?: string;
+    kind?: ConfirmKind;
+  }): Promise<boolean> {
+    return new Promise((resolve) => {
+      // If a prior confirm is somehow still open, resolve it false
+      // so the promise doesn't leak. Shouldn't happen in practice
+      // (buttons disabled while a modal is up).
+      if (confirmPrompt) confirmPrompt.resolve(false);
+      confirmPrompt = {
+        title: opts.title,
+        body: opts.body,
+        confirmLabel: opts.confirmLabel ?? 'OK',
+        kind: opts.kind ?? 'primary',
+        resolve,
+      };
+    });
+  }
+  function resolveConfirm(v: boolean) {
+    const p = confirmPrompt;
+    if (!p) return;
+    confirmPrompt = null;
+    p.resolve(v);
+  }
+
+  /**
    * Bracket modal state (v3.6). Same shape as roundsKey — null
    * closes the modal, a tournament key opens it. The modal itself
    * (TournamentBracket.svelte) handles round selection, add/delete
@@ -258,18 +305,47 @@
     };
   });
 
-  // Lazy-load assigned-player counts for closed tournaments in the
-  // current filtered list. Runs whenever the list changes. Ignores
-  // errors silently (missing count just hides the '(N)' suffix).
+  /**
+   * Live assigned-player counts (v3.6.3). Previously the effect
+   * skipped any key that already had a count — meaning that once
+   * loaded, the badge never refreshed when the organiser
+   * assigned / unassigned players from the Players modal or from
+   * another device. Reported 2026-09-01.
+   *
+   * Now the effect refires on:
+   *   - tick        (tournament-store changes; e.g. a tournament
+   *                   record was renamed, so the row re-appears)
+   *   - playersTick (player identity store changes; roster is
+   *                   built on top of /players so counts can
+   *                   move as players get added / removed)
+   * And re-fetches every visible closed tournament's assigned
+   * count each time. loadAssignedPlayers is a single
+   * /tournaments/{key}/assignedPlayerIds `get` — cheap enough
+   * that a re-run on every tick is fine at the admin scale.
+   */
   $effect(() => {
+    // Depend on the ticks so the effect reruns on remote changes.
+    void tick;
+    void playersTick;
     const seen = new Set<string>();
     for (const t of filtered()) {
       if (t.type !== 'closed') continue;
-      if (assignedCountByKey[t.key] !== undefined) continue;
       if (seen.has(t.key)) continue;
       seen.add(t.key);
       void loadAssignedPlayers(t.key).then((set) => {
-        assignedCountByKey = { ...assignedCountByKey, [t.key]: set.size };
+        // Filter out ghost IDs — assignedPlayerIds pointing at
+        // players that no longer exist. Reported 2026-09-01:
+        // 'Players (3)' badge with only 2 visible checkboxes
+        // because the 3rd ID belonged to a deleted player. Count
+        // now matches what the admin actually sees in the assign
+        // dialog. (The cleanup write happens in startAssign so
+        // the ghost is deleted for good on the next open.)
+        const known = new Set(loadAllPlayers().map((p) => p.id));
+        let realCount = 0;
+        for (const id of set) if (known.has(id)) realCount += 1;
+        if (assignedCountByKey[t.key] !== realCount) {
+          assignedCountByKey = { ...assignedCountByKey, [t.key]: realCount };
+        }
       }).catch(() => {
         // silent — count just stays absent
       });
@@ -777,7 +853,32 @@
     assignOpen = true;
     assignLoading = true;
     try {
-      assignedIds = await loadAssignedPlayers(t.key);
+      const raw = await loadAssignedPlayers(t.key);
+      // v3.6.3 (2026-09-01): sweep ghost IDs — assigned playerIds
+      // whose player record no longer exists. Symptom: 'Players (3)'
+      // badge while only 2 checkboxes are ticked; the third ID
+      // pointed at a deleted player and had no visible row. Clean
+      // them out of both the local Set (so the header size + row
+      // count agree) and RTDB (so the ghost doesn't come back on
+      // reopen). Fire-and-forget on the deletes.
+      const known = new Set(loadAllPlayers().map((p) => p.id));
+      const cleaned = new Set<string>();
+      for (const id of raw) {
+        if (known.has(id)) {
+          cleaned.add(id);
+        } else if (assignKey) {
+          void unassignPlayer(assignKey, id);
+        }
+      }
+      assignedIds = cleaned;
+      // Also refresh the row badge so it shows the cleaned count
+      // without waiting for the next tick.
+      if (assignKey && assignedCountByKey[assignKey] !== cleaned.size) {
+        assignedCountByKey = {
+          ...assignedCountByKey,
+          [assignKey]: cleaned.size,
+        };
+      }
     } finally {
       assignLoading = false;
     }
@@ -918,14 +1019,46 @@
   }
   async function closeSelectedRound(r: Round) {
     if (!roundsKey) return;
-    // Terminal action — confirm so an organiser doesn't lose the
-    // 'running' state to an accidental tap.
-    // eslint-disable-next-line no-alert
-    if (!window.confirm(`Close ${r.name}? This can't be undone — a closed round can't be reopened.`)) return;
+    // v3.6.3: close is no longer terminal — accidental closes were
+    // reported 2026-09-01 as unrecoverable, so reopen is back as
+    // an escape hatch. Still confirm-gated. Uses the themed in-app
+    // modal (askConfirm) instead of the native window.confirm.
+    const ok = await askConfirm({
+      title: `Close ${r.name}?`,
+      body: `Umpires won't be able to add new matches to it. You can reopen later if this was a mistake.`,
+      confirmLabel: 'Close round',
+      kind: 'danger',
+    });
+    if (!ok) return;
     roundsSaving = true;
     const outcome = await setRoundState(roundsKey, r.key, 'closed');
     roundsSaving = false;
     if (!outcome.ok) flash('err', outcome.error);
+  }
+
+  /**
+   * ↩ Reopen (v3.6.3). Flips a closed round back to open so umpires
+   * can add matches to it again. Doesn't touch startedAt — a round
+   * that was started, closed, then reopened comes back as RUNNING
+   * (state=open + startedAt set). A round closed while pending
+   * comes back as PENDING (state=open, no startedAt).
+   * Confirm-gated so a stray tap on a closed row doesn't undo an
+   * intended close.
+   */
+  async function reopenSelectedRound(r: Round) {
+    if (!roundsKey) return;
+    const ok = await askConfirm({
+      title: `Reopen ${r.name}?`,
+      body: 'Umpires will be able to add new matches to it again.',
+      confirmLabel: 'Reopen',
+      kind: 'primary',
+    });
+    if (!ok) return;
+    roundsSaving = true;
+    const outcome = await setRoundState(roundsKey, r.key, 'open');
+    roundsSaving = false;
+    if (!outcome.ok) flash('err', outcome.error);
+    else flash('ok', `${r.name} reopened`);
   }
 
   async function startDeleteRound(r: Round) {
@@ -1631,7 +1764,20 @@
                   </div>
                 {:else}
                   <div class="round-name">
-                    <div class="round-name-text">{r.name}</div>
+                    <!--
+                      v3.6.3: round name is now a button — clicking it
+                      enters rename mode inline (same as the tournament
+                      row's name-as-affordance pattern). Removes the
+                      standalone Rename button from the action bar,
+                      freeing horizontal room on mobile.
+                    -->
+                    <button
+                      type="button"
+                      class="round-name-btn"
+                      onclick={() => startRenameRound(r)}
+                      disabled={roundsSaving}
+                      title="Rename round"
+                    >{r.name}</button>
                     <div class="round-name-meta">
                       <span class="chip">order {r.order}</span>
                       {#if r.state === 'closed'}
@@ -1650,27 +1796,16 @@
                     </div>
                   </div>
                   <div class="round-actions">
-                    <button
-                      type="button"
-                      class="btn"
-                      onclick={() => startRenameRound(r)}
-                      disabled={roundsSaving}
-                    >Rename</button>
                     <!--
-                      v3.6.2: three-state round lifecycle with two
-                      dedicated buttons (media-player style):
-                        ▶ Start   — enabled only when pending
-                                    (state='open' AND !startedAt)
-                        ⏹ Close   — enabled only when running
-                                    (state='open' AND startedAt)
-                      Close is terminal; there's no Reopen. Closed
-                      rounds show neither button. If the organiser
-                      needs to score more matches after closing, they
-                      add a fresh round with a new label.
-                      Legacy rounds (created pre-v3.6.2) have no
-                      startedAt, so they render as pending — the
-                      organiser can either start them (records
-                      startedAt=now) or close them directly.
+                      v3.6.3: round lifecycle (updated from v3.6.2's
+                      terminal-close model). States:
+                        ▶ Start   — pending → running (stamps startedAt)
+                        ⏹ Close   — running → closed
+                        ↩ Reopen  — closed → running (restores the
+                                    round so accidental closes are
+                                    recoverable; reported 2026-09-01)
+                      All state changes are confirm-gated so a stray
+                      tap doesn't silently move the round.
                     -->
                     {#if r.state !== 'closed'}
                       <button
@@ -1687,8 +1822,17 @@
                         onclick={() => closeSelectedRound(r)}
                         disabled={roundsSaving || !r.startedAt}
                         aria-label="Close round"
-                        title={!r.startedAt ? 'Round not started yet' : 'Close round — terminal, no reopen'}
+                        title={!r.startedAt ? 'Round not started yet' : 'Close round — hides from umpire picker'}
                       >⏹</button>
+                    {:else}
+                      <button
+                        type="button"
+                        class="btn btn-icon btn-round-reopen"
+                        onclick={() => reopenSelectedRound(r)}
+                        disabled={roundsSaving}
+                        aria-label="Reopen round"
+                        title="Reopen round — umpires can add matches to it again"
+                      >↩</button>
                     {/if}
                     <button
                       type="button"
@@ -1754,6 +1898,42 @@
         onClose={stopBracket}
       />
     {/if}
+  {/if}
+
+  <!--
+    In-app confirm modal (v3.6.3). Themed to match the other dialogs
+    on this page. Backdrop tap = cancel. Escape key also cancels
+    via the tabindex + onkeydown on the backdrop.
+  -->
+  {#if confirmPrompt}
+    <div
+      class="dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="confirm-title"
+      onclick={(e) => { if (e.target === e.currentTarget) resolveConfirm(false); }}
+      onkeydown={(e) => { if (e.key === 'Escape') resolveConfirm(false); }}
+      tabindex="-1"
+    >
+      <div class="dialog-card confirm-card">
+        <h3 id="confirm-title">{confirmPrompt.title}</h3>
+        <p class="confirm-body">{confirmPrompt.body}</p>
+        <div class="dialog-actions">
+          <button
+            type="button"
+            class="btn"
+            onclick={() => resolveConfirm(false)}
+          >Cancel</button>
+          <button
+            type="button"
+            class="btn"
+            class:btn-primary={confirmPrompt.kind === 'primary'}
+            class:btn-danger={confirmPrompt.kind === 'danger'}
+            onclick={() => resolveConfirm(true)}
+          >{confirmPrompt.confirmLabel}</button>
+        </div>
+      </div>
+    </div>
   {/if}
 </section>
 
@@ -1867,8 +2047,24 @@
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 0.5rem;
     transition: background 0.12s, border-color 0.12s;
+    /* Narrow phones (< 34rem) run out of horizontal room for the
+       5-button action set to sit beside a name + chips row. Let the
+       row wrap so actions land on a second line under the meta;
+       align-items switches to flex-start so wrapped items don't
+       collide visually. Reported 2026-09-01. */
+    flex-wrap: wrap;
   }
-  .row-name { flex: 1; min-width: 0; }
+  @media (max-width: 34rem) {
+    .row { align-items: flex-start; }
+  }
+  .row-name { flex: 1 1 0; min-width: 0; }
+  /* On narrow phones let the name column take full width so the
+     wrapping row-actions block falls to its own row. Desktop keeps
+     the flex: 1 side-by-side layout. */
+  @media (max-width: 34rem) {
+    .row-name { flex: 1 1 100%; }
+    .row-actions { width: 100%; justify-content: flex-end; }
+  }
   .row-name-text {
     color: var(--fg);
     font-weight: 600;
@@ -2198,6 +2394,14 @@
     border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 0.45rem;
     background: rgba(255, 255, 255, 0.02);
+    /* Wrap on narrow phones so the action buttons don't overlap
+       long round names. Same posture as .row above. */
+    flex-wrap: wrap;
+  }
+  @media (max-width: 34rem) {
+    .round-row { align-items: flex-start; }
+    .round-name { flex: 1 1 100%; }
+    .round-actions { width: 100%; justify-content: flex-end; }
   }
   /* Closed rounds render dimmed so the umpire's picker mental model
      — "these are the rounds still accepting matches" — is mirrored
@@ -2210,6 +2414,37 @@
     color: var(--fg);
     font-weight: 600;
     line-height: 1.1;
+  }
+  /* Round name as an affordance (v3.6.3) — same visual as the plain
+     text version, but hover-underlined so it reads as clickable, and
+     activation opens rename-in-place. Matches .row-name-btn on the
+     tournament row. */
+  .round-name-btn {
+    background: transparent;
+    border: 0;
+    padding: 0;
+    color: var(--fg);
+    font: inherit;
+    font-weight: 600;
+    line-height: 1.1;
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
+    max-width: 100%;
+  }
+  .round-name-btn:hover:not(:disabled) {
+    color: var(--accent, #ffd54a);
+    text-decoration: underline;
+    text-underline-offset: 0.15em;
+  }
+  .round-name-btn:focus-visible {
+    outline: 2px solid rgba(255, 213, 74, 0.6);
+    outline-offset: 2px;
+    border-radius: 0.2rem;
+  }
+  .round-name-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.7;
   }
   .round-name-meta {
     display: flex;
@@ -2326,6 +2561,31 @@
   }
   .btn-round-close:hover:not(:disabled) {
     background: rgba(255, 213, 74, 0.2);
+  }
+  /* Reopen button (v3.6.3) — soft blue so it reads as 'restore /
+     rewind' rather than 'destructive'. Same shape as start/close. */
+  .btn-round-reopen {
+    background: rgba(79, 195, 247, 0.14);
+    border-color: rgba(79, 195, 247, 0.5);
+    color: #b3e5fc;
+  }
+  .btn-round-reopen:hover:not(:disabled) {
+    background: rgba(79, 195, 247, 0.24);
+  }
+
+  /* In-app confirm modal (v3.6.3). Compact card, dark theme, two
+     buttons on the right. Body copy sits below the title with a
+     comfortable reading measure. */
+  .confirm-card {
+    max-width: 24rem;
+    width: min(24rem, 96vw);
+  }
+  .confirm-body {
+    margin: 0.35rem 0 0.9rem;
+    color: var(--fg, #f5f5f5);
+    font-size: 0.95rem;
+    line-height: 1.45;
+    opacity: 0.9;
   }
 
   .dialog {

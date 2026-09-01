@@ -87,6 +87,15 @@ That's it. No account. No download from an app store.
   Umpires pick a round at match setup; the lobby's History tab
   groups two levels deep (tournament → round) and Reports gets a
   per-round breakdown alongside the combined view.
+- 🏆 **[Tournament brackets + per-board QR](./docs/features/tournament-brackets.md)** —
+  pre-create every match ahead of tournament day, print one
+  permanent QR sticker per physical board, and umpires scan the
+  same code every round. The app auto-loads whichever match is
+  currently assigned to that board and archives on End. Cover
+  sheet with player roster + country flags. Round lifecycle
+  (pending / running / closed / reopen). Match defaults set at
+  the tournament level. Invite-only roster gate at bracket-build
+  time.
 - 📡 **Live broadcast + spectator URL** — toggle "Live" on setup and
   every state change publishes to a shareable URL. Friends and family
   open the URL on any phone; the score updates within a second of
@@ -182,10 +191,12 @@ gets an **Open admin panel ⇗** link:
   delete any you created. Bulk-add rosters (comma-separated or
   one per line), resolve name conflicts by merging aliases or
   keeping them separate.
-- **Tournaments** — create your own tournaments, edit them (name,
-  open/closed access, country), and manage their rounds and
-  assigned players from inside the Edit dialog. Full control over
-  events you created.
+- **Tournaments** — create your own tournaments, click the name
+  to rename or edit settings (access, country, match defaults).
+  Per-row buttons open Players / Rounds / Bracket / Print pack
+  in isolated modals. Full control over events you created. See
+  [Tournament brackets](./docs/features/tournament-brackets.md)
+  for the end-to-end tournament-day workflow.
 - **Live matches** — every ongoing broadcast; delete yours if a
   match went sideways.
 - **History cleanup** — same treatment for archived matches.

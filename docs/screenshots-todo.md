@@ -90,6 +90,42 @@ trees.
 | `32-practice-overlay.png` | Practice OBS overlay: SOLO badge + player pill + per-set rows with board tiles + TOTAL. | practice-mode.md, broadcast-overlay.md |
 | `33-match-end-lockout.png` | Score screen post-End with lockout toast: "Match ended — score is locked. Use Reset to start over." | keeping-the-score.md, admin-verification.md |
 
+## 3. v3.6 Tournament brackets — new screens
+
+Referenced in `docs/features/tournament-brackets.md`. All of these
+need to be captured on a signed-in organiser account with at least
+one closed and one open tournament pre-seeded, some rounds, and a
+few planned matches. `scripts/screenshots.ts` can automate some
+(post-mount UI); others (Firebase-authed admin state) are manual.
+
+| Proposed filename | What to capture | Automatable |
+|---|---|---|
+| `50-tournament-row.png` | Admin → Tournaments row: name (clickable), INVITE-ONLY chip, country chip, last-active chip, Players (N) / Rounds (N) / Bracket (N) / 🖨 / 🗑 buttons. Landscape or wide viewport so the whole action bar fits inline. | Manual |
+| `51-add-tournament.png` | Add tournament dialog with Open / Invite-only radio + Country picker visible (closed selected so Country is required). | Manual |
+| `52-tournament-defaults.png` | Rename & settings dialog for a tournament: Name / Access / Country / Match defaults fieldset showing Mode (Singles) / Best of (3) / Points target (25) / Max boards (8). | Manual |
+| `53-rounds-modal.png` | Rounds modal with 4-6 rounds in different lifecycle states — at least one PENDING (▶ enabled, ⏹ disabled), one RUNNING (▶ disabled, ⏹ enabled), one CLOSED (↩ visible). | Manual |
+| `54-bracket-empty.png` | Bracket modal, round selected, empty state ("No planned matches in this round yet"). Above the add-form: mode toggle + Board picker. | Manual |
+| `55-bracket-add.png` | Bracket add-match form with autocomplete dropdown open — cursor in Side A input, 3+ player suggestions with country flag pills. | Manual |
+| `56-bracket-populated.png` | Bracket table with 4+ matches in a round, mix of "ready" and "scoring · Nm ago" status pills, board numbers visible. | Manual |
+| `57-assigned-players.png` | Assigned Players dialog for a closed tournament: header "<Tournament> · 🇩🇰 Denmark · N assigned", search box, "Match country only" checkbox, 3+ players with checkboxes and country pills. | Manual |
+| `58-print-cover.png` | Print pack cover page: CARROMSCORE brand strip, big tournament name, country line, meta grid (Format / Type / Boards / Matches / Players), alphabetical roster with country flags in 2 columns. Landscape capture. | Semi (needs prefilled tournament) |
+| `59-print-board.png` | Print pack board page: tournament name at top, big "Board 1" heading, big central QR sticker, "Scan to open the current match on this board" caption. | Semi |
+| `60-scan-preview.png` | MatchSetup with bracket-scan preview banner (green tint): [BRACKET] pill + tournament + round, both sides with partner names for doubles, format line. Portrait phone. | Semi |
+| `61-round-lifecycle.png` | (optional) Close-up of a Rounds modal row showing the ▶ / ⏹ / 🗑 icon buttons and RUNNING chip together. | Manual |
+| `62-confirm-dialog.png` | (optional) Themed askConfirm dialog: title, body, Cancel + confirm buttons on the right. Contrast against the browser's native purple confirm. | Manual |
+
+### Capture tips (v3.6)
+
+- The bracket modal wants at least **2 rounds** and **3+ matches
+  across boards** for the "populated" shot. Use fake names so the
+  screenshot isn't tied to a real event.
+- For `58-print-cover.png` and `59-print-board.png`, print-to-PDF
+  in Chrome or use the browser's "Screenshot full page" tool —
+  the QR needs to be readable in the final PNG.
+- For `60-scan-preview.png`, load a `?planned=<mid>` URL manually
+  in the browser (grab a mid from the bracket admin's local state
+  in devtools) rather than actually scanning.
+
 ## Where to put the files
 
 For each new/refreshed PNG:
