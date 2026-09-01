@@ -111,17 +111,11 @@
   let editingDefaultMaxBoards = $state<string>('');
   let editingDefaultTimerDuration = $state<string>('');
   let editingDescription = $state<string>('');
-  let editingOrganizerName = $state<string>('');
-  let editingLogoUrl = $state<string>('');
-  let logoUploading = $state(false);
-  let logoUploadProgress = $state(0);
   let editingOriginal = $state<{
     name: string;
     type: 'open' | 'closed';
     country: string;
     description: string;
-    organizerName: string;
-    logoUrl: string;
     defaults: {
       mode: 'singles' | 'doubles';
       bestOf: string;
@@ -175,10 +169,6 @@
    *  Required in that case; blocks Save. */
   let addingCountry = $state('');
   let addingDescription = $state('');
-  let addingOrganizerName = $state('');
-  let addingLogoUrl = $state('');
-  let addingLogoUploading = $state(false);
-  let addingLogoUploadProgress = $state(0);
 
   /** Per-row "Assigned players" dialog state (closed tournaments). */
   let assignOpen = $state(false);
@@ -448,15 +438,11 @@
     editingDefaultMaxBoards = String(t.defaults?.maxBoards ?? FALLBACK_TOURNAMENT_DEFAULTS.maxBoards);
     editingDefaultTimerDuration = String(t.defaults?.timerDuration ?? FALLBACK_TOURNAMENT_DEFAULTS.timerDuration);
     editingDescription = t.description ?? '';
-    editingOrganizerName = t.organizerName ?? '';
-    editingLogoUrl = t.logoUrl ?? '';
     editingOriginal = {
       name: t.name,
       type: t.type ?? 'open',
       country: t.country ?? '',
       description: t.description ?? '',
-      organizerName: t.organizerName ?? '',
-      logoUrl: t.logoUrl ?? '',
       defaults: {
         mode: editingDefaultMode,
         bestOf: editingDefaultBestOf,
@@ -472,8 +458,6 @@
     editingType = 'open';
     editingCountry = '';
     editingDescription = '';
-    editingOrganizerName = '';
-    editingLogoUrl = '';
     editingDefaultMode = 'singles';
     editingDefaultBestOf = '';
     editingDefaultPointsTarget = '';
@@ -550,9 +534,7 @@
     const defaultsChanged = Object.keys(defaultsPatch).length > 0;
 
     const descriptionChanged = editingDescription !== editingOriginal.description;
-    const organizerNameChanged = editingOrganizerName !== editingOriginal.organizerName;
-    const logoUrlChanged = editingLogoUrl !== editingOriginal.logoUrl;
-    const metaExtraChanged = descriptionChanged || organizerNameChanged || logoUrlChanged;
+    const metaExtraChanged = descriptionChanged;
 
     if (!nameChanged && !typeChanged && !countryChanged && !defaultsChanged && !metaExtraChanged) {
       // No-op — close the dialog quietly. Prevents a bogus audit
@@ -585,8 +567,6 @@
           type: editingType,
           country: countryPatch,
           ...(descriptionChanged ? { description: editingDescription || null } : {}),
-          ...(organizerNameChanged ? { organizerName: editingOrganizerName || null } : {}),
-          ...(logoUrlChanged ? { logoUrl: editingLogoUrl || null } : {}),
         });
         if (!r.ok) {
           flash('err', r.error);
@@ -614,51 +594,6 @@
     } finally {
       saving = false;
     }
-  }
-
-  function doLogoRead(
-    file: File,
-    setUploading: (v: boolean) => void,
-    setProgress: (pct: number) => void,
-    setUrl: (url: string) => void,
-  ) {
-    if (file.size > 2 * 1024 * 1024) { flash('err', 'Logo must be under 2 MB'); return; }
-    if (!file.type.startsWith('image/')) { flash('err', 'Only image files are accepted'); return; }
-    setUploading(true);
-    setProgress(0);
-    const reader = new FileReader();
-    reader.onprogress = (e) => {
-      if (e.lengthComputable) setProgress(Math.round((e.loaded / e.total) * 100));
-    };
-    reader.onload = () => {
-      setUrl(reader.result as string);
-      setUploading(false);
-      setProgress(0);
-    };
-    reader.onerror = () => {
-      flash('err', 'Could not read the image file');
-      setUploading(false);
-      setProgress(0);
-    };
-    reader.readAsDataURL(file);
-  }
-
-  function uploadLogo(file: File) {
-    doLogoRead(
-      file,
-      (v) => { logoUploading = v; },
-      (pct) => { logoUploadProgress = pct; },
-      (url) => { editingLogoUrl = url; },
-    );
-  }
-
-  function uploadLogoForAdd(file: File) {
-    doLogoRead(
-      file,
-      (v) => { addingLogoUploading = v; },
-      (pct) => { addingLogoUploadProgress = pct; },
-      (url) => { addingLogoUrl = url; },
-    );
   }
 
   function startDelete(key: string) {
@@ -904,8 +839,6 @@
     addingType = 'open';
     addingCountry = '';
     addingDescription = '';
-    addingOrganizerName = '';
-    addingLogoUrl = '';
   }
   function closeAdd() {
     addingOpen = false;
@@ -913,9 +846,6 @@
     addingType = 'open';
     addingCountry = '';
     addingDescription = '';
-    addingOrganizerName = '';
-    addingLogoUrl = '';
-    addingLogoUploading = false;
   }
   async function saveAdd() {
     const trimmed = addingName.trim();
@@ -934,16 +864,9 @@
       flash('err', outcome.error);
       return;
     }
-    // Write optional meta fields if provided.
     const desc = addingDescription.trim();
-    const org = addingOrganizerName.trim();
-    const logo = addingLogoUrl.trim();
-    if (desc || org || logo) {
-      await updateTournamentMeta(outcome.record.key, {
-        ...(desc ? { description: desc } : {}),
-        ...(org ? { organizerName: org } : {}),
-        ...(logo ? { logoUrl: logo } : {}),
-      });
+    if (desc) {
+      await updateTournamentMeta(outcome.record.key, { description: desc });
     }
     saving = false;
     flash('ok', `"${outcome.record.name}" added`);
@@ -1437,52 +1360,6 @@
           ></textarea>
         </label>
 
-        <label class="edit-field">
-          <span>Organiser name <em class="hint-inline">(optional, shown on print footer)</em></span>
-          <input
-            type="text"
-            bind:value={editingOrganizerName}
-            placeholder="Danish Carrom Federation"
-            maxlength="80"
-            disabled={saving}
-            aria-label="Organiser name"
-          />
-        </label>
-
-        <div class="edit-field logo-field">
-          <span class="logo-label">Logo <em class="hint-inline">(optional, ≤ 2 MB, shown on print cover)</em></span>
-          {#if editingLogoUrl}
-            <div class="logo-preview">
-              <img src={editingLogoUrl} alt="Tournament logo preview" class="logo-img" />
-              <button
-                type="button"
-                class="btn btn-danger btn-sm logo-remove"
-                onclick={() => (editingLogoUrl = '')}
-                disabled={saving || logoUploading}
-              >Remove</button>
-            </div>
-          {/if}
-          <label class="logo-upload-btn" class:logo-uploading={logoUploading}>
-            <input
-              type="file"
-              accept="image/*"
-              class="logo-file-input"
-              disabled={saving || logoUploading}
-              onchange={(e) => {
-                const f = (e.currentTarget as HTMLInputElement).files?.[0];
-                if (f) void uploadLogo(f);
-                (e.currentTarget as HTMLInputElement).value = '';
-              }}
-            />
-            {logoUploading ? `Uploading… ${logoUploadProgress}%` : editingLogoUrl ? 'Replace logo' : 'Upload logo'}
-          </label>
-          {#if logoUploading}
-            <div class="upload-progress-bar" role="progressbar" aria-valuenow={logoUploadProgress} aria-valuemin={0} aria-valuemax={100}>
-              <div class="upload-progress-fill" style="width: {logoUploadProgress}%"></div>
-            </div>
-          {/if}
-        </div>
-
         <!--
           Match defaults (v3.6.1). Each field is optional — leaving it
           blank falls back to the app-wide defaults (singles / bo1 /
@@ -1786,59 +1663,13 @@
           ></textarea>
         </label>
 
-        <label class="edit-field">
-          <span>Organiser name <em class="hint-inline">(optional, shown on print footer)</em></span>
-          <input
-            type="text"
-            bind:value={addingOrganizerName}
-            placeholder="Danish Carrom Federation"
-            maxlength="80"
-            disabled={saving}
-            aria-label="Organiser name"
-          />
-        </label>
-
-        <div class="edit-field logo-field">
-          <span class="logo-label">Logo <em class="hint-inline">(optional, ≤ 2 MB, shown on print cover)</em></span>
-          {#if addingLogoUrl}
-            <div class="logo-preview">
-              <img src={addingLogoUrl} alt="Tournament logo preview" class="logo-img" />
-              <button
-                type="button"
-                class="btn btn-danger btn-sm logo-remove"
-                onclick={() => (addingLogoUrl = '')}
-                disabled={saving || addingLogoUploading}
-              >Remove</button>
-            </div>
-          {/if}
-          <label class="logo-upload-btn" class:logo-uploading={addingLogoUploading}>
-            <input
-              type="file"
-              accept="image/*"
-              class="logo-file-input"
-              disabled={saving || addingLogoUploading}
-              onchange={(e) => {
-                const f = (e.currentTarget as HTMLInputElement).files?.[0];
-                if (f) void uploadLogoForAdd(f);
-                (e.currentTarget as HTMLInputElement).value = '';
-              }}
-            />
-            {addingLogoUploading ? `Uploading… ${addingLogoUploadProgress}%` : addingLogoUrl ? 'Replace logo' : 'Upload logo'}
-          </label>
-          {#if addingLogoUploading}
-            <div class="upload-progress-bar" role="progressbar" aria-valuenow={addingLogoUploadProgress} aria-valuemin={0} aria-valuemax={100}>
-              <div class="upload-progress-fill" style="width: {addingLogoUploadProgress}%"></div>
-            </div>
-          {/if}
-        </div>
-
         <div class="dialog-actions">
           <button type="button" class="btn" onclick={closeAdd} disabled={saving}>Cancel</button>
           <button
             type="button"
             class="btn btn-primary"
             onclick={saveAdd}
-            disabled={saving || addingLogoUploading || !addingName.trim() || (addingType === 'closed' && !addingCountry)}
+            disabled={saving || !addingName.trim() || (addingType === 'closed' && !addingCountry)}
           >{saving ? 'Adding…' : 'Add'}</button>
         </div>
       </div>

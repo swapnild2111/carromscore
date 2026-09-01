@@ -144,6 +144,27 @@
     return findByKey(normalizeKey(selection));
   });
 
+  // Organiser profile for print header — loaded when tournament's createdBy changes.
+  type OrgProfile = { displayName?: string; orgName?: string; logoUrl?: string };
+  let orgProfile = $state<OrgProfile | null>(null);
+  $effect(() => {
+    const uid = currentTournamentRecord?.createdBy;
+    if (!uid) { orgProfile = null; return; }
+    void (async () => {
+      try {
+        const [{ getDatabase, ref, get }, { firebaseApp }] = await Promise.all([
+          import('firebase/database'),
+          import('../../lib/firebase'),
+        ]);
+        const db = getDatabase(firebaseApp());
+        const snap = await get(ref(db, `organiserProfiles/${uid}`));
+        orgProfile = snap.exists() ? (snap.val() as OrgProfile) : null;
+      } catch { orgProfile = null; }
+    })();
+  });
+  const printLogoUrl = $derived(orgProfile?.logoUrl ?? null);
+  const printOrganizerName = $derived(orgProfile?.orgName || orgProfile?.displayName || null);
+
   /**
    * Round filter (v3.3.3). Chip strip below the tournament picker
    * lets the umpire scope the top view (summary tiles, charts,
@@ -540,12 +561,12 @@
         <p class="rep-print-desc">{currentTournamentRecord.description}</p>
       {/if}
     </div>
-    {#if currentTournamentRecord?.logoUrl}
-      <img src={currentTournamentRecord.logoUrl} alt="Tournament logo" class="rep-print-logo" />
+    {#if printLogoUrl}
+      <img src={printLogoUrl} alt="Tournament logo" class="rep-print-logo" />
     {/if}
   </div>
-  {#if currentTournamentRecord?.organizerName}
-    <p class="rep-print-organizer">Organised by {currentTournamentRecord.organizerName}</p>
+  {#if printOrganizerName}
+    <p class="rep-print-organizer">Organised by {printOrganizerName}</p>
   {/if}
 
   <!--

@@ -36,9 +36,10 @@
   import AdminHistoryCleanup from './AdminHistoryCleanup.svelte';
   import AdminAuditLog from './AdminAuditLog.svelte';
   import AdminRoles from './AdminRoles.svelte';
+  import AdminProfile from './AdminProfile.svelte';
   import { logScreen } from '../lib/analytics';
 
-  type Tab = 'players' | 'tournaments' | 'live' | 'history' | 'roles' | 'audit';
+  type Tab = 'profile' | 'players' | 'tournaments' | 'live' | 'history' | 'roles' | 'audit';
 
   const base: string = import.meta.env.BASE_URL;
   let user = $state<AuthUser | null>(null);
@@ -65,8 +66,8 @@
    */
   const visibleTabs = $derived<Tab[]>(
     role?.isSuper
-      ? ['roles', 'players', 'tournaments', 'live', 'history', 'audit']
-      : ['players', 'tournaments', 'live', 'history'],
+      ? ['profile', 'roles', 'players', 'tournaments', 'live', 'history', 'audit']
+      : ['profile', 'players', 'tournaments', 'live', 'history'],
   );
 
   onMount(() => {
@@ -112,14 +113,14 @@
     if (!roleLoaded || !role) return;
     const hasResolvedRole = role.isSuper || role.isOrganiser;
     if (!landed && hasResolvedRole) {
-      tab = role.isSuper ? 'roles' : 'tournaments';
+      tab = 'profile';
       landed = true;
       return;
     }
     // Post-landing safety: if the tab becomes invalid because role
     // changed (super revoked, organiser removed), fall back.
     if (landed && !visibleTabs.includes(tab)) {
-      tab = role.isSuper ? 'roles' : 'tournaments';
+      tab = 'profile';
     }
   });
 </script>
@@ -185,6 +186,16 @@
       their role (Roles for super, Tournaments for organiser).
     -->
     <div class="tabs" role="tablist" aria-label="Admin sections">
+      {#if visibleTabs.includes('profile')}
+        <button
+          type="button"
+          role="tab"
+          class="tab"
+          class:tab-active={tab === 'profile'}
+          aria-selected={tab === 'profile'}
+          onclick={() => (tab = 'profile')}
+        >Profile</button>
+      {/if}
       {#if visibleTabs.includes('roles')}
         <button
           type="button"
@@ -248,7 +259,9 @@
     </div>
 
     <div class="panel" role="tabpanel">
-      {#if tab === 'players' && visibleTabs.includes('players')}
+      {#if tab === 'profile' && visibleTabs.includes('profile')}
+        <AdminProfile />
+      {:else if tab === 'players' && visibleTabs.includes('players')}
         <AdminPlayers />
       {:else if tab === 'tournaments' && visibleTabs.includes('tournaments')}
         <AdminTournaments />

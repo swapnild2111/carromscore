@@ -201,6 +201,26 @@
       }
     },
 
+    "organiserProfiles": {
+      ".read": "auth != null && root.child('adminRoles').child(auth.uid).val() == 'super'",
+      "$uid": {
+        ".read": "auth != null && auth.uid == $uid",
+        ".write": "auth != null && auth.uid == $uid",
+        ".validate": "newData.hasChildren()",
+        "displayName":  { ".validate": "newData.isString() && newData.val().length <= 120" },
+        "orgName":      { ".validate": "newData.isString() && newData.val().length <= 120" },
+        "address":      { ".validate": "newData.isString() && newData.val().length <= 300" },
+        "contact":      { ".validate": "newData.isString() && newData.val().length <= 120" },
+        "website":      { ".validate": "newData.isString() && newData.val().length <= 200" },
+        "instagram":    { ".validate": "newData.isString() && newData.val().length <= 60" },
+        "facebook":     { ".validate": "newData.isString() && newData.val().length <= 60" },
+        "youtube":      { ".validate": "newData.isString() && newData.val().length <= 60" },
+        "x":            { ".validate": "newData.isString() && newData.val().length <= 60" },
+        "logoUrl":      { ".validate": "newData.isString() && newData.val().length <= 3000000" },
+        "$other":       { ".validate": false }
+      }
+    },
+
     "users": {
       ".read": "auth != null && root.child('adminRoles').child(auth.uid).val() == 'super'",
       ".indexOn": ["email"],

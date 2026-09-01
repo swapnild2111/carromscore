@@ -132,6 +132,11 @@
     };
   });
 
+  // Organiser profile loaded from /organiserProfiles/{createdBy}.
+  // Optional — print works fine without it; logo/organizer just won't show.
+  type OrgProfile = { displayName?: string; orgName?: string; logoUrl?: string };
+  let orgProfile = $state<OrgProfile | null>(null);
+
   // Tournament record (name, type, country, defaults). Nudged by
   // tournamentTick. Falls back to a minimal shim when the record
   // isn't in the local mirror yet.
@@ -148,6 +153,32 @@
     if (!tournamentKey) return null;
     return loadAllTournaments().find((t) => t.key === tournamentKey) ?? null;
   });
+
+  // Load organiser profile once the tournament record's createdBy is known.
+  $effect(() => {
+    const uid = tournament?.createdBy;
+    if (!uid) return;
+    void (async () => {
+      try {
+        const [{ getDatabase, ref, get }, { firebaseApp }] = await Promise.all([
+          import('firebase/database'),
+          import('../../lib/firebase'),
+        ]);
+        const db = getDatabase(firebaseApp());
+        const snap = await get(ref(db, `organiserProfiles/${uid}`));
+        orgProfile = snap.exists() ? (snap.val() as OrgProfile) : null;
+      } catch {
+        orgProfile = null;
+      }
+    })();
+  });
+
+  // Derived print values — prefer tournament-level overrides (desc stays on
+  // tournament), fall back to organiser profile for logo + organizer name.
+  const printLogoUrl = $derived(orgProfile?.logoUrl ?? null);
+  const printOrganizerName = $derived(
+    orgProfile?.orgName || orgProfile?.displayName || null,
+  );
 
   // Load assigned-player set once when we have both the tournament
   // and its type. Silent-on-failure: an empty set just hides the
@@ -399,8 +430,8 @@
             <p class="cover-description">{tournament.description}</p>
           {/if}
         </div>
-        {#if tournament?.logoUrl}
-          <img src={tournament.logoUrl} alt="Tournament logo" class="cover-logo" />
+        {#if printLogoUrl}
+          <img src={printLogoUrl} alt="Tournament logo" class="cover-logo" />
         {/if}
       </div>
 
@@ -482,8 +513,8 @@
         {/each}
       {/if}
 
-      {#if tournament?.organizerName}
-        <p class="cover-organizer">Organised by {tournament.organizerName}</p>
+      {#if printOrganizerName}
+        <p class="cover-organizer">Organised by {printOrganizerName}</p>
       {/if}
     </section>
 
