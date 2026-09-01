@@ -204,7 +204,7 @@
     "organiserProfiles": {
       ".read": "auth != null && root.child('adminRoles').child(auth.uid).val() == 'super'",
       "$uid": {
-        ".read": "auth != null && auth.uid == $uid",
+        ".read": true,
         ".write": "auth != null && auth.uid == $uid",
         ".validate": "newData.hasChildren()",
         "displayName":  { ".validate": "newData.isString() && newData.val().length <= 120" },
