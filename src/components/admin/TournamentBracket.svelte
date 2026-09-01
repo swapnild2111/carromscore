@@ -569,7 +569,7 @@
                         onclick={() => deleteRow(m)}
                         aria-label="Delete match"
                         title="Delete match"
-                      >🗑</button>
+                      ><svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M2 2l10 10M12 2L2 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
                     </td>
                   </tr>
                 {/each}
@@ -961,10 +961,12 @@
     background: transparent;
     border: 1px solid rgba(239, 83, 80, 0.3);
     color: rgba(239, 83, 80, 0.8);
-    padding: 0.25rem 0.5rem;
+    padding: 0.3rem 0.5rem;
     border-radius: 0.3rem;
     cursor: pointer;
-    font-size: 0.9rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
   }
   .row-del:hover {
     background: rgba(239, 83, 80, 0.1);

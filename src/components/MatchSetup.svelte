@@ -176,10 +176,9 @@
         return;
       }
       applyPlannedToCfg(match);
-      // Claim (or refresh claim) — silent-on-failure so a signed-out
-      // umpire can still see the prefilled setup; they just won't
-      // stamp claimedBy.
-      if (uid) void claimPlannedMatch(mid, uid);
+      // Claim happens at start() — not here. Loading the setup screen
+      // should not flip the bracket row to "scoring"; only actually
+      // tapping Start should do that.
       plannedState = { kind: 'loaded', mid };
     })();
   });
@@ -877,6 +876,11 @@
     // v3.6: if this setup came from a planned-match QR scan, thread
     // the mid through to the score URL. ScoreBoard reads ?planned=<mid>
     // and deletes /planned/{mid} once the match archives.
+    // Claim the planned slot now that the match is actually starting.
+    // Silent-on-failure — a signed-out umpire can still score; they
+    // just won't stamp claimedBy on the bracket row.
+    const uid = currentUser()?.uid;
+    if (plannedMid && uid) void claimPlannedMatch(plannedMid, uid);
     const plannedSuffix = plannedMid ? `&planned=${encodeURIComponent(plannedMid)}` : '';
     const scoreUrl = `${base}score/?${encodeConfig(cfg)}${plannedSuffix}`;
     saveResume({

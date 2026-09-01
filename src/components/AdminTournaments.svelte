@@ -265,6 +265,8 @@
   // visible list. Both are advisory — an absent count just omits the
   // '(N)' suffix on the button.
   let plannedCountByKey = $state<Record<string, number>>({});
+  // planned matches remaining per roundKey — used to derive COMPLETE status
+  let plannedCountByRound = $state<Record<string, number>>({});
   let assignedCountByKey = $state<Record<string, number>>({});
   let unsubPlannedGlobal: (() => void) | null = null;
 
@@ -284,17 +286,20 @@
       ]);
       const db = getDatabase(firebaseApp());
       unsubPlannedGlobal = onValue(ref(db, 'planned'), (snap) => {
-        const raw = snap.val() as Record<string, { tournamentKey?: string }> | null;
+        const raw = snap.val() as Record<string, { tournamentKey?: string; roundKey?: string }> | null;
         const counts: Record<string, number> = {};
+        const roundCounts: Record<string, number> = {};
         if (raw) {
           for (const v of Object.values(raw)) {
             if (!v || typeof v !== 'object') continue;
             const k = v.tournamentKey;
-            if (!k) continue;
-            counts[k] = (counts[k] ?? 0) + 1;
+            if (k) counts[k] = (counts[k] ?? 0) + 1;
+            const rk = v.roundKey;
+            if (rk) roundCounts[rk] = (roundCounts[rk] ?? 0) + 1;
           }
         }
         plannedCountByKey = counts;
+        plannedCountByRound = roundCounts;
       });
     })();
     return () => {
@@ -1781,16 +1786,20 @@
                     <div class="round-name-meta">
                       <span class="chip">order {r.order}</span>
                       {#if r.state === 'closed'}
-                        <span class="chip chip-closed" title="Closed — not offered to umpires">
+                        <span class="chip chip-closed" title="Closed — organiser stopped this round">
                           CLOSED
+                        </span>
+                      {:else if r.startedAt && !plannedCountByRound[r.key]}
+                        <span class="chip chip-complete" title="Complete — all matches in this round have been scored">
+                          COMPLETE
                         </span>
                       {:else if r.startedAt}
                         <span class="chip chip-running" title="Running — umpires can start matches under this round">
                           RUNNING
                         </span>
                       {:else}
-                        <span class="chip chip-pending" title="Pending — hit ▶ Start to activate for umpires">
-                          PENDING
+                        <span class="chip chip-pending" title="Ready — hit ▶ Start to activate for umpires">
+                          READY
                         </span>
                       {/if}
                     </div>
@@ -2175,6 +2184,14 @@
     color: #a6dfa9;
     background: rgba(76, 175, 80, 0.14);
     border-color: rgba(76, 175, 80, 0.45);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 700;
+  }
+  .chip-complete {
+    color: #7ec8e3;
+    background: rgba(100, 180, 230, 0.14);
+    border-color: rgba(100, 180, 230, 0.4);
     text-transform: uppercase;
     letter-spacing: 0.05em;
     font-weight: 700;

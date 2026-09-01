@@ -162,7 +162,7 @@
       ".read": true,
       "$mid": {
         ".write": "($mid.length >= 4 && $mid.length <= 12) && ((newData.exists()) || (data.exists() && !newData.exists() && ((!data.child('createdBy').exists()) || (auth != null && ((root.child('adminRoles').child(auth.uid).val() == 'super') || (data.child('meta').child('tournamentKey').exists() && root.child('tournaments').child(data.child('meta').child('tournamentKey').val()).child('createdBy').val() == auth.uid) || (data.child('createdBy').val() == auth.uid) || (root.child('organiserRoles').child(auth.uid).val() == true && data.child('updatedAt').isNumber() && data.child('updatedAt').val() < (now - 14400000)))))))",
-        ".validate": "newData.hasChildren(['updatedAt', 'liveState']) && newData.child('updatedAt').isNumber() && newData.child('updatedAt').val() <= now && newData.child('updatedAt').val() > now - 60000",
+        ".validate": "newData.hasChildren(['updatedAt', 'liveState']) && newData.child('updatedAt').isNumber() && newData.child('updatedAt').val() <= now + 30000 && newData.child('updatedAt').val() > now - 300000",
         "matchId":   { ".validate": "newData.isString()" },
         "updatedAt": { ".validate": "newData.isNumber()" },
         "meta":      { ".validate": "newData.hasChildren()" },
