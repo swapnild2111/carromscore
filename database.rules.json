@@ -78,7 +78,7 @@
         "country":       { ".validate": "newData.isString() && newData.val().length <= 40" },
         "description":   { ".validate": "newData.isString() && newData.val().length <= 300" },
         "organizerName": { ".validate": "newData.isString() && newData.val().length <= 120" },
-        "logoUrl":       { ".validate": "newData.isString() && newData.val().length <= 512" },
+        "logoUrl":       { ".validate": "newData.isString() && newData.val().length <= 3000000" },
         "organisers": {
           ".read": "auth != null",
           "$uid": {

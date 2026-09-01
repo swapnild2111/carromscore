@@ -616,9 +616,8 @@
     }
   }
 
-  async function doLogoUpload(
+  function doLogoRead(
     file: File,
-    keyHint: string,
     setUploading: (v: boolean) => void,
     setProgress: (pct: number) => void,
     setUrl: (url: string) => void,
@@ -627,45 +626,35 @@
     if (!file.type.startsWith('image/')) { flash('err', 'Only image files are accepted'); return; }
     setUploading(true);
     setProgress(0);
-    try {
-      const [{ firebaseApp }, { getStorage, ref: storageRef, uploadBytesResumable, getDownloadURL }] = await Promise.all([
-        import('../lib/firebase'),
-        import('firebase/storage'),
-      ]);
-      const storage = getStorage(firebaseApp());
-      const path = `tournament-logos/${keyHint}/${Date.now()}_${file.name.replace(/[^a-z0-9._-]/gi, '_')}`;
-      const task = uploadBytesResumable(storageRef(storage, path), file);
-      await new Promise<void>((resolve, reject) => {
-        task.on(
-          'state_changed',
-          (snap) => setProgress(Math.round((snap.bytesTransferred / snap.totalBytes) * 100)),
-          reject,
-          resolve,
-        );
-      });
-      setUrl(await getDownloadURL(task.snapshot.ref));
-    } catch (err) {
-      flash('err', `Upload failed: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
+    const reader = new FileReader();
+    reader.onprogress = (e) => {
+      if (e.lengthComputable) setProgress(Math.round((e.loaded / e.total) * 100));
+    };
+    reader.onload = () => {
+      setUrl(reader.result as string);
       setUploading(false);
       setProgress(0);
-    }
+    };
+    reader.onerror = () => {
+      flash('err', 'Could not read the image file');
+      setUploading(false);
+      setProgress(0);
+    };
+    reader.readAsDataURL(file);
   }
 
-  async function uploadLogo(file: File) {
-    await doLogoUpload(
+  function uploadLogo(file: File) {
+    doLogoRead(
       file,
-      editingKey ?? 'new',
       (v) => { logoUploading = v; },
       (pct) => { logoUploadProgress = pct; },
       (url) => { editingLogoUrl = url; },
     );
   }
 
-  async function uploadLogoForAdd(file: File) {
-    await doLogoUpload(
+  function uploadLogoForAdd(file: File) {
+    doLogoRead(
       file,
-      'new',
       (v) => { addingLogoUploading = v; },
       (pct) => { addingLogoUploadProgress = pct; },
       (url) => { addingLogoUrl = url; },
