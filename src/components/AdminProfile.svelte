@@ -160,11 +160,11 @@
       <section class="prof-section">
         <h2 class="prof-section-title">Identity</h2>
         <label class="prof-field">
-          <span>Your name <em class="prof-hint">(shown as "Organised by …" on print covers)</em></span>
+          <span>Your name</span>
           <input type="text" bind:value={profile.displayName} maxlength="120" placeholder="e.g. Swapnil Deshpande" disabled={saving} />
         </label>
         <label class="prof-field">
-          <span>Organisation / federation</span>
+          <span>Organisation / federation <em class="prof-hint">(shown as "Organised by …" on print covers)</em></span>
           <input type="text" bind:value={profile.orgName} maxlength="120" placeholder="e.g. Danish Carrom Federation" disabled={saving} />
         </label>
         <label class="prof-field">
@@ -251,7 +251,7 @@
   .profile-wrap {
     max-width: 36rem;
     margin: 0 auto;
-    padding: 1rem 0 2rem;
+    padding: 1rem 0 6rem;
   }
   .flash {
     padding: 0.55rem 0.85rem;
