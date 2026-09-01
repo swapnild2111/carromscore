@@ -440,20 +440,21 @@
         <h2 class="cover-section" style="margin-top:1.4rem">
           Schedule ({matchCount} {matchCount === 1 ? 'match' : 'matches'})
         </h2>
-        {#each schedule as round (round.roundKey)}
+        {#each schedule as round, ri (round.roundKey)}
           <div class="sched-round">
             <p class="sched-round-name">{round.roundName}</p>
             <table class="sched-table">
               <thead>
                 <tr>
-                  <th class="sched-th-board">Board</th>
+                  <th class="sched-th-board">{qrMode === 'match' ? 'Match' : 'Board'}</th>
                   <th class="sched-th-match">Match</th>
                 </tr>
               </thead>
               <tbody>
-                {#each round.matches as m (m.mid)}
+                {#each round.matches as m, mi (m.mid)}
+                  {@const matchNum = schedule.slice(0, ri).reduce((acc, r) => acc + r.matches.length, 0) + mi + 1}
                   <tr>
-                    <td class="sched-board">{m.board ? `B${m.board}` : '—'}</td>
+                    <td class="sched-board">{qrMode === 'match' ? `M${matchNum}` : (m.board ? `B${m.board}` : '—')}</td>
                     <td class="sched-matchup">
                       <span class="sched-player">{m.aName}{#if m.a2Name} + {m.a2Name}{/if}</span>
                       <span class="sched-vs">vs</span>
@@ -494,7 +495,7 @@
       </section>
     {:else}
       <!-- ─── PER-MATCH QR CARDS (one QR per planned match) ─────────── -->
-      {#each schedule as round (round.roundKey)}
+      {#each schedule as round, ri (round.roundKey)}
         <section class="page qr-grid-page">
           <div class="qr-grid-hdr">
             <p class="brand">Carromscore</p>
@@ -502,9 +503,10 @@
             <p class="qr-grid-sub">Cut out each card and place at the board for that match. Scan to start scoring.</p>
           </div>
           <div class="match-qr-grid">
-            {#each round.matches as m (m.mid)}
+            {#each round.matches as m, mi (m.mid)}
+              {@const matchNum = schedule.slice(0, ri).reduce((acc, r) => acc + r.matches.length, 0) + mi + 1}
               <div class="match-qr-cell">
-                {#if m.board}<p class="mqr-board">Board {m.board}</p>{/if}
+                <p class="mqr-board">Match {matchNum}</p>
                 <div class="mqr-matchup">
                   <span class="mqr-side">{m.aName}{#if m.a2Name}<br/><span class="mqr-partner">{m.a2Name}</span>{/if}</span>
                   <span class="mqr-vs">vs</span>
