@@ -430,19 +430,61 @@
   // tap opens an inline dropdown with the role badge + Sign out.
 
   let showTournamentPicker = $state(false);
-  function tournamentSuggestions(q: string): Tournament[] {
-    // Read the tick so Svelte re-derives on remote updates.
-    void tournamentTick;
-    return rankTournaments(q, 8);
-  }
+  let tournamentHighlight = $state<number>(-1);
+  let suppressTournamentBlur = false;
+
   function pickTournament(name: string): void {
     cfg.tournament = name;
     showTournamentPicker = false;
+    tournamentHighlight = -1;
     // Reset the round tag whenever the tournament changes — a round
     // is scoped to a specific tournament (its slug), so carrying the
     // old round string into a new tournament would archive a
     // round/roundKey pair that doesn't exist under the new parent.
     cfg.round = '';
+  }
+
+  const tourSuggestions = $derived<Tournament[]>(() => {
+    void tournamentTick;
+    return rankTournaments(cfg.tournament, 8);
+  });
+  const tourDropdownVisible = $derived<boolean>(
+    showTournamentPicker && tourSuggestions().length > 0,
+  );
+
+  function onTournamentKeydown(e: KeyboardEvent, suggestions: Tournament[]) {
+    const open = showTournamentPicker && suggestions.length > 0;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      suppressTournamentBlur = true;
+      if (!open) { showTournamentPicker = true; tournamentHighlight = 0; }
+      else tournamentHighlight = Math.min(tournamentHighlight + 1, suggestions.length - 1);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      suppressTournamentBlur = true;
+      tournamentHighlight = Math.max(tournamentHighlight - 1, 0);
+    } else if ((e.key === 'Enter' || e.key === ' ') && open && tournamentHighlight >= 0) {
+      e.preventDefault();
+      const s = suggestions[tournamentHighlight];
+      if (s) { pickTournament(s.name); suppressTournamentBlur = false; }
+    } else if (e.key === 'Escape') {
+      suppressTournamentBlur = false;
+      showTournamentPicker = false;
+      tournamentHighlight = -1;
+    } else if (e.key === 'Tab') {
+      if (open && tournamentHighlight >= 0) {
+        e.preventDefault();
+        suppressTournamentBlur = true;
+        const s = suggestions[tournamentHighlight];
+        if (s) { pickTournament(s.name); suppressTournamentBlur = false; }
+      } else {
+        suppressTournamentBlur = false;
+        showTournamentPicker = false;
+        tournamentHighlight = -1;
+      }
+    } else {
+      if (open) tournamentHighlight = 0;
+    }
   }
 
   /**
@@ -1268,34 +1310,38 @@
       autocomplete="off"
       placeholder="Event name — Silver Cup 2026, Sunday Club Night, …"
       value={cfg.tournament}
+      role="combobox"
+      aria-expanded={tourDropdownVisible()}
+      aria-autocomplete="list"
       oninput={(e) => {
         const nextValue = (e.currentTarget as HTMLInputElement).value;
-        // Clear the round tag whenever the tournament identity might
-        // change (either the raw text or the resolved key). A round is
-        // scoped to a specific tournament — carrying an old round
-        // string into a new one would archive a mismatched pair.
         const prevKey = normalizeKey(cfg.tournament.trim());
         const nextKey = normalizeKey(nextValue.trim());
         if (prevKey !== nextKey) cfg.round = '';
         cfg.tournament = nextValue;
+        tournamentHighlight = 0;
       }}
-      onfocus={() => (showTournamentPicker = true)}
-      onblur={() => setTimeout(() => (showTournamentPicker = false), 200)}
+      onfocus={() => { showTournamentPicker = true; tournamentHighlight = -1; }}
+      onblur={() => setTimeout(() => { if (!suppressTournamentBlur) { showTournamentPicker = false; tournamentHighlight = -1; } suppressTournamentBlur = false; }, 200)}
+      onkeydown={(e) => onTournamentKeydown(e, tourSuggestions())}
       maxlength="60"
     />
-    {#if showTournamentPicker}
-      {@const suggestions = tournamentSuggestions(cfg.tournament)}
-      {#if suggestions.length > 0}
-        <ul class="suggest">
-          {#each suggestions as t (t.key)}
-            <li>
-              <button type="button" onclick={() => pickTournament(t.name)}>
-                <span class="pname">{t.name}</span>
-              </button>
-            </li>
-          {/each}
-        </ul>
-      {/if}
+    {#if tourDropdownVisible()}
+      <ul class="suggest">
+        {#each tourSuggestions() as t, ti (t.key)}
+          <li>
+            <button
+              type="button"
+              class:suggest-highlighted={ti === tournamentHighlight}
+              onmouseenter={() => (tournamentHighlight = ti)}
+              onmousedown={(e) => e.preventDefault()}
+              onclick={() => pickTournament(t.name)}
+            >
+              <span class="pname">{t.name}</span>
+            </button>
+          </li>
+        {/each}
+      </ul>
     {/if}
   </label>
 

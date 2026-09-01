@@ -511,9 +511,19 @@
       return (b.endedAtRaw ?? 0) - (a.endedAtRaw ?? 0);
     });
   });
+
+  const printTitle = $derived.by<string>(() => {
+    if (!viewReport) return '';
+    const t = viewReport.tournament ?? 'Default';
+    const r = roundFilter
+      ? ` · ${report?.roundReports?.find((x) => x.roundKey === roundFilter)?.roundName ?? roundFilter}`
+      : '';
+    const d = new Date().toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' });
+    return `${t}${r} — ${d}`;
+  });
 </script>
 
-<section class="reports">
+<section class="reports" data-print-title={printTitle}>
   <!--
     Shared filter bar (v3.4.12) — replaces both the top tournament
     chip strip AND the per-table search rows we had earlier.
@@ -1076,19 +1086,173 @@
   }
   .rep-print:hover { background: rgba(255, 213, 74, 0.08); }
   @media print {
-    @page { size: A4 landscape; margin: 1.2cm; }
-    :global(body) { background: #fff !important; color: #111 !important; }
+    @page { size: A4 landscape; margin: 1.5cm 1.2cm; }
+
+    /* ── Hide all chrome except the report body ── */
     :global(.offline-banner),
     :global(nav),
     :global(.tab-bar),
     :global(.lobby-tabs),
     :global(.lobby-header),
-    :global(.reports-filters) { display: none !important; }
+    :global(.footer),
+    :global(.foot-block),
+    .reports-filters,
+    .tbl-hdr .tbl-actions,
+    .btn-copy,
+    .round-report-actions { display: none !important; }
+
+    :global(body) { background: #fff !important; color: #111 !important; }
     :global(.tab-content),
-    :global(.reports-tab) { padding: 0 !important; }
-    .stat-tile { border: 1px solid #ccc !important; background: #fff !important; color: #111 !important; }
-    .matches-tbl th, .matches-tbl td { border-color: #ccc !important; color: #111 !important; background: #fff !important; }
-    .matches-tbl thead tr { background: #f0f0f0 !important; }
+    :global(.reports-tab),
+    :global(.reports) { padding: 0 !important; background: #fff !important; }
+
+    /* ── Print header injected via ::before on .reports ── */
+    .reports::before {
+      content: attr(data-print-title);
+      display: block;
+      font-size: 1.5rem;
+      font-weight: 900;
+      color: #111;
+      letter-spacing: 0.01em;
+      padding-bottom: 0.5rem;
+      margin-bottom: 0.8rem;
+      border-bottom: 3px solid #000;
+    }
+
+    /* ── Stat tiles: horizontal strip, compact ── */
+    .stat-row {
+      display: flex !important;
+      flex-direction: row !important;
+      gap: 0.6rem !important;
+      margin-bottom: 0.9rem !important;
+    }
+    .stat-tile {
+      border: 1.5px solid #ccc !important;
+      background: #fff !important;
+      color: #111 !important;
+      padding: 0.45rem 0.75rem !important;
+      border-radius: 0.4rem !important;
+      flex: 1 1 0 !important;
+    }
+    .stat-tile-podium {
+      flex: 2 1 0 !important;
+      border-color: #b8990a !important;
+      background: #fffbe6 !important;
+    }
+    .stat-value { color: #111 !important; font-size: 1.3rem !important; }
+    .stat-label { color: #555 !important; }
+    .podium-lbl { color: #b8990a !important; }
+    .podium-name { color: #111 !important; }
+    .podium-1 .podium-name { color: #b8990a !important; }
+    .podium-wins { color: #555 !important; }
+
+    /* ── Section headings ── */
+    .section-hdr {
+      color: #111 !important;
+      font-size: 0.75rem !important;
+      border-bottom: 2px solid #000;
+      padding-bottom: 0.2rem;
+      margin-bottom: 0.4rem !important;
+    }
+    .tbl-hdr { margin-bottom: 0.3rem !important; }
+
+    /* ── Both tables: clean black-on-white ── */
+    .tbl-scroll,
+    .summary-scroll {
+      overflow: visible !important;
+      background: transparent !important;
+      border: none !important;
+      border-radius: 0 !important;
+    }
+    .leaderboard-tbl,
+    .summary-tbl,
+    .matches-tbl {
+      min-width: 0 !important;
+      width: 100% !important;
+      border-collapse: collapse !important;
+      font-size: 0.8rem !important;
+    }
+    .leaderboard-tbl th,
+    .leaderboard-tbl td,
+    .summary-tbl th,
+    .summary-tbl td,
+    .matches-tbl th,
+    .matches-tbl td {
+      padding: 0.28rem 0.5rem !important;
+      border: 1px solid #ddd !important;
+      color: #111 !important;
+      background: #fff !important;
+    }
+    .leaderboard-tbl th,
+    .summary-tbl th,
+    .matches-tbl th {
+      background: #f5f5f5 !important;
+      font-size: 0.68rem !important;
+      color: #444 !important;
+      text-transform: uppercase !important;
+      letter-spacing: 0.05em !important;
+    }
+    /* Top leaderboard row: gold tint */
+    .leaderboard-tbl tr.leaderboard-top td {
+      background: #fffbe6 !important;
+    }
+    .leaderboard-tbl tr.leaderboard-top .col-rank,
+    .leaderboard-tbl tr.leaderboard-top .col-name {
+      color: #b8990a !important;
+    }
+    .leaderboard-tbl .col-total { color: #111 !important; font-weight: 700 !important; }
+    /* Zebra for readability */
+    .matches-tbl tbody tr:nth-child(even) td {
+      background: #f9f9f9 !important;
+    }
+
+    /* ── Winner tags: print-safe colours ── */
+    .winner-tag { border: 1px solid #bbb !important; }
+    .winner-a {
+      background: #e3f2fd !important;
+      color: #1565c0 !important;
+      border-color: #90caf9 !important;
+    }
+    .winner-b {
+      background: #fbe9e7 !important;
+      color: #bf360c !important;
+      border-color: #ffab91 !important;
+    }
+    .winner-draw {
+      background: #f5f0e6 !important;
+      color: #795548 !important;
+      border-color: #bcaaa4 !important;
+    }
+
+    /* ── Per-round accordion: print all open, remove chrome ── */
+    .rounds-section { margin-top: 0.8rem !important; }
+    .round-report {
+      background: #fff !important;
+      border: none !important;
+      border-top: 2px solid #000 !important;
+      border-radius: 0 !important;
+      break-inside: avoid;
+      page-break-inside: avoid;
+      margin-bottom: 0.5rem !important;
+    }
+    .round-report-hdr {
+      background: transparent !important;
+      padding: 0.35rem 0 !important;
+      color: #111 !important;
+      font-size: 0.82rem !important;
+      pointer-events: none;
+    }
+    .round-report-caret { display: none !important; }
+    .round-report-body {
+      display: flex !important;
+      padding: 0 0 0.5rem !important;
+    }
+    /* Force all rounds to show when printing */
+    .round-folded .round-report-body { display: flex !important; }
+    .round-report-count {
+      background: transparent !important;
+      color: #555 !important;
+    }
   }
   .chips {
     display: flex;
