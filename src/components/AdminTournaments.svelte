@@ -918,14 +918,36 @@
   }
   async function closeSelectedRound(r: Round) {
     if (!roundsKey) return;
-    // Terminal action — confirm so an organiser doesn't lose the
-    // 'running' state to an accidental tap.
+    // v3.6.3: close is no longer terminal — accidental closes were
+    // reported 2026-09-01 as unrecoverable, so reopen is back as an
+    // escape hatch. Still confirm-gated so a stray tap doesn't
+    // silently hide the round from umpires.
     // eslint-disable-next-line no-alert
-    if (!window.confirm(`Close ${r.name}? This can't be undone — a closed round can't be reopened.`)) return;
+    if (!window.confirm(`Close ${r.name}? Umpires won't be able to add new matches to it. You can reopen later if this was a mistake.`)) return;
     roundsSaving = true;
     const outcome = await setRoundState(roundsKey, r.key, 'closed');
     roundsSaving = false;
     if (!outcome.ok) flash('err', outcome.error);
+  }
+
+  /**
+   * ↩ Reopen (v3.6.3). Flips a closed round back to open so umpires
+   * can add matches to it again. Doesn't touch startedAt — a round
+   * that was started, closed, then reopened comes back as RUNNING
+   * (state=open + startedAt set). A round closed while pending
+   * comes back as PENDING (state=open, no startedAt).
+   * Confirm-gated so a stray tap on a closed row doesn't undo an
+   * intended close.
+   */
+  async function reopenSelectedRound(r: Round) {
+    if (!roundsKey) return;
+    // eslint-disable-next-line no-alert
+    if (!window.confirm(`Reopen ${r.name}? Umpires will be able to add new matches to it again.`)) return;
+    roundsSaving = true;
+    const outcome = await setRoundState(roundsKey, r.key, 'open');
+    roundsSaving = false;
+    if (!outcome.ok) flash('err', outcome.error);
+    else flash('ok', `${r.name} reopened`);
   }
 
   async function startDeleteRound(r: Round) {
@@ -1631,7 +1653,20 @@
                   </div>
                 {:else}
                   <div class="round-name">
-                    <div class="round-name-text">{r.name}</div>
+                    <!--
+                      v3.6.3: round name is now a button — clicking it
+                      enters rename mode inline (same as the tournament
+                      row's name-as-affordance pattern). Removes the
+                      standalone Rename button from the action bar,
+                      freeing horizontal room on mobile.
+                    -->
+                    <button
+                      type="button"
+                      class="round-name-btn"
+                      onclick={() => startRenameRound(r)}
+                      disabled={roundsSaving}
+                      title="Rename round"
+                    >{r.name}</button>
                     <div class="round-name-meta">
                       <span class="chip">order {r.order}</span>
                       {#if r.state === 'closed'}
@@ -1650,27 +1685,16 @@
                     </div>
                   </div>
                   <div class="round-actions">
-                    <button
-                      type="button"
-                      class="btn"
-                      onclick={() => startRenameRound(r)}
-                      disabled={roundsSaving}
-                    >Rename</button>
                     <!--
-                      v3.6.2: three-state round lifecycle with two
-                      dedicated buttons (media-player style):
-                        ▶ Start   — enabled only when pending
-                                    (state='open' AND !startedAt)
-                        ⏹ Close   — enabled only when running
-                                    (state='open' AND startedAt)
-                      Close is terminal; there's no Reopen. Closed
-                      rounds show neither button. If the organiser
-                      needs to score more matches after closing, they
-                      add a fresh round with a new label.
-                      Legacy rounds (created pre-v3.6.2) have no
-                      startedAt, so they render as pending — the
-                      organiser can either start them (records
-                      startedAt=now) or close them directly.
+                      v3.6.3: round lifecycle (updated from v3.6.2's
+                      terminal-close model). States:
+                        ▶ Start   — pending → running (stamps startedAt)
+                        ⏹ Close   — running → closed
+                        ↩ Reopen  — closed → running (restores the
+                                    round so accidental closes are
+                                    recoverable; reported 2026-09-01)
+                      All state changes are confirm-gated so a stray
+                      tap doesn't silently move the round.
                     -->
                     {#if r.state !== 'closed'}
                       <button
@@ -1687,8 +1711,17 @@
                         onclick={() => closeSelectedRound(r)}
                         disabled={roundsSaving || !r.startedAt}
                         aria-label="Close round"
-                        title={!r.startedAt ? 'Round not started yet' : 'Close round — terminal, no reopen'}
+                        title={!r.startedAt ? 'Round not started yet' : 'Close round — hides from umpire picker'}
                       >⏹</button>
+                    {:else}
+                      <button
+                        type="button"
+                        class="btn btn-icon btn-round-reopen"
+                        onclick={() => reopenSelectedRound(r)}
+                        disabled={roundsSaving}
+                        aria-label="Reopen round"
+                        title="Reopen round — umpires can add matches to it again"
+                      >↩</button>
                     {/if}
                     <button
                       type="button"
@@ -1867,8 +1900,24 @@
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 0.5rem;
     transition: background 0.12s, border-color 0.12s;
+    /* Narrow phones (< 34rem) run out of horizontal room for the
+       5-button action set to sit beside a name + chips row. Let the
+       row wrap so actions land on a second line under the meta;
+       align-items switches to flex-start so wrapped items don't
+       collide visually. Reported 2026-09-01. */
+    flex-wrap: wrap;
   }
-  .row-name { flex: 1; min-width: 0; }
+  @media (max-width: 34rem) {
+    .row { align-items: flex-start; }
+  }
+  .row-name { flex: 1 1 0; min-width: 0; }
+  /* On narrow phones let the name column take full width so the
+     wrapping row-actions block falls to its own row. Desktop keeps
+     the flex: 1 side-by-side layout. */
+  @media (max-width: 34rem) {
+    .row-name { flex: 1 1 100%; }
+    .row-actions { width: 100%; justify-content: flex-end; }
+  }
   .row-name-text {
     color: var(--fg);
     font-weight: 600;
@@ -2198,6 +2247,14 @@
     border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 0.45rem;
     background: rgba(255, 255, 255, 0.02);
+    /* Wrap on narrow phones so the action buttons don't overlap
+       long round names. Same posture as .row above. */
+    flex-wrap: wrap;
+  }
+  @media (max-width: 34rem) {
+    .round-row { align-items: flex-start; }
+    .round-name { flex: 1 1 100%; }
+    .round-actions { width: 100%; justify-content: flex-end; }
   }
   /* Closed rounds render dimmed so the umpire's picker mental model
      — "these are the rounds still accepting matches" — is mirrored
@@ -2210,6 +2267,37 @@
     color: var(--fg);
     font-weight: 600;
     line-height: 1.1;
+  }
+  /* Round name as an affordance (v3.6.3) — same visual as the plain
+     text version, but hover-underlined so it reads as clickable, and
+     activation opens rename-in-place. Matches .row-name-btn on the
+     tournament row. */
+  .round-name-btn {
+    background: transparent;
+    border: 0;
+    padding: 0;
+    color: var(--fg);
+    font: inherit;
+    font-weight: 600;
+    line-height: 1.1;
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
+    max-width: 100%;
+  }
+  .round-name-btn:hover:not(:disabled) {
+    color: var(--accent, #ffd54a);
+    text-decoration: underline;
+    text-underline-offset: 0.15em;
+  }
+  .round-name-btn:focus-visible {
+    outline: 2px solid rgba(255, 213, 74, 0.6);
+    outline-offset: 2px;
+    border-radius: 0.2rem;
+  }
+  .round-name-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.7;
   }
   .round-name-meta {
     display: flex;
@@ -2326,6 +2414,16 @@
   }
   .btn-round-close:hover:not(:disabled) {
     background: rgba(255, 213, 74, 0.2);
+  }
+  /* Reopen button (v3.6.3) — soft blue so it reads as 'restore /
+     rewind' rather than 'destructive'. Same shape as start/close. */
+  .btn-round-reopen {
+    background: rgba(79, 195, 247, 0.14);
+    border-color: rgba(79, 195, 247, 0.5);
+    color: #b3e5fc;
+  }
+  .btn-round-reopen:hover:not(:disabled) {
+    background: rgba(79, 195, 247, 0.24);
   }
 
   .dialog {
