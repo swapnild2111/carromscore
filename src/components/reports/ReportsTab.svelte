@@ -1332,6 +1332,7 @@
     display: flex;
     flex-direction: column;
     align-items: center;
+    justify-content: center;
     text-align: center;
     gap: 0.1rem;
     min-width: 0;
