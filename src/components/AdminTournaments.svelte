@@ -79,6 +79,9 @@
   }
 
   let tick = $state(0);
+  /** Live map of uid → display name from /organiserProfiles. Refreshes
+   *  whenever any profile is saved, so the filter dropdown stays current. */
+  let orgProfilesMap = $state<Record<string, string>>({});
   let renamingKey = $state<string | null>(null);
   let renameValue = $state('');
   /**
@@ -163,6 +166,7 @@
   let query = $state('');
   let filterType = $state<'all' | 'open' | 'closed'>('all');
   let filterOrganizer = $state('');
+  let filterCountry = $state('');
   let sortBy = $state<'recent' | 'oldest' | 'az' | 'za'>('recent');
   /** Add-new-tournament dialog state. Kept as a simple string + open
    *  flag; validation happens on save. */
@@ -335,6 +339,17 @@
         import('../lib/firebase'),
       ]);
       const db = getDatabase(firebaseApp());
+      onValue(ref(db, 'organiserProfiles'), (snap) => {
+        const raw = snap.val() as Record<string, { orgName?: string; displayName?: string }> | null;
+        const map: Record<string, string> = {};
+        if (raw) {
+          for (const [uid, v] of Object.entries(raw)) {
+            const name = v?.orgName?.trim() || v?.displayName?.trim() || '';
+            if (name) map[uid] = name;
+          }
+        }
+        orgProfilesMap = map;
+      });
       unsubPlannedGlobal = onValue(ref(db, 'planned'), (snap) => {
         const raw = snap.val() as Record<string, { tournamentKey?: string; roundKey?: string; completedAt?: number }> | null;
         const counts: Record<string, number> = {};
@@ -430,7 +445,11 @@
     const q = query.trim().toLowerCase();
     if (q) all = all.filter((t) => t.name.toLowerCase().includes(q) || t.key.toLowerCase().includes(q));
     if (filterType !== 'all') all = all.filter((t) => (t.type ?? 'open') === filterType);
-    if (filterOrganizer) all = all.filter((t) => (t.organizerName ?? '') === filterOrganizer);
+    if (filterCountry) all = all.filter((t) => t.country === filterCountry);
+    if (filterOrganizer) all = all.filter((t) => {
+      const name = (t.createdBy ? (orgProfilesMap[t.createdBy] ?? '') : '') || (t.organizerName ?? '');
+      return name === filterOrganizer;
+    });
     all = [...all].sort((a, b) => {
       if (sortBy === 'recent') return b.lastActive - a.lastActive;
       if (sortBy === 'oldest') return a.lastActive - b.lastActive;
@@ -440,10 +459,23 @@
     return all;
   });
 
-  /** Unique organizer names from all tournaments, for the filter dropdown. */
-  const organizerOptions = $derived(() =>
-    [...new Set(list().map((t) => t.organizerName ?? '').filter(Boolean))].sort()
+  /** Unique country codes from tournaments with a country set. */
+  const countryOptions = $derived(() =>
+    [...new Set(list().map((t) => t.country ?? '').filter(Boolean))].sort()
   );
+
+  /** Unique organizer display names from live /organiserProfiles, scoped to
+   *  tournaments in the current list. Falls back to stale organizerName when
+   *  a tournament has no createdBy or no profile entry. */
+  const organizerOptions = $derived(() => {
+    const names = new Set<string>();
+    for (const t of list()) {
+      const live = t.createdBy ? (orgProfilesMap[t.createdBy] ?? '') : '';
+      const name = live || (t.organizerName ?? '');
+      if (name) names.add(name);
+    }
+    return [...names].sort();
+  });
 
   function flash(kind: 'ok' | 'err', message: string) {
     banner = { kind, message };
@@ -1209,6 +1241,14 @@
       <option value="open">Open</option>
       <option value="closed">Invite-only</option>
     </select>
+    {#if countryOptions().length > 0}
+    <select class="filter-select" bind:value={filterCountry} aria-label="Filter by country">
+      <option value="">All countries</option>
+      {#each countryOptions() as cc (cc)}
+        <option value={cc}>{flagEmoji(cc)} {countryName(cc)}</option>
+      {/each}
+    </select>
+    {/if}
     {#if organizerOptions().length > 0}
     <select class="filter-select" bind:value={filterOrganizer} aria-label="Filter by organizer">
       <option value="">All organisers</option>
