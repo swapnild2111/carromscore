@@ -1458,9 +1458,14 @@
       </div>
     </div>
   {:else if cfg.mode === 'practice'}
-    <div class="player-row">
-      {@render picker('Player', 'playerA')}
-      {@render noteInput('Represents', 'noteA')}
+    <div class="players-block">
+      <div class="player-card player-card-a">
+        <span class="player-card-label">Player</span>
+        <div class="player-row">
+          {@render picker('Name', 'playerA')}
+          {@render noteInput('Represents', 'noteA')}
+        </div>
+      </div>
     </div>
   {:else}
     <!--
