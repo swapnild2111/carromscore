@@ -80,6 +80,7 @@ export type Tournament = {
     bestOf?: number;
     pointsTarget?: number;
     maxBoards?: number;
+    timerDuration?: number;
   };
 };
 
@@ -343,6 +344,8 @@ function parseDefaults(raw: unknown): Tournament['defaults'] | undefined {
   if (Number.isFinite(points) && points >= 1 && points <= 100) out.pointsTarget = Math.floor(points);
   const maxBoards = Number(v.maxBoards);
   if (Number.isFinite(maxBoards) && maxBoards >= 0 && maxBoards <= 50) out.maxBoards = Math.floor(maxBoards);
+  const timerDuration = Number(v.timerDuration);
+  if (Number.isFinite(timerDuration) && timerDuration >= 0 && timerDuration <= 300) out.timerDuration = Math.floor(timerDuration);
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
@@ -692,6 +695,7 @@ export async function updateTournamentDefaults(
     bestOf: number | null;
     pointsTarget: number | null;
     maxBoards: number | null;
+    timerDuration: number | null;
   }>,
 ): Promise<TournamentWriteOutcome> {
   if (!key) return { ok: false, error: 'Missing tournament key' };

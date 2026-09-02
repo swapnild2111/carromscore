@@ -106,11 +106,12 @@
         },
         "defaults": {
           ".validate": "!newData.exists() || newData.hasChildren()",
-          "mode":         { ".validate": "newData.isString() && (newData.val() == 'singles' || newData.val() == 'doubles')" },
-          "bestOf":       { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 15" },
-          "pointsTarget": { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 100" },
-          "maxBoards":    { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 50" },
-          "$other":       { ".validate": false }
+          "mode":          { ".validate": "newData.isString() && (newData.val() == 'singles' || newData.val() == 'doubles')" },
+          "bestOf":        { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 15" },
+          "pointsTarget":  { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 100" },
+          "maxBoards":     { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 50" },
+          "timerDuration": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 300" },
+          "$other":        { ".validate": false }
         },
         "$other":     { ".validate": false }
       }
