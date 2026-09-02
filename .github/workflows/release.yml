@@ -200,7 +200,7 @@ jobs:
           NOTES="${{ inputs.notes }}"
 
           cat > release-notes.md <<NOTES
-          # Carromscore ${VER}
+          # v${VER}
 
           ${NOTES:-*(no release notes provided)*}
 
@@ -218,6 +218,6 @@ jobs:
         run: |
           TAG="${{ steps.ver.outputs.tag }}"
           gh release create "$TAG" \
-            --title "Carromscore $TAG" \
+            --title "$TAG" \
             --notes-file release-notes.md \
             "${{ steps.sign.outputs.apk }}"

@@ -201,11 +201,11 @@ export function buildReportRows(matches: MatchRecord[]): ReportRow[] {
  * contributes to both players' summaries. Draws don't count as wins
  * or losses for either side.
  */
-/** Fresh zeroed summary for a newly-seen player id. */
-function emptyPlayerSummary(pid: string): PlayerSummary {
+/** Fresh zeroed summary for a newly-seen player id or name-key. */
+function emptyPlayerSummary(pid: string, displayName?: string): PlayerSummary {
   return {
     playerId: pid,
-    name: playerName(pid),
+    name: displayName ?? playerName(pid),
     matches: 0,
     wins: 0,
     losses: 0,
@@ -242,6 +242,19 @@ function accumulateSide(
   }
 }
 
+/**
+ * Resolve a player slot to a stable map key. When a resolved Firebase
+ * id is available, use it directly. When the player was typed by name
+ * only (no picker selection — common in doubles where the second player
+ * may not be registered), synthesise a key from the raw name so they
+ * still appear on the leaderboard rather than being silently dropped.
+ */
+function slotKey(id: string | undefined, rawName: string | undefined): string | null {
+  if (id) return id;
+  const n = (rawName ?? '').trim();
+  return n ? `name:${n.toLowerCase()}` : null;
+}
+
 // Guard added v3.4.12: same null-hole defence as buildReportRows /
 // countBoardsWon.
 export function buildPlayerSummary(matches: MatchRecord[]): PlayerSummary[] {
@@ -255,12 +268,29 @@ export function buildPlayerSummary(matches: MatchRecord[]): PlayerSummary[] {
     const pointsA = m.result?.finalPointsA ?? 0;
     const pointsB = m.result?.finalPointsB ?? 0;
 
-    const sideAIds = [m.playerAId, m.playerA2Id].filter((x): x is string => !!x);
-    const sideBIds = [m.playerBId, m.playerB2Id].filter((x): x is string => !!x);
+    const sideAKeys: string[] = [
+      slotKey(m.playerAId, m.aName),
+      slotKey(m.playerA2Id, m.a2Name),
+    ].filter((x): x is string => x !== null);
+    const sideBKeys: string[] = [
+      slotKey(m.playerBId, m.bName),
+      slotKey(m.playerB2Id, m.b2Name),
+    ].filter((x): x is string => x !== null);
+
+    // Ensure name-keyed entries get a legible display name on first touch.
+    for (const [key, rawName] of [
+      [sideAKeys[0], m.aName], [sideAKeys[1], m.a2Name],
+      [sideBKeys[0], m.bName], [sideBKeys[1], m.b2Name],
+    ] as [string | undefined, string | undefined][]) {
+      if (key && !map.has(key)) {
+        map.set(key, emptyPlayerSummary(key, key.startsWith('name:') ? (rawName ?? '').trim() : undefined));
+      }
+    }
+
     const isDraw = winner === 'draw';
 
-    accumulateSide(map, sideAIds, boardsWonA, pointsA, winner === 'a', winner === 'b', isDraw);
-    accumulateSide(map, sideBIds, boardsWonB, pointsB, winner === 'b', winner === 'a', isDraw);
+    accumulateSide(map, sideAKeys, boardsWonA, pointsA, winner === 'a', winner === 'b', isDraw);
+    accumulateSide(map, sideBKeys, boardsWonB, pointsB, winner === 'b', winner === 'a', isDraw);
   }
 
   const out = Array.from(map.values());
