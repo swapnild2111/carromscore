@@ -334,6 +334,18 @@ export function buildTournamentReport(
   };
 }
 
+export function buildAllTournamentsReport(allMatches: MatchRecord[]): TournamentReport {
+  const filtered = allMatches.filter(
+    (m) => !!m && typeof m === 'object' && m.mode !== 'practice',
+  );
+  return {
+    tournament: 'All tournaments',
+    matches: filtered.length,
+    rows: buildReportRows(filtered),
+    playerSummary: buildPlayerSummary(filtered),
+  };
+}
+
 /**
  * Group the tournament's filtered matches by roundKey and build a
  * sub-report per bucket. Rounds present in `roundRoster` appear

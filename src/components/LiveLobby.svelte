@@ -336,7 +336,7 @@
     if (tab === 'live') url.searchParams.delete('tab');
     else url.searchParams.set('tab', tab);
     if (tab === 'reports') {
-      if (reportsSelection === undefined) url.searchParams.delete('tournament');
+      if (reportsSelection === undefined || reportsSelection === '__all__') url.searchParams.delete('tournament');
       else if (reportsSelection === null) url.searchParams.set('tournament', '');
       else url.searchParams.set('tournament', reportsSelection);
     } else {

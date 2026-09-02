@@ -16,6 +16,7 @@
   import type { MatchRecord } from '../../lib/history';
   import {
     buildTournamentReport,
+    buildAllTournamentsReport,
     toTSV,
     type ReportRow,
     type PlayerSummary,
@@ -80,11 +81,7 @@
   type PickerOption = { key: string | null; label: string };
   const options = $derived.by<PickerOption[]>(() => {
     void tournamentTick;
-    // Real tournaments first (most-recently-active), Default last
-    // and de-emphasised — organisers scanning the chip strip should
-    // see their real events at the front. Reported 2026-08-19:
-    // "Default" cluttering the head of the row.
-    const opts: PickerOption[] = [];
+    const opts: PickerOption[] = [{ key: '__all__', label: 'All tournaments' }];
     for (const t of loadAllTournaments()) {
       opts.push({ key: t.name, label: t.name });
     }
@@ -106,18 +103,14 @@
    * picked (renders the "pick a tournament" empty state).
    */
   const selection = $derived<string | null | undefined>(
-    initialTournament === undefined ? null : initialTournament,
+    initialTournament === undefined ? '__all__' : initialTournament,
   );
   const selectionProxy = $derived(
-    selection === null || selection === undefined ? '__default__' : selection,
+    selection === null ? '__default__' : (selection ?? '__all__'),
   );
   function onTournamentChange(e: Event) {
     const v = (e.currentTarget as HTMLSelectElement).value;
     const next = v === '__default__' ? null : v;
-    // Always fire — the parent's reportsSelection may still be
-    // `undefined` (fresh load, no tournament URL param) even when
-    // `selection` derived to `null`. Firing on every pick pushes
-    // the user's explicit choice into the parent so URL sync runs.
     onSelectionChange(next);
   }
 
@@ -128,19 +121,21 @@
   // still produces roundReports if any match has a roundKey tag.
   const currentRoundRoster = $derived.by(() => {
     void tournamentTick;
-    if (selection === undefined || selection === null) return [];
+    if (selection === undefined || selection === null || selection === '__all__') return [];
     return loadRounds(normalizeKey(selection));
   });
 
   const report = $derived<TournamentReport | null>(
     selection === undefined
       ? null
-      : buildTournamentReport(matches, selection, currentRoundRoster),
+      : selection === '__all__'
+        ? buildAllTournamentsReport(matches)
+        : buildTournamentReport(matches, selection, currentRoundRoster),
   );
 
   const currentTournamentRecord = $derived.by(() => {
     void tournamentTick;
-    if (!selection) return null;
+    if (!selection || selection === '__all__') return null;
     return findByKey(normalizeKey(selection));
   });
 
@@ -623,7 +618,7 @@
       aria-label="Tournament"
     >
       {#each options as opt (opt.key ?? '__default__')}
-        <option value={opt.key === null ? '__default__' : opt.key}>{opt.label}</option>
+        <option value={opt.key === null ? '__default__' : opt.key === '__all__' ? '__all__' : opt.key}>{opt.label}</option>
       {/each}
     </select>
     {#if report && (report.roundReports?.length ?? 0) > 0}
