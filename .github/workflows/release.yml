@@ -134,15 +134,17 @@ jobs:
         run: npm install -g @bubblewrap/cli
 
       - name: Build APK via Bubblewrap
-        # bubblewrap build reads twa-manifest.json, generates the Android project
-        # if needed, and produces app-release-unsigned.apk. The keystore is already
-        # decoded to twa/android.keystore above; bubblewrap will sign via it.
-        # We pass --skipPwaValidation so the build doesn't hit the live site.
+        # bubblewrap build reads twa-manifest.json and produces a signed APK.
+        # --skipPwaValidation avoids hitting the live site.
+        # Echo "n" to stdin to decline bubblewrap's JDK install prompt (we
+        # already have Java 17 from setup-java). --androidSdkPath points it
+        # at the pre-installed SDK so it skips the SDK setup prompt too.
         run: |
           cd twa
-          bubblewrap build \
+          echo "n" | bubblewrap build \
             --manifest ./twa-manifest.json \
-            --skipPwaValidation
+            --skipPwaValidation \
+            --androidSdkPath "$ANDROID_HOME"
 
       - name: Verify + rename APK
         id: sign
