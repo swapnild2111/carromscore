@@ -293,7 +293,7 @@ export async function resolvePlannedByBoard(
       get(ref(db, `tournaments/${tournamentKey}/rounds`)),
     ]);
 
-    // Build set of roundKeys that are currently RUNNING (open + startedAt).
+    // Build set of roundKeys that are open (not closed).
     // If we can't read rounds (permissions, missing) fall back to all rounds.
     const runningRoundKeys = new Set<string>();
     let hasRoundData = false;
@@ -305,7 +305,11 @@ export async function resolvePlannedByBoard(
       hasRoundData = true;
       for (const [rk, rv] of Object.entries(roundsRaw)) {
         if (!rv || typeof rv !== 'object') continue;
-        if (rv.state !== 'closed' && rv.startedAt) {
+        // Include any round that isn't explicitly closed — pending rounds
+        // (state='open', no startedAt) are still scannable so the umpire
+        // can load Round 2 matches as soon as the admin creates them,
+        // without waiting for the admin to tap "Start round".
+        if (rv.state !== 'closed') {
           runningRoundKeys.add(rk);
         }
       }
