@@ -1803,7 +1803,7 @@
     .opt-meta { font-size: 0.62rem; }
     fieldset.rules label { padding: 0.5rem 0.4rem; }
     fieldset.rules label > span { font-size: 0.62rem; }
-    fieldset.rules input[type='number'] { font-size: 0.95rem; width: 2.5ch; }
+    fieldset.rules input[type='number'] { font-size: 0.95rem; }
     legend { font-size: 0.7rem; }
   }
 
@@ -1866,8 +1866,7 @@
     font-weight: 700;
     font-family: inherit;
     outline: none;
-    min-width: 0;
-    width: 2.8ch;
+    width: 100%;
     text-align: center;
     line-height: 1.2;
   }
