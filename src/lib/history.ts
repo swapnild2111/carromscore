@@ -527,6 +527,41 @@ export function reconcileResultFromBoardLog(record: MatchRecord): {
     (e): e is NonNullable<typeof e> => !!e && typeof e === 'object',
   );
   if (log.length === 0) {
+    // Practice records never have a boardLog — scoring lives in
+    // practiceBoards[][]. Legacy records were written with zeros in
+    // result.setsA / boardCount / finalPointsA. Derive from the
+    // matrix when present so the history table shows real values.
+    const matrix = record.practiceBoards;
+    if (
+      record.mode === 'practice' &&
+      Array.isArray(matrix) &&
+      matrix.length > 0 &&
+      Array.isArray(matrix[0])
+    ) {
+      let setsPlayed = 0;
+      let boardsPlayed = 0;
+      let totalMisses = 0;
+      for (const row of matrix) {
+        let setHit = false;
+        for (const v of row) {
+          if (typeof v === 'number' && v > 0) {
+            boardsPlayed += 1;
+            totalMisses += v;
+            setHit = true;
+          }
+        }
+        if (setHit) setsPlayed += 1;
+      }
+      return {
+        setsA: setsPlayed,
+        setsB: 0,
+        winner: null,
+        finalPointsA: totalMisses,
+        finalPointsB: 0,
+        boardCount: boardsPlayed,
+        divergedFromStored: false,
+      };
+    }
     return {
       setsA: storedSetsA,
       setsB: storedSetsB,
