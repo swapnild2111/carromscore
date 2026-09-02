@@ -136,16 +136,16 @@ jobs:
       - name: Build APK via Bubblewrap
         # bubblewrap build reads twa-manifest.json and produces a signed APK.
         # --skipPwaValidation avoids hitting the live site.
-        # bubblewrap asks two interactive prompts in non-interactive mode:
-        #   1. "Install JDK?" → answer "n"
-        #   2. "Path to your existing JDK 17:" → answer $JAVA_HOME
-        # Pipe both answers via printf. --androidSdkPath skips the SDK prompt.
+        # Pre-write ~/.bubblewrap/config.json so bubblewrap finds jdkPath and
+        # androidSdkPath already configured and skips all interactive prompts.
         run: |
+          mkdir -p ~/.bubblewrap
+          printf '{"jdkPath":"%s","androidSdkPath":"%s"}\n' \
+            "$JAVA_HOME" "$ANDROID_HOME" > ~/.bubblewrap/config.json
           cd twa
-          printf 'n\n%s\n' "$JAVA_HOME" | bubblewrap build \
+          bubblewrap build \
             --manifest ./twa-manifest.json \
-            --skipPwaValidation \
-            --androidSdkPath "$ANDROID_HOME"
+            --skipPwaValidation
 
       - name: Verify + rename APK
         id: sign
