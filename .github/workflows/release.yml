@@ -47,6 +47,10 @@ jobs:
         uses: actions/checkout@v4
         with:
           # Need full history + ability to push version-bump commit.
+          # Use PAT so the version-bump push triggers deploy.yml
+          # (GITHUB_TOKEN pushes are intentionally blocked from
+          # triggering other workflows to prevent infinite loops).
+          token: ${{ secrets.RELEASE_PAT }}
           fetch-depth: 0
 
       - name: Setup Node
