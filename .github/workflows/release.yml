@@ -1,4 +1,5 @@
 name: Release
+run-name: Release (${{ github.event.inputs.bump }})
 
 # Automated release pipeline.
 #
