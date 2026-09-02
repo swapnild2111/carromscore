@@ -2163,12 +2163,14 @@
   /* Search bar — same treatment as AdminPlayers / AdminHistoryCleanup. */
   .controls {
     display: flex;
+    flex-wrap: wrap;
     gap: 0.5rem;
     align-items: center;
     margin-top: 0.5rem;
   }
   .controls input {
     flex: 1;
+    min-width: 8rem;
     background: #0f0f0f;
     color: var(--fg);
     border: 1px solid #2a2a2a;

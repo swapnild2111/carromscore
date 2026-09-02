@@ -1323,7 +1323,6 @@
       <span>{cfg.mode === 'practice' ? 'Boards per set' : 'Boards'}</span>
       <div class="rules-val-row">
         <input type="number" min={cfg.mode === 'practice' ? 1 : 0} step="1" bind:value={cfg.maxBoards} />
-        {#if cfg.mode !== 'practice'}<em class="rules-hint">0 = ∞</em>{/if}
       </div>
     </label>
     <label>
@@ -1340,7 +1339,6 @@
             if (v === '' || v === null) cfg.timerDuration = 0;
           }}
         />
-        <em class="rules-hint">0 = off</em>
       </div>
     </label>
   </fieldset>
