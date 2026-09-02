@@ -38,6 +38,7 @@
     setRoundState,
     startRound,
     deleteRound,
+    reorderRounds,
     countMatchesByRoundKey,
     type Round,
     type Tournament,
@@ -203,6 +204,46 @@
   let roundsDeletingKey = $state<string | null>(null);
   let roundsDeletingCount = $state<number | null>(null);
   let roundsSaving = $state(false);
+  // Drag-to-reorder state for round rows.
+  let dragSrcKey = $state<string | null>(null);
+  let dragOverKey = $state<string | null>(null);
+
+  function onRoundDragStart(e: DragEvent, key: string) {
+    dragSrcKey = key;
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', key);
+    }
+  }
+  function onRoundDragOver(e: DragEvent, key: string) {
+    if (!dragSrcKey || dragSrcKey === key) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+    dragOverKey = key;
+  }
+  function onRoundDragLeave() {
+    dragOverKey = null;
+  }
+  async function onRoundDrop(e: DragEvent, targetKey: string) {
+    e.preventDefault();
+    dragOverKey = null;
+    if (!dragSrcKey || dragSrcKey === targetKey || !roundsKey) { dragSrcKey = null; return; }
+    const rounds = currentRounds();
+    const srcIdx = rounds.findIndex((r) => r.key === dragSrcKey);
+    const tgtIdx = rounds.findIndex((r) => r.key === targetKey);
+    if (srcIdx === -1 || tgtIdx === -1) { dragSrcKey = null; return; }
+    const reordered = [...rounds];
+    const [moved] = reordered.splice(srcIdx, 1);
+    reordered.splice(tgtIdx, 0, moved);
+    dragSrcKey = null;
+    roundsSaving = true;
+    await reorderRounds(roundsKey, reordered.map((r) => r.key));
+    roundsSaving = false;
+  }
+  function onRoundDragEnd() {
+    dragSrcKey = null;
+    dragOverKey = null;
+  }
 
   /**
    * In-app confirm modal (v3.6.3). Replaces window.confirm for
@@ -1807,7 +1848,17 @@
         {:else}
           <ul class="round-list">
             {#each currentRounds() as r (r.key)}
-              <li class="round-row" class:round-closed={r.state === 'closed'}>
+              <li
+                class="round-row"
+                class:round-closed={r.state === 'closed'}
+                class:round-drag-over={dragOverKey === r.key}
+                draggable="true"
+                ondragstart={(e) => onRoundDragStart(e, r.key)}
+                ondragover={(e) => onRoundDragOver(e, r.key)}
+                ondragleave={onRoundDragLeave}
+                ondrop={(e) => onRoundDrop(e, r.key)}
+                ondragend={onRoundDragEnd}
+              >
                 {#if roundsRenamingKey === r.key}
                   <div class="row-edit">
                     <input
@@ -1832,6 +1883,7 @@
                   </div>
                 {:else}
                   <div class="round-name">
+                    <span class="round-drag-handle" aria-hidden="true" title="Drag to reorder">⠿</span>
                     <!--
                       v3.6.3: round name is now a button — clicking it
                       enters rename mode inline (same as the tournament
@@ -2554,10 +2606,25 @@
     border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 0.45rem;
     background: rgba(255, 255, 255, 0.02);
+    cursor: grab;
     /* Wrap on narrow phones so the action buttons don't overlap
        long round names. Same posture as .row above. */
     flex-wrap: wrap;
+    transition: background 0.1s, border-color 0.1s;
   }
+  .round-row.round-drag-over {
+    border-color: var(--accent);
+    background: rgba(212, 175, 55, 0.08);
+  }
+  .round-drag-handle {
+    color: var(--muted);
+    font-size: 1rem;
+    cursor: grab;
+    user-select: none;
+    flex-shrink: 0;
+    opacity: 0.5;
+  }
+  .round-row:hover .round-drag-handle { opacity: 1; }
   @media (max-width: 34rem) {
     .round-row { align-items: flex-start; }
     .round-name { flex: 1 1 100%; }

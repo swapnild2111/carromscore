@@ -78,7 +78,7 @@
   type PlannedState =
     | { kind: 'idle' }
     | { kind: 'loading'; mid: string }
-    | { kind: 'not-found'; mid: string }
+    | { kind: 'not-found'; mid: string; reason?: 'no-active-round' | 'all-complete' }
     | { kind: 'takeover'; mid: string; match: PlannedMatch; claimerName: string }
     | { kind: 'loaded'; mid: string };
   let plannedState = $state<PlannedState>({ kind: 'idle' });
@@ -128,10 +128,8 @@
       await awaitAuthReady();
       const outcome = await resolvePlannedByBoard(tKey, board);
       if (outcome.ok === false || !outcome.match) {
-        // Reuse the not-found state — the QR is stale (no matches
-        // remain for this board) or the tournament key was
-        // mistyped in the sticker.
-        plannedState = { kind: 'not-found', mid: `board-${board}` };
+        const reason = outcome.ok === true ? outcome.reason : undefined;
+        plannedState = { kind: 'not-found', mid: `board-${board}`, ...(reason ? { reason } : {}) };
         return;
       }
       const match = outcome.match;
@@ -1192,9 +1190,17 @@
   </aside>
 {:else if plannedState.kind === 'not-found'}
   <aside class="planned-notice planned-notice-warn" aria-label="Planned match not available">
-    <h3>Match not available</h3>
-    <p>This match slot isn't around anymore. It may have already been
-    played, or the organiser removed it. Ask them for a fresh QR.</p>
+    {#if plannedState.reason === 'no-active-round'}
+      <h3>No active round</h3>
+      <p>The organiser hasn't started a round yet. Ask them to open a round — then scan again.</p>
+    {:else if plannedState.reason === 'all-complete'}
+      <h3>All matches done</h3>
+      <p>Every match on this board is already played. The organiser may need to start the next round.</p>
+    {:else}
+      <h3>Match not available</h3>
+      <p>This match slot isn't around anymore. It may have already been
+      played, or the organiser removed it. Ask them for a fresh QR.</p>
+    {/if}
     <div class="planned-actions">
       <button type="button" class="planned-btn" onclick={dismissNotFound}>
         Set up a match manually

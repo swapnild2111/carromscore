@@ -506,17 +506,32 @@
       <p class="hint">Add rounds to this tournament first — the bracket
       needs to know which round each match belongs to.</p>
     {:else}
-      <div class="round-nav" role="group" aria-label="Select round">
-        {#each rounds as r (r.key)}
-          <button
-            type="button"
-            class="round-chip"
-            class:round-chip-on={r.key === selectedRoundKey}
-            class:round-chip-closed={r.state === 'closed'}
-            onclick={() => (selectedRoundKey = r.key)}
-          >{r.name}{r.state === 'closed' ? ' · closed' : ''}</button>
-        {/each}
-      </div>
+      {#if rounds.length <= 5}
+        <div class="round-nav" role="group" aria-label="Select round">
+          {#each rounds as r (r.key)}
+            <button
+              type="button"
+              class="round-chip"
+              class:round-chip-on={r.key === selectedRoundKey}
+              class:round-chip-closed={r.state === 'closed'}
+              onclick={() => (selectedRoundKey = r.key)}
+            >{r.name}{r.state === 'closed' ? ' · closed' : ''}</button>
+          {/each}
+        </div>
+      {:else}
+        <div class="round-nav round-nav-select">
+          <select
+            class="round-select"
+            value={selectedRoundKey}
+            onchange={(e) => (selectedRoundKey = (e.currentTarget as HTMLSelectElement).value)}
+            aria-label="Select round"
+          >
+            {#each rounds as r (r.key)}
+              <option value={r.key}>{r.name}{r.state === 'closed' ? ' · closed' : ''}</option>
+            {/each}
+          </select>
+        </div>
+      {/if}
 
       {#if selectedRound}
         <p class="hint">
@@ -780,6 +795,31 @@
   .round-chip-closed {
     opacity: 0.7;
     font-style: italic;
+  }
+  .round-nav-select {
+    display: flex;
+    align-items: center;
+  }
+  .round-select {
+    padding: 0.3rem 2rem 0.3rem 0.75rem;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: var(--fg, #f5f5f5);
+    border-radius: 0.45rem;
+    font: inherit;
+    font-size: 0.82rem;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%239aa0a6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.65rem center;
+    min-width: 12rem;
+    max-width: 22rem;
+  }
+  .round-select:focus {
+    outline: none;
+    border-color: rgba(255, 213, 74, 0.55);
   }
 
   .bracket-add {

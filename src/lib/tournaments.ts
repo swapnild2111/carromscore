@@ -1560,6 +1560,47 @@ export async function deleteRound(
 }
 
 /**
+ * Persist a new display order for a tournament's rounds. Takes the
+ * round keys in the desired order (index 0 = order 1) and writes
+ * the updated `order` values to RTDB in a single multi-path update.
+ * Also updates the local in-memory store so the UI reflects the
+ * change immediately without a round-trip.
+ */
+export async function reorderRounds(
+  tournamentKey: string,
+  orderedKeys: string[],
+): Promise<TournamentWriteOutcome> {
+  if (!tournamentKey || orderedKeys.length === 0)
+    return { ok: false, error: 'Missing tournament or rounds' };
+  try {
+    const [{ firebaseApp }, { getDatabase, ref, update }] = await Promise.all([
+      import('./firebase'),
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    const patch: Record<string, number> = {};
+    orderedKeys.forEach((key, idx) => {
+      patch[`tournaments/${tournamentKey}/rounds/${key}/order`] = idx + 1;
+    });
+    await update(ref(db), patch);
+    const local = memoryStore.find((t) => t.key === tournamentKey);
+    if (local?.rounds) {
+      const orderMap = new Map(orderedKeys.map((k, i) => [k, i + 1]));
+      for (const r of local.rounds) {
+        const o = orderMap.get(r.key);
+        if (o !== undefined) r.order = o;
+      }
+      local.rounds.sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
+      notify();
+    }
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg || 'Reorder rounds failed' };
+  }
+}
+
+/**
  * Count matches currently tagged under (tournamentKey, roundKey).
  * Used by the admin panel's delete-round dialog to warn "this round
  * has N matches — they'll be un-tagged" before the organiser

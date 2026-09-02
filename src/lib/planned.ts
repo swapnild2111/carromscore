@@ -75,7 +75,7 @@ export type PlannedWriteOutcome =
   | { ok: false; error: string };
 
 export type PlannedReadOutcome =
-  | { ok: true; match: PlannedMatch | null }
+  | { ok: true; match: PlannedMatch | null; reason?: 'no-active-round' | 'all-complete' }
   | { ok: false; error: string };
 
 /**
@@ -293,49 +293,72 @@ export async function resolvePlannedByBoard(
       get(ref(db, `tournaments/${tournamentKey}/rounds`)),
     ]);
 
-    // Build set of roundKeys that are open (not closed).
-    // If we can't read rounds (permissions, missing) fall back to all rounds.
-    const runningRoundKeys = new Set<string>();
+    // Build map of roundKey → order for open (non-closed) rounds.
+    // Also track whether ALL rounds are closed so we can surface a
+    // helpful message when the umpire scans before any round is open.
+    // If round data is unavailable, fall back to including all slots.
+    const openRoundOrder = new Map<string, number>(); // roundKey → order
     let hasRoundData = false;
+    let totalRounds = 0;
     const roundsRaw = tournamentSnap.val() as Record<string, {
       state?: string;
       startedAt?: number;
+      order?: number;
     }> | null;
     if (roundsRaw) {
       hasRoundData = true;
       for (const [rk, rv] of Object.entries(roundsRaw)) {
         if (!rv || typeof rv !== 'object') continue;
+        totalRounds += 1;
         // Include any round that isn't explicitly closed — pending rounds
         // (state='open', no startedAt) are still scannable so the umpire
         // can load Round 2 matches as soon as the admin creates them,
         // without waiting for the admin to tap "Start round".
         if (rv.state !== 'closed') {
-          runningRoundKeys.add(rk);
+          openRoundOrder.set(rk, rv.order ?? 999);
         }
       }
     }
 
     const raw = plannedSnap.val() as Record<string, Omit<PlannedMatch, 'mid'>> | null;
-    if (!raw) return { ok: true, match: null };
+    if (!raw) {
+      // No planned matches at all — if all rounds are closed (or none
+      // exist) tell the umpire the tournament isn't ready.
+      const noActiveRound = hasRoundData && openRoundOrder.size === 0;
+      return { ok: true, match: null, ...(noActiveRound ? { reason: 'no-active-round' as const } : {}) };
+    }
 
     const candidates: PlannedMatch[] = [];
+    let hasMatchesForBoard = false;
     for (const [mid, v] of Object.entries(raw)) {
       if (!v || typeof v !== 'object') continue;
       if (v.tournamentKey !== tournamentKey) continue;
       if (v.board !== board) continue;
+      hasMatchesForBoard = true;
       // Skip completed slots — they've already been played.
       if ((v as PlannedMatch).completedAt) continue;
-      // Only include matches whose round is currently running.
+      // Only include matches whose round is currently open.
       // If round data is unavailable, include all (safe fallback).
-      if (hasRoundData && v.roundKey && !runningRoundKeys.has(v.roundKey)) continue;
+      if (hasRoundData && v.roundKey && !openRoundOrder.has(v.roundKey)) continue;
       candidates.push({ mid, ...v });
     }
-    if (candidates.length === 0) return { ok: true, match: null };
-    // Unclaimed first, then by matchOrder ascending within the running round.
+    if (candidates.length === 0) {
+      // Distinguish "no open round" from "all matches on this board done".
+      const noActiveRound = hasRoundData && openRoundOrder.size === 0 && totalRounds > 0;
+      let reason: 'no-active-round' | 'all-complete' | undefined;
+      if (noActiveRound) reason = 'no-active-round';
+      else if (hasMatchesForBoard) reason = 'all-complete';
+      return { ok: true, match: null, ...(reason ? { reason } : {}) };
+    }
+    // Sort: unclaimed first, then by round order (earlier round first),
+    // then by matchOrder ascending within the round.
     candidates.sort((a, b) => {
       const aClaimed = a.claimedBy ? 1 : 0;
       const bClaimed = b.claimedBy ? 1 : 0;
       if (aClaimed !== bClaimed) return aClaimed - bClaimed;
+      const aRoundOrder = openRoundOrder.get(a.roundKey ?? '') ?? 999;
+      const bRoundOrder = openRoundOrder.get(b.roundKey ?? '') ?? 999;
+      if (aRoundOrder !== bRoundOrder) return aRoundOrder - bRoundOrder;
       return (a.matchOrder ?? 0) - (b.matchOrder ?? 0);
     });
     return { ok: true, match: candidates[0] ?? null };
