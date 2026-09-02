@@ -168,6 +168,18 @@
   let filterOrganizer = $state('');
   let filterCountry = $state('');
   let sortBy = $state<'recent' | 'oldest' | 'az' | 'za'>('recent');
+
+  const isFiltered = $derived(
+    query.trim() !== '' || filterType !== 'all' || filterOrganizer !== '' || filterCountry !== '' || sortBy !== 'recent'
+  );
+
+  function resetFilters() {
+    query = '';
+    filterType = 'all';
+    filterOrganizer = '';
+    filterCountry = '';
+    sortBy = 'recent';
+  }
   /** Add-new-tournament dialog state. Kept as a simple string + open
    *  flag; validation happens on save. */
   let addingOpen = $state(false);
@@ -1264,6 +1276,9 @@
       <option value="za">Name Z–A</option>
     </select>
     <span class="count">{filtered().length}</span>
+    {#if isFiltered}
+      <button class="reset-filters" onclick={resetFilters} aria-label="Clear filters">✕ Reset</button>
+    {/if}
   </div>
 
   {#if filtered().length === 0}
@@ -2203,6 +2218,23 @@
   .filter-select:focus {
     outline: none;
     border-color: var(--accent);
+  }
+  .reset-filters {
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid #2a2a2a;
+    border-radius: 0.45rem;
+    padding: 0.45rem 0.75rem;
+    font: inherit;
+    font-size: 0.82rem;
+    cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .reset-filters:hover {
+    color: var(--fg);
+    border-color: #555;
   }
   .count {
     color: var(--muted);
