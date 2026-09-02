@@ -318,7 +318,8 @@
     const pts = d.pointsTarget ?? 25;
     const mb = d.maxBoards ?? 8;
     const mbTxt = mb === 0 ? 'unlimited boards' : `max ${mb} boards`;
-    return `${mode} · best of ${bo} · target ${pts} points · ${mbTxt}`;
+    const timer = d.timerDuration ? ` · ${d.timerDuration} min timer` : '';
+    return `${mode} · best of ${bo} · target ${pts} points · ${mbTxt}${timer}`;
   });
 
   const tournamentName = $derived<string>(

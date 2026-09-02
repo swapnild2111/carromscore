@@ -164,6 +164,17 @@
   });
   const printLogoUrl = $derived(orgProfile?.logoUrl ?? null);
   const printOrganizerName = $derived(orgProfile?.orgName || orgProfile?.displayName || null);
+  const printConfigLine = $derived.by(() => {
+    const d = currentTournamentRecord?.defaults;
+    if (!d) return null;
+    const mode = d.mode === 'doubles' ? 'Doubles' : 'Singles';
+    const bo = d.bestOf ?? 3;
+    const pts = d.pointsTarget ?? 25;
+    const mb = d.maxBoards ?? 8;
+    const mbTxt = mb === 0 ? 'unlimited boards' : `max ${mb} boards`;
+    const timer = d.timerDuration ? ` · ${d.timerDuration} min timer` : '';
+    return `${mode} · best of ${bo} · target ${pts} points · ${mbTxt}${timer}`;
+  });
 
   /**
    * Round filter (v3.3.3). Chip strip below the tournament picker
@@ -559,6 +570,9 @@
       <h1 class="rep-print-title">{printTitle}</h1>
       {#if currentTournamentRecord?.description}
         <p class="rep-print-desc">{currentTournamentRecord.description}</p>
+      {/if}
+      {#if printConfigLine}
+        <p class="rep-print-config">{printConfigLine}</p>
       {/if}
     </div>
     {#if printLogoUrl}
@@ -1194,6 +1208,12 @@
       margin: 0.3rem 0 0;
       font-size: 0.88rem;
       color: #555;
+    }
+    .rep-print-config {
+      margin: 0.25rem 0 0;
+      font-size: 0.8rem;
+      color: #666;
+      letter-spacing: 0.02em;
     }
     .rep-print-logo {
       display: block !important;
