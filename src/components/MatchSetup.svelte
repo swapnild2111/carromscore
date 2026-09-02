@@ -1355,6 +1355,7 @@
     tournament in any meaningful way.
   -->
   {#if cfg.mode !== 'practice'}
+  <div class="event-block">
   <label class="tournament-input">
     <span>
       Tournament <em class="hint-inline">(optional)</em>
@@ -1436,16 +1437,25 @@
     </select>
   </label>
   {/if}
+  </div>
   {/if}
 
   {#if cfg.mode === 'singles'}
-    <div class="player-row">
-      {@render picker('Player A', 'playerA')}
-      {@render noteInput('Represents', 'noteA')}
-    </div>
-    <div class="player-row">
-      {@render picker('Player B', 'playerB')}
-      {@render noteInput('Represents', 'noteB')}
+    <div class="players-block">
+      <div class="player-card player-card-a">
+        <span class="player-card-label">Player A</span>
+        <div class="player-row">
+          {@render picker('Name', 'playerA')}
+          {@render noteInput('Represents', 'noteA')}
+        </div>
+      </div>
+      <div class="player-card player-card-b">
+        <span class="player-card-label">Player B</span>
+        <div class="player-row">
+          {@render picker('Name', 'playerB')}
+          {@render noteInput('Represents', 'noteB')}
+        </div>
+      </div>
     </div>
   {:else if cfg.mode === 'practice'}
     <div class="player-row">
@@ -1937,10 +1947,53 @@
     gap: 0.35rem;
     position: relative;
   }
+  /* Event group card: wraps Tournament + Round fields */
+  .event-block {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 0.75rem;
+    padding: 0.85rem 0.9rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    margin: 0.5rem 0 0;
+  }
+
+  /* Players group: two side-coloured cards stacked */
+  .players-block {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    margin-top: 0.5rem;
+  }
+  .player-card {
+    border-radius: 0.75rem;
+    padding: 0.75rem 0.9rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+  }
+  .player-card-label {
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+  }
+  .player-card-a {
+    background: rgba(79, 195, 247, 0.06);
+    border: 1px solid rgba(79, 195, 247, 0.3);
+  }
+  .player-card-a .player-card-label { color: var(--side-a, #4fc3f7); }
+  .player-card-b {
+    background: rgba(255, 138, 101, 0.06);
+    border: 1px solid rgba(255, 138, 101, 0.3);
+  }
+  .player-card-b .player-card-label { color: var(--side-b, #ff8a65); }
+
   /* Tournament input keeps its own spacing so it feels like a
      high-level context row, distinct from the player rows below. */
   .tournament-input {
-    margin: 0.5rem 0 0;
+    margin: 0;
   }
   .tournament-input .hint-inline {
     color: var(--muted);
