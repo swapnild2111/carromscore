@@ -122,45 +122,54 @@ jobs:
           git push origin main:beta
 
       # ── APK build + sign ─────────────────────────────────────────────────
+      # twa/ is almost entirely gitignored (only twa-manifest.json is tracked).
+      # We regenerate the full TWA project from the manifest using Bubblewrap,
+      # which produces gradlew + the Android project, then build with Gradle.
 
       - name: Decode keystore
         run: |
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > twa/android.keystore
 
-      - name: Build APK
+      - name: Install Bubblewrap CLI
+        run: npm install -g @bubblewrap/cli
+
+      - name: Build APK via Bubblewrap
+        # bubblewrap build reads twa-manifest.json, generates the Android project
+        # if needed, and produces app-release-unsigned.apk. The keystore is already
+        # decoded to twa/android.keystore above; bubblewrap will sign via it.
+        # We pass --skipPwaValidation so the build doesn't hit the live site.
         run: |
           cd twa
-          chmod +x gradlew
-          ./gradlew --no-daemon assembleRelease
-        env:
-          JAVA_HOME: ${{ env.JAVA_HOME }}
+          bubblewrap build \
+            --manifest ./twa-manifest.json \
+            --skipPwaValidation
 
-      - name: Sign APK
+      - name: Verify + rename APK
         id: sign
         run: |
           set -euo pipefail
-          VER="${{ steps.ver.outputs.next }}"
           TAG="${{ steps.ver.outputs.tag }}"
-          UNSIGNED="twa/app/build/outputs/apk/release/app-release-unsigned.apk"
+
+          # bubblewrap build signs the APK itself and outputs it to the twa/ dir.
+          # Find it (prefer *signed*, fall back to any release apk).
+          BUILT=$(find twa -name "*signed*.apk" -o -name "*release*.apk" 2>/dev/null | grep -v unsigned | sort | tail -1)
+          if [ -z "$BUILT" ]; then
+            echo "No signed APK found in twa/:"
+            find twa -name "*.apk" || true
+            exit 1
+          fi
+          echo "Found APK: $BUILT"
+
           SIGNED="twa/carromscore-${TAG}.apk"
+          cp "$BUILT" "$SIGNED"
 
-          # Find apksigner from the Android SDK installed by setup-android
+          # Verify signatures
           APKSIGNER=$(find "$ANDROID_HOME" -name apksigner -type f | sort -V | tail -1)
-          echo "Using apksigner: $APKSIGNER"
-
-          "$APKSIGNER" sign \
-            --ks twa/android.keystore \
-            --ks-key-alias android \
-            --ks-pass "pass:${{ secrets.KEYSTORE_PASSWORD }}" \
-            --key-pass "pass:${{ secrets.KEYSTORE_PASSWORD }}" \
-            --out "$SIGNED" \
-            "$UNSIGNED"
-
           "$APKSIGNER" verify --verbose "$SIGNED" | grep -E "Verifies|scheme"
 
           SHA=$(sha256sum "$SIGNED" | awk '{print $1}')
-          echo "sha256=$SHA"   >> "$GITHUB_OUTPUT"
-          echo "apk=$SIGNED"   >> "$GITHUB_OUTPUT"
+          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
+          echo "apk=$SIGNED" >> "$GITHUB_OUTPUT"
           echo "APK: $SIGNED  SHA-256: $SHA"
 
       # ── GitHub Release ───────────────────────────────────────────────────
