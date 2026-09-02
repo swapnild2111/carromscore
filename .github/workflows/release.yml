@@ -139,14 +139,16 @@ jobs:
         # Pre-write ~/.bubblewrap/config.json so bubblewrap skips JDK/SDK prompts.
         # Run `bubblewrap update` first to generate the Android project + checksum
         # file; without it `bubblewrap build` prompts "regenerate project?" and
-        # hangs in non-interactive CI (exit 130).
+        # hangs in CI. Pass --appVersionName to skip the version-name prompt.
         run: |
           mkdir -p ~/.bubblewrap
           printf '{"jdkPath":"%s","androidSdkPath":"%s"}\n' \
             "$JAVA_HOME" "$ANDROID_HOME" > ~/.bubblewrap/config.json
+          VER="${{ steps.ver.outputs.next }}"
           cd twa
           bubblewrap update \
             --manifest ./twa-manifest.json \
+            --appVersionName "$VER" \
             --skipPwaValidation
           bubblewrap build \
             --manifest ./twa-manifest.json \
