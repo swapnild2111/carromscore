@@ -1758,11 +1758,15 @@
                       {sideNameMatch(m, 'b')}
                     </td>
                     <td class="hist-td hist-td-score">
-                      <span class="digit-a">{rec.setsA}</span>–<span class="digit-b">{rec.setsB}</span>
+                      {#if m.mode === 'practice'}
+                        {rec.setsA}
+                      {:else}
+                        <span class="digit-a">{rec.setsA}</span>–<span class="digit-b">{rec.setsB}</span>
+                      {/if}
                     </td>
                     <td class="hist-td hist-td-score">
                       {#if m.mode === 'practice'}
-                        —
+                        {rec.finalPointsA}
                       {:else}
                         <span class="digit-a">{rec.finalPointsA}</span>–<span class="digit-b">{rec.finalPointsB}</span>
                       {/if}
