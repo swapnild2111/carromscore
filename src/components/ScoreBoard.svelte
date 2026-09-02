@@ -2098,12 +2098,37 @@
         b2Name: cfg.playerB2,
         b2ResolvedId: identity.b2ResolvedId,
       };
+      // Practice mode: sideA.sets / sideB.sets / board are never
+      // updated during play (scoring lives in practiceBoards[][]).
+      // Derive the real values from the matrix so the history table
+      // shows the correct Sets and Boards counts.
+      const practiceStats = (() => {
+        if (!isPractice || practiceBoards.length === 0) return null;
+        let setsPlayed = 0;
+        let boardsPlayed = 0;
+        let totalMisses = 0;
+        for (const row of practiceBoards) {
+          let setHit = false;
+          for (const v of row) {
+            if (typeof v === 'number' && v > 0) {
+              boardsPlayed += 1;
+              totalMisses += v;
+              setHit = true;
+            }
+          }
+          if (setHit) setsPlayed += 1;
+        }
+        return { setsPlayed, boardsPlayed, totalMisses };
+      })();
       const resultPayload = {
         mode: cfg.mode,
         winner,
-        sideA: { points: sideA.points, sets: sideA.sets },
+        sideA: {
+          points: isPractice ? (practiceStats?.totalMisses ?? sideA.points) : sideA.points,
+          sets: isPractice ? (practiceStats?.setsPlayed ?? sideA.sets) : sideA.sets,
+        },
         sideB: { points: sideB.points, sets: sideB.sets },
-        board,
+        board: isPractice ? (practiceStats?.boardsPlayed ?? board) : board,
         cfg: {
           bestOf: cfg.bestOf,
           maxBoards: cfg.maxBoards,
