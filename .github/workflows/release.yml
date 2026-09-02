@@ -136,10 +136,15 @@ jobs:
       - name: Build APK via Bubblewrap
         # bubblewrap build reads twa-manifest.json and produces a signed APK.
         # --skipPwaValidation avoids hitting the live site.
-        # Pre-write ~/.bubblewrap/config.json so bubblewrap skips JDK/SDK prompts.
-        # Run `bubblewrap update` first to generate the Android project + checksum
-        # file; without it `bubblewrap build` prompts "regenerate project?" and
-        # hangs in CI. Pass --appVersionName to skip the version-name prompt.
+        # Non-interactive CI setup:
+        #   - ~/.bubblewrap/config.json pre-written → skips JDK + SDK prompts
+        #   - --appVersionName → skips version-name prompt in bubblewrap update
+        #   - BUBBLEWRAP_KEYSTORE_PASSWORD + BUBBLEWRAP_KEY_PASSWORD env vars
+        #     → bubblewrap build reads these instead of prompting (documented
+        #       in bubblewrap/packages/cli/src/lib/cmds/build.ts getPasswords())
+        env:
+          BUBBLEWRAP_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          BUBBLEWRAP_KEY_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         run: |
           mkdir -p ~/.bubblewrap
           printf '{"jdkPath":"%s","androidSdkPath":"%s"}\n' \
