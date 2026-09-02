@@ -1986,7 +1986,6 @@
                       title="Rename round"
                     >{r.name}</button>
                     <div class="round-name-meta">
-                      <span class="chip">order {r.order}</span>
                       {#if r.state === 'closed'}
                         <span class="chip chip-closed" title="Closed — organiser stopped this round">
                           CLOSED

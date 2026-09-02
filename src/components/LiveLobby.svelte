@@ -2861,6 +2861,8 @@
      amber; non-winner stays neutral. */
   .hist-tbl-scroll {
     overflow-x: auto;
+    overflow-y: auto;
+    max-height: 70vh;
     -webkit-overflow-scrolling: touch;
     border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 0.6rem;
@@ -2881,7 +2883,7 @@
   }
   .hist-tbl tr:last-child td { border-bottom: 0; }
   .hist-th {
-    background: rgba(255, 255, 255, 0.03);
+    background: #161616;
     color: var(--muted, #9aa0a6);
     font-size: 0.7rem;
     font-weight: 700;

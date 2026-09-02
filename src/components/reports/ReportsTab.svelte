@@ -1577,6 +1577,8 @@
      are long. Same pattern as .tbl-scroll for the Matches table. */
   .summary-scroll {
     overflow-x: auto;
+    overflow-y: auto;
+    max-height: 70vh;
     -webkit-overflow-scrolling: touch;
     margin: 0 -0.35rem;
   }
@@ -1604,7 +1606,10 @@
     font-size: 0.7rem;
     color: var(--muted, #9aa0a6);
     font-weight: 700;
-    background: rgba(255, 255, 255, 0.03);
+    background: #161616;
+    position: sticky;
+    top: 0;
+    z-index: 1;
   }
   .col-name { text-align: left !important; }
   .summary-tbl tr:last-child td,
@@ -1753,6 +1758,8 @@
   .btn:hover { background: rgba(255, 213, 74, 0.08); }
   .tbl-scroll {
     overflow-x: auto;
+    overflow-y: auto;
+    max-height: 70vh;
     -webkit-overflow-scrolling: touch;
     background: rgba(255, 255, 255, 0.02);
     border: 1px solid rgba(255, 255, 255, 0.08);
