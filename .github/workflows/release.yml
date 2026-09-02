@@ -1,8 +1,38 @@
 name: Release
 
+# Automated release pipeline.
+#
+# Usage: Actions → Release → Run workflow
+#   bump:  patch | minor | major
+#   notes: bullet-point summary of what changed (markdown OK)
+#
+# What it does:
+#   1. Reads current version from src/lib/version.ts
+#   2. Computes next version (semver bump)
+#   3. Bumps all four version files + commits + tags + pushes to main
+#   4. Builds + signs the TWA APK with Java 17 + Android build-tools
+#   5. Creates a GitHub Release with notes + SHA-256 + attached APK
+#
+# Required secrets (Settings → Secrets → Actions):
+#   KEYSTORE_BASE64     base64-encoded twa/android.keystore
+#                       generate with: base64 -i twa/android.keystore | pbcopy
+#   KEYSTORE_PASSWORD   the keystore + key password (same value for both)
+#   PUBLIC_FIREBASE_API_KEY         (already used by deploy.yml)
+#   PUBLIC_FIREBASE_MEASUREMENT_ID  (already used by deploy.yml)
+
 on:
-  push:
-    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Version bump type'
+        required: true
+        default: patch
+        type: choice
+        options: [patch, minor, major]
+      notes:
+        description: 'Release notes (markdown bullet points)'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -10,27 +40,159 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Need full history + ability to push version-bump commit.
+          fetch-depth: 0
 
-      - name: Create GitHub Release
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Android SDK build-tools
+        uses: android-actions/setup-android@v3
+
+      - name: Install Node deps
+        run: npm ci
+
+      # ── Version bump ─────────────────────────────────────────────────────
+
+      - name: Compute next version
+        id: ver
+        run: |
+          set -euo pipefail
+          current=$(grep -oP "(?<=APP_VERSION = ')[\d.]+" src/lib/version.ts)
+          IFS='.' read -r maj min pat <<< "$current"
+          case "${{ inputs.bump }}" in
+            major) maj=$((maj+1)); min=0; pat=0 ;;
+            minor) min=$((min+1)); pat=0 ;;
+            patch) pat=$((pat+1)) ;;
+          esac
+          next="${maj}.${min}.${pat}"
+          # versionCode: increment the current one from twa-manifest.json
+          current_code=$(grep -oP '(?<="appVersionCode": )\d+' twa/twa-manifest.json)
+          next_code=$((current_code+1))
+          echo "current=$current"     >> "$GITHUB_OUTPUT"
+          echo "next=$next"           >> "$GITHUB_OUTPUT"
+          echo "next_code=$next_code" >> "$GITHUB_OUTPUT"
+          echo "tag=v$next"           >> "$GITHUB_OUTPUT"
+
+      - name: Bump version files
+        run: |
+          set -euo pipefail
+          VER="${{ steps.ver.outputs.next }}"
+          CODE="${{ steps.ver.outputs.next_code }}"
+
+          # src/lib/version.ts
+          sed -i "s/APP_VERSION = '[0-9.]*'/APP_VERSION = '${VER}'/" src/lib/version.ts
+
+          # public/sw.js
+          sed -i "s/APP_VERSION = '[0-9.]*'/APP_VERSION = '${VER}'/" public/sw.js
+
+          # twa/twa-manifest.json  (appVersionName + appVersionCode)
+          sed -i "s/\"appVersionName\": \"[0-9.]*\"/\"appVersionName\": \"${VER}\"/" twa/twa-manifest.json
+          sed -i "s/\"appVersionCode\": [0-9]*/\"appVersionCode\": ${CODE}/" twa/twa-manifest.json
+
+          echo "Bumped to $VER (code $CODE)"
+          grep APP_VERSION src/lib/version.ts
+          grep appVersionName twa/twa-manifest.json
+
+      - name: Commit + tag + push
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/lib/version.ts public/sw.js twa/twa-manifest.json
+          git commit -m "${{ steps.ver.outputs.tag }}: ${{ inputs.bump }} release"
+          git tag "${{ steps.ver.outputs.tag }}"
+          git push origin main
+          git push origin "${{ steps.ver.outputs.tag }}"
+          # Keep beta in sync with the version bump
+          git push origin main:beta
+
+      # ── APK build + sign ─────────────────────────────────────────────────
+
+      - name: Decode keystore
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > twa/android.keystore
+
+      - name: Build APK
+        run: |
+          cd twa
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleRelease
+        env:
+          JAVA_HOME: ${{ env.JAVA_HOME }}
+
+      - name: Sign APK
+        id: sign
+        run: |
+          set -euo pipefail
+          VER="${{ steps.ver.outputs.next }}"
+          TAG="${{ steps.ver.outputs.tag }}"
+          UNSIGNED="twa/app/build/outputs/apk/release/app-release-unsigned.apk"
+          SIGNED="twa/carromscore-${TAG}.apk"
+
+          # Find apksigner from the Android SDK installed by setup-android
+          APKSIGNER=$(find "$ANDROID_HOME" -name apksigner -type f | sort -V | tail -1)
+          echo "Using apksigner: $APKSIGNER"
+
+          "$APKSIGNER" sign \
+            --ks twa/android.keystore \
+            --ks-key-alias android \
+            --ks-pass "pass:${{ secrets.KEYSTORE_PASSWORD }}" \
+            --key-pass "pass:${{ secrets.KEYSTORE_PASSWORD }}" \
+            --out "$SIGNED" \
+            "$UNSIGNED"
+
+          "$APKSIGNER" verify --verbose "$SIGNED" | grep -E "Verifies|scheme"
+
+          SHA=$(sha256sum "$SIGNED" | awk '{print $1}')
+          echo "sha256=$SHA"   >> "$GITHUB_OUTPUT"
+          echo "apk=$SIGNED"   >> "$GITHUB_OUTPUT"
+          echo "APK: $SIGNED  SHA-256: $SHA"
+
+      # ── GitHub Release ───────────────────────────────────────────────────
+
+      - name: Build release notes
+        id: relnotes
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.ver.outputs.tag }}"
+          VER="${{ steps.ver.outputs.next }}"
+          SHA="${{ steps.sign.outputs.sha256 }}"
+          NOTES="${{ inputs.notes }}"
+
+          cat > release-notes.md <<NOTES
+          # Carromscore ${VER}
+
+          ${NOTES:-*(no release notes provided)*}
+
+          ---
+
+          **SHA-256:** \`${SHA}\`
+          NOTES
+
+          echo "Release notes:"
+          cat release-notes.md
+
+      - name: Create + publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="${GITHUB_REF#refs/tags/}"
-          # Grab the top-of-CHANGELOG section for the release notes if one exists,
-          # else fall back to the tag message.
-          NOTES=$(git tag -l --format='%(contents)' "$TAG" | sed '/^$/,$d')
-          if [ -z "$NOTES" ]; then
-            NOTES="Release $TAG"
-          fi
-          echo "$NOTES" > release-notes.md
+          TAG="${{ steps.ver.outputs.tag }}"
           gh release create "$TAG" \
             --title "Carromscore $TAG" \
             --notes-file release-notes.md \
-            --draft
-          echo ""
-          echo "Draft release created. Attach the signed APK by running:"
-          echo "  gh release upload $TAG twa/app/build/outputs/apk/release/app-release.apk --repo \$GITHUB_REPOSITORY"
-          echo "Then publish the draft."
+            "${{ steps.sign.outputs.apk }}"
