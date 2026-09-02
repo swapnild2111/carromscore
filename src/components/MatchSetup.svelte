@@ -1201,11 +1201,6 @@
       <p>This match slot isn't around anymore. It may have already been
       played, or the organiser removed it. Ask them for a fresh QR.</p>
     {/if}
-    <div class="planned-actions">
-      <button type="button" class="planned-btn" onclick={dismissNotFound}>
-        Set up a match manually
-      </button>
-    </div>
   </aside>
 {:else if plannedState.kind === 'takeover'}
   <aside class="planned-notice planned-notice-warn" aria-label="Match in progress">

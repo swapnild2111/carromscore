@@ -508,6 +508,7 @@
     {:else}
       {#if rounds.length <= 5}
         <div class="round-nav" role="group" aria-label="Select round">
+          <span class="round-nav-label">Rounds</span>
           {#each rounds as r (r.key)}
             <button
               type="button"
@@ -520,6 +521,7 @@
         </div>
       {:else}
         <div class="round-nav round-nav-select">
+          <span class="round-nav-label">Rounds</span>
           <select
             class="round-select"
             value={selectedRoundKey}
@@ -771,8 +773,17 @@
   .round-nav {
     display: flex;
     flex-wrap: wrap;
+    align-items: center;
     gap: 0.35rem;
     margin: 0.5rem 0 0.75rem;
+  }
+  .round-nav-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted, #9aa0a6);
+    margin-right: 0.25rem;
   }
   .round-chip {
     padding: 0.3rem 0.7rem;

@@ -318,9 +318,14 @@
     const pts = d.pointsTarget ?? 25;
     const mb = d.maxBoards ?? 8;
     const mbTxt = mb === 0 ? 'unlimited boards' : `max ${mb} boards`;
-    const timer = d.timerDuration ? ` · ${d.timerDuration} min timer` : '';
-    return `${mode} · best of ${bo} · target ${pts} points · ${mbTxt}${timer}`;
+    return `${mode} · best of ${bo} · target ${pts} points · ${mbTxt}`;
   });
+
+  const timerLine = $derived<string | null>(
+    (tournament?.defaults?.timerDuration ?? 0) > 0
+      ? `${tournament!.defaults!.timerDuration} min`
+      : null
+  );
 
   const tournamentName = $derived<string>(
     tournament?.name ?? plannedMatches[0]?.tournament ?? tournamentKey,
@@ -453,6 +458,12 @@
             {tournament?.type === 'closed' ? 'Invite-only (assigned roster)' : 'Open'}
           </span>
         </div>
+        {#if timerLine}
+        <div class="meta-row">
+          <span class="meta-label">Timer</span>
+          <span class="meta-value">{timerLine}</span>
+        </div>
+        {/if}
         <div class="meta-row">
           <span class="meta-label">Boards</span>
           <span class="meta-value">{boards.length}</span>
