@@ -161,6 +161,9 @@
    *  a record by either the display name or the slug that appears
    *  in the URL / on match records. */
   let query = $state('');
+  let filterType = $state<'all' | 'open' | 'closed'>('all');
+  let filterOrganizer = $state('');
+  let sortBy = $state<'recent' | 'oldest' | 'az' | 'za'>('recent');
   /** Add-new-tournament dialog state. Kept as a simple string + open
    *  flag; validation happens on save. */
   let addingOpen = $state(false);
@@ -421,16 +424,26 @@
     return all.filter((t) => t.createdBy === myUid);
   });
 
-  /** Search-filtered view of `list()`. Empty query = full list.
-   *  Matches name substring OR key substring, both lowercased. */
+  /** Search-filtered, type-filtered, organizer-filtered, sorted view of `list()`. */
   const filtered = $derived(() => {
-    const all = list();
+    let all = list();
     const q = query.trim().toLowerCase();
-    if (!q) return all;
-    return all.filter(
-      (t) => t.name.toLowerCase().includes(q) || t.key.toLowerCase().includes(q),
-    );
+    if (q) all = all.filter((t) => t.name.toLowerCase().includes(q) || t.key.toLowerCase().includes(q));
+    if (filterType !== 'all') all = all.filter((t) => (t.type ?? 'open') === filterType);
+    if (filterOrganizer) all = all.filter((t) => (t.organizerName ?? '') === filterOrganizer);
+    all = [...all].sort((a, b) => {
+      if (sortBy === 'recent') return b.lastActive - a.lastActive;
+      if (sortBy === 'oldest') return a.lastActive - b.lastActive;
+      if (sortBy === 'az') return a.name.localeCompare(b.name);
+      return b.name.localeCompare(a.name);
+    });
+    return all;
   });
+
+  /** Unique organizer names from all tournaments, for the filter dropdown. */
+  const organizerOptions = $derived(() =>
+    [...new Set(list().map((t) => t.organizerName ?? '').filter(Boolean))].sort()
+  );
 
   function flash(kind: 'ok' | 'err', message: string) {
     banner = { kind, message };
@@ -1191,6 +1204,25 @@
       bind:value={query}
       aria-label="Search tournaments"
     />
+    <select class="filter-select" bind:value={filterType} aria-label="Filter by type">
+      <option value="all">All types</option>
+      <option value="open">Open</option>
+      <option value="closed">Invite-only</option>
+    </select>
+    {#if organizerOptions().length > 0}
+    <select class="filter-select" bind:value={filterOrganizer} aria-label="Filter by organizer">
+      <option value="">All organisers</option>
+      {#each organizerOptions() as name (name)}
+        <option value={name}>{name}</option>
+      {/each}
+    </select>
+    {/if}
+    <select class="filter-select" bind:value={sortBy} aria-label="Sort">
+      <option value="recent">Recent first</option>
+      <option value="oldest">Oldest first</option>
+      <option value="az">Name A–Z</option>
+      <option value="za">Name Z–A</option>
+    </select>
     <span class="count">{filtered().length}</span>
   </div>
 
@@ -2106,6 +2138,27 @@
     font-size: 0.9rem;
   }
   .controls input:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .filter-select {
+    background: #0f0f0f;
+    color: var(--fg);
+    border: 1px solid #2a2a2a;
+    border-radius: 0.45rem;
+    padding: 0.5rem 1.8rem 0.5rem 0.65rem;
+    font: inherit;
+    font-size: 0.82rem;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%239aa0a6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.55rem center;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .filter-select:focus {
     outline: none;
     border-color: var(--accent);
   }
