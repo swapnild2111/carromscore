@@ -1539,9 +1539,19 @@ export async function deleteRound(
     ]);
     const db = getDatabase(firebaseApp());
     const path = `tournaments/${tournamentKey}/rounds/${roundKey}`;
-    const snap = await get(ref(db, path));
+    const [snap, plannedSnap] = await Promise.all([
+      get(ref(db, path)),
+      get(ref(db, 'planned')),
+    ]);
     const existing = snap.val() as Record<string, unknown> | null;
-    await remove(ref(db, path));
+    // Cascade-delete planned matches that belong to this round.
+    const plannedRaw = plannedSnap.val() as Record<string, { tournamentKey?: string; roundKey?: string }> | null;
+    const plannedDeletes = plannedRaw
+      ? Object.entries(plannedRaw)
+          .filter(([, v]) => v?.tournamentKey === tournamentKey && v?.roundKey === roundKey)
+          .map(([mid]) => remove(ref(db, `planned/${mid}`)))
+      : [];
+    await Promise.all([remove(ref(db, path)), ...plannedDeletes]);
     const local = memoryStore.find((t) => t.key === tournamentKey);
     if (local?.rounds) {
       local.rounds = local.rounds.filter((r) => r.key !== roundKey);
