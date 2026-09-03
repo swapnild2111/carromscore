@@ -79,6 +79,7 @@
     | { kind: 'idle' }
     | { kind: 'loading'; mid: string }
     | { kind: 'not-found'; mid: string; reason?: 'no-active-round' | 'all-complete' }
+    | { kind: 'completed'; mid: string; match: PlannedMatch }
     | { kind: 'takeover'; mid: string; match: PlannedMatch; claimerName: string }
     | { kind: 'loaded'; mid: string };
   let plannedState = $state<PlannedState>({ kind: 'idle' });
@@ -163,6 +164,11 @@
         return;
       }
       const uid = currentUser()?.uid;
+      // Match already completed — block re-play.
+      if (match.completedAt) {
+        plannedState = { kind: 'completed', mid, match };
+        return;
+      }
       // Someone else already claimed it — offer takeover.
       if (match.claimedBy && uid && match.claimedBy !== uid) {
         plannedState = {
@@ -1201,6 +1207,19 @@
       <p>This match slot isn't around anymore. It may have already been
       played, or the organiser removed it. Ask them for a fresh QR.</p>
     {/if}
+  </aside>
+{:else if plannedState.kind === 'completed'}
+  {@const r = plannedState.match.result}
+  {@const winner = r?.winner === 'a' ? plannedState.match.aName : r?.winner === 'b' ? plannedState.match.bName : null}
+  <aside class="planned-notice planned-notice-warn" aria-label="Match already played">
+    <h3>Match already played</h3>
+    {#if r}
+      <p>
+        {plannedState.match.aName} <strong>{r.setsA} – {r.setsB}</strong> {plannedState.match.bName}
+        {#if winner}· {winner} won{/if}
+      </p>
+    {/if}
+    <p>Re-scanning won't start a new game — ask the organiser if something needs to be changed.</p>
   </aside>
 {:else if plannedState.kind === 'takeover'}
   <aside class="planned-notice planned-notice-warn" aria-label="Match in progress">
