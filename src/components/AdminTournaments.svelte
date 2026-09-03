@@ -365,6 +365,8 @@
       unsubPlannedGlobal = onValue(ref(db, 'planned'), (snap) => {
         const raw = snap.val() as Record<string, { tournamentKey?: string; roundKey?: string; completedAt?: number }> | null;
         const counts: Record<string, number> = {};
+        // Key: `${tournamentKey}/${roundKey}` to avoid collisions across
+        // tournaments that share the same roundKey (e.g. both have "round-1").
         const roundCounts: Record<string, number> = {};
         if (raw) {
           for (const v of Object.values(raw)) {
@@ -374,7 +376,7 @@
             const k = v.tournamentKey;
             if (k) counts[k] = (counts[k] ?? 0) + 1;
             const rk = v.roundKey;
-            if (rk) roundCounts[rk] = (roundCounts[rk] ?? 0) + 1;
+            if (k && rk) roundCounts[`${k}/${rk}`] = (roundCounts[`${k}/${rk}`] ?? 0) + 1;
           }
         }
         plannedCountByKey = counts;
@@ -1990,7 +1992,7 @@
                         <span class="chip chip-closed" title="Closed — organiser stopped this round">
                           CLOSED
                         </span>
-                      {:else if r.startedAt && !plannedCountByRound[r.key]}
+                      {:else if r.startedAt && !plannedCountByRound[`${roundsKey}/${r.key}`]}
                         <span class="chip chip-complete" title="Complete — all matches in this round have been scored">
                           COMPLETE
                         </span>
@@ -1998,7 +2000,7 @@
                         <span class="chip chip-running" title="Running — umpires can start matches under this round">
                           RUNNING
                         </span>
-                      {:else if !plannedCountByRound[r.key]}
+                      {:else if !plannedCountByRound[`${roundsKey}/${r.key}`]}
                         <span class="chip chip-awaiting" title="Add at least one bracket match before starting">
                           AWAITING BRACKETS
                         </span>
@@ -2026,9 +2028,9 @@
                         type="button"
                         class="btn btn-icon btn-round-start"
                         onclick={() => startSelectedRound(r)}
-                        disabled={roundsSaving || !!r.startedAt || !plannedCountByRound[r.key]}
+                        disabled={roundsSaving || !!r.startedAt || !plannedCountByRound[`${roundsKey}/${r.key}`]}
                         aria-label="Start round"
-                        title={r.startedAt ? 'Round already started' : !plannedCountByRound[r.key] ? 'Add bracket matches before starting the round' : 'Start round — umpires can score under it now'}
+                        title={r.startedAt ? 'Round already started' : !plannedCountByRound[`${roundsKey}/${r.key}`] ? 'Add bracket matches before starting the round' : 'Start round — umpires can score under it now'}
                       >▶</button>
                       <button
                         type="button"
