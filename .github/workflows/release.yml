@@ -123,8 +123,8 @@ jobs:
           git tag "${{ steps.ver.outputs.tag }}"
           git push origin main
           git push origin "${{ steps.ver.outputs.tag }}"
-          # Keep beta in sync with the version bump
-          git push origin main:beta
+          # Keep beta in sync with the version bump (force: beta is always a preview of main)
+          git push origin main:beta --force
 
       # ── APK build + sign ─────────────────────────────────────────────────
       # twa/ is almost entirely gitignored (only twa-manifest.json is tracked).
