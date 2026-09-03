@@ -1998,6 +1998,10 @@
                         <span class="chip chip-running" title="Running — umpires can start matches under this round">
                           RUNNING
                         </span>
+                      {:else if !plannedCountByRound[r.key]}
+                        <span class="chip chip-awaiting" title="Add at least one bracket match before starting">
+                          AWAITING BRACKETS
+                        </span>
                       {:else}
                         <span class="chip chip-pending" title="Ready — hit ▶ Start to activate for umpires">
                           READY
@@ -2022,9 +2026,9 @@
                         type="button"
                         class="btn btn-icon btn-round-start"
                         onclick={() => startSelectedRound(r)}
-                        disabled={roundsSaving || !!r.startedAt}
+                        disabled={roundsSaving || !!r.startedAt || !plannedCountByRound[r.key]}
                         aria-label="Start round"
-                        title={r.startedAt ? 'Round already started' : 'Start round — umpires can score under it now'}
+                        title={r.startedAt ? 'Round already started' : !plannedCountByRound[r.key] ? 'Add bracket matches before starting the round' : 'Start round — umpires can score under it now'}
                       >▶</button>
                       <button
                         type="button"
@@ -2413,6 +2417,14 @@
      (waiting), running = green (live), closed = amber (terminal,
      already defined above). Match the button tints so status pill
      and action button read as the same colour language. */
+  .chip-awaiting {
+    color: #888;
+    background: rgba(160, 160, 160, 0.06);
+    border-color: rgba(160, 160, 160, 0.2);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 700;
+  }
   .chip-pending {
     color: var(--muted, #9aa0a6);
     background: rgba(255, 255, 255, 0.06);

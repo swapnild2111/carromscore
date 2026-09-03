@@ -310,11 +310,10 @@ export async function resolvePlannedByBoard(
       for (const [rk, rv] of Object.entries(roundsRaw)) {
         if (!rv || typeof rv !== 'object') continue;
         totalRounds += 1;
-        // Include any round that isn't explicitly closed — pending rounds
-        // (state='open', no startedAt) are still scannable so the umpire
-        // can load Round 2 matches as soon as the admin creates them,
-        // without waiting for the admin to tap "Start round".
-        if (rv.state !== 'closed') {
+        // Only include rounds that have been explicitly started (Play tapped).
+        // A round with state='open' but no startedAt is created but not yet
+        // started — scanning should be blocked until the organiser taps Play.
+        if (rv.state !== 'closed' && rv.startedAt) {
           openRoundOrder.set(rk, rv.order ?? 999);
         }
       }

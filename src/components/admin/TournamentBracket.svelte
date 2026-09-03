@@ -145,13 +145,12 @@
     // Read tick so the derivation re-runs on store updates.
     void identityTick;
     const q = query.trim().toLowerCase();
-    if (!q) return [];
     // Invite-only: only suggest players who are on the tournament's
     // roster. Free-text is still allowed in the input (so the
     // organiser can type ahead of an assignment), but the add-row
     // guard below will reject unresolved / off-roster picks.
     const pool = loadAllPlayers().filter((p) => {
-      if (!p.canonicalName.toLowerCase().includes(q)) return false;
+      if (q && !p.canonicalName.toLowerCase().includes(q)) return false;
       if (isInviteOnly && !assignedPlayerIds.has(p.id)) return false;
       return true;
     });
@@ -427,9 +426,12 @@
     else flash('Match removed');
   }
 
-  function statusOf(m: PlannedMatch): 'planned' | 'claimed' | 'complete' {
+  function statusOf(m: PlannedMatch): 'awaiting' | 'planned' | 'claimed' | 'complete' {
     if (m.completedAt) return 'complete';
-    return m.claimedBy ? 'claimed' : 'planned';
+    if (m.claimedBy) return 'claimed';
+    const round = rounds.find((r) => r.key === m.roundKey);
+    if (round && !round.startedAt) return 'awaiting';
+    return 'planned';
   }
 
   function claimAge(m: PlannedMatch): string {
@@ -668,6 +670,8 @@
                         <span class="pill pill-claimed" title="Being scored right now">
                           scoring · {claimAge(m)}
                         </span>
+                      {:else if statusOf(m) === 'awaiting'}
+                        <span class="pill pill-awaiting" title="Round not started yet">awaiting round</span>
                       {:else}
                         <span class="pill pill-planned">ready</span>
                       {/if}
@@ -1114,6 +1118,13 @@
     background: rgba(100, 180, 230, 0.12);
     border: 1px solid rgba(100, 180, 230, 0.35);
     color: #7ec8e3;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+  .pill-awaiting {
+    background: rgba(160, 160, 160, 0.08);
+    border: 1px solid rgba(160, 160, 160, 0.25);
+    color: #888;
     text-transform: none;
     letter-spacing: 0;
   }
