@@ -169,6 +169,33 @@ export async function loadPlannedMatch(mid: string): Promise<PlannedReadOutcome>
 }
 
 /**
+ * Load all non-completed planned matches for a specific tournament round.
+ * Used by MatchSetup to verify that a manually-entered pair has a bracket
+ * slot before allowing the match to start (closed tournaments only).
+ */
+export async function loadPlannedByRound(
+  tournamentKey: string,
+  roundKey: string,
+): Promise<PlannedMatch[]> {
+  if (!tournamentKey || !roundKey) return [];
+  try {
+    const { getDatabase, ref, get } = await import('firebase/database');
+    const db = getDatabase(firebaseApp());
+    const snap = await get(ref(db, 'planned'));
+    const raw = snap.val() as Record<string, Omit<PlannedMatch, 'mid'>> | null;
+    if (!raw) return [];
+    return Object.entries(raw)
+      .filter(
+        ([, v]) =>
+          v?.tournamentKey === tournamentKey && v?.roundKey === roundKey && !v?.completedAt,
+      )
+      .map(([mid, v]) => ({ mid, ...v }));
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Delete a planned slot. Called by:
  *   - the bracket admin's per-row delete button
  *   - endMatch() in ScoreBoard when a planned-launched match archives

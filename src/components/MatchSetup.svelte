@@ -51,6 +51,7 @@
   import { countryName, flagEmoji } from '../lib/countries';
   import {
     loadPlannedMatch,
+    loadPlannedByRound,
     claimPlannedMatch,
     resolvePlannedByBoard,
     type PlannedMatch,
@@ -358,6 +359,30 @@
       // Guard against a stale key: if the user picked a different
       // tournament while the fetch was in-flight, drop the result.
       if (lastLoadedAssignmentKey === key) assignedPlayerIds = set;
+    });
+  });
+
+  // Planned matches for the currently selected closed-tournament + round.
+  // Used to enforce bracket membership before allowing a manual match start.
+  let roundPlannedMatches = $state<PlannedMatch[]>([]);
+  let lastLoadedRoundKey = $state<string | null>(null);
+  $effect(() => {
+    const t = pickedTournament();
+    if (!t || t.type !== 'closed') {
+      roundPlannedMatches = [];
+      lastLoadedRoundKey = null;
+      return;
+    }
+    const roundKey = cfg.round.trim();
+    const cacheKey = roundKey ? `${t.key}/${roundKey}` : null;
+    if (cacheKey === lastLoadedRoundKey) return;
+    lastLoadedRoundKey = cacheKey;
+    if (!cacheKey) {
+      roundPlannedMatches = [];
+      return;
+    }
+    void loadPlannedByRound(t.key, roundKey).then((matches) => {
+      if (lastLoadedRoundKey === cacheKey) roundPlannedMatches = matches;
     });
   });
 
@@ -871,6 +896,30 @@
     return null;
   });
 
+  // For closed tournaments with bracket rounds: block Start unless the
+  // two players have a pre-seeded bracket slot in this round together.
+  // Only fires when the round has at least one planned match (i.e. brackets
+  // have been added). Skipped for QR-scan flow (plannedState.kind !== 'idle').
+  let bracketError = $derived.by((): string | null => {
+    if (plannedState.kind !== 'idle') return null;
+    if (cfg.mode === 'practice') return null;
+    void identityTick;
+    void tournamentTick;
+    const t = pickedTournament();
+    if (!t || t.type !== 'closed') return null;
+    if (roundPlannedMatches.length === 0) return null;
+    const idA = resolvedPlayerIds['playerA'];
+    const idB = resolvedPlayerIds['playerB'];
+    if (!idA || !idB) return null;
+    const hasSlot = roundPlannedMatches.some(
+      (m) =>
+        (m.aResolvedId === idA && m.bResolvedId === idB) ||
+        (m.aResolvedId === idB && m.bResolvedId === idA),
+    );
+    if (!hasSlot) return 'These players do not have a bracket slot in this round';
+    return null;
+  });
+
   let canStart = $derived(() => {
     const a1 = cfg.playerA.trim().length > 0;
     if (cfg.mode === 'practice') {
@@ -879,7 +928,7 @@
       return a1 && cfg.maxBoards > 0;
     }
     const b1 = cfg.playerB.trim().length > 0;
-    if (cfg.mode === 'singles') return a1 && b1 && !dupError && !roundError && !rosterError;
+    if (cfg.mode === 'singles') return a1 && b1 && !dupError && !roundError && !rosterError && !bracketError;
     return (
       a1 &&
       b1 &&
@@ -887,7 +936,8 @@
       cfg.playerB2.trim().length > 0 &&
       !dupError &&
       !roundError &&
-      !rosterError
+      !rosterError &&
+      !bracketError
     );
   });
 
@@ -1518,7 +1568,7 @@
     class="start"
     type="submit"
     disabled={!canStart()}
-    title={!canStart() ? (rosterError ?? roundError ?? undefined) : undefined}
+    title={!canStart() ? (rosterError ?? bracketError ?? roundError ?? undefined) : undefined}
   >
     Start match →
   </button>
