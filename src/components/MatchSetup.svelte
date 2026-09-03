@@ -1008,7 +1008,7 @@
   }
 
   function beginCountdown(url: string, startKey: string) {
-    countdownSecs = 10;
+    countdownSecs = 5;
     pendingScoreUrl = url;
     countdownIntervalId = setInterval(() => {
       countdownSecs = (countdownSecs ?? 1) - 1;
