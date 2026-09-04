@@ -279,6 +279,7 @@
    * tap BOARD +1 to move to the next board. Auto-dismisses.
    */
   let boardCapToast = $state(false);
+  let timerOverToast = $state(false);
   /**
    * Fires when the umpire tries to score points on side B after
    * side A has already scored on the current board (or vice versa).
@@ -677,11 +678,17 @@
       const startedAt = loadMatchStart(key);
       // Seed immediately so the display isn't blank on first paint.
       timerElapsedMs = startedAt !== null ? Date.now() - startedAt : 0;
+      const timerTotalMs = cfg.timerDuration * 60 * 1000;
+      let timerOverFired = false;
       window.setTimeout(() => {
         timerIntervalId = window.setInterval(() => {
           const k = matchStateKey(cfg.mode, cfg.playerA, cfg.playerB);
           const t0 = loadMatchStart(k);
           timerElapsedMs = t0 !== null ? Date.now() - t0 : 0;
+          if (!timerOverFired && timerElapsedMs >= timerTotalMs) {
+            timerOverFired = true;
+            timerOverToast = true;
+          }
         }, 1000);
       }, 1000);
     }
@@ -3337,7 +3344,14 @@
       + queen coverage 3 = 12. Umpire probably means BOARD +1.
     -->
     <div class="queen-toast" role="status" aria-live="polite">
-      Max 12 points per board — tap BOARD +1 for the next board
+      Max 12 points per board (9 if opponent holds the queen) — tap BOARD +1 for the next board
+    </div>
+  {/if}
+
+  {#if timerOverToast}
+    <div class="queen-toast queen-toast-danger" role="status" aria-live="assertive">
+      Time's up — finish the board, record the score and tap End
+      <button type="button" onclick={() => { timerOverToast = false; }} aria-label="Dismiss">✕</button>
     </div>
   {/if}
 
@@ -3503,6 +3517,25 @@
     border-color: rgba(239, 83, 80, 0.6);
     color: #ef8985;
   }
+  .queen-toast.queen-toast-danger {
+    background: linear-gradient(135deg, #3a1010, #2a0a0a);
+    border-color: rgba(239, 83, 80, 0.7);
+    color: #ef8985;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+  .queen-toast.queen-toast-danger button {
+    background: none;
+    border: none;
+    color: inherit;
+    cursor: pointer;
+    font-size: 1rem;
+    padding: 0;
+    opacity: 0.7;
+    flex-shrink: 0;
+  }
+  .queen-toast.queen-toast-danger button:hover { opacity: 1; }
   @keyframes queenToastIn {
     from { opacity: 0; transform: translate(-50%, -0.4rem); }
     to   { opacity: 1; transform: translate(-50%, 0); }
@@ -4242,9 +4275,9 @@
     transition: background 0.3s, border-color 0.3s, color 0.3s;
   }
   .timer-pill.timer-warn {
-    color: #ffb300;
-    background: rgba(255, 179, 0, 0.18);
-    border-color: rgba(255, 179, 0, 0.5);
+    color: var(--danger);
+    background: rgba(239, 83, 80, 0.15);
+    border-color: rgba(239, 83, 80, 0.5);
     animation: timer-warn-pulse 1s ease-in-out infinite;
   }
   .timer-pill.timer-over {
