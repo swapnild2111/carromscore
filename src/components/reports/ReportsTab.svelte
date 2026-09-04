@@ -312,21 +312,21 @@
    * tournament with four rounds doesn't unfurl into a page-height
    * scroll on a phone the moment the picker fires.
    */
-  let collapsedRounds = $state<Set<string>>(new Set());
+  let openRounds = $state<Set<string>>(new Set());
   $effect(() => {
     // Reset whenever the selection changes. Read `selection` so
     // Svelte tracks it as a dependency of this effect.
     void selection;
-    collapsedRounds = new Set();
+    openRounds = new Set();
   });
   function toggleRound(roundKey: string) {
-    const next = new Set(collapsedRounds);
+    const next = new Set(openRounds);
     if (next.has(roundKey)) next.delete(roundKey);
     else next.add(roundKey);
-    collapsedRounds = next;
+    openRounds = next;
   }
   function isRoundOpen(roundKey: string): boolean {
-    return !collapsedRounds.has(roundKey);
+    return openRounds.has(roundKey);
   }
 
   // pick() removed v3.4.12 — selection is now $derived off the
@@ -812,6 +812,7 @@
         </table>
       </div>
 
+    {#if roundFilter !== null || !(report.roundReports?.length)}
     <div class="tbl-hdr">
       <h3 class="section-hdr">Matches ({sortedMatches.length}{#if sortedMatches.length !== view.matches} / {view.matches}{/if})</h3>
       <div class="tbl-actions">
@@ -889,6 +890,7 @@
         </tbody>
       </table>
     </div>
+    {/if}
 
     <!--
       Per-round accordion (v3.2). Only renders when the tournament
