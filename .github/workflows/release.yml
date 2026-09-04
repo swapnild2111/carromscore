@@ -8,11 +8,13 @@ run-name: Release (${{ github.event.inputs.bump }})
 #   notes: bullet-point summary of what changed (markdown OK)
 #
 # What it does:
-#   1. Reads current version from src/lib/version.ts
-#   2. Computes next version (semver bump)
-#   3. Bumps all four version files + commits + tags + pushes to main
-#   4. Builds + signs the TWA APK with Java 17 + Android build-tools
-#   5. Creates a GitHub Release with notes + SHA-256 + attached APK
+#   1. Checks out main, then merges origin/beta into it
+#      (beta is always ahead of main — all feature work lands on beta first)
+#   2. Reads current version from src/lib/version.ts
+#   3. Computes next version (semver bump)
+#   4. Bumps all four version files + commits + tags + pushes to main
+#   5. Builds + signs the TWA APK with Java 17 + Android build-tools
+#   6. Creates a GitHub Release with notes + SHA-256 + attached APK
 #
 # Required secrets (Settings → Secrets → Actions):
 #   KEYSTORE_BASE64     base64-encoded twa/android.keystore
@@ -52,6 +54,21 @@ jobs:
           # triggering other workflows to prevent infinite loops).
           token: ${{ secrets.RELEASE_PAT }}
           fetch-depth: 0
+          ref: main
+
+      - name: Merge beta into main
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin beta
+          # Merge all beta commits into main before bumping version.
+          # --no-edit uses the default merge commit message; fast-forward
+          # when possible (beta is typically ahead of main).
+          git merge origin/beta --no-edit --no-ff || {
+            echo "::error::Merge of beta into main failed — resolve conflicts locally first"
+            exit 1
+          }
 
       - name: Setup Node
         uses: actions/setup-node@v4
