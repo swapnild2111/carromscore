@@ -920,6 +920,24 @@
     return null;
   });
 
+  // For a manual match on a closed tournament, resolve the planned slot mid so
+  // ScoreBoard can stamp it complete after the match — same as the QR-scan path.
+  const resolvedBracketMid = $derived.by((): string => {
+    if (plannedState.kind !== 'idle') return '';
+    const t = pickedTournament();
+    if (!t || t.type !== 'closed') return '';
+    if (roundPlannedMatches.length === 0) return '';
+    const idA = resolvedPlayerIds['playerA'];
+    const idB = resolvedPlayerIds['playerB'];
+    if (!idA || !idB) return '';
+    const slot = roundPlannedMatches.find(
+      (m) =>
+        (m.aResolvedId === idA && m.bResolvedId === idB) ||
+        (m.aResolvedId === idB && m.bResolvedId === idA),
+    );
+    return slot?.mid ?? '';
+  });
+
   let canStart = $derived(() => {
     const a1 = cfg.playerA.trim().length > 0;
     if (cfg.mode === 'practice') {
@@ -1015,8 +1033,9 @@
     // Silent-on-failure — a signed-out umpire can still score; they
     // just won't stamp claimedBy on the bracket row.
     const uid = currentUser()?.uid;
-    if (plannedMid && uid) void claimPlannedMatch(plannedMid, uid);
-    const plannedSuffix = plannedMid ? `&planned=${encodeURIComponent(plannedMid)}` : '';
+    const effectiveMid = plannedMid || resolvedBracketMid;
+    if (effectiveMid && uid) void claimPlannedMatch(effectiveMid, uid);
+    const plannedSuffix = effectiveMid ? `&planned=${encodeURIComponent(effectiveMid)}` : '';
     const scoreUrl = `${base}score/?${encodeConfig(cfg)}${plannedSuffix}`;
     saveResume({
       mid: cfg.mid,
