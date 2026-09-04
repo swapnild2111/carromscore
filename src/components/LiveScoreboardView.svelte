@@ -415,6 +415,8 @@
                   <span class="sc-cell sc-b-pts side-b" role="cell">{entry.cumB}</span>
                 </div>
               {/each}
+              {@const boardsWonA = g.boards.filter((b) => b.pointsA > b.pointsB).length}
+              {@const boardsWonB = g.boards.filter((b) => b.pointsB > b.pointsA).length}
               <div class="sc-row sc-total" role="row">
                 <span
                   class="sc-cell sc-a-pts sc-total-val side-a"
@@ -429,6 +431,21 @@
                   class:sc-winner={g.winner === 'b'}
                   role="cell"
                 >{g.totalB}</span>
+              </div>
+              <div class="sc-row sc-boards-row" role="row">
+                <span
+                  class="sc-cell sc-a-pts sc-boards-val side-a"
+                  class:sc-boards-lead={boardsWonA > boardsWonB}
+                  role="cell"
+                >{boardsWonA}</span>
+                <span class="sc-cell sc-a-score sc-total-empty" role="cell"></span>
+                <span class="sc-cell sc-num sc-total-lbl" role="cell">Boards</span>
+                <span class="sc-cell sc-b-score sc-total-empty" role="cell"></span>
+                <span
+                  class="sc-cell sc-b-pts sc-boards-val side-b"
+                  class:sc-boards-lead={boardsWonB > boardsWonA}
+                  role="cell"
+                >{boardsWonB}</span>
               </div>
               {#if g.winner === 'a' || g.winner === 'b'}
                 <div class="sc-row sc-winner-row" role="row">
@@ -952,6 +969,20 @@
   }
   .sc-total-empty { background: #161616; }
 
+  /* Boards-won row: sits below Total, shows how many boards each side won. */
+  .sc-row.sc-boards-row .sc-cell {
+    background: #161616;
+  }
+  .sc-boards-val {
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.35);
+  }
+  .sc-boards-val.side-a { color: rgba(79, 195, 247, 0.45); }
+  .sc-boards-val.side-b { color: rgba(255, 138, 101, 0.45); }
+  .sc-boards-val.sc-boards-lead.side-a { color: var(--side-a, #4fc3f7); }
+  .sc-boards-val.sc-boards-lead.side-b { color: var(--side-b, #ff8a65); }
+
   /* Winner banner row — spans the whole grid width. */
   .sc-winner-row .sc-winner-line {
     grid-column: 1 / -1;
@@ -986,6 +1017,7 @@
     }
     .sc-row.sc-head .sc-cell { font-size: 0.55rem; padding: 0.25rem 0.2rem; }
     .sc-total-val { font-size: 0.9rem; }
+    .sc-boards-val { font-size: 0.8rem; }
     .sc-a-score, .sc-b-score { font-size: 0.7rem; }
   }
 
