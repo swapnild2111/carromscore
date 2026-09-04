@@ -70,6 +70,8 @@
     boards: BoardRow[];
     totalA: number;
     totalB: number;
+    boardsWonA: number;
+    boardsWonB: number;
     winner: 'a' | 'b' | 'tie' | null;
   };
   const setGroups = $derived<SetGroup[]>(() => {
@@ -156,6 +158,8 @@
       });
       const totalA = cumA;
       const totalB = cumB;
+      const boardsWonA = boards.filter((b) => b.pointsA > b.pointsB).length;
+      const boardsWonB = boards.filter((b) => b.pointsB > b.pointsA).length;
       let winner: SetGroup['winner'] = null;
       const setIsCompleted = matchEnded || i < currentSetIdx;
       if (setIsCompleted && boards.length > 0) {
@@ -167,7 +171,7 @@
         else if (totalB > totalA) winner = 'b';
         else winner = 'tie';
       }
-      groups.push({ setIdx: i, boards, totalA, totalB, winner });
+      groups.push({ setIdx: i, boards, totalA, totalB, boardsWonA, boardsWonB, winner });
     }
     return groups;
   });
@@ -415,8 +419,6 @@
                   <span class="sc-cell sc-b-pts side-b" role="cell">{entry.cumB}</span>
                 </div>
               {/each}
-              {@const boardsWonA = g.boards.filter((b) => b.pointsA > b.pointsB).length}
-              {@const boardsWonB = g.boards.filter((b) => b.pointsB > b.pointsA).length}
               <div class="sc-row sc-total" role="row">
                 <span
                   class="sc-cell sc-a-pts sc-total-val side-a"
@@ -435,17 +437,17 @@
               <div class="sc-row sc-boards-row" role="row">
                 <span
                   class="sc-cell sc-a-pts sc-boards-val side-a"
-                  class:sc-boards-lead={boardsWonA > boardsWonB}
+                  class:sc-boards-lead={g.boardsWonA > g.boardsWonB}
                   role="cell"
-                >{boardsWonA}</span>
+                >{g.boardsWonA}</span>
                 <span class="sc-cell sc-a-score sc-total-empty" role="cell"></span>
                 <span class="sc-cell sc-num sc-total-lbl" role="cell">Boards</span>
                 <span class="sc-cell sc-b-score sc-total-empty" role="cell"></span>
                 <span
                   class="sc-cell sc-b-pts sc-boards-val side-b"
-                  class:sc-boards-lead={boardsWonB > boardsWonA}
+                  class:sc-boards-lead={g.boardsWonB > g.boardsWonA}
                   role="cell"
-                >{boardsWonB}</span>
+                >{g.boardsWonB}</span>
               </div>
               {#if g.winner === 'a' || g.winner === 'b'}
                 <div class="sc-row sc-winner-row" role="row">
@@ -952,7 +954,8 @@
   }
 
   /* Total row: highlight the set winner with a gold pill. */
-  .sc-row.sc-total .sc-total-lbl {
+  .sc-row.sc-total .sc-total-lbl,
+  .sc-row.sc-boards-row .sc-total-lbl {
     color: var(--muted, #9aa0a6);
     font-size: 0.6rem;
     text-transform: uppercase;
