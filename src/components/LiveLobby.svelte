@@ -1771,7 +1771,13 @@
                         <span class="digit-a">{rec.finalPointsA}</span>–<span class="digit-b">{rec.finalPointsB}</span>
                       {/if}
                     </td>
-                    <td class="hist-td hist-td-num">{rec.boardCount}</td>
+                    <td class="hist-td hist-td-score">
+                      {#if m.mode === 'practice'}
+                        {rec.boardCount}
+                      {:else}
+                        <span class="digit-a">{rec.boardsWonA}</span>–<span class="digit-b">{rec.boardsWonB}</span>
+                      {/if}
+                    </td>
                     <td class="hist-td hist-td-edit">
                       {#if editable}
                         <button
