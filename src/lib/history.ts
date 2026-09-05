@@ -513,6 +513,8 @@ export function reconcileResultFromBoardLog(record: MatchRecord): {
   finalPointsA: number;
   finalPointsB: number;
   boardCount: number;
+  boardsWonA: number;
+  boardsWonB: number;
   divergedFromStored: boolean;
 } {
   const stored = record.result ?? {};
@@ -559,6 +561,8 @@ export function reconcileResultFromBoardLog(record: MatchRecord): {
         finalPointsA: totalMisses,
         finalPointsB: 0,
         boardCount: boardsPlayed,
+        boardsWonA: 0,
+        boardsWonB: 0,
         divergedFromStored: false,
       };
     }
@@ -569,16 +573,22 @@ export function reconcileResultFromBoardLog(record: MatchRecord): {
       finalPointsA: storedFinalA,
       finalPointsB: storedFinalB,
       boardCount: storedBoardCount,
+      boardsWonA: 0,
+      boardsWonB: 0,
       divergedFromStored: false,
     };
   }
 
-  const bySet = new Map<number, { a: number; b: number; boards: number }>();
+  const bySet = new Map<number, { a: number; b: number; boards: number; wonA: number; wonB: number }>();
   for (const e of log) {
-    const cur = bySet.get(e.set) ?? { a: 0, b: 0, boards: 0 };
-    cur.a += Number(e.pointsA ?? 0);
-    cur.b += Number(e.pointsB ?? 0);
+    const cur = bySet.get(e.set) ?? { a: 0, b: 0, boards: 0, wonA: 0, wonB: 0 };
+    const pA = Number(e.pointsA ?? 0);
+    const pB = Number(e.pointsB ?? 0);
+    cur.a += pA;
+    cur.b += pB;
     cur.boards += 1;
+    if (pA > pB) cur.wonA += 1;
+    else if (pB > pA) cur.wonB += 1;
     bySet.set(e.set, cur);
   }
   // Prefer stored setWinners when present — it's the authoritative
@@ -612,10 +622,17 @@ export function reconcileResultFromBoardLog(record: MatchRecord): {
       // tied set: uncredited on either side
     }
   }
-  const lastSet = lastKey !== undefined ? bySet.get(lastKey)! : { a: 0, b: 0, boards: 0 };
+  const lastSet = lastKey !== undefined ? bySet.get(lastKey)! : { a: 0, b: 0, boards: 0, wonA: 0, wonB: 0 };
   const finalPointsA = lastSet.a;
   const finalPointsB = lastSet.b;
-  const boardCount = lastSet.boards;
+  let boardCount = 0;
+  let boardsWonA = 0;
+  let boardsWonB = 0;
+  for (const s of bySet.values()) {
+    boardCount += s.boards;
+    boardsWonA += s.wonA;
+    boardsWonB += s.wonB;
+  }
 
   let winner: 'a' | 'b' | 'draw' | null = null;
   if (setsA > setsB) winner = 'a';
@@ -627,7 +644,7 @@ export function reconcileResultFromBoardLog(record: MatchRecord): {
     setsB !== storedSetsB ||
     (storedWinner !== null && storedWinner !== winner);
 
-  return { setsA, setsB, winner, finalPointsA, finalPointsB, boardCount, divergedFromStored };
+  return { setsA, setsB, winner, finalPointsA, finalPointsB, boardCount, boardsWonA, boardsWonB, divergedFromStored };
 }
 
 /**
