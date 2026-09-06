@@ -417,12 +417,14 @@
   let roundPlannedMatches = $state<PlannedMatch[]>([]);
   let roundAllMatches = $state<PlannedMatch[]>([]);
   let lastLoadedRoundKey = $state<string | null>(null);
+  let roundMatchesLoading = $state(false);
   $effect(() => {
     const t = pickedTournament();
     if (!t || t.type !== 'closed') {
       roundPlannedMatches = [];
       roundAllMatches = [];
       lastLoadedRoundKey = null;
+      roundMatchesLoading = false;
       return;
     }
     const roundKey = cfg.round.trim();
@@ -432,12 +434,15 @@
     if (!cacheKey) {
       roundPlannedMatches = [];
       roundAllMatches = [];
+      roundMatchesLoading = false;
       return;
     }
+    roundMatchesLoading = true;
     void loadAllPlannedByRound(t.key, roundKey).then((all) => {
       if (lastLoadedRoundKey !== cacheKey) return;
       roundAllMatches = all;
       roundPlannedMatches = all.filter((m) => !m.completedAt);
+      roundMatchesLoading = false;
     });
   });
 
@@ -1025,6 +1030,7 @@
   const tournamentLocked = $derived(isQrFlow);
 
   let canStart = $derived(() => {
+    if (roundMatchesLoading) return false;
     const a1 = cfg.playerA.trim().length > 0;
     if (cfg.mode === 'practice') {
       // Solo drill: one player is enough. Also need a real per-set board count
@@ -1711,9 +1717,9 @@
     class="start"
     type="submit"
     disabled={!canStart()}
-    title={!canStart() ? (rosterError ?? bracketError ?? roundError ?? undefined) : undefined}
+    title={roundMatchesLoading ? 'Loading bracket…' : (!canStart() ? (rosterError ?? bracketError ?? roundError ?? undefined) : undefined)}
   >
-    Start match →
+    {roundMatchesLoading ? 'Loading…' : 'Start match →'}
   </button>
 
   {#if loadingPlayers}
