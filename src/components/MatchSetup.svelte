@@ -253,6 +253,31 @@
     plannedState = { kind: 'idle' };
   }
 
+  function startFresh() {
+    // Player wants a casual/unlinked match from the same device.
+    // Clear the planned params from the URL and reset all pre-filled
+    // fields so the form is a blank slate — bracket slot stays "Ready".
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('planned');
+      url.searchParams.delete('tournament');
+      url.searchParams.delete('board');
+      window.history.replaceState({}, '', url.toString());
+    }
+    plannedMid = '';
+    plannedState = { kind: 'idle' };
+    cfg.playerA = '';
+    cfg.playerA2 = '';
+    cfg.playerB = '';
+    cfg.playerB2 = '';
+    cfg.tournament = '';
+    cfg.round = '';
+    resolvedPlayerIds.playerA = null;
+    resolvedPlayerIds.playerA2 = null;
+    resolvedPlayerIds.playerB = null;
+    resolvedPlayerIds.playerB2 = null;
+  }
+
   // Per-device roster grown from past match setups. Merged with the
   // Firebase identity store below so a name typed on this device
   // autocompletes on the next setup even before Firebase is reached.
@@ -1335,6 +1360,9 @@
       bo{cfg.bestOf} · target {cfg.pointsTarget}{cfg.maxBoards ? ` · max ${cfg.maxBoards} boards` : ''}{cfg.timerDuration ? ` · ${cfg.timerDuration} min timer` : ''}
     </p>
     <p class="planned-hint">Review below and tap Start when the players are seated.</p>
+    <button type="button" class="planned-fresh-btn" onclick={startFresh}>
+      Not this match? Play without bracket
+    </button>
   </aside>
 {/if}
 
@@ -2533,6 +2561,18 @@
     border-color: rgba(76, 175, 80, 0.4);
   }
   .planned-hint { color: var(--muted, #9aa0a6); font-size: 0.82rem; }
+  .planned-fresh-btn {
+    margin-top: 0.6rem;
+    background: none;
+    border: none;
+    color: var(--muted, #9aa0a6);
+    font-size: 0.78rem;
+    text-decoration: underline;
+    cursor: pointer;
+    padding: 0;
+    font-family: inherit;
+  }
+  .planned-fresh-btn:hover { color: var(--fg, #f5f5f5); }
   /* Bracket-scan preview banner — richer than the plain notice; shows
      tournament, round, both sides, and the format the umpire is about
      to start. Wraps on narrow screens (players stack vertically). */
