@@ -675,10 +675,31 @@
   $effect(() => {
     if (!dialog) return;
     if (openPopup) {
-      if (!dialog.open) dialog.showModal();
+      if (!dialog.open) {
+        dialog.showModal();
+        // Push a history entry so the mobile back button closes the
+        // popup instead of navigating away from /live/ and landing on
+        // a blank page (Svelte remounting with only the header visible).
+        window.history.pushState({ popupOpen: true }, '');
+      }
     } else {
       if (dialog.open) dialog.close();
     }
+  });
+
+  // Handle mobile back button: if a popup-sentinel history entry is
+  // present, close the popup instead of leaving the page.
+  $effect(() => {
+    function onPopState(e: PopStateEvent) {
+      if (e.state?.popupOpen) return; // navigating forward into sentinel — ignore
+      if (openPopup) {
+        openPopup = null;
+        // Re-push the sentinel so a second back press still works if
+        // the user re-opens a popup without navigating away.
+      }
+    }
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
   });
 
   // Auto-open the popup when a deep-link mid finally matches a live
@@ -690,6 +711,19 @@
     if (!match) return;
     openPopup = { source: 'live', mid: match.mid };
     pendingMid = null;
+  });
+
+  // Auto-close the live popup when the /live/ record disappears
+  // (match ended → umpire's ScoreBoard deletes it). Without this,
+  // openPopup stays set, the dialog stays open, and the backdrop
+  // blur persists on the spectator's screen until they tap to dismiss.
+  $effect(() => {
+    if (openPopup?.source !== 'live') return;
+    // Touch entries so this effect re-runs whenever the list changes.
+    void entries;
+    if (!entries.some((e) => e.mid === openPopup.mid)) {
+      openPopup = null;
+    }
   });
 
   // Same shape for history archives: /live/?match=<id> opens the
