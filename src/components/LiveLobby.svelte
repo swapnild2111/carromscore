@@ -692,6 +692,19 @@
     pendingMid = null;
   });
 
+  // Auto-close the live popup when the /live/ record disappears
+  // (match ended → umpire's ScoreBoard deletes it). Without this,
+  // openPopup stays set, the dialog stays open, and the backdrop
+  // blur persists on the spectator's screen until they tap to dismiss.
+  $effect(() => {
+    if (openPopup?.source !== 'live') return;
+    // Touch entries so this effect re-runs whenever the list changes.
+    void entries;
+    if (!entries.some((e) => e.mid === openPopup.mid)) {
+      openPopup = null;
+    }
+  });
+
   // Same shape for history archives: /live/?match=<id> opens the
   // sheet dialog with the matching MatchRecord.
   $effect(() => {
