@@ -213,22 +213,22 @@ jobs:
 
       - name: Build release notes
         id: relnotes
+        env:
+          NOTES: ${{ inputs.notes }}
         run: |
           set -euo pipefail
-          TAG="${{ steps.ver.outputs.tag }}"
           VER="${{ steps.ver.outputs.next }}"
           SHA="${{ steps.sign.outputs.sha256 }}"
-          NOTES="${{ inputs.notes }}"
 
-          cat > release-notes.md <<NOTES
-          # v${VER}
-
-          ${NOTES:-*(no release notes provided)*}
-
-          ---
-
-          **SHA-256:** \`${SHA}\`
-          NOTES
+          {
+            echo "# v${VER}"
+            echo ""
+            echo "${NOTES:-*(no release notes provided)*}"
+            echo ""
+            echo "---"
+            echo ""
+            echo "**SHA-256:** \`${SHA}\`"
+          } > release-notes.md
 
           echo "Release notes:"
           cat release-notes.md
