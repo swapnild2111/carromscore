@@ -220,8 +220,12 @@ export async function ensureAnonAuth(): Promise<void> {
       import('./firebase'),
       import('firebase/auth'),
     ]);
-    await signInAnonymously(getAuth(firebaseApp()));
-    // onAuthStateChanged will fire and update cachedUser.
+    const result = await signInAnonymously(getAuth(firebaseApp()));
+    // signInAnonymously resolves before onAuthStateChanged fires, so
+    // cachedUser would still be null if we returned now. Patch it
+    // directly from the credential so currentUser() is non-null
+    // immediately after this function returns.
+    if (result.user) cachedUser = toAuthUser(result.user);
   } catch {
     // Anonymous auth disabled in the project, or network dead.
     // Planned writes will fail silently — acceptable degradation.
