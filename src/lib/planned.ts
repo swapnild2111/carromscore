@@ -16,6 +16,7 @@
  */
 
 import { firebaseApp } from './firebase';
+import { ensureAnonAuth, currentUser } from './auth';
 
 /** Match config shape stored on a planned record. Same field names
  *  as MatchConfig / MatchRecord.cfg. Any missing field falls back
@@ -229,6 +230,8 @@ export async function markPlannedComplete(
   uid: string,
 ): Promise<PlannedWriteOutcome> {
   if (!mid) return { ok: false, error: 'no mid' };
+  await ensureAnonAuth();
+  const effectiveUid = uid || currentUser()?.uid || '';
   try {
     const [{ getDatabase, ref, get, update }] = await Promise.all([
       import('firebase/database'),
@@ -238,7 +241,7 @@ export async function markPlannedComplete(
     if (!snap.exists()) return { ok: false, error: 'not found' };
     await update(ref(db, `planned/${mid}`), {
       completedAt: Date.now(),
-      completedBy: uid,
+      completedBy: effectiveUid || null,
       result,
     });
     return { ok: true, mid };
@@ -248,15 +251,47 @@ export async function markPlannedComplete(
 }
 
 /**
+ * Reset a completed planned slot back to "ready" by removing
+ * completedAt, completedBy, result, claimedBy, and claimedAt.
+ * Used when a test run completed a slot that needs to be replayed.
+ */
+export async function resetPlannedMatch(mid: string): Promise<PlannedWriteOutcome> {
+  if (!mid) return { ok: false, error: 'no mid' };
+  try {
+    const [{ getDatabase, ref, get, update }] = await Promise.all([
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    const snap = await get(ref(db, `planned/${mid}`));
+    if (!snap.exists()) return { ok: false, error: 'not found' };
+    await update(ref(db, `planned/${mid}`), {
+      completedAt: null,
+      completedBy: null,
+      result: null,
+      claimedBy: null,
+      claimedAt: null,
+    });
+    return { ok: true, mid };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'reset failed' };
+  }
+}
+
+/**
  * Claim (or take over) a planned match by writing claimedBy: uid.
  * Called by MatchSetup when the umpire scans the QR. Bumps
  * claimedAt too so the admin UI can show "claimed 3 min ago".
+ * Signs in anonymously if the caller has no auth session so
+ * unauthenticated QR-scanners can still update the bracket.
  */
 export async function claimPlannedMatch(
   mid: string,
   uid: string,
 ): Promise<PlannedWriteOutcome> {
-  if (!mid || !uid) return { ok: false, error: 'missing mid or uid' };
+  if (!mid) return { ok: false, error: 'missing mid' };
+  await ensureAnonAuth();
+  const effectiveUid = uid || currentUser()?.uid || '';
+  if (!effectiveUid) return { ok: false, error: 'no auth uid' };
   try {
     const [{ getDatabase, ref, get, set }] = await Promise.all([
       import('firebase/database'),
@@ -265,10 +300,11 @@ export async function claimPlannedMatch(
     const snap = await get(ref(db, `planned/${mid}`));
     const val = snap.val() as Omit<PlannedMatch, 'mid'> | null;
     if (!val) return { ok: false, error: 'planned match not found' };
-    const next = { ...val, claimedBy: uid, claimedAt: Date.now() };
+    const next = { ...val, claimedBy: effectiveUid, claimedAt: Date.now() };
     await set(ref(db, `planned/${mid}`), next);
     return { ok: true, mid };
   } catch (err) {
+    console.error('[claimPlanned] FAILED:', err);
     return { ok: false, error: err instanceof Error ? err.message : 'claim failed' };
   }
 }

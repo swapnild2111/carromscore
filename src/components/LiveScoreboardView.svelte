@@ -391,7 +391,7 @@
                 twice under set 0: breakSide=a then breakSide=b).
                 Popup used to fail to open entirely for those records.
               -->
-              {#each g.boards as entry (`${entry.set}-${entry.board}-${entry.endedAt}`)}
+              {#each g.boards as entry, boardIdx (`${entry.set}-${entry.board}-${entry.endedAt}`)}
                 {@const queenA = entry.queen === 'a'}
                 {@const queenB = entry.queen === 'b'}
                 <!--
@@ -403,7 +403,10 @@
                             to recover the coin count and render a
                             small `+Q` suffix. Displayed as `coins`
                             (or `coins+Q` when queen).
-                  Middle `#` is the board number, clean.
+                  Middle `#` is 1-based position within the set (not
+                  the raw entry.board, which was a global counter in
+                  records written before 2026-08-09 and would show
+                  7, 8 in Set 2 of a 6-board Set 1).
                 -->
                 {@const coinsA = queenA ? Math.max(0, entry.pointsA - 3) : entry.pointsA}
                 {@const coinsB = queenB ? Math.max(0, entry.pointsB - 3) : entry.pointsB}
@@ -412,7 +415,7 @@
                   <span class="sc-cell sc-a-score side-a" role="cell">
                     {coinsA}{#if queenA}<span class="sc-q-tag" aria-label="Queen">+Q</span>{/if}
                   </span>
-                  <span class="sc-cell sc-num" role="cell">{entry.board}</span>
+                  <span class="sc-cell sc-num" role="cell">{boardIdx + 1}</span>
                   <span class="sc-cell sc-b-score side-b" role="cell">
                     {coinsB}{#if queenB}<span class="sc-q-tag" aria-label="Queen">+Q</span>{/if}
                   </span>

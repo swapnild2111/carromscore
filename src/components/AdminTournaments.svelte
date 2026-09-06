@@ -167,10 +167,10 @@
   let filterType = $state<'all' | 'open' | 'closed'>('all');
   let filterOrganizer = $state('');
   let filterCountry = $state('');
-  let sortBy = $state<'recent' | 'oldest' | 'az' | 'za'>('recent');
+  let sortBy = $state<'recent' | 'oldest' | 'az' | 'za'>('az');
 
   const isFiltered = $derived(
-    query.trim() !== '' || filterType !== 'all' || filterOrganizer !== '' || filterCountry !== '' || sortBy !== 'recent'
+    query.trim() !== '' || filterType !== 'all' || filterOrganizer !== '' || filterCountry !== '' || sortBy !== 'az'
   );
 
   function resetFilters() {
@@ -178,7 +178,7 @@
     filterType = 'all';
     filterOrganizer = '';
     filterCountry = '';
-    sortBy = 'recent';
+    sortBy = 'az';
   }
   /** Add-new-tournament dialog state. Kept as a simple string + open
    *  flag; validation happens on save. */
@@ -465,8 +465,8 @@
       return name === filterOrganizer;
     });
     all = [...all].sort((a, b) => {
-      if (sortBy === 'recent') return b.lastActive - a.lastActive;
-      if (sortBy === 'oldest') return a.lastActive - b.lastActive;
+      if (sortBy === 'recent') return b.createdAt - a.createdAt;
+      if (sortBy === 'oldest') return a.createdAt - b.createdAt;
       if (sortBy === 'az') return a.name.localeCompare(b.name);
       return b.name.localeCompare(a.name);
     });
@@ -1272,7 +1272,7 @@
     </select>
     {/if}
     <select class="filter-select" bind:value={sortBy} aria-label="Sort">
-      <option value="recent">Recent first</option>
+      <option value="recent">Newest first</option>
       <option value="oldest">Oldest first</option>
       <option value="az">Name A–Z</option>
       <option value="za">Name Z–A</option>
