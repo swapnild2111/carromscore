@@ -646,11 +646,12 @@
     void loadHistory().then((m) => (matches = m));
   }
 
-  // Load History on tab switch (once). Reloads on tab-switch-back
-  // are cheap — Firebase caches the read. Also fires on Reports
-  // switch because Reports reads the same /matches tree.
+  // Load History on tab switch. Reloads every time the tab is opened
+  // so the tournament dropdown and match list pick up new matches
+  // without requiring a hard refresh. Firebase caches the read locally
+  // so repeated tab switches are cheap.
   $effect(() => {
-    if ((tab !== 'history' && tab !== 'reports') || historyLoaded) return;
+    if (tab !== 'history' && tab !== 'reports') return;
     historyLoading = true;
     void loadHistory().then((m) => {
       matches = m;
