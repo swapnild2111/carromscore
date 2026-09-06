@@ -410,14 +410,16 @@
                 -->
                 {@const coinsA = queenA ? Math.max(0, entry.pointsA - 3) : entry.pointsA}
                 {@const coinsB = queenB ? Math.max(0, entry.pointsB - 3) : entry.pointsB}
+                {@const displayCoinsA = (queenA && coinsA === 0 && entry.pointsA > 0) ? entry.pointsA : coinsA}
+                {@const displayCoinsB = (queenB && coinsB === 0 && entry.pointsB > 0) ? entry.pointsB : coinsB}
                 <div class="sc-row" role="row">
                   <span class="sc-cell sc-a-pts side-a" role="cell">{entry.cumA}</span>
                   <span class="sc-cell sc-a-score side-a" role="cell">
-                    {coinsA}{#if queenA}<span class="sc-q-tag" aria-label="Queen">+Q</span>{/if}
+                    {displayCoinsA}{#if queenA}<span class="sc-q-tag" aria-label="Queen">+Q</span>{/if}
                   </span>
                   <span class="sc-cell sc-num" role="cell">{boardIdx + 1}</span>
                   <span class="sc-cell sc-b-score side-b" role="cell">
-                    {coinsB}{#if queenB}<span class="sc-q-tag" aria-label="Queen">+Q</span>{/if}
+                    {displayCoinsB}{#if queenB}<span class="sc-q-tag" aria-label="Queen">+Q</span>{/if}
                   </span>
                   <span class="sc-cell sc-b-pts side-b" role="cell">{entry.cumB}</span>
                 </div>
