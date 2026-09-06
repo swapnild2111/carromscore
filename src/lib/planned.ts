@@ -248,6 +248,33 @@ export async function markPlannedComplete(
 }
 
 /**
+ * Reset a completed planned slot back to "ready" by removing
+ * completedAt, completedBy, result, claimedBy, and claimedAt.
+ * Used when a test run completed a slot that needs to be replayed.
+ */
+export async function resetPlannedMatch(mid: string): Promise<PlannedWriteOutcome> {
+  if (!mid) return { ok: false, error: 'no mid' };
+  try {
+    const [{ getDatabase, ref, get, update }] = await Promise.all([
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    const snap = await get(ref(db, `planned/${mid}`));
+    if (!snap.exists()) return { ok: false, error: 'not found' };
+    await update(ref(db, `planned/${mid}`), {
+      completedAt: null,
+      completedBy: null,
+      result: null,
+      claimedBy: null,
+      claimedAt: null,
+    });
+    return { ok: true, mid };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'reset failed' };
+  }
+}
+
+/**
  * Claim (or take over) a planned match by writing claimedBy: uid.
  * Called by MatchSetup when the umpire scans the QR. Bumps
  * claimedAt too so the admin UI can show "claimed 3 min ago".

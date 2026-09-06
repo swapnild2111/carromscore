@@ -19,6 +19,7 @@
   import {
     createPlannedMatch,
     deletePlannedMatch,
+    resetPlannedMatch,
     subscribePlannedByTournament,
     type PlannedMatch,
   } from '../../lib/planned';
@@ -426,6 +427,14 @@
     else flash('Match removed');
   }
 
+  async function resetRow(m: PlannedMatch) {
+    // eslint-disable-next-line no-alert
+    if (!window.confirm(`Reset this slot back to "ready"?\n${m.aName} vs ${m.bName}\n\nThis removes the recorded result and lets the match be played again.`)) return;
+    const outcome = await resetPlannedMatch(m.mid);
+    if (!outcome.ok) inlineError = outcome.error;
+    else flash('Slot reset to ready');
+  }
+
   function statusOf(m: PlannedMatch): 'awaiting' | 'planned' | 'claimed' | 'complete' {
     if (m.completedAt) return 'complete';
     if (m.claimedBy) return 'claimed';
@@ -677,6 +686,15 @@
                       {/if}
                     </td>
                     <td class="col-actions">
+                      {#if m.completedAt}
+                        <button
+                          type="button"
+                          class="row-reset"
+                          onclick={() => resetRow(m)}
+                          aria-label="Reset slot to ready"
+                          title="Reset — remove result so this slot can be played again"
+                        >↺</button>
+                      {/if}
                       <button
                         type="button"
                         class="row-del"
@@ -1091,7 +1109,7 @@
   }
   .col-num { width: 2rem; text-align: center; color: var(--muted, #9aa0a6); }
   .col-status { width: 8rem; }
-  .col-actions { width: 2.5rem; text-align: right; }
+  .col-actions { width: 5rem; text-align: right; white-space: nowrap; }
 
   .pill {
     display: inline-block;
@@ -1130,6 +1148,21 @@
   }
 
 
+  .row-reset {
+    background: transparent;
+    border: 1px solid rgba(100, 160, 255, 0.3);
+    color: rgba(100, 160, 255, 0.8);
+    padding: 0.3rem 0.5rem;
+    border-radius: 0.3rem;
+    cursor: pointer;
+    font-size: 0.95rem;
+    line-height: 1;
+    margin-right: 0.25rem;
+  }
+  .row-reset:hover {
+    background: rgba(100, 160, 255, 0.1);
+    border-color: rgba(100, 160, 255, 0.5);
+  }
   .row-del {
     background: transparent;
     border: 1px solid rgba(239, 83, 80, 0.3);
