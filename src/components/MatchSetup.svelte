@@ -1032,9 +1032,9 @@
     // Claim the planned slot now that the match is actually starting.
     // Silent-on-failure — a signed-out umpire can still score; they
     // just won't stamp claimedBy on the bracket row.
-    const uid = currentUser()?.uid;
+    const uid = currentUser()?.uid ?? '';
     const effectiveMid = plannedMid || resolvedBracketMid;
-    if (effectiveMid && uid) void claimPlannedMatch(effectiveMid, uid);
+    if (effectiveMid) void claimPlannedMatch(effectiveMid, uid);
     const plannedSuffix = effectiveMid ? `&planned=${encodeURIComponent(effectiveMid)}` : '';
     const scoreUrl = `${base}score/?${encodeConfig(cfg)}${plannedSuffix}`;
     saveResume({
