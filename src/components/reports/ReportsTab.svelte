@@ -486,6 +486,68 @@
       mSortDir = k === 'sideA' || k === 'sideB' || k === 'mode' || k === 'winner' ? 'asc' : 'desc';
     }
   }
+
+  // Per-round breakdown table sort state. Shared across all round
+  // accordion panels — same column click sorts every round the same
+  // way, which is less confusing than independent sort per round.
+  let rrLBSortKey = $state<LBSortKey>('rank');
+  let rrLBSortDir = $state<'asc' | 'desc'>('asc');
+  let rrMSortKey = $state<MSortKey>('endedAt');
+  let rrMSortDir = $state<'asc' | 'desc'>('desc');
+  function toggleRRLBSort(k: LBSortKey): void {
+    if (rrLBSortKey === k) {
+      rrLBSortDir = rrLBSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      rrLBSortKey = k;
+      rrLBSortDir = k === 'name' || k === 'rank' ? 'asc' : 'desc';
+    }
+  }
+  function toggleRRMSort(k: MSortKey): void {
+    if (rrMSortKey === k) {
+      rrMSortDir = rrMSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      rrMSortKey = k;
+      rrMSortDir = k === 'sideA' || k === 'sideB' || k === 'mode' || k === 'winner' ? 'asc' : 'desc';
+    }
+  }
+  function sortRRLeaderboard(rows: typeof report.roundReports[0]['playerSummary']) {
+    if (rrLBSortKey === 'rank') return rrLBSortDir === 'asc' ? rows : rows.slice().reverse();
+    const dir = rrLBSortDir === 'asc' ? 1 : -1;
+    return rows.slice().sort((a, b) => {
+      let av: number | string = 0, bv: number | string = 0;
+      switch (rrLBSortKey) {
+        case 'name': av = a.name.toLowerCase(); bv = b.name.toLowerCase(); break;
+        case 'matches': av = a.matches; bv = b.matches; break;
+        case 'wins': av = a.wins; bv = b.wins; break;
+        case 'losses': av = a.losses; bv = b.losses; break;
+        case 'draws': av = a.draws; bv = b.draws; break;
+        case 'boards': av = a.boardsWon; bv = b.boardsWon; break;
+        case 'points': av = a.pointsScored; bv = b.pointsScored; break;
+      }
+      if (av < bv) return -1 * dir;
+      if (av > bv) return 1 * dir;
+      return 0;
+    });
+  }
+  function sortRRMatches(rows: typeof report.roundReports[0]['rows']) {
+    const dir = rrMSortDir === 'asc' ? 1 : -1;
+    return rows.slice().sort((a, b) => {
+      let av: number | string = 0, bv: number | string = 0;
+      switch (rrMSortKey) {
+        case 'endedAt': av = a.endedAtRaw ?? 0; bv = b.endedAtRaw ?? 0; break;
+        case 'mode': av = String(a.mode); bv = String(b.mode); break;
+        case 'sideA': av = String(a.sideA).toLowerCase(); bv = String(b.sideA).toLowerCase(); break;
+        case 'sideB': av = String(a.sideB).toLowerCase(); bv = String(b.sideB).toLowerCase(); break;
+        case 'setsA': av = a.setsA; bv = b.setsA; break;
+        case 'setsB': av = a.setsB; bv = b.setsB; break;
+        case 'points': av = a.pointsA + a.pointsB; bv = b.pointsA + b.pointsB; break;
+        case 'winner': av = String(a.winner); bv = String(b.winner); break;
+      }
+      if (av < bv) return -1 * dir;
+      if (av > bv) return 1 * dir;
+      return (b.endedAtRaw ?? 0) - (a.endedAtRaw ?? 0);
+    });
+  }
   const sortedLeaderboard = $derived.by(() => {
     const r = viewReport;
     if (!r) return [];
@@ -936,23 +998,25 @@
               {:else}
                 <div class="round-report-body">
                   <div class="summary-scroll">
+                    {@const rrSorted = sortRRLeaderboard(rr.playerSummary)}
+                    {@const rrRankMap = new Map(rr.playerSummary.map((p, i) => [p.playerId, rankLabel(rr.playerSummary, i)]))}
                     <table class="summary-tbl leaderboard-tbl">
                       <thead>
                         <tr>
-                          <th class="col-rank">#</th>
-                          <th class="col-name">Player</th>
-                          <th>Matches</th>
-                          <th>W</th>
-                          <th>L</th>
-                          <th>D</th>
-                          <th>Boards</th>
-                          <th>Points</th>
+                          <th class="col-rank hist-th-sortable" class:hist-th-sorted={rrLBSortKey === 'rank'} onclick={() => toggleRRLBSort('rank')}># {rrLBSortKey === 'rank' ? (rrLBSortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                          <th class="col-name hist-th-sortable" class:hist-th-sorted={rrLBSortKey === 'name'} onclick={() => toggleRRLBSort('name')}>Player {rrLBSortKey === 'name' ? (rrLBSortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                          <th class="hist-th-sortable" class:hist-th-sorted={rrLBSortKey === 'matches'} onclick={() => toggleRRLBSort('matches')}>Matches {rrLBSortKey === 'matches' ? (rrLBSortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                          <th class="hist-th-sortable" class:hist-th-sorted={rrLBSortKey === 'wins'} onclick={() => toggleRRLBSort('wins')}>W {rrLBSortKey === 'wins' ? (rrLBSortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                          <th class="hist-th-sortable" class:hist-th-sorted={rrLBSortKey === 'losses'} onclick={() => toggleRRLBSort('losses')}>L {rrLBSortKey === 'losses' ? (rrLBSortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                          <th class="hist-th-sortable" class:hist-th-sorted={rrLBSortKey === 'draws'} onclick={() => toggleRRLBSort('draws')}>D {rrLBSortKey === 'draws' ? (rrLBSortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                          <th class="hist-th-sortable" class:hist-th-sorted={rrLBSortKey === 'boards'} onclick={() => toggleRRLBSort('boards')}>Boards {rrLBSortKey === 'boards' ? (rrLBSortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                          <th class="hist-th-sortable" class:hist-th-sorted={rrLBSortKey === 'points'} onclick={() => toggleRRLBSort('points')}>Points {rrLBSortKey === 'points' ? (rrLBSortDir === 'asc' ? '↑' : '↓') : ''}</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {#each rr.playerSummary as p, i (p.playerId)}
-                          <tr class:leaderboard-top={i === 0}>
-                            <td class="col-rank">{rankLabel(rr.playerSummary, i)}</td>
+                        {#each rrSorted as p, i (p.playerId)}
+                          <tr class:leaderboard-top={rrLBSortKey === 'rank' && rrLBSortDir === 'asc' && i === 0}>
+                            <td class="col-rank">{rrRankMap.get(p.playerId) ?? String(i + 1)}</td>
                             <td class="col-name">{p.name}</td>
                             <td>{p.matches}</td>
                             <td>{p.wins}</td>
@@ -976,24 +1040,25 @@
                     </button>
                   </div>
                   <div class="tbl-scroll">
+                    {@const rrMatchesSorted = sortRRMatches(rr.rows)}
                     <table class="matches-tbl">
                       <thead>
                         <tr>
-                          <th>Ended</th>
-                          <th>Mode</th>
-                          <th class="col-name">Side A</th>
-                          <th class="col-name">Side B</th>
-                          <th>Sets A</th>
-                          <th>Sets B</th>
+                          <th class="hist-th-sortable" class:hist-th-sorted={rrMSortKey === 'endedAt'} onclick={() => toggleRRMSort('endedAt')}>Ended {rrMSortKey === 'endedAt' ? (rrMSortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                          <th class="hist-th-sortable" class:hist-th-sorted={rrMSortKey === 'mode'} onclick={() => toggleRRMSort('mode')}>Mode {rrMSortKey === 'mode' ? (rrMSortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                          <th class="col-name hist-th-sortable" class:hist-th-sorted={rrMSortKey === 'sideA'} onclick={() => toggleRRMSort('sideA')}>Side A {rrMSortKey === 'sideA' ? (rrMSortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                          <th class="col-name hist-th-sortable" class:hist-th-sorted={rrMSortKey === 'sideB'} onclick={() => toggleRRMSort('sideB')}>Side B {rrMSortKey === 'sideB' ? (rrMSortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                          <th class="hist-th-sortable" class:hist-th-sorted={rrMSortKey === 'setsA'} onclick={() => toggleRRMSort('setsA')}>Sets A {rrMSortKey === 'setsA' ? (rrMSortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                          <th class="hist-th-sortable" class:hist-th-sorted={rrMSortKey === 'setsB'} onclick={() => toggleRRMSort('setsB')}>Sets B {rrMSortKey === 'setsB' ? (rrMSortDir === 'asc' ? '↑' : '↓') : ''}</th>
                           <th>Boards A</th>
                           <th>Boards B</th>
-                          <th>Points A</th>
+                          <th class="hist-th-sortable" class:hist-th-sorted={rrMSortKey === 'points'} onclick={() => toggleRRMSort('points')}>Points A {rrMSortKey === 'points' ? (rrMSortDir === 'asc' ? '↑' : '↓') : ''}</th>
                           <th>Points B</th>
-                          <th>Winner</th>
+                          <th class="hist-th-sortable" class:hist-th-sorted={rrMSortKey === 'winner'} onclick={() => toggleRRMSort('winner')}>Winner {rrMSortKey === 'winner' ? (rrMSortDir === 'asc' ? '↑' : '↓') : ''}</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {#each rr.rows as r (r._matchId)}
+                        {#each rrMatchesSorted as r (r._matchId)}
                           <tr>
                             <td>{r.endedAt}</td>
                             <td>{r.mode}</td>

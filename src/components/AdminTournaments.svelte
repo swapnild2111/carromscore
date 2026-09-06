@@ -56,6 +56,7 @@
   import CountrySelect from './CountrySelect.svelte';
   import { countryName, flagEmoji } from '../lib/countries';
   import TournamentBracket from './admin/TournamentBracket.svelte';
+  import { loadPendingPlannedByTournament, deletePlannedMatch } from '../lib/planned';
 
   /**
    * Current-user role gating: super sees every row's actions; a
@@ -210,6 +211,20 @@
   /** Bump on the identity-store change, so the assignment dialog's
    *  filtered player list re-renders when a player is added elsewhere. */
   let playersTick = $state(0);
+
+  /**
+   * Unassign-with-bracket-cascade warning state. When an organiser
+   * unticks a player who has pending (non-completed) bracket slots,
+   * we surface a confirmation before proceeding: how many slots, a
+   * Cancel path, and a "Remove + delete slots" path. Completed slots
+   * are not touched (the match already happened; bracket history stays).
+   */
+  let unassignWarning = $state<{
+    playerId: string;
+    playerName: string;
+    affectedSlots: import('../lib/planned').PlannedMatch[];
+    deleting: boolean;
+  } | null>(null);
 
   /**
    * Per-row Rounds modal state (v3.2). Modal lists the tournament's
@@ -1044,9 +1059,39 @@
   }
   async function togglePlayerAssignment(playerId: string) {
     if (!assignKey) return;
-    assignSaving = true;
-    try {
-      if (assignedIds.has(playerId)) {
+    if (assignedIds.has(playerId)) {
+      // Unassigning — check for pending bracket slots first.
+      assignSaving = true;
+      let slots: import('../lib/planned').PlannedMatch[] = [];
+      try {
+        const all = await loadPendingPlannedByTournament(assignKey);
+        slots = all.filter(
+          (m) =>
+            m.aResolvedId === playerId ||
+            m.bResolvedId === playerId ||
+            m.a2ResolvedId === playerId ||
+            m.b2ResolvedId === playerId,
+        );
+      } catch {
+        // ignore — proceed without the bracket check
+      } finally {
+        assignSaving = false;
+      }
+      if (slots.length > 0) {
+        // Surface the warning dialog; the actual removal happens in
+        // confirmUnassignWithCascade / cancelUnassignWarning.
+        const p = loadAllPlayers().find((x) => x.id === playerId);
+        unassignWarning = {
+          playerId,
+          playerName: p?.canonicalName ?? playerId,
+          affectedSlots: slots,
+          deleting: false,
+        };
+        return;
+      }
+      // No pending slots — proceed with the plain unassign.
+      assignSaving = true;
+      try {
         const r = await unassignPlayer(assignKey, playerId);
         if (r.ok) {
           const next = new Set(assignedIds);
@@ -1055,7 +1100,13 @@
         } else {
           flash('err', r.error);
         }
-      } else {
+      } finally {
+        assignSaving = false;
+      }
+    } else {
+      // Assigning — no cascade needed.
+      assignSaving = true;
+      try {
         const r = await assignPlayer(assignKey, playerId);
         if (r.ok) {
           const next = new Set(assignedIds);
@@ -1064,10 +1115,33 @@
         } else {
           flash('err', r.error);
         }
+      } finally {
+        assignSaving = false;
       }
-    } finally {
-      assignSaving = false;
     }
+  }
+
+  function cancelUnassignWarning() {
+    unassignWarning = null;
+  }
+
+  async function confirmUnassignWithCascade() {
+    if (!unassignWarning || !assignKey) return;
+    unassignWarning = { ...unassignWarning, deleting: true };
+    const { playerId, affectedSlots } = unassignWarning;
+    // Delete each pending bracket slot.
+    await Promise.all(affectedSlots.map((s) => deletePlannedMatch(s.mid)));
+    // Then unassign the player.
+    const r = await unassignPlayer(assignKey, playerId);
+    if (r.ok) {
+      const next = new Set(assignedIds);
+      next.delete(playerId);
+      assignedIds = next;
+      flash('ok', `Player removed · ${affectedSlots.length} bracket slot${affectedSlots.length === 1 ? '' : 's'} deleted`);
+    } else {
+      flash('err', r.error);
+    }
+    unassignWarning = null;
   }
 
   /** Filtered player list for the assignment dialog. Reads from the
@@ -1980,6 +2054,44 @@
     </div>
   {/if}
 
+  {#if unassignWarning}
+    {@const w = unassignWarning}
+    <div class="dialog" role="dialog" aria-modal="true">
+      <div class="dialog-card">
+        <h3>Remove player from tournament?</h3>
+        <p>
+          <strong>{w.playerName}</strong> has
+          <strong>{w.affectedSlots.length} pending bracket slot{w.affectedSlots.length === 1 ? '' : 's'}</strong>
+          in this tournament. Removing them will also delete
+          {w.affectedSlots.length === 1 ? 'that slot' : 'those slots'}.
+        </p>
+        <p class="unassign-slots-preview">
+          {#each w.affectedSlots.slice(0, 5) as s (s.mid)}
+            <span class="unassign-slot-chip">{s.round} · {s.aName} vs {s.bName}</span>
+          {/each}
+          {#if w.affectedSlots.length > 5}
+            <span class="unassign-slot-more">+{w.affectedSlots.length - 5} more</span>
+          {/if}
+        </p>
+        <p>Completed matches are not affected — only upcoming slots will be deleted.</p>
+        <div class="dialog-actions">
+          <button
+            type="button"
+            class="btn"
+            onclick={cancelUnassignWarning}
+            disabled={w.deleting}
+          >Cancel</button>
+          <button
+            type="button"
+            class="btn btn-danger"
+            onclick={confirmUnassignWithCascade}
+            disabled={w.deleting}
+          >{w.deleting ? 'Removing…' : 'Remove + delete slots'}</button>
+        </div>
+      </div>
+    </div>
+  {/if}
+
   <!--
     Rounds modal (v3.2). Nested dialog: the round-delete confirmation
     layers on top of this one. Both are simple `.dialog` overlays so
@@ -2830,6 +2942,27 @@
   .assign-country {
     color: var(--muted);
     font-size: 0.75rem;
+  }
+
+  /* ─── Unassign-with-cascade warning ─────────────────────────── */
+  .unassign-slots-preview {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin: 0.5rem 0;
+  }
+  .unassign-slot-chip {
+    background: rgba(255, 160, 0, 0.12);
+    border: 1px solid rgba(255, 160, 0, 0.3);
+    border-radius: 4px;
+    padding: 0.15rem 0.45rem;
+    font-size: 0.75rem;
+    color: var(--fg);
+  }
+  .unassign-slot-more {
+    font-size: 0.75rem;
+    color: var(--muted);
+    align-self: center;
   }
 
   /* ─── Rounds modal (v3.2) ────────────────────────────────────── */

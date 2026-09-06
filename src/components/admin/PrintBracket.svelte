@@ -62,6 +62,15 @@
   let tournamentTick = $state(0);
   let playerTick = $state(0);
 
+  /** Resolve a player id to their current canonical name, falling back
+   *  to the stored string. Mirrors history.ts playerName(). */
+  function resolvedName(id: string | undefined, fallback: string): string {
+    void playerTick;
+    if (!id) return fallback;
+    const p = loadAllPlayersFn().find((x) => x.id === id);
+    return p?.canonicalName ?? fallback;
+  }
+
   // Assigned-player id set for closed tournaments (empty for open).
   // Populated once when the tournament record is known.
   let assignedIds = $state<Set<string>>(new Set());
@@ -519,9 +528,9 @@
                   <tr>
                     <td class="sched-board">{qrMode === 'match' ? `M${matchNum}` : (m.board ? `B${m.board}` : '—')}</td>
                     <td class="sched-matchup">
-                      <span class="sched-player">{m.aName}{#if m.a2Name} + {m.a2Name}{/if}</span>
+                      <span class="sched-player">{resolvedName(m.aResolvedId, m.aName)}{#if m.a2Name} + {resolvedName(m.a2ResolvedId, m.a2Name)}{/if}</span>
                       <span class="sched-vs">vs</span>
-                      <span class="sched-player">{m.bName}{#if m.b2Name} + {m.b2Name}{/if}</span>
+                      <span class="sched-player">{resolvedName(m.bResolvedId, m.bName)}{#if m.b2Name} + {resolvedName(m.b2ResolvedId, m.b2Name)}{/if}</span>
                     </td>
                   </tr>
                 {/each}
@@ -592,9 +601,9 @@
               <div class="match-qr-cell">
                 <p class="mqr-board">Match {matchNum}</p>
                 <div class="mqr-matchup">
-                  <span class="mqr-side">{m.aName}{#if m.a2Name}<br/><span class="mqr-partner">{m.a2Name}</span>{/if}</span>
+                  <span class="mqr-side">{resolvedName(m.aResolvedId, m.aName)}{#if m.a2Name}<br/><span class="mqr-partner">{resolvedName(m.a2ResolvedId, m.a2Name)}</span>{/if}</span>
                   <span class="mqr-vs">vs</span>
-                  <span class="mqr-side">{m.bName}{#if m.b2Name}<br/><span class="mqr-partner">{m.b2Name}</span>{/if}</span>
+                  <span class="mqr-side">{resolvedName(m.bResolvedId, m.bName)}{#if m.b2Name}<br/><span class="mqr-partner">{resolvedName(m.b2ResolvedId, m.b2Name)}</span>{/if}</span>
                 </div>
                 <div class="mqr-qr-holder">
                   {#if qrByMid[m.mid]}
