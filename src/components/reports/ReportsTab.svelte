@@ -998,6 +998,7 @@
               {:else}
                 <div class="round-report-body">
                   <div class="summary-scroll">
+                    {#if true}
                     {@const rrSorted = sortRRLeaderboard(rr.playerSummary)}
                     {@const rrRankMap = new Map(rr.playerSummary.map((p, i) => [p.playerId, rankLabel(rr.playerSummary, i)]))}
                     <table class="summary-tbl leaderboard-tbl">
@@ -1028,6 +1029,7 @@
                         {/each}
                       </tbody>
                     </table>
+                    {/if}
                   </div>
                   <div class="round-report-actions">
                     <button
@@ -1040,6 +1042,7 @@
                     </button>
                   </div>
                   <div class="tbl-scroll">
+                    {#if true}
                     {@const rrMatchesSorted = sortRRMatches(rr.rows)}
                     <table class="matches-tbl">
                       <thead>
@@ -1080,6 +1083,7 @@
                         {/each}
                       </tbody>
                     </table>
+                    {/if}
                   </div>
                 </div>
               {/if}
