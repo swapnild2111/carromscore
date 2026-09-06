@@ -221,6 +221,31 @@
   }
 
   /**
+   * Apply tournament defaults to match rules when a tournament is selected
+   * manually (no QR). Resets to DEFAULT_CONFIG when tournament is cleared.
+   * Only runs in idle (non-QR) flow — QR flow uses applyPlannedToCfg.
+   */
+  let lastAppliedTournamentKey = $state<string | null>(null);
+  $effect(() => {
+    if (plannedState.kind !== 'idle') return;
+    const t = pickedTournament();
+    const key = t?.key ?? null;
+    if (key === lastAppliedTournamentKey) return;
+    lastAppliedTournamentKey = key;
+    if (t?.defaults) {
+      cfg.bestOf = t.defaults.bestOf ?? DEFAULT_CONFIG.bestOf;
+      cfg.pointsTarget = t.defaults.pointsTarget ?? DEFAULT_CONFIG.pointsTarget;
+      cfg.maxBoards = t.defaults.maxBoards ?? DEFAULT_CONFIG.maxBoards;
+      cfg.timerDuration = t.defaults.timerDuration ?? DEFAULT_CONFIG.timerDuration;
+    } else if (key === null) {
+      cfg.bestOf = DEFAULT_CONFIG.bestOf;
+      cfg.pointsTarget = DEFAULT_CONFIG.pointsTarget;
+      cfg.maxBoards = DEFAULT_CONFIG.maxBoards;
+      cfg.timerDuration = DEFAULT_CONFIG.timerDuration;
+    }
+  });
+
+  /**
    * User confirmed takeover from the takeover screen. Claim the slot
    * for their uid, apply the record to cfg, and drop into the normal
    * setup flow.
@@ -251,6 +276,31 @@
       window.history.replaceState({}, '', url.toString());
     }
     plannedState = { kind: 'idle' };
+  }
+
+  function startFresh() {
+    // Player wants a casual/unlinked match from the same device.
+    // Clear the planned params from the URL and reset all pre-filled
+    // fields so the form is a blank slate — bracket slot stays "Ready".
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('planned');
+      url.searchParams.delete('tournament');
+      url.searchParams.delete('board');
+      window.history.replaceState({}, '', url.toString());
+    }
+    plannedMid = '';
+    plannedState = { kind: 'idle' };
+    cfg.playerA = '';
+    cfg.playerA2 = '';
+    cfg.playerB = '';
+    cfg.playerB2 = '';
+    cfg.tournament = '';
+    cfg.round = '';
+    resolvedPlayerIds.playerA = null;
+    resolvedPlayerIds.playerA2 = null;
+    resolvedPlayerIds.playerB = null;
+    resolvedPlayerIds.playerB2 = null;
   }
 
   // Per-device roster grown from past match setups. Merged with the
@@ -938,6 +988,14 @@
     return slot?.mid ?? '';
   });
 
+  // QR flow: everything locks — bracket encodes the full match config.
+  // Manual flow: rules lock when a known tournament is selected (its
+  // defaults define the rules); players/tournament/round stay editable.
+  const isQrFlow = $derived(plannedState.kind === 'loaded');
+  const rulesLocked = $derived(isQrFlow || pickedTournament() !== null);
+  const playersLocked = $derived(isQrFlow);
+  const tournamentLocked = $derived(isQrFlow);
+
   let canStart = $derived(() => {
     const a1 = cfg.playerA.trim().length > 0;
     if (cfg.mode === 'practice') {
@@ -1171,12 +1229,12 @@
   // See src/components/FeedbackPopup.svelte.
 </script>
 
-{#snippet picker(label: string, key: keyof MatchConfig)}
+{#snippet picker(label: string, key: keyof MatchConfig, disabled = false)}
   {@const typed = (cfg[key] as string)}
   {@const suggestions = suggest(typed)}
-  {@const dropdownVisible = openPicker === key && suggestions.length > 0}
+  {@const dropdownVisible = !disabled && openPicker === key && suggestions.length > 0}
   {@const hit = topHit(typed)}
-  <label class="picker">
+  <label class="picker" class:picker-locked={disabled}>
     <span>{label}</span>
     <input
       type="text"
@@ -1186,6 +1244,7 @@
       role="combobox"
       aria-expanded={dropdownVisible}
       aria-autocomplete="list"
+      {disabled}
       oninput={(e) => { pickerHighlight = 0; onNameInput(key, (e.currentTarget as HTMLInputElement).value); }}
       onfocus={() => { openPicker = key; pickerHighlight = -1; }}
       onblur={() => setTimeout(() => { if (!suppressPickerBlur && openPicker === key) { openPicker = null; pickerHighlight = -1; } suppressPickerBlur = false; }, 200)}
@@ -1244,15 +1303,16 @@
   </label>
 {/snippet}
 
-{#snippet noteInput(label: string, key: 'noteA' | 'noteB')}
-  <label class="note-input">
-    <span>{label} <em class="hint-inline">(optional)</em></span>
+{#snippet noteInput(label: string, key: 'noteA' | 'noteB', disabled = false)}
+  <label class="note-input" class:picker-locked={disabled}>
+    <span>{label}{#if !disabled} <em class="hint-inline">(optional)</em>{/if}</span>
     <input
       type="text"
       autocomplete="off"
       maxlength="24"
       placeholder="Country, state, club…"
       value={cfg[key]}
+      {disabled}
       oninput={(e) => (cfg[key] = (e.currentTarget as HTMLInputElement).value)}
     />
   </label>
@@ -1331,6 +1391,9 @@
       bo{cfg.bestOf} · target {cfg.pointsTarget}{cfg.maxBoards ? ` · max ${cfg.maxBoards} boards` : ''}{cfg.timerDuration ? ` · ${cfg.timerDuration} min timer` : ''}
     </p>
     <p class="planned-hint">Review below and tap Start when the players are seated.</p>
+    <button type="button" class="planned-fresh-btn" onclick={startFresh}>
+      Not this match? Play without bracket
+    </button>
   </aside>
 {/if}
 
@@ -1369,48 +1432,50 @@
     that already reflect the mode — no back-and-forth. Reordered
     2026-08-15.
   -->
-  <fieldset class="fmt fmt-mode">
+  <fieldset class="fmt fmt-mode" class:rules-locked={rulesLocked}>
     <legend>
-      Mode
+      Mode{#if rulesLocked}<span class="rules-lock-badge" title="Mode set by tournament">🔒</span>{/if}
+      {#if !rulesLocked}
       <HelpTip label="Help: match mode">
         <strong>Singles</strong> — one player per side.<br/>
         <strong>Doubles</strong> — two players per side (2v2).<br/>
         <strong>Practice</strong> — solo drill; tracks boards + misses only, no opponent.
       </HelpTip>
+      {/if}
     </legend>
-    <label class:selected={cfg.mode === 'singles'}>
-      <input type="radio" name="mode" value="singles" checked={cfg.mode === 'singles'} onchange={() => setMode('singles')} />
+    <label class:selected={cfg.mode === 'singles'} class:mode-locked={rulesLocked}>
+      <input type="radio" name="mode" value="singles" checked={cfg.mode === 'singles'} onchange={() => setMode('singles')} disabled={rulesLocked} />
       <span class="opt-title">Singles</span>
       <span class="opt-meta">1 vs 1</span>
     </label>
-    <label class:selected={cfg.mode === 'doubles'}>
-      <input type="radio" name="mode" value="doubles" checked={cfg.mode === 'doubles'} onchange={() => setMode('doubles')} />
+    <label class:selected={cfg.mode === 'doubles'} class:mode-locked={rulesLocked}>
+      <input type="radio" name="mode" value="doubles" checked={cfg.mode === 'doubles'} onchange={() => setMode('doubles')} disabled={rulesLocked} />
       <span class="opt-title">Doubles</span>
       <span class="opt-meta">2 vs 2</span>
     </label>
-    <label class:selected={cfg.mode === 'practice'}>
-      <input type="radio" name="mode" value="practice" checked={cfg.mode === 'practice'} onchange={() => setMode('practice')} />
+    <label class:selected={cfg.mode === 'practice'} class:mode-locked={rulesLocked}>
+      <input type="radio" name="mode" value="practice" checked={cfg.mode === 'practice'} onchange={() => setMode('practice')} disabled={rulesLocked} />
       <span class="opt-title">Practice</span>
       <span class="opt-meta">Solo drill</span>
     </label>
   </fieldset>
 
-  <fieldset class="rules" class:rules-practice={cfg.mode === 'practice'}>
-    <legend>Match rules</legend>
+  <fieldset class="rules" class:rules-practice={cfg.mode === 'practice'} class:rules-locked={rulesLocked}>
+    <legend>Match rules{#if rulesLocked}<span class="rules-lock-badge" title="Rules set by tournament">🔒</span>{/if}</legend>
     <label>
       <span>Sets</span>
-      <input type="number" min="1" max="9" step="1" bind:value={cfg.bestOf} />
+      <input type="number" min="1" max="9" step="1" bind:value={cfg.bestOf} disabled={rulesLocked} />
     </label>
     {#if cfg.mode !== 'practice'}
       <label>
         <span>Points</span>
-        <input type="number" min="1" step="1" bind:value={cfg.pointsTarget} />
+        <input type="number" min="1" step="1" bind:value={cfg.pointsTarget} disabled={rulesLocked} />
       </label>
     {/if}
     <label>
       <span>{cfg.mode === 'practice' ? 'Boards per set' : 'Boards'}</span>
       <div class="rules-val-row">
-        <input type="number" min={cfg.mode === 'practice' ? 1 : 0} step="1" bind:value={cfg.maxBoards} />
+        <input type="number" min={cfg.mode === 'practice' ? 1 : 0} step="1" bind:value={cfg.maxBoards} disabled={rulesLocked} />
       </div>
     </label>
     <label>
@@ -1422,6 +1487,7 @@
           max="300"
           step="1"
           bind:value={cfg.timerDuration}
+          disabled={rulesLocked}
           onblur={(e) => {
             const v = (e.currentTarget as HTMLInputElement).value;
             if (v === '' || v === null) cfg.timerDuration = 0;
@@ -1442,12 +1508,14 @@
   -->
   {#if cfg.mode !== 'practice'}
   <div class="event-block">
-  <label class="tournament-input">
+  <label class="tournament-input" class:picker-locked={tournamentLocked}>
     <span>
-      Tournament <em class="hint-inline">(optional)</em>
+      Tournament{#if !tournamentLocked} <em class="hint-inline">(optional)</em>{/if}
+      {#if !tournamentLocked}
       <HelpTip label="Help: tournament">
         Groups this match with others of the same event name in the Lobby. Leave blank for casual play (matches show under <strong>Default</strong>). Type an existing tournament name to reuse it, or type a new one to create it.
       </HelpTip>
+      {/if}
     </span>
     <input
       type="text"
@@ -1457,6 +1525,7 @@
       role="combobox"
       aria-expanded={tourDropdownVisible}
       aria-autocomplete="list"
+      disabled={tournamentLocked}
       oninput={(e) => {
         const nextValue = (e.currentTarget as HTMLInputElement).value;
         const prevKey = normalizeKey(cfg.tournament.trim());
@@ -1504,17 +1573,20 @@
     tournament input, which stays free-text for casual events).
   -->
   {#if currentTournamentRounds().length > 0}
-  <label class="tournament-input">
+  <label class="tournament-input" class:picker-locked={tournamentLocked}>
     <span>
-      Round <em class="hint-inline">(required)</em>
+      Round{#if !tournamentLocked} <em class="hint-inline">(required)</em>{/if}
+      {#if !tournamentLocked}
       <HelpTip label="Help: round">
         Which stage of the tournament this match belongs to — Round of 16, Quarter-finals, Semi-finals, Final, etc. This tournament has rounds set up, so pick one before starting the match. History and Reports group matches by round.
       </HelpTip>
+      {/if}
     </span>
     <select
       class="round-select"
       bind:value={cfg.round}
       aria-label="Round"
+      disabled={tournamentLocked}
     >
       <option value="" disabled>Pick a round…</option>
       {#each currentTournamentOpenRounds() as r (r.key)}
@@ -1531,15 +1603,15 @@
       <div class="player-card player-card-a">
         <span class="player-card-label">Player A</span>
         <div class="player-row">
-          {@render picker('Name', 'playerA')}
-          {@render noteInput('Represents', 'noteA')}
+          {@render picker('Name', 'playerA', playersLocked)}
+          {@render noteInput('Represents', 'noteA', rulesLocked)}
         </div>
       </div>
       <div class="player-card player-card-b">
         <span class="player-card-label">Player B</span>
         <div class="player-row">
-          {@render picker('Name', 'playerB')}
-          {@render noteInput('Represents', 'noteB')}
+          {@render picker('Name', 'playerB', playersLocked)}
+          {@render noteInput('Represents', 'noteB', rulesLocked)}
         </div>
       </div>
     </div>
@@ -1548,8 +1620,8 @@
       <div class="player-card player-card-a">
         <span class="player-card-label">Player</span>
         <div class="player-row">
-          {@render picker('Name', 'playerA')}
-          {@render noteInput('Represents', 'noteA')}
+          {@render picker('Name', 'playerA', playersLocked)}
+          {@render noteInput('Represents', 'noteA', rulesLocked)}
         </div>
       </div>
     </div>
@@ -1564,18 +1636,18 @@
     <div class="team-block team-block-a">
       <h3>Team A</h3>
       <div class="row2">
-        {@render picker('Player 1', 'playerA')}
-        {@render picker('Player 2', 'playerA2')}
+        {@render picker('Player 1', 'playerA', playersLocked)}
+        {@render picker('Player 2', 'playerA2', playersLocked)}
       </div>
-      {@render noteInput('Team A represents', 'noteA')}
+      {@render noteInput('Team A represents', 'noteA', rulesLocked)}
     </div>
     <div class="team-block team-block-b">
       <h3>Team B</h3>
       <div class="row2">
-        {@render picker('Player 1', 'playerB')}
-        {@render picker('Player 2', 'playerB2')}
+        {@render picker('Player 1', 'playerB', playersLocked)}
+        {@render picker('Player 2', 'playerB2', playersLocked)}
       </div>
-      {@render noteInput('Team B represents', 'noteB')}
+      {@render noteInput('Team B represents', 'noteB', rulesLocked)}
     </div>
   {/if}
 
@@ -1971,6 +2043,58 @@
     width: 100%;
     text-align: center;
     line-height: 1.2;
+  }
+  fieldset.rules.rules-locked label {
+    border-color: #2a2a2a;
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  fieldset.rules.rules-locked input[type='number']:disabled {
+    color: var(--muted);
+    cursor: not-allowed;
+    -webkit-text-fill-color: var(--muted);
+  }
+  .rules-lock-badge {
+    margin-left: 0.4rem;
+    font-size: 0.75rem;
+    opacity: 0.8;
+  }
+
+  /* Locked mode radio labels */
+  fieldset.fmt-mode.rules-locked label {
+    opacity: 0.6;
+    cursor: not-allowed;
+    border-color: #2a2a2a;
+  }
+  fieldset.fmt-mode.rules-locked label:hover { border-color: #2a2a2a; }
+  fieldset.fmt-mode.rules-locked label.selected {
+    border-color: rgba(255, 213, 74, 0.3);
+    background: #1a1613;
+    opacity: 0.75;
+  }
+
+  /* Locked text / select inputs (picker, note, tournament, round) */
+  label.picker-locked,
+  label.note-input.picker-locked,
+  label.tournament-input.picker-locked {
+    opacity: 0.65;
+    cursor: not-allowed;
+  }
+  label.picker-locked input[type='text']:disabled,
+  label.note-input.picker-locked input[type='text']:disabled,
+  label.tournament-input.picker-locked input[type='text']:disabled {
+    color: var(--muted);
+    -webkit-text-fill-color: var(--muted);
+    cursor: not-allowed;
+    border-color: #2a2a2a;
+  }
+  label.tournament-input.picker-locked .round-select:disabled,
+  .round-select:disabled {
+    color: var(--muted);
+    -webkit-text-fill-color: var(--muted);
+    cursor: not-allowed;
+    border-color: #2a2a2a;
+    opacity: 0.65;
   }
   .rules-hint {
     color: var(--muted);
@@ -2513,6 +2637,18 @@
     border-color: rgba(76, 175, 80, 0.4);
   }
   .planned-hint { color: var(--muted, #9aa0a6); font-size: 0.82rem; }
+  .planned-fresh-btn {
+    margin-top: 0.6rem;
+    background: none;
+    border: none;
+    color: var(--muted, #9aa0a6);
+    font-size: 0.78rem;
+    text-decoration: underline;
+    cursor: pointer;
+    padding: 0;
+    font-family: inherit;
+  }
+  .planned-fresh-btn:hover { color: var(--fg, #f5f5f5); }
   /* Bracket-scan preview banner — richer than the plain notice; shows
      tournament, round, both sides, and the format the umpire is about
      to start. Wraps on narrow screens (players stack vertically). */

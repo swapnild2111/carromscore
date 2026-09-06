@@ -26,6 +26,7 @@
  */
 import {
   loadAll,
+  rankMatches,
   type Player,
 } from './players';
 import { currentUser } from './auth';
@@ -144,7 +145,12 @@ export type MatchResultInput = {
 function resolvePlayerId(name: string, resolvedId: string | null | undefined): string | null {
   const n = (name ?? '').trim();
   if (!n) return null;
-  return resolvedId ?? null;
+  if (resolvedId) return resolvedId;
+  // Fallback: if the umpire typed the name without using the picker,
+  // try an exact match against the loaded player store so the archive
+  // record still carries a playerAId/playerBId for leaderboard grouping.
+  const hit = rankMatches(loadAll(), n, 1)[0];
+  return hit?.rank === 'exact' ? hit.player.id : null;
 }
 
 /**
