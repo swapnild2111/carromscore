@@ -99,6 +99,9 @@
    *  tap handler can route them to /score/ instead of the popup. */
   const localOfflineMids = $derived(new Set(localOfflineEntries.map((e) => e.mid)));
   let matches = $state<MatchRecord[]>([]);
+  // Stable insertion-order map: mid → position when first seen.
+  // Declared at component scope so $derived.by (liveEntries) can read it.
+  const midOrder = new Map<string, number>();
 
   /*
    * History table state (v3.4.12). The tab is table-only now — the
@@ -413,9 +416,6 @@
     let unsub: (() => void) | null = null;
     let liveRaf: ReturnType<typeof requestAnimationFrame> | null = null;
     let latestEntries: typeof entries = [];
-    // Stable insertion-order map: mid → position when first seen.
-    // Keeps cards in place as scores update; new matches append to end.
-    const midOrder = new Map<string, number>();
     void subscribeAllLive((e) => {
       latestEntries = e;
       liveLoading = false;
