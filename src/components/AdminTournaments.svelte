@@ -1294,10 +1294,10 @@
     </select>
     {/if}
     <select class="filter-select" bind:value={sortBy} aria-label="Sort">
-      <option value="recent">Newest first</option>
-      <option value="oldest">Oldest first</option>
       <option value="az">Name A–Z</option>
       <option value="za">Name Z–A</option>
+      <option value="recent">Recent first</option>
+      <option value="oldest">Oldest first</option>
     </select>
     <span class="count">{filtered().length}</span>
     {#if isFiltered}
@@ -1333,13 +1333,6 @@
             >Name <span class="sort-icon" aria-hidden="true">{sortBy === 'az' ? '↑' : sortBy === 'za' ? '↓' : '↕'}</span></th>
             <th class="th-type">Type</th>
             <th class="th-country">Country</th>
-            <th
-              class="th-sortable th-date"
-              class:th-sort-asc={sortBy === 'oldest'}
-              class:th-sort-desc={sortBy === 'recent'}
-              onclick={() => (sortBy = sortBy === 'recent' ? 'oldest' : 'recent')}
-              title="Sort by last active"
-            >Last active <span class="sort-icon" aria-hidden="true">{sortBy === 'recent' ? '↓' : sortBy === 'oldest' ? '↑' : '↕'}</span></th>
             <th class="th-actions">Actions</th>
           </tr>
         </thead>
@@ -1388,7 +1381,6 @@
                   <span class="td-empty">—</span>
                 {/if}
               </td>
-              <td class="td-date">{new Date(t.lastActive).toLocaleDateString()}</td>
               <td class="td-actions">
                 {#if canManageTournament(t)}
                   <div class="row-actions">
@@ -1601,6 +1593,18 @@
             disabled={saving || !editingName.trim() || (editingType === 'closed' && !editingCountry)}
           >{saving ? 'Saving…' : 'Save'}</button>
         </div>
+
+        {#if editingTournament}
+          <footer class="dialog-meta">
+            <span>key: <code>{editingTournament.key}</code></span>
+            <span class="dialog-meta-sep">·</span>
+            <span>last active {new Date(editingTournament.lastActive).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+            {#if editingTournament.createdAt}
+              <span class="dialog-meta-sep">·</span>
+              <span>created {new Date(editingTournament.createdAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+            {/if}
+          </footer>
+        {/if}
       </div>
     </div>
   {/if}
@@ -2415,7 +2419,6 @@
   .th-check { width: 2rem; padding: 0.55rem 0.4rem; }
   .th-type { width: 8rem; }
   .th-country { width: 9rem; }
-  .th-date { width: 8rem; }
   .th-actions { width: 1%; white-space: nowrap; }
 
   .trow {
@@ -2432,29 +2435,19 @@
     vertical-align: middle;
   }
   .td-check { width: 2rem; padding: 0.55rem 0.4rem; }
-  .td-name { min-width: 12rem; }
+  .td-name { min-width: 12rem; max-width: 22rem; word-break: break-word; }
   .td-type { white-space: nowrap; }
   .td-country { white-space: nowrap; }
-  .td-date {
-    white-space: nowrap;
-    color: var(--muted);
-    font-size: 0.8rem;
-    font-variant-numeric: tabular-nums;
-  }
-  .td-actions { white-space: nowrap; }
+  .td-actions { white-space: nowrap; width: 1%; }
   .td-empty { color: var(--muted); opacity: 0.4; }
   .row-name-text {
     color: var(--fg);
     font-weight: 600;
-    font-size: 0.95rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    font-size: 0.9rem;
+    line-height: 1.35;
+    word-break: break-word;
   }
-  /* Row-name button: same visual as the text version but clickable to
-     open the rename / settings dialog. Underline on hover signals the
-     affordance without adding a separate 'Edit' pill. Uses the same
-     ellipsis rules so long names don't blow the row wide. */
+  /* Row-name button: wraps long names rather than stretching the table. */
   .row-name-btn {
     background: transparent;
     border: 0;
@@ -2462,14 +2455,13 @@
     color: var(--fg);
     font: inherit;
     font-weight: 600;
-    font-size: 0.95rem;
+    font-size: 0.9rem;
+    line-height: 1.35;
     font-family: inherit;
     text-align: left;
     cursor: pointer;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    max-width: 100%;
+    white-space: normal;
+    word-break: break-word;
     display: block;
   }
   .row-name-btn:hover {
@@ -2956,9 +2948,17 @@
 
   .row-actions {
     display: flex;
-    gap: 0.35rem;
+    gap: 0.3rem;
     flex-shrink: 0;
     flex-wrap: wrap;
+    align-items: center;
+  }
+  /* Inside the table, action buttons are slightly more compact so they
+     fit on fewer lines next to a wrapped tournament name. */
+  .td-actions .row-actions { flex-wrap: nowrap; }
+  .td-actions .btn {
+    padding: 0.3rem 0.55rem;
+    font-size: 0.78rem;
   }
   .row-edit {
     flex: 1;
@@ -3132,6 +3132,31 @@
     justify-content: flex-end;
     margin-top: 0.5rem;
   }
+
+  /* Blog-style metadata footer inside the edit dialog. Sits below the
+     action buttons, separated by a hairline rule, so it reads as
+     contextual info rather than part of the editable form. */
+  .dialog-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.3rem 0.5rem;
+    margin-top: 0.75rem;
+    padding-top: 0.65rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.07);
+    font-size: 0.75rem;
+    color: var(--muted, #9aa0a6);
+    line-height: 1.4;
+  }
+  .dialog-meta code {
+    font-family: monospace;
+    font-size: 0.78rem;
+    color: rgba(255, 255, 255, 0.45);
+    background: rgba(255, 255, 255, 0.05);
+    padding: 0.05rem 0.3rem;
+    border-radius: 0.25rem;
+  }
+  .dialog-meta-sep { opacity: 0.35; }
 
   .uid-list {
     list-style: none;
