@@ -296,8 +296,8 @@ export function buildPlayerSummary(matches: MatchRecord[]): PlayerSummary[] {
   const out = Array.from(map.values());
   out.sort((a, b) => {
     if (b.wins !== a.wins) return b.wins - a.wins;
-    if (b.boardsWon !== a.boardsWon) return b.boardsWon - a.boardsWon;
-    return b.pointsScored - a.pointsScored;
+    if (b.pointsScored !== a.pointsScored) return b.pointsScored - a.pointsScored;
+    return b.boardsWon - a.boardsWon;
   });
   return out;
 }
