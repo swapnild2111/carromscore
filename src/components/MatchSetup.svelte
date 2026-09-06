@@ -51,7 +51,7 @@
   import { countryName, flagEmoji } from '../lib/countries';
   import {
     loadPlannedMatch,
-    loadPlannedByRound,
+    loadAllPlannedByRound,
     claimPlannedMatch,
     resolvePlannedByBoard,
     type PlannedMatch,
@@ -415,11 +415,13 @@
   // Planned matches for the currently selected closed-tournament + round.
   // Used to enforce bracket membership before allowing a manual match start.
   let roundPlannedMatches = $state<PlannedMatch[]>([]);
+  let roundAllMatches = $state<PlannedMatch[]>([]);
   let lastLoadedRoundKey = $state<string | null>(null);
   $effect(() => {
     const t = pickedTournament();
     if (!t || t.type !== 'closed') {
       roundPlannedMatches = [];
+      roundAllMatches = [];
       lastLoadedRoundKey = null;
       return;
     }
@@ -429,10 +431,13 @@
     lastLoadedRoundKey = cacheKey;
     if (!cacheKey) {
       roundPlannedMatches = [];
+      roundAllMatches = [];
       return;
     }
-    void loadPlannedByRound(t.key, roundKey).then((matches) => {
-      if (lastLoadedRoundKey === cacheKey) roundPlannedMatches = matches;
+    void loadAllPlannedByRound(t.key, roundKey).then((all) => {
+      if (lastLoadedRoundKey !== cacheKey) return;
+      roundAllMatches = all;
+      roundPlannedMatches = all.filter((m) => !m.completedAt);
     });
   });
 
@@ -970,6 +975,29 @@
     return null;
   });
 
+  // Manual flow: detect if the picked pairing already has a completed slot in this
+  // round. bracketError only checks pending slots; this checks the full list so
+  // we can give a specific "already played" message instead of "no bracket slot".
+  const duplicateMatchError = $derived.by((): { slot: PlannedMatch } | null => {
+    if (plannedState.kind !== 'idle') return null;
+    if (cfg.mode === 'practice') return null;
+    void identityTick;
+    void tournamentTick;
+    const t = pickedTournament();
+    if (!t || t.type !== 'closed') return null;
+    if (roundAllMatches.length === 0) return null;
+    const idA = resolvedPlayerIds['playerA'];
+    const idB = resolvedPlayerIds['playerB'];
+    if (!idA || !idB) return null;
+    const slot = roundAllMatches.find(
+      (m) =>
+        m.completedAt &&
+        ((m.aResolvedId === idA && m.bResolvedId === idB) ||
+          (m.aResolvedId === idB && m.bResolvedId === idA)),
+    );
+    return slot ? { slot } : null;
+  });
+
   // For a manual match on a closed tournament, resolve the planned slot mid so
   // ScoreBoard can stamp it complete after the match — same as the QR-scan path.
   const resolvedBracketMid = $derived.by((): string => {
@@ -1004,7 +1032,7 @@
       return a1 && cfg.maxBoards > 0;
     }
     const b1 = cfg.playerB.trim().length > 0;
-    if (cfg.mode === 'singles') return a1 && b1 && !dupError && !roundError && !rosterError && !bracketError;
+    if (cfg.mode === 'singles') return a1 && b1 && !dupError && !roundError && !rosterError && !bracketError && !duplicateMatchError;
     return (
       a1 &&
       b1 &&
@@ -1013,7 +1041,8 @@
       !dupError &&
       !roundError &&
       !rosterError &&
-      !bracketError
+      !bracketError &&
+      !duplicateMatchError
     );
   });
 
@@ -1348,7 +1377,7 @@
         {#if winner}· {winner} won{/if}
       </p>
     {/if}
-    <p>Re-scanning won't start a new game — ask the organiser if something needs to be changed.</p>
+    <p>This match is already recorded. Contact the organiser if the result needs to be changed.</p>
   </aside>
 {:else if plannedState.kind === 'takeover'}
   <aside class="planned-notice planned-notice-warn" aria-label="Match in progress">
@@ -1653,6 +1682,20 @@
 
   {#if dupError}
     <p class="dup-error" role="alert">{dupError}</p>
+  {/if}
+
+  {#if duplicateMatchError}
+    {@const slot = duplicateMatchError.slot}
+    {@const r = slot.result}
+    <aside class="dup-played-notice" role="alert">
+      <strong>Match already played</strong>
+      {#if r}
+        — {slot.aName} <span class="dup-score">{r.setsA}–{r.setsB}</span> {slot.bName}
+        {#if r.winner === 'a'} · {slot.aName} won{:else if r.winner === 'b'} · {slot.bName} won{/if}
+      {/if}
+      <br />
+      Contact the organiser if this needs to be changed.
+    </aside>
   {/if}
 
   <button
@@ -2374,6 +2417,23 @@
     border: 1px solid color-mix(in srgb, var(--danger, #d93a3a) 40%, transparent);
     font-size: 0.9rem;
     text-align: center;
+  }
+
+  /* Manual-start duplicate-match warning. Same amber palette as the
+     planned-notice-warn block used by the QR completed state. */
+  .dup-played-notice {
+    margin: 0;
+    padding: 0.6rem 0.85rem;
+    border-radius: 0.5rem;
+    background: rgba(255, 179, 0, 0.08);
+    border: 1px solid rgba(255, 179, 0, 0.35);
+    color: #ffd54a;
+    font-size: 0.88rem;
+    line-height: 1.5;
+  }
+  .dup-score {
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
   }
 
   .install {

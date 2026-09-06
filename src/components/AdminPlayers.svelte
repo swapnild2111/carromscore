@@ -53,6 +53,26 @@
 
   let tick = $state(0);
   let query = $state('');
+  let filterCountry = $state('');
+  let sortBy = $state<'az' | 'za'>('az');
+
+  const isFiltered = $derived(query.trim() !== '' || filterCountry !== '' || sortBy !== 'az');
+
+  function resetFilters() {
+    query = '';
+    filterCountry = '';
+    sortBy = 'az';
+  }
+
+  const countryOptions = $derived(() => {
+    void tick;
+    const codes = new Set<string>();
+    for (const p of loadAll()) {
+      if (p.country) codes.add(p.country);
+    }
+    return [...codes].sort((a, b) => countryName(a).localeCompare(countryName(b)));
+  });
+
   let renamingId = $state<string | null>(null);
   let renameValue = $state('');
   let deleteConfirmId = $state<string | null>(null);
@@ -153,10 +173,15 @@
     if (role && !role.isSuper && !role.isOrganiser) {
       all = [];
     }
-    if (!q) return all.slice(0, 200);
-    return all
-      .filter((p) => p.canonicalName.toLowerCase().includes(q))
-      .slice(0, 200);
+    if (q) all = all.filter((p) => p.canonicalName.toLowerCase().includes(q));
+    if (filterCountry) all = all.filter((p) => p.country === filterCountry);
+    all = all.slice(0, 200);
+    if (sortBy === 'za') {
+      all = [...all].sort((a, b) => b.canonicalName.localeCompare(a.canonicalName));
+    } else {
+      all = [...all].sort((a, b) => a.canonicalName.localeCompare(b.canonicalName));
+    }
+    return all;
   });
 
   function flash(kind: 'ok' | 'err', message: string) {
@@ -614,84 +639,105 @@
       bind:value={query}
       aria-label="Search players"
     />
+    {#if countryOptions().length > 0}
+      <select class="filter-select" bind:value={filterCountry} aria-label="Filter by country">
+        <option value="">All countries</option>
+        {#each countryOptions() as cc (cc)}
+          <option value={cc}>{flagEmoji(cc)} {countryName(cc)}</option>
+        {/each}
+      </select>
+    {/if}
     <span class="count">{filtered().length}</span>
+    {#if isFiltered}
+      <button class="reset-filters" onclick={resetFilters} aria-label="Clear filters">✕ Reset</button>
+    {/if}
   </div>
 
   {#if filtered().length === 0}
     <p class="empty">
-      {query ? 'No players match that search.' : 'No players yet.'}
+      {query || filterCountry ? 'No players match that filter.' : 'No players yet.'}
     </p>
   {:else}
-    <div class="select-hdr">
-      <label class="sel-all">
-        <input
-          type="checkbox"
-          checked={allSelected()}
-          onchange={toggleSelectAll}
-          aria-label={allSelected() ? 'Deselect all' : 'Select all visible'}
-        />
-        Select all
-      </label>
-    </div>
-    <ul class="list">
-      {#each filtered() as p (p.id)}
-        {@const manageable = canManagePlayer(p)}
-        <li class="row" class:row-selected={selected.has(p.id)}>
-          {#if manageable}
-            <label class="row-check">
-              <input
-                type="checkbox"
-                checked={selected.has(p.id)}
-                onchange={() => toggleSel(p.id)}
-                aria-label={`Select ${p.canonicalName}`}
-              />
-            </label>
-          {:else}
-            <!-- Placeholder keeps the row grid aligned when the
-                 checkbox is hidden for records the organiser didn't
-                 create (v3.3 own-only auth). -->
-            <span class="row-check row-check-spacer" aria-hidden="true"></span>
-          {/if}
-          <div class="row-name">
-              <div class="row-name-text">{p.canonicalName}</div>
-              <div class="row-name-meta">
+    <div class="tbl-wrap">
+      <table class="tbl">
+        <thead>
+          <tr>
+            <th class="th-check">
+              <label class="sel-all">
+                <input
+                  type="checkbox"
+                  checked={allSelected()}
+                  onchange={toggleSelectAll}
+                  aria-label={allSelected() ? 'Deselect all' : 'Select all visible'}
+                />
+              </label>
+            </th>
+            <th
+              class="th-sortable"
+              class:th-sort-asc={sortBy === 'az'}
+              class:th-sort-desc={sortBy === 'za'}
+              onclick={() => (sortBy = sortBy === 'az' ? 'za' : 'az')}
+              title="Sort by name"
+            >Name <span class="sort-icon" aria-hidden="true">{sortBy === 'az' ? '↑' : '↓'}</span></th>
+            <th class="th-country">Country</th>
+            <th class="th-aliases">Aliases</th>
+            <th class="th-actions">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {#each filtered() as p (p.id)}
+            {@const manageable = canManagePlayer(p)}
+            <tr class="trow" class:trow-selected={selected.has(p.id)}>
+              <td class="td-check">
+                {#if manageable}
+                  <label class="row-check">
+                    <input
+                      type="checkbox"
+                      checked={selected.has(p.id)}
+                      onchange={() => toggleSel(p.id)}
+                      aria-label={`Select ${p.canonicalName}`}
+                    />
+                  </label>
+                {:else}
+                  <span class="row-check row-check-spacer" aria-hidden="true"></span>
+                {/if}
+              </td>
+              <td class="td-name">
+                <div class="row-name-text">{p.canonicalName}</div>
+                {#if !manageable}
+                  <span class="chip chip-readonly" title="Created by another organiser — read-only for you">read-only</span>
+                {/if}
+              </td>
+              <td class="td-country">
                 {#if p.country}
                   <span class="chip chip-country" title={countryName(p.country)}>
-                    {#if flagEmoji(p.country)}
-                      <span aria-hidden="true">{flagEmoji(p.country)}</span>
-                    {/if}
+                    {#if flagEmoji(p.country)}<span aria-hidden="true">{flagEmoji(p.country)}</span>{/if}
                     {countryName(p.country)}
                   </span>
+                {:else}
+                  <span class="td-empty">—</span>
                 {/if}
+              </td>
+              <td class="td-aliases">
                 {#if Object.keys(p.aliases).length > 0}
                   <span class="chip">{Object.keys(p.aliases).length} alias{Object.keys(p.aliases).length === 1 ? '' : 'es'}</span>
+                {:else}
+                  <span class="td-empty">—</span>
                 {/if}
-                {#if !manageable}
-                  <!--
-                    v3.6.2: read-only marker so organisers understand
-                    why they see the row without action buttons — this
-                    is another organiser's or super's record. They can
-                    still alias-onto-it from the Add dialog.
-                  -->
-                  <span class="chip chip-readonly" title="Created by another organiser — read-only for you">
-                    read-only
-                  </span>
+              </td>
+              <td class="td-actions">
+                {#if manageable}
+                  <div class="row-actions">
+                    <button type="button" class="btn btn-primary" onclick={() => startEdit(p)}>Edit</button>
+                    <button type="button" class="btn btn-danger" onclick={() => startDelete(p.id)}>Delete</button>
+                  </div>
                 {/if}
-              </div>
-            </div>
-            {#if manageable}
-              <div class="row-actions">
-                <button type="button" class="btn btn-primary" onclick={() => startEdit(p)}>Edit</button>
-                <button
-                  type="button"
-                  class="btn btn-danger"
-                  onclick={() => startDelete(p.id)}
-                >Delete</button>
-              </div>
-            {/if}
-        </li>
-      {/each}
-    </ul>
+              </td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    </div>
   {/if}
 
   {#if deleteConfirmId}
@@ -1072,13 +1118,7 @@
     padding: 0 0.25rem;
   }
 
-  /* Bulk-select header + row checkbox, matching AdminLiveCleanup /
-     AdminTournaments so the three admin lists behave identically. */
-  .select-hdr {
-    display: flex;
-    justify-content: flex-start;
-    padding: 0.25rem 0.5rem;
-  }
+  /* Bulk-select row checkbox, matching AdminTournaments. */
   .sel-all {
     display: inline-flex;
     align-items: center;
@@ -1105,43 +1145,93 @@
     accent-color: var(--accent, #ffd54a);
     cursor: pointer;
   }
-  .row-selected {
-    background: rgba(255, 213, 74, 0.06) !important;
-    border-color: rgba(255, 213, 74, 0.4) !important;
+  .filter-select {
+    background: #0f0f0f;
+    color: var(--fg);
+    border: 1px solid #2a2a2a;
+    border-radius: 0.45rem;
+    padding: 0.5rem 1.8rem 0.5rem 0.65rem;
+    font: inherit;
+    font-size: 0.82rem;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%239aa0a6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.55rem center;
+    white-space: nowrap;
+    flex-shrink: 0;
   }
+  .filter-select:focus { outline: none; border-color: var(--accent); }
+  .reset-filters {
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid #2a2a2a;
+    border-radius: 0.45rem;
+    padding: 0.45rem 0.75rem;
+    font: inherit;
+    font-size: 0.82rem;
+    cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .reset-filters:hover { color: var(--fg); border-color: #555; }
 
-  .list {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
-  }
-  .row {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    padding: 0.6rem 0.75rem;
-    transition: background 0.12s, border-color 0.12s;
-    background: rgba(255, 255, 255, 0.02);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+  /* Table layout */
+  .tbl-wrap {
+    overflow-x: auto;
     border-radius: 0.5rem;
+    border: 1px solid rgba(255, 255, 255, 0.08);
   }
-  .row-name { flex: 1; min-width: 0; }
+  .tbl {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.88rem;
+  }
+  .tbl thead tr {
+    background: rgba(255, 255, 255, 0.04);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  }
+  .tbl th {
+    padding: 0.55rem 0.75rem;
+    text-align: left;
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    white-space: nowrap;
+    user-select: none;
+  }
+  .th-sortable { cursor: pointer; }
+  .th-sortable:hover { color: var(--fg); }
+  .th-sort-asc, .th-sort-desc { color: var(--accent, #ffd54a); }
+  .sort-icon { font-style: normal; opacity: 0.7; margin-left: 0.2em; }
+  .th-check { width: 2rem; padding: 0.55rem 0.4rem; }
+  .th-country { width: 9rem; }
+  .th-aliases { width: 6rem; }
+  .th-actions { width: 1%; white-space: nowrap; }
+
+  .trow {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    transition: background 0.1s;
+  }
+  .trow:last-child { border-bottom: none; }
+  .trow:hover { background: rgba(255, 255, 255, 0.02); }
+  .trow-selected { background: rgba(255, 213, 74, 0.06) !important; }
+
+  .tbl td { padding: 0.55rem 0.75rem; vertical-align: middle; }
+  .td-check { width: 2rem; padding: 0.55rem 0.4rem; }
+  .td-name { min-width: 12rem; }
+  .td-country { white-space: nowrap; }
+  .td-aliases { white-space: nowrap; }
+  .td-actions { white-space: nowrap; }
+  .td-empty { color: var(--muted); opacity: 0.4; }
   .row-name-text {
     color: var(--fg);
     font-weight: 600;
-    font-size: 0.95rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .row-name-meta {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.35rem;
-    margin-top: 0.25rem;
+    font-size: 0.9rem;
   }
   .chip {
     font-size: 0.7rem;
@@ -1150,9 +1240,6 @@
     border: 1px solid rgba(255, 255, 255, 0.08);
     padding: 0.1rem 0.4rem;
     border-radius: 999px;
-  }
-  .chip code {
-    font-size: 0.9em;
   }
   /* Country chip carries a subtle accent tint so it reads as
      identifying-metadata (higher signal than the id/alias chips). */
@@ -1180,23 +1267,6 @@
     gap: 0.35rem;
     flex-shrink: 0;
   }
-  .row-edit {
-    flex: 1;
-    display: flex;
-    gap: 0.35rem;
-    align-items: center;
-  }
-  .row-edit input {
-    flex: 1;
-    background: #0f0f0f;
-    color: var(--fg);
-    border: 1px solid var(--accent);
-    border-radius: 0.4rem;
-    padding: 0.4rem 0.55rem;
-    font: inherit;
-    font-size: 0.9rem;
-  }
-
   .btn {
     background: rgba(255, 255, 255, 0.06);
     border: 1px solid rgba(255, 255, 255, 0.12);

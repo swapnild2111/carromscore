@@ -189,6 +189,11 @@
    *  Required in that case; blocks Save. */
   let addingCountry = $state('');
   let addingDescription = $state('');
+  let addingDefaultMode = $state<'singles' | 'doubles'>('singles');
+  let addingDefaultBestOf = $state<string>(String(FALLBACK_TOURNAMENT_DEFAULTS.bestOf));
+  let addingDefaultPointsTarget = $state<string>(String(FALLBACK_TOURNAMENT_DEFAULTS.pointsTarget));
+  let addingDefaultMaxBoards = $state<string>(String(FALLBACK_TOURNAMENT_DEFAULTS.maxBoards));
+  let addingDefaultTimerDuration = $state<string>(String(FALLBACK_TOURNAMENT_DEFAULTS.timerDuration));
 
   /** Per-row "Assigned players" dialog state (closed tournaments). */
   let assignOpen = $state(false);
@@ -939,6 +944,11 @@
     addingType = 'open';
     addingCountry = '';
     addingDescription = '';
+    addingDefaultMode = FALLBACK_TOURNAMENT_DEFAULTS.mode;
+    addingDefaultBestOf = String(FALLBACK_TOURNAMENT_DEFAULTS.bestOf);
+    addingDefaultPointsTarget = String(FALLBACK_TOURNAMENT_DEFAULTS.pointsTarget);
+    addingDefaultMaxBoards = String(FALLBACK_TOURNAMENT_DEFAULTS.maxBoards);
+    addingDefaultTimerDuration = String(FALLBACK_TOURNAMENT_DEFAULTS.timerDuration);
   }
   function closeAdd() {
     addingOpen = false;
@@ -946,6 +956,11 @@
     addingType = 'open';
     addingCountry = '';
     addingDescription = '';
+    addingDefaultMode = FALLBACK_TOURNAMENT_DEFAULTS.mode;
+    addingDefaultBestOf = String(FALLBACK_TOURNAMENT_DEFAULTS.bestOf);
+    addingDefaultPointsTarget = String(FALLBACK_TOURNAMENT_DEFAULTS.pointsTarget);
+    addingDefaultMaxBoards = String(FALLBACK_TOURNAMENT_DEFAULTS.maxBoards);
+    addingDefaultTimerDuration = String(FALLBACK_TOURNAMENT_DEFAULTS.timerDuration);
   }
   async function saveAdd() {
     const trimmed = addingName.trim();
@@ -968,6 +983,13 @@
     if (desc) {
       await updateTournamentMeta(outcome.record.key, { description: desc });
     }
+    await updateTournamentDefaults(outcome.record.key, {
+      mode: addingDefaultMode,
+      bestOf: Number(addingDefaultBestOf) || FALLBACK_TOURNAMENT_DEFAULTS.bestOf,
+      pointsTarget: Number(addingDefaultPointsTarget) || FALLBACK_TOURNAMENT_DEFAULTS.pointsTarget,
+      maxBoards: Number(addingDefaultMaxBoards) >= 0 ? Number(addingDefaultMaxBoards) : FALLBACK_TOURNAMENT_DEFAULTS.maxBoards,
+      timerDuration: Number(addingDefaultTimerDuration) >= 0 ? Number(addingDefaultTimerDuration) : FALLBACK_TOURNAMENT_DEFAULTS.timerDuration,
+    });
     saving = false;
     flash('ok', `"${outcome.record.name}" added`);
     closeAdd();
@@ -1272,10 +1294,10 @@
     </select>
     {/if}
     <select class="filter-select" bind:value={sortBy} aria-label="Sort">
-      <option value="recent">Newest first</option>
-      <option value="oldest">Oldest first</option>
       <option value="az">Name A–Z</option>
       <option value="za">Name Z–A</option>
+      <option value="recent">Recent first</option>
+      <option value="oldest">Oldest first</option>
     </select>
     <span class="count">{filtered().length}</span>
     {#if isFiltered}
@@ -1288,126 +1310,123 @@
       {query ? 'No tournaments match that search.' : 'No tournaments yet.'}
     </p>
   {:else}
-    <div class="select-hdr">
-      <label class="sel-all">
-        <input
-          type="checkbox"
-          checked={allSelected()}
-          onchange={toggleSelectAll}
-          aria-label={allSelected() ? 'Deselect all' : 'Select all'}
-        />
-        Select all
-      </label>
-    </div>
-    <ul class="list">
-      {#each filtered() as t (t.key)}
-        <li class="row" class:row-selected={selected.has(t.key)}>
-          {#if canManageTournament(t)}
-            <label class="row-check">
-              <input
-                type="checkbox"
-                checked={selected.has(t.key)}
-                onchange={() => toggleSel(t.key)}
-                aria-label={`Select ${t.name}`}
-              />
-            </label>
-          {:else}
-            <!-- Placeholder keeps the row grid aligned when the checkbox
-                 is hidden for tournaments the organiser doesn't manage. -->
-            <span class="row-check row-check-spacer" aria-hidden="true"></span>
-          {/if}
-            <div class="row-name">
-              <!--
-                Clicking the tournament name opens the rename / settings
-                dialog. This matches the direct-manipulation shape the
-                user asked for (2026-08-31): name is the affordance for
-                metadata; sibling buttons open Players / Rounds /
-                Bracket in their own modals.
-              -->
-              {#if canManageTournament(t)}
-                <button
-                  type="button"
-                  class="row-name-btn"
-                  onclick={() => startEdit(t)}
-                  title="Rename, change type, edit defaults"
-                >{t.name}</button>
-              {:else}
-                <div class="row-name-text">{t.name}</div>
-              {/if}
-              <div class="row-name-meta">
-                {#if t.type === 'closed'}
-                  <span class="chip chip-type chip-invite" title="Invite-only — assigned-roster tournament, country-scoped">
-                    INVITE-ONLY
-                  </span>
+    <div class="tbl-wrap">
+      <table class="tbl">
+        <thead>
+          <tr>
+            <th class="th-check">
+              <label class="sel-all">
+                <input
+                  type="checkbox"
+                  checked={allSelected()}
+                  onchange={toggleSelectAll}
+                  aria-label={allSelected() ? 'Deselect all' : 'Select all'}
+                />
+              </label>
+            </th>
+            <th
+              class="th-sortable"
+              class:th-sort-asc={sortBy === 'az'}
+              class:th-sort-desc={sortBy === 'za'}
+              onclick={() => (sortBy = sortBy === 'az' ? 'za' : 'az')}
+              title="Sort by name"
+            >Name <span class="sort-icon" aria-hidden="true">{sortBy === 'az' ? '↑' : sortBy === 'za' ? '↓' : '↕'}</span></th>
+            <th class="th-type">Type</th>
+            <th class="th-country">Country</th>
+            <th class="th-actions">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {#each filtered() as t (t.key)}
+            <tr class="trow" class:trow-selected={selected.has(t.key)}>
+              <td class="td-check">
+                {#if canManageTournament(t)}
+                  <label class="row-check">
+                    <input
+                      type="checkbox"
+                      checked={selected.has(t.key)}
+                      onchange={() => toggleSel(t.key)}
+                      aria-label={`Select ${t.name}`}
+                    />
+                  </label>
                 {:else}
-                  <span class="chip chip-type chip-open" title="Open tournament — any player, any umpire">
-                    OPEN
-                  </span>
+                  <span class="row-check row-check-spacer" aria-hidden="true"></span>
                 {/if}
+              </td>
+              <td class="td-name">
+                {#if canManageTournament(t)}
+                  <button
+                    type="button"
+                    class="row-name-btn"
+                    onclick={() => startEdit(t)}
+                    title="Rename, change type, edit defaults"
+                  >{t.name}</button>
+                {:else}
+                  <div class="row-name-text">{t.name}</div>
+                {/if}
+              </td>
+              <td class="td-type">
+                {#if t.type === 'closed'}
+                  <span class="chip chip-type chip-invite" title="Invite-only — assigned-roster tournament, country-scoped">INVITE-ONLY</span>
+                {:else}
+                  <span class="chip chip-type chip-open" title="Open tournament — any player, any umpire">OPEN</span>
+                {/if}
+              </td>
+              <td class="td-country">
                 {#if t.country}
                   <span class="chip chip-country" title={countryName(t.country)}>
                     {flagEmoji(t.country)} {countryName(t.country)}
                   </span>
+                {:else}
+                  <span class="td-empty">—</span>
                 {/if}
-                <span class="chip">last active {new Date(t.lastActive).toLocaleDateString()}</span>
-              </div>
-            </div>
-            {#if canManageTournament(t)}
-              <div class="row-actions">
-                <!--
-                  Per-row Players / Rounds / Bracket direct-launch
-                  buttons (2026-08-31). Each opens its own modal in
-                  isolation — no longer nested inside an outer 'Edit
-                  tournament' dialog. Count suffix keeps the buttons
-                  self-describing at a glance.
-                -->
-                {#if t.type === 'closed'}
-                  <button
-                    type="button"
-                    class="btn"
-                    onclick={() => startAssign(t)}
-                    title="Assigned players (invite-only)"
-                  >Players{assignedCountByKey[t.key] !== undefined ? ` (${assignedCountByKey[t.key]})` : ''}</button>
+              </td>
+              <td class="td-actions">
+                {#if canManageTournament(t)}
+                  <div class="row-actions">
+                    {#if t.type === 'closed'}
+                      <button
+                        type="button"
+                        class="btn"
+                        onclick={() => startAssign(t)}
+                        title="Assigned players (invite-only)"
+                      >Players{assignedCountByKey[t.key] !== undefined ? ` (${assignedCountByKey[t.key]})` : ''}</button>
+                    {/if}
+                    <button
+                      type="button"
+                      class="btn"
+                      onclick={() => startRounds(t)}
+                      title="Add / rename rounds"
+                    >Rounds{t.rounds && t.rounds.length > 0 ? ` (${t.rounds.length})` : ''}</button>
+                    <button
+                      type="button"
+                      class="btn"
+                      onclick={() => startBracket(t)}
+                      title="Add matches to bracket"
+                    >Bracket{plannedCountByKey[t.key] !== undefined && plannedCountByKey[t.key] > 0 ? ` (${plannedCountByKey[t.key]})` : ''}</button>
+                    <a
+                      class="btn btn-print"
+                      href={`${import.meta.env.BASE_URL}print-bracket/?tournament=${encodeURIComponent(t.key)}`}
+                      target="_blank"
+                      rel="noopener"
+                      aria-label="Print tournament pack"
+                      title="Print tournament pack (cover sheet + board QR stickers)"
+                    >🖨</a>
+                    <button
+                      type="button"
+                      class="btn btn-danger"
+                      onclick={() => startDelete(t.key)}
+                      aria-label="Delete tournament"
+                      title="Delete tournament"
+                    >🗑</button>
+                  </div>
                 {/if}
-                <button
-                  type="button"
-                  class="btn"
-                  onclick={() => startRounds(t)}
-                  title="Add / rename rounds"
-                >Rounds{t.rounds && t.rounds.length > 0 ? ` (${t.rounds.length})` : ''}</button>
-                <button
-                  type="button"
-                  class="btn"
-                  onclick={() => startBracket(t)}
-                  title="Add matches to bracket"
-                >Bracket{plannedCountByKey[t.key] !== undefined && plannedCountByKey[t.key] > 0 ? ` (${plannedCountByKey[t.key]})` : ''}</button>
-                <!--
-                  Print pack (v3.6.1): opens the print-bracket page for
-                  this tournament in a new tab. Same URL the bracket
-                  admin used to expose from inside its own modal, but
-                  now available at the tournament level so the
-                  organiser doesn't have to open Bracket first.
-                -->
-                <a
-                  class="btn btn-print"
-                  href={`${import.meta.env.BASE_URL}print-bracket/?tournament=${encodeURIComponent(t.key)}`}
-                  target="_blank"
-                  rel="noopener"
-                  aria-label="Print tournament pack"
-                  title="Print tournament pack (cover sheet + board QR stickers)"
-                >🖨</a>
-                <button
-                  type="button"
-                  class="btn btn-danger"
-                  onclick={() => startDelete(t.key)}
-                  aria-label="Delete tournament"
-                  title="Delete tournament"
-                >🗑</button>
-              </div>
-            {/if}
-        </li>
-      {/each}
-    </ul>
+              </td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    </div>
   {/if}
 
   <!--
@@ -1574,6 +1593,18 @@
             disabled={saving || !editingName.trim() || (editingType === 'closed' && !editingCountry)}
           >{saving ? 'Saving…' : 'Save'}</button>
         </div>
+
+        {#if editingTournament}
+          <footer class="dialog-meta">
+            <span>key: <code>{editingTournament.key}</code></span>
+            <span class="dialog-meta-sep">·</span>
+            <span>last active {new Date(editingTournament.lastActive).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+            {#if editingTournament.createdAt}
+              <span class="dialog-meta-sep">·</span>
+              <span>created {new Date(editingTournament.createdAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+            {/if}
+          </footer>
+        {/if}
       </div>
     </div>
   {/if}
@@ -1792,6 +1823,73 @@
             aria-label="Tournament description"
           ></textarea>
         </label>
+
+        <fieldset class="defaults-grid">
+          <legend>Match defaults</legend>
+          <p class="defaults-hint">
+            Prefills matches created under this tournament. Umpires
+            can still override per match.
+          </p>
+          <label class="edit-field">
+            <span>Mode</span>
+            <select
+              bind:value={addingDefaultMode}
+              disabled={saving}
+              aria-label="Default mode"
+            >
+              <option value="singles">Singles</option>
+              <option value="doubles">Doubles</option>
+            </select>
+          </label>
+          <label class="edit-field">
+            <span>Best of (sets)</span>
+            <input
+              type="number"
+              min="1"
+              max="15"
+              step="1"
+              bind:value={addingDefaultBestOf}
+              disabled={saving}
+              aria-label="Default best of"
+            />
+          </label>
+          <label class="edit-field">
+            <span>Points target</span>
+            <input
+              type="number"
+              min="1"
+              max="100"
+              step="1"
+              bind:value={addingDefaultPointsTarget}
+              disabled={saving}
+              aria-label="Default points target"
+            />
+          </label>
+          <label class="edit-field">
+            <span>Max boards <em class="hint-inline">(0 = unlimited)</em></span>
+            <input
+              type="number"
+              min="0"
+              max="50"
+              step="1"
+              bind:value={addingDefaultMaxBoards}
+              disabled={saving}
+              aria-label="Default max boards"
+            />
+          </label>
+          <label class="edit-field">
+            <span>Timer <em class="hint-inline">(mins, 0 = off)</em></span>
+            <input
+              type="number"
+              min="0"
+              max="300"
+              step="1"
+              bind:value={addingDefaultTimerDuration}
+              disabled={saving}
+              aria-label="Default timer duration"
+            />
+          </label>
+        </fieldset>
 
         <div class="dialog-actions">
           <button type="button" class="btn" onclick={closeAdd} disabled={saving}>Cancel</button>
@@ -2286,53 +2384,70 @@
     border-color: rgba(255, 213, 74, 0.4) !important;
   }
 
-  .list {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
-  }
-  .row {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    padding: 0.6rem 0.75rem;
-    background: rgba(255, 255, 255, 0.02);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+  /* Table layout for Tournaments list */
+  .tbl-wrap {
+    overflow-x: auto;
     border-radius: 0.5rem;
-    transition: background 0.12s, border-color 0.12s;
-    /* Narrow phones (< 34rem) run out of horizontal room for the
-       5-button action set to sit beside a name + chips row. Let the
-       row wrap so actions land on a second line under the meta;
-       align-items switches to flex-start so wrapped items don't
-       collide visually. Reported 2026-09-01. */
-    flex-wrap: wrap;
+    border: 1px solid rgba(255, 255, 255, 0.08);
   }
-  @media (max-width: 34rem) {
-    .row { align-items: flex-start; }
+  .tbl {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.88rem;
   }
-  .row-name { flex: 1 1 0; min-width: 0; }
-  /* On narrow phones let the name column take full width so the
-     wrapping row-actions block falls to its own row. Desktop keeps
-     the flex: 1 side-by-side layout. */
-  @media (max-width: 34rem) {
-    .row-name { flex: 1 1 100%; }
-    .row-actions { width: 100%; justify-content: flex-end; }
+  .tbl thead tr {
+    background: rgba(255, 255, 255, 0.04);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
   }
+  .tbl th {
+    padding: 0.55rem 0.75rem;
+    text-align: left;
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    white-space: nowrap;
+    user-select: none;
+  }
+  .th-sortable {
+    cursor: pointer;
+  }
+  .th-sortable:hover { color: var(--fg); }
+  .th-sort-asc, .th-sort-desc { color: var(--accent, #ffd54a); }
+  .sort-icon { font-style: normal; opacity: 0.7; margin-left: 0.2em; }
+  .th-check { width: 2rem; padding: 0.55rem 0.4rem; }
+  .th-type { width: 8rem; }
+  .th-country { width: 9rem; }
+  .th-actions { width: 1%; white-space: nowrap; }
+
+  .trow {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    transition: background 0.1s;
+  }
+  .trow:last-child { border-bottom: none; }
+  .trow:hover { background: rgba(255, 255, 255, 0.02); }
+  .trow-selected { background: rgba(255, 213, 74, 0.06) !important; }
+  .trow-selected td { border-color: rgba(255, 213, 74, 0.15); }
+
+  .tbl td {
+    padding: 0.55rem 0.75rem;
+    vertical-align: middle;
+  }
+  .td-check { width: 2rem; padding: 0.55rem 0.4rem; }
+  .td-name { min-width: 12rem; max-width: 22rem; word-break: break-word; }
+  .td-type { white-space: nowrap; }
+  .td-country { white-space: nowrap; }
+  .td-actions { white-space: nowrap; width: 1%; }
+  .td-empty { color: var(--muted); opacity: 0.4; }
   .row-name-text {
     color: var(--fg);
     font-weight: 600;
-    font-size: 0.95rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    font-size: 0.9rem;
+    line-height: 1.35;
+    word-break: break-word;
   }
-  /* Row-name button: same visual as the text version but clickable to
-     open the rename / settings dialog. Underline on hover signals the
-     affordance without adding a separate 'Edit' pill. Uses the same
-     ellipsis rules so long names don't blow the row wide. */
+  /* Row-name button: wraps long names rather than stretching the table. */
   .row-name-btn {
     background: transparent;
     border: 0;
@@ -2340,14 +2455,13 @@
     color: var(--fg);
     font: inherit;
     font-weight: 600;
-    font-size: 0.95rem;
+    font-size: 0.9rem;
+    line-height: 1.35;
     font-family: inherit;
     text-align: left;
     cursor: pointer;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    max-width: 100%;
+    white-space: normal;
+    word-break: break-word;
     display: block;
   }
   .row-name-btn:hover {
@@ -2834,9 +2948,17 @@
 
   .row-actions {
     display: flex;
-    gap: 0.35rem;
+    gap: 0.3rem;
     flex-shrink: 0;
     flex-wrap: wrap;
+    align-items: center;
+  }
+  /* Inside the table, action buttons are slightly more compact so they
+     fit on fewer lines next to a wrapped tournament name. */
+  .td-actions .row-actions { flex-wrap: nowrap; }
+  .td-actions .btn {
+    padding: 0.3rem 0.55rem;
+    font-size: 0.78rem;
   }
   .row-edit {
     flex: 1;
@@ -3010,6 +3132,31 @@
     justify-content: flex-end;
     margin-top: 0.5rem;
   }
+
+  /* Blog-style metadata footer inside the edit dialog. Sits below the
+     action buttons, separated by a hairline rule, so it reads as
+     contextual info rather than part of the editable form. */
+  .dialog-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.3rem 0.5rem;
+    margin-top: 0.75rem;
+    padding-top: 0.65rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.07);
+    font-size: 0.75rem;
+    color: var(--muted, #9aa0a6);
+    line-height: 1.4;
+  }
+  .dialog-meta code {
+    font-family: monospace;
+    font-size: 0.78rem;
+    color: rgba(255, 255, 255, 0.45);
+    background: rgba(255, 255, 255, 0.05);
+    padding: 0.05rem 0.3rem;
+    border-radius: 0.25rem;
+  }
+  .dialog-meta-sep { opacity: 0.35; }
 
   .uid-list {
     list-style: none;
