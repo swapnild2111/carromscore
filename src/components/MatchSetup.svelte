@@ -21,7 +21,7 @@
     saveMatchStart,
     clearMatchIdentity,
   } from '../lib/history';
-  import { newMid, subscribeLive, type LiveRecord } from '../lib/live-sync';
+  import { newMid, subscribeLive, deleteLive, type LiveRecord } from '../lib/live-sync';
   import { saveResume, loadResume, clearResume, type ResumeRecord } from '../lib/resume';
   import {
     rankTournaments,
@@ -445,6 +445,76 @@
       roundMatchesLoading = false;
     });
   });
+
+  // Abandoned-match prompt. When the umpire taps Start and we find an
+  // existing /live record for the same two players with real scoring,
+  // we pause and ask: Resume (navigate to old score URL) or Fresh start
+  // (delete old record, begin new match). Zero-score records are silently
+  // overwritten without prompting.
+  type AbandonedMatch = { mid: string; scoreUrl: string; record: LiveRecord };
+  let abandonedMatch = $state<AbandonedMatch | null>(null);
+  let pendingStartFn = $state<(() => void) | null>(null);
+
+  function hasRealScoring(record: LiveRecord): boolean {
+    const ls = record.liveState;
+    if (!ls) return false;
+    return ls.board > 0 || (ls.sideA?.points ?? 0) > 0 || (ls.sideB?.points ?? 0) > 0;
+  }
+
+  async function findAbandonedLive(playerA: string, playerB: string): Promise<AbandonedMatch | null> {
+    try {
+      const [{ firebaseApp }, { getDatabase, ref, get }] = await Promise.all([
+        import('../lib/firebase'),
+        import('firebase/database'),
+      ]);
+      const db = getDatabase(firebaseApp());
+      const snap = await get(ref(db, 'live'));
+      const raw = snap.val() as Record<string, LiveRecord> | null;
+      if (!raw) return null;
+      const a = playerA.trim().toLowerCase();
+      const b = playerB.trim().toLowerCase();
+      for (const [mid, record] of Object.entries(raw)) {
+        if (!record?.meta) continue;
+        const ra = record.meta.playerA?.trim().toLowerCase() ?? '';
+        const rb = record.meta.playerB?.trim().toLowerCase() ?? '';
+        if ((ra === a && rb === b) || (ra === b && rb === a)) {
+          if (!record.liveState?.matchResult) return { mid, scoreUrl: '', record };
+        }
+      }
+    } catch { /* silent */ }
+    return null;
+  }
+
+  function resumeAbandoned() {
+    if (!abandonedMatch) return;
+    const m = abandonedMatch.record.meta;
+    const resumeCfg: MatchConfig = {
+      ...DEFAULT_CONFIG,
+      live: true,
+      mid: abandonedMatch.mid,
+      mode: (m.mode as MatchConfig['mode']) ?? 'singles',
+      playerA: m.playerA ?? '',
+      playerB: m.playerB ?? '',
+      tournament: m.tournament ?? '',
+      round: m.round ?? '',
+      bestOf: m.bestOf ?? DEFAULT_CONFIG.bestOf,
+      maxBoards: m.maxBoards ?? DEFAULT_CONFIG.maxBoards,
+      pointsTarget: m.pointsTarget ?? DEFAULT_CONFIG.pointsTarget,
+      timerDuration: m.timerDuration ?? DEFAULT_CONFIG.timerDuration,
+    };
+    window.location.href = `${base}score/?${encodeConfig(resumeCfg)}`;
+    abandonedMatch = null;
+    pendingStartFn = null;
+  }
+
+  async function discardAndStartFresh() {
+    if (!abandonedMatch) return;
+    await deleteLive(abandonedMatch.mid);
+    abandonedMatch = null;
+    const fn = pendingStartFn;
+    pendingStartFn = null;
+    fn?.();
+  }
 
   // Resume-match chip. If the last-started match is still ongoing
   // on the server (record exists, matchResult is null, updatedAt is
@@ -1055,6 +1125,25 @@
   function start(e: Event) {
     e.preventDefault();
     if (!canStart()) return;
+    // Check for an existing /live record for the same players.
+    // Zero-score records: silently delete and continue.
+    // Records with real scoring: pause and show resume/fresh prompt.
+    if (cfg.mode !== 'practice') {
+      void findAbandonedLive(cfg.playerA, cfg.playerB).then((found) => {
+        if (!found) { doStart(); return; }
+        if (!hasRealScoring(found.record)) {
+          void deleteLive(found.mid).then(() => doStart());
+        } else {
+          abandonedMatch = found;
+          pendingStartFn = doStart;
+        }
+      });
+      return;
+    }
+    doStart();
+  }
+
+  function doStart() {
     const key = matchStateKey(cfg.mode, cfg.playerA, cfg.playerB);
     try {
       localStorage.removeItem(key);
@@ -1452,6 +1541,28 @@
       </button>
       <button type="button" class="resume-btn resume-secondary" onclick={onDiscardResume}>
         Discard
+      </button>
+    </div>
+  </aside>
+{/if}
+
+{#if abandonedMatch}
+  <aside class="resume-chip abandoned-prompt" aria-label="Abandoned match found">
+    <div class="resume-body">
+      <span class="resume-icon" aria-hidden="true">⚠</span>
+      <div class="resume-text">
+        <strong>Match already in progress</strong>
+        <span class="resume-sub">
+          {abandonedMatch.record.meta?.playerA ?? ''} vs {abandonedMatch.record.meta?.playerB ?? ''} — resume or start fresh?
+        </span>
+      </div>
+    </div>
+    <div class="resume-actions">
+      <button type="button" class="resume-btn resume-primary" onclick={resumeAbandoned}>
+        Resume
+      </button>
+      <button type="button" class="resume-btn resume-secondary" onclick={discardAndStartFresh}>
+        Start fresh
       </button>
     </div>
   </aside>
@@ -1888,6 +1999,9 @@
     font-size: 1.5rem;
     line-height: 1;
     flex-shrink: 0;
+  }
+  .abandoned-prompt .resume-icon {
+    color: #f0a500;
   }
   .resume-text {
     display: flex;
