@@ -28,6 +28,9 @@
   let matches = $state<MatchRecord[]>([]);
   let loading = $state(true);
   let query = $state('');
+  let filterMode = $state('');
+  let filterTournament = $state('');
+  let sortDir = $state<'desc' | 'asc'>('desc');
   let saving = $state(false);
   let banner = $state<{ kind: 'ok' | 'err'; message: string } | null>(null);
   let selected = $state<Set<string>>(new Set());
@@ -112,16 +115,41 @@
     return new Date(ts).toLocaleDateString();
   }
 
+  const isFiltered = $derived(
+    query.trim() !== '' || filterMode !== '' || filterTournament !== '' || sortDir !== 'desc'
+  );
+
+  function resetFilters() {
+    query = '';
+    filterMode = '';
+    filterTournament = '';
+    sortDir = 'desc';
+  }
+
+  const tournamentOptions = $derived(() => {
+    const names = new Set<string>();
+    for (const m of matches) {
+      if (m.tournament) names.add(m.tournament);
+    }
+    return [...names].sort((a, b) => a.localeCompare(b));
+  });
+
   const filtered = $derived(() => {
     void identityTick;
     const q = query.trim().toLowerCase();
-    if (!q) return matches;
-    return matches.filter((m) => {
-      if ((m.tournament ?? '').toLowerCase().includes(q)) return true;
-      if (sideNameMatch(m, 'a').toLowerCase().includes(q)) return true;
-      if (sideNameMatch(m, 'b').toLowerCase().includes(q)) return true;
-      return false;
-    });
+    let list = matches;
+    if (q) {
+      list = list.filter((m) => {
+        if ((m.tournament ?? '').toLowerCase().includes(q)) return true;
+        if (sideNameMatch(m, 'a').toLowerCase().includes(q)) return true;
+        if (sideNameMatch(m, 'b').toLowerCase().includes(q)) return true;
+        return false;
+      });
+    }
+    if (filterMode) list = list.filter((m) => m.mode === filterMode);
+    if (filterTournament) list = list.filter((m) => m.tournament === filterTournament);
+    if (sortDir === 'asc') list = [...list].sort((a, b) => (a.endedAt ?? 0) - (b.endedAt ?? 0));
+    return list;
   });
 
   function toggleSel(id: string) {
@@ -207,7 +235,24 @@
       bind:value={query}
       aria-label="Search matches"
     />
+    <select class="filter-select" bind:value={filterMode} aria-label="Filter by mode">
+      <option value="">All modes</option>
+      <option value="singles">Singles</option>
+      <option value="doubles">Doubles</option>
+      <option value="practice">Practice</option>
+    </select>
+    {#if tournamentOptions().length > 0}
+      <select class="filter-select" bind:value={filterTournament} aria-label="Filter by tournament">
+        <option value="">All tournaments</option>
+        {#each tournamentOptions() as t (t)}
+          <option value={t}>{t}</option>
+        {/each}
+      </select>
+    {/if}
     <span class="count">{filtered().length}</span>
+    {#if isFiltered}
+      <button class="reset-filters" onclick={resetFilters} aria-label="Clear filters">✕ Reset</button>
+    {/if}
     <button type="button" class="btn" onclick={reload} disabled={loading || saving}>
       {loading ? 'Reloading…' : 'Reload'}
     </button>
@@ -217,88 +262,95 @@
     <p class="empty">Loading matches…</p>
   {:else if filtered().length === 0}
     <p class="empty">
-      {query ? 'No matches match that search.' : 'No matches in history.'}
+      {query || filterMode || filterTournament ? 'No matches match that filter.' : 'No matches in history.'}
     </p>
   {:else}
-    <div class="select-hdr">
-      <label class="sel-all">
-        <input
-          type="checkbox"
-          checked={allSelected()}
-          onchange={toggleSelectAll}
-          aria-label={allSelected() ? 'Deselect all' : 'Select all visible'}
-        />
-        Select all
-      </label>
+    <div class="tbl-wrap">
+      <table class="tbl">
+        <thead>
+          <tr>
+            <th class="th-check">
+              <label class="sel-all">
+                <input
+                  type="checkbox"
+                  checked={allSelected()}
+                  onchange={toggleSelectAll}
+                  aria-label={allSelected() ? 'Deselect all' : 'Select all visible'}
+                />
+              </label>
+            </th>
+            <th
+              class="th-sortable th-date"
+              class:th-sort-asc={sortDir === 'asc'}
+              class:th-sort-desc={sortDir === 'desc'}
+              onclick={() => (sortDir = sortDir === 'desc' ? 'asc' : 'desc')}
+              title="Sort by date"
+            >Date <span class="sort-icon" aria-hidden="true">{sortDir === 'desc' ? '↓' : '↑'}</span></th>
+            <th class="th-mode">Mode</th>
+            <th class="th-tournament">Tournament / Round</th>
+            <th class="th-players">Players</th>
+            <th class="th-score">Score</th>
+            <th class="th-actions">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {#each filtered() as m (m.id)}
+            <tr class="trow" class:trow-selected={selected.has(m.id)}>
+              <td class="td-check">
+                {#if canDeleteMatch(m)}
+                  <label class="row-check">
+                    <input
+                      type="checkbox"
+                      checked={selected.has(m.id)}
+                      onchange={() => toggleSel(m.id)}
+                      aria-label="Select match"
+                    />
+                  </label>
+                {:else}
+                  <span class="row-check row-check-spacer" aria-hidden="true"></span>
+                {/if}
+              </td>
+              <td class="td-date">{fmtDate(m.endedAt)}</td>
+              <td class="td-mode">
+                <span class="chip chip-mode">{m.mode}</span>
+              </td>
+              <td class="td-tournament">
+                {#if m.tournament}<div class="td-tourn-name">{m.tournament}</div>{/if}
+                {#if m.round}<span class="chip chip-round">{m.round}</span>{/if}
+                {#if !m.tournament && !m.round}<span class="td-empty">—</span>{/if}
+              </td>
+              <td class="td-players">
+                <div class="players-vs">
+                  <span>{sideNameMatch(m, 'a')}</span>
+                  {#if sideNameMatch(m, 'b')}
+                    <span class="vs">vs</span>
+                    <span>{sideNameMatch(m, 'b')}</span>
+                  {/if}
+                </div>
+              </td>
+              <td class="td-score">
+                {#if m.mode === 'practice'}
+                  {@const rows = m.practiceBoards ?? []}
+                  {@const totalMisses = rows.reduce((s, row) => s + (row ?? []).reduce((a, v) => a + (v ?? 0), 0), 0)}
+                  {@const boardsPerSet = m.cfg?.maxBoards ?? (rows[0]?.length ?? 0)}
+                  {@const totalBoards = rows.length * boardsPerSet}
+                  <span class="score">{totalMisses}m · {totalBoards}b</span>
+                {:else if m.result?.finalPointsA !== undefined}
+                  <span class="score">{m.result?.setsA ?? 0}–{m.result?.setsB ?? 0} · {m.result?.finalPointsA ?? 0}–{m.result?.finalPointsB ?? 0}</span>
+                {:else}
+                  <span class="td-empty">—</span>
+                {/if}
+              </td>
+              <td class="td-actions">
+                {#if canDeleteMatch(m)}
+                  <button type="button" class="btn btn-danger" onclick={() => (confirmId = m.id)}>Delete</button>
+                {/if}
+              </td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
     </div>
-    <ul class="list">
-      {#each filtered() as m (m.id)}
-        <li class="row" class:row-selected={selected.has(m.id)}>
-          {#if canDeleteMatch(m)}
-            <label class="row-check">
-              <input
-                type="checkbox"
-                checked={selected.has(m.id)}
-                onchange={() => toggleSel(m.id)}
-                aria-label="Select match"
-              />
-            </label>
-          {:else}
-            <span class="row-check row-check-spacer" aria-hidden="true"></span>
-          {/if}
-          <div class="row-name">
-            <div class="row-title">
-              <span class="chip chip-mode">{m.mode}</span>
-              {#if m.tournament}
-                <span class="chip">{m.tournament}</span>
-              {/if}
-              {#if m.round}
-                <span class="chip chip-round">{m.round}</span>
-              {/if}
-              <span class="row-date">{fmtDate(m.endedAt)}</span>
-            </div>
-            <div class="row-sub">
-              {sideNameMatch(m, 'a')}
-              {#if sideNameMatch(m, 'b')}<span class="vs">vs</span> {sideNameMatch(m, 'b')}{/if}
-              {#if m.mode === 'practice'}
-                <!--
-                  Practice records don't have a versus-shape result.
-                  `finalPointsA` is technically defined (always 0)
-                  which would otherwise trip the old `!== undefined`
-                  guard and render "0-0 · 0-0" — meaningless for a
-                  solo drill. Show total misses + total boards from
-                  the practiceBoards matrix instead, mirroring the
-                  Lobby History card's shape.
-                -->
-                {@const rows = m.practiceBoards ?? []}
-                {@const totalMisses = rows.reduce(
-                  (s, row) => s + (row ?? []).reduce((a, v) => a + (v ?? 0), 0),
-                  0,
-                )}
-                {@const boardsPerSet = m.cfg?.maxBoards ?? (rows[0]?.length ?? 0)}
-                {@const totalBoards = rows.length * boardsPerSet}
-                <span class="score">
-                  {totalMisses} misses · {totalBoards} boards
-                </span>
-              {:else if m.result?.finalPointsA !== undefined}
-                <span class="score">
-                  {m.result?.setsA ?? 0}–{m.result?.setsB ?? 0}
-                  ·
-                  {m.result?.finalPointsA ?? 0}–{m.result?.finalPointsB ?? 0}
-                </span>
-              {/if}
-            </div>
-          </div>
-          {#if canDeleteMatch(m)}
-            <button
-              type="button"
-              class="btn btn-danger"
-              onclick={() => (confirmId = m.id)}
-            >Delete</button>
-          {/if}
-        </li>
-      {/each}
-    </ul>
   {/if}
 
   {#if confirmId}
@@ -343,11 +395,13 @@
 
   .controls {
     display: flex;
+    flex-wrap: wrap;
     gap: 0.5rem;
     align-items: center;
   }
   .controls input {
     flex: 1;
+    min-width: 8rem;
     background: #0f0f0f;
     color: var(--fg);
     border: 1px solid #2a2a2a;
@@ -360,6 +414,38 @@
     outline: none;
     border-color: var(--accent);
   }
+  .filter-select {
+    background: #0f0f0f;
+    color: var(--fg);
+    border: 1px solid #2a2a2a;
+    border-radius: 0.45rem;
+    padding: 0.5rem 1.8rem 0.5rem 0.65rem;
+    font: inherit;
+    font-size: 0.82rem;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%239aa0a6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.55rem center;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .filter-select:focus { outline: none; border-color: var(--accent); }
+  .reset-filters {
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid #2a2a2a;
+    border-radius: 0.45rem;
+    padding: 0.45rem 0.75rem;
+    font: inherit;
+    font-size: 0.82rem;
+    cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .reset-filters:hover { color: var(--fg); border-color: #555; }
   .count {
     color: var(--muted);
     font-size: 0.8rem;
@@ -370,12 +456,7 @@
 
   .empty { color: var(--muted); text-align: center; padding: 1.5rem; }
 
-  /* Bulk-select toolbar mirroring other admin tabs. */
-  .select-hdr {
-    display: flex;
-    justify-content: flex-start;
-    padding: 0.25rem 0.5rem;
-  }
+  /* Bulk-select row checkbox, matching other admin tabs. */
   .sel-all {
     display: inline-flex;
     align-items: center;
@@ -403,40 +484,80 @@
     cursor: pointer;
   }
 
-  .list {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
-  }
-  .row {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    padding: 0.55rem 0.75rem;
-    background: rgba(255, 255, 255, 0.02);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+  /* Table layout */
+  .tbl-wrap {
+    overflow-x: auto;
     border-radius: 0.5rem;
-    transition: background 0.12s, border-color 0.12s;
+    border: 1px solid rgba(255, 255, 255, 0.08);
   }
-  .row-selected {
-    background: rgba(255, 213, 74, 0.06);
-    border-color: rgba(255, 213, 74, 0.4);
+  .tbl {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.88rem;
   }
-  .row-name { flex: 1; min-width: 0; }
-  .row-title {
+  .tbl thead tr {
+    background: rgba(255, 255, 255, 0.04);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  }
+  .tbl th {
+    padding: 0.55rem 0.75rem;
+    text-align: left;
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    white-space: nowrap;
+    user-select: none;
+  }
+  .th-sortable { cursor: pointer; }
+  .th-sortable:hover { color: var(--fg); }
+  .th-sort-asc, .th-sort-desc { color: var(--accent, #ffd54a); }
+  .sort-icon { font-style: normal; opacity: 0.7; margin-left: 0.2em; }
+  .th-check { width: 2rem; padding: 0.55rem 0.4rem; }
+  .th-date { width: 7rem; }
+  .th-mode { width: 6rem; }
+  .th-tournament { min-width: 10rem; }
+  .th-score { width: 8rem; }
+  .th-actions { width: 1%; white-space: nowrap; }
+
+  .trow {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    transition: background 0.1s;
+  }
+  .trow:last-child { border-bottom: none; }
+  .trow:hover { background: rgba(255, 255, 255, 0.02); }
+  .trow-selected { background: rgba(255, 213, 74, 0.06) !important; }
+
+  .tbl td { padding: 0.5rem 0.75rem; vertical-align: middle; }
+  .td-check { width: 2rem; padding: 0.5rem 0.4rem; }
+  .td-date {
+    white-space: nowrap;
+    color: var(--muted);
+    font-size: 0.8rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .td-mode { white-space: nowrap; }
+  .td-tourn-name {
+    font-size: 0.82rem;
+    color: var(--fg);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 16rem;
+  }
+  .td-players { min-width: 10rem; }
+  .players-vs {
     display: flex;
     flex-wrap: wrap;
+    gap: 0.25rem 0.4rem;
     align-items: center;
-    gap: 0.4rem;
+    font-size: 0.85rem;
   }
-  .row-date {
-    color: var(--muted, #9aa0a6);
-    font-size: 0.75rem;
-    margin-left: auto;
-  }
+  .td-score { white-space: nowrap; }
+  .td-actions { white-space: nowrap; }
+  .td-empty { color: var(--muted); opacity: 0.4; }
+
   .chip {
     font-size: 0.7rem;
     color: var(--muted);
@@ -454,28 +575,18 @@
     font-weight: 700;
     font-size: 0.65rem;
   }
-  /* Round chip (v3.3.6). Blue-ish accent to sit distinctly next to
-     the tournament chip without reading as the primary label. */
   .chip-round {
     color: #8ab4f8;
     background: rgba(138, 180, 248, 0.08);
     border-color: rgba(138, 180, 248, 0.3);
     letter-spacing: 0.02em;
   }
-  .row-sub {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.4rem;
-    color: var(--muted);
-    font-size: 0.82rem;
-    margin-top: 0.25rem;
-  }
-  .vs { opacity: 0.6; }
+  .vs { opacity: 0.6; font-size: 0.75rem; }
   .score {
     color: var(--fg);
     font-variant-numeric: tabular-nums;
     font-weight: 600;
+    font-size: 0.82rem;
   }
 
   .btn {
