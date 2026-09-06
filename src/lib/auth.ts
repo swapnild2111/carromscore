@@ -204,6 +204,31 @@ export async function signIn(): Promise<void> {
 }
 
 /**
+ * Ensure there is a Firebase auth session (anonymous if the user is not
+ * signed in). Called by planned.ts before any write so unauthenticated
+ * QR-scanners can claim/complete slots without signing in with Google.
+ * Anonymous sessions persist in IndexedDB so the same device reuses the
+ * same UID on subsequent scans. Silent-on-failure — worst case the
+ * planned write will be denied by the rule and the bracket stays "Ready",
+ * which is the same outcome as today.
+ */
+export async function ensureAnonAuth(): Promise<void> {
+  try {
+    await awaitAuthReady();
+    if (cachedUser) return; // already signed in (Google or anon)
+    const [{ firebaseApp }, { getAuth, signInAnonymously }] = await Promise.all([
+      import('./firebase'),
+      import('firebase/auth'),
+    ]);
+    await signInAnonymously(getAuth(firebaseApp()));
+    // onAuthStateChanged will fire and update cachedUser.
+  } catch {
+    // Anonymous auth disabled in the project, or network dead.
+    // Planned writes will fail silently — acceptable degradation.
+  }
+}
+
+/**
  * Sign out the current user. Silent-on-failure. After success
  * `onAuthStateChanged` emits `null` and subscribers refresh.
  */
