@@ -179,6 +179,7 @@
    * Negative deltas remain enabled so real mistakes can be undone.
    */
   let matchDecidedToast = $state(false);
+  let endMatchInProgress = $state(false);
   /**
    * Swap-sides prompt (v3.4.12). Fires immediately after a SET+1
    * successfully transitions into a NEW set. Real-carrom seat
@@ -1406,6 +1407,12 @@
       if (s.sets >= winThreshold) {
         matchResult = side;
         showWinnerPopup = true;
+        // Clear the rollback breadcrumb so SET-1 cannot undo a
+        // clinching SET+1 after the match is already archived —
+        // that would create a second archive entry when the umpire
+        // hits End again (bug: match -P0qxXGzbP2stsxM8QH7 had
+        // setsB:2 on a bestOf:1 match).
+        lastSetPlusRollback = null;
         recordFinishedMatch(side);
         clearResume();
         return;
@@ -1601,14 +1608,21 @@
     if (lockedAtBoardStart) return null;
     const holderSide = queenHolder === 'a' ? sideA : sideB;
     const holderPerBoard = holderSide.points - holderBaseline;
-    // Zero delta = opponent won the board despite the queen chip
-    // being lit (e.g. queen went uncovered and reverted, or the
-    // holder pocketed the queen but the OTHER side finished first —
-    // scored 0 this board is legitimate). Only validate when the
-    // holder actually scored: if they scored anything, they must
-    // have scored at least QUEEN_VALUE (their own puck + queen
-    // cover = 3 minimum in real carrom).
-    if (holderPerBoard === 0) return null;
+    // Zero delta on the holder's side can be legitimate: the OTHER
+    // side won the board (opponent scored, queen chip lit but the
+    // holder pocketed queen without covering it in time). But when
+    // BOTH sides scored 0 the board can't have ended at all — block
+    // the advance, the umpire likely tapped BOARD+ without entering
+    // any scores.
+    if (holderPerBoard === 0) {
+      const otherBaseline = queenHolder === 'a' ? pointsAtBoardStart.b : pointsAtBoardStart.a;
+      const otherSide = queenHolder === 'a' ? sideB : sideA;
+      const otherPerBoard = otherSide.points - otherBaseline;
+      if (otherPerBoard === 0) {
+        return 'Queen is marked but no points entered — add points before advancing';
+      }
+      return null;
+    }
     if (holderPerBoard < QUEEN_VALUE) {
       return `Queen holder scored ${holderPerBoard} — needs at least ${QUEEN_VALUE} when marked`;
     }
@@ -1728,6 +1742,8 @@
   // Fixed array of spark indices for the fireworks each-loop.
   const SPARK_INDICES = Array.from({ length: 20 }, (_, i) => i);
   function endMatch() {
+    if (endMatchInProgress) return;
+    endMatchInProgress = true;
     // Practice: no winner concept. Surface the recap matrix + archive
     // to /matches. Explicitly delete the /live/{mid} record so the
     // lobby stops showing this run under "Now Playing" — versus
@@ -1855,12 +1871,14 @@
         // with the same toast that adjustBoard(+1) uses.
         queenRequiredToast = true;
         window.setTimeout(() => { queenRequiredToast = false; }, 2500);
+        endMatchInProgress = false;
         return;
       }
       const qProblem = queenCreditProblem();
       if (qProblem) {
         queenCreditToast = qProblem;
         window.setTimeout(() => { queenCreditToast = ''; }, 3500);
+        endMatchInProgress = false;
         return;
       }
       const entry: BoardEntry = {
@@ -1912,6 +1930,7 @@
       matchResult = 'draw';
       pendingDrawChoice = true;
       showWinnerPopup = true;
+      endMatchInProgress = false;
       return;
     } else if (sideA.sets > sideB.sets) {
       // Set-lead but not clinched, and current set isn't tied-at-cap.
@@ -2891,7 +2910,7 @@
       </button>
       -->
 
-      <button type="button" class="foot-btn endm" onclick={endMatch} aria-label="End match">
+      <button type="button" class="foot-btn endm" onclick={endMatch} disabled={endMatchInProgress} aria-label="End match">
         <span class="foot-ico" aria-hidden="true">🏁</span><span class="foot-lbl">End</span>
       </button>
       <button type="button" class="foot-btn close" onclick={requestExit} aria-label="Close match">

@@ -89,7 +89,16 @@
     // failure. The subscription below will then re-fetch cleanly.
     void sweepStaleLive();
     let unsub: (() => void) | null = null;
-    void subscribeAllLive((e) => (entries = e)).then((fn) => {
+    let liveRaf: ReturnType<typeof requestAnimationFrame> | null = null;
+    let latestEntries: typeof entries = [];
+    void subscribeAllLive((e) => {
+      latestEntries = e;
+      if (liveRaf !== null) return;
+      liveRaf = requestAnimationFrame(() => {
+        liveRaf = null;
+        entries = latestEntries;
+      });
+    }).then((fn) => {
       unsub = fn;
     });
     // Subscribe to tournaments so findByKey() in canDeleteLive has

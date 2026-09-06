@@ -411,9 +411,18 @@
     }
 
     let unsub: (() => void) | null = null;
+    let liveRaf: ReturnType<typeof requestAnimationFrame> | null = null;
+    let latestEntries: typeof entries = [];
     void subscribeAllLive((e) => {
-      entries = e;
+      latestEntries = e;
       liveLoading = false;
+      // Coalesce rapid Firebase pushes (e.g. 8 live matches scoring
+      // simultaneously) into a single Svelte state update per frame.
+      if (liveRaf !== null) return;
+      liveRaf = requestAnimationFrame(() => {
+        liveRaf = null;
+        entries = latestEntries;
+      });
     }).then((fn) => {
       unsub = fn;
     });
@@ -1968,7 +1977,7 @@
             {@const owns = !!myUid && rec.createdBy === myUid}
             {#if rec.createdBy}
               <p class="recorded-by">
-                Recorded by <strong>{rec.createdByName || 'a signed-in player'}</strong>
+                Recorded by <strong>{rec.createdByName || 'Anonymous'}</strong>
               </p>
             {/if}
             {#if owns}
