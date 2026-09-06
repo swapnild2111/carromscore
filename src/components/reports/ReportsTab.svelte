@@ -996,11 +996,11 @@
               {#if rr.rows.length === 0}
                 <p class="round-report-empty">No matches in this round yet.</p>
               {:else}
+                {@const rrSorted = sortRRLeaderboard(rr.playerSummary)}
+                {@const rrRankMap = new Map(rr.playerSummary.map((p, i) => [p.playerId, rankLabel(rr.playerSummary, i)]))}
+                {@const rrMatchesSorted = sortRRMatches(rr.rows)}
                 <div class="round-report-body">
                   <div class="summary-scroll">
-                    {#if true}
-                    {@const rrSorted = sortRRLeaderboard(rr.playerSummary)}
-                    {@const rrRankMap = new Map(rr.playerSummary.map((p, i) => [p.playerId, rankLabel(rr.playerSummary, i)]))}
                     <table class="summary-tbl leaderboard-tbl">
                       <thead>
                         <tr>
@@ -1029,7 +1029,6 @@
                         {/each}
                       </tbody>
                     </table>
-                    {/if}
                   </div>
                   <div class="round-report-actions">
                     <button
@@ -1042,8 +1041,6 @@
                     </button>
                   </div>
                   <div class="tbl-scroll">
-                    {#if true}
-                    {@const rrMatchesSorted = sortRRMatches(rr.rows)}
                     <table class="matches-tbl">
                       <thead>
                         <tr>
@@ -1083,7 +1080,6 @@
                         {/each}
                       </tbody>
                     </table>
-                    {/if}
                   </div>
                 </div>
               {/if}
