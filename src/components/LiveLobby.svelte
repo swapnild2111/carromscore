@@ -99,6 +99,9 @@
    *  tap handler can route them to /score/ instead of the popup. */
   const localOfflineMids = $derived(new Set(localOfflineEntries.map((e) => e.mid)));
   let matches = $state<MatchRecord[]>([]);
+  // Stable insertion-order map: mid → position when first seen.
+  // Declared at component scope so $derived.by (liveEntries) can read it.
+  const midOrder = new Map<string, number>();
 
   /*
    * History table state (v3.4.12). The tab is table-only now — the
@@ -421,6 +424,9 @@
       if (liveRaf !== null) return;
       liveRaf = requestAnimationFrame(() => {
         liveRaf = null;
+        for (const entry of latestEntries) {
+          if (!midOrder.has(entry.mid)) midOrder.set(entry.mid, midOrder.size);
+        }
         entries = latestEntries;
       });
     }).then((fn) => {
@@ -878,7 +884,7 @@
     return [...entries, ...offlineOnly]
       .filter((e) => !e.liveState.matchResult)
       .filter((e) => now - e.updatedAt < STALE_WINDOW_MS)
-      .sort((a, b) => b.updatedAt - a.updatedAt);
+      .sort((a, b) => (midOrder.get(a.mid) ?? 0) - (midOrder.get(b.mid) ?? 0));
   });
 
   // Tournament bucket label. Blank tag → "Default" bucket. Same
@@ -1570,12 +1576,12 @@
                 {:else}
                   <span class="team-block team-a">
                     <span class="team-name">{sideNameLive(e, 'a')}</span>
-                    {#if s.currentBreak === 'a'}<span class="brk">BREAK</span>{/if}
+                    <span class="brk" class:brk-hidden={s.currentBreak !== 'a'}>BREAK</span>
                   </span>
                   <span class="team-vs">vs</span>
                   <span class="team-block team-b">
                     <span class="team-name">{sideNameLive(e, 'b')}</span>
-                    {#if s.currentBreak === 'b'}<span class="brk">BREAK</span>{/if}
+                    <span class="brk" class:brk-hidden={s.currentBreak !== 'b'}>BREAK</span>
                   </span>
                 {/if}
               </div>
@@ -2656,6 +2662,9 @@
     background: rgba(255, 213, 74, 0.1);
     border: 1px solid rgba(255, 213, 74, 0.4);
     flex-shrink: 0;
+  }
+  .brk-hidden {
+    visibility: hidden;
   }
 
   .card-scores {
