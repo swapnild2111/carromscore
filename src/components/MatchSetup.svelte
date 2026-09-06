@@ -2172,19 +2172,20 @@
   }
   .represents-summary {
     cursor: pointer;
-    font-size: 0.75rem;
+    font-size: 0.8rem;
     color: var(--muted);
     user-select: none;
     list-style: none;
     display: flex;
     align-items: center;
-    gap: 0.3rem;
+    gap: 0.35rem;
     width: fit-content;
+    padding: 0.2rem 0;
   }
   .represents-summary::-webkit-details-marker { display: none; }
   .represents-summary::before {
     content: '▸';
-    font-size: 0.65rem;
+    font-size: 0.8rem;
     transition: transform 0.15s;
   }
   details[open] > .represents-summary::before {
