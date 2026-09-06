@@ -450,6 +450,29 @@ export async function resolvePlannedByBoard(
   }
 }
 
+/**
+ * Load all pending (non-completed) planned slots for a tournament.
+ * Used by AdminTournaments to check whether a player being unassigned
+ * has any upcoming bracket matches before allowing the removal.
+ */
+export async function loadPendingPlannedByTournament(
+  tournamentKey: string,
+): Promise<PlannedMatch[]> {
+  if (!tournamentKey) return [];
+  try {
+    const { getDatabase, ref, get } = await import('firebase/database');
+    const db = getDatabase(firebaseApp());
+    const snap = await get(ref(db, 'planned'));
+    const raw = snap.val() as Record<string, Omit<PlannedMatch, 'mid'>> | null;
+    if (!raw) return [];
+    return Object.entries(raw)
+      .filter(([, v]) => v?.tournamentKey === tournamentKey && !v?.completedAt)
+      .map(([mid, v]) => ({ mid, ...v }));
+  } catch {
+    return [];
+  }
+}
+
 export async function subscribePlannedByTournament(
   tournamentKey: string,
   cb: (matches: PlannedMatch[]) => void,

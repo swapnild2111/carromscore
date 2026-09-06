@@ -124,6 +124,16 @@
     return () => unsubStore();
   });
 
+  /** Resolve a player id to their current canonical name, falling
+   *  back to the stored name string when the id is absent or the
+   *  player record has been deleted. Mirrors history.ts playerName(). */
+  function resolvedName(id: string | undefined, fallback: string): string {
+    void identityTick;
+    if (!id) return fallback;
+    const p = loadAllPlayers().find((x) => x.id === id);
+    return p?.canonicalName ?? fallback;
+  }
+
   // Assigned-player roster for invite-only tournaments. Empty set
   // when the tournament is open (roster gate disabled). Loaded once
   // on mount and refreshed if the tournament flips type in another
@@ -660,17 +670,17 @@
                       {/if}
                     </td>
                     <td>
-                      {m.aName}{#if m.a2Name} + {m.a2Name}{/if}
+                      {resolvedName(m.aResolvedId, m.aName)}{#if m.a2Name} + {resolvedName(m.a2ResolvedId, m.a2Name)}{/if}
                     </td>
                     <td>
-                      {m.bName}{#if m.b2Name} + {m.b2Name}{/if}
+                      {resolvedName(m.bResolvedId, m.bName)}{#if m.b2Name} + {resolvedName(m.b2ResolvedId, m.b2Name)}{/if}
                     </td>
                     <td class="col-status">
                       {#if statusOf(m) === 'complete'}
                         {@const r = m.result}
                         <span class="pill pill-complete" title="Match complete">
                           {#if r}
-                            {r.winner === 'a' ? m.aName.split(' ')[0] : r.winner === 'b' ? m.bName.split(' ')[0] : 'Draw'} · {r.setsA}–{r.setsB}
+                            {r.winner === 'a' ? resolvedName(m.aResolvedId, m.aName).split(' ')[0] : r.winner === 'b' ? resolvedName(m.bResolvedId, m.bName).split(' ')[0] : 'Draw'} · {r.setsA}–{r.setsB}
                           {:else}
                             done
                           {/if}
