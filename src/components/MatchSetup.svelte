@@ -51,7 +51,6 @@
   import { countryName, flagEmoji } from '../lib/countries';
   import {
     loadPlannedMatch,
-    loadPlannedByRound,
     loadAllPlannedByRound,
     claimPlannedMatch,
     resolvePlannedByBoard,
@@ -435,11 +434,10 @@
       roundAllMatches = [];
       return;
     }
-    void loadPlannedByRound(t.key, roundKey).then((matches) => {
-      if (lastLoadedRoundKey === cacheKey) roundPlannedMatches = matches;
-    });
-    void loadAllPlannedByRound(t.key, roundKey).then((matches) => {
-      if (lastLoadedRoundKey === cacheKey) roundAllMatches = matches;
+    void loadAllPlannedByRound(t.key, roundKey).then((all) => {
+      if (lastLoadedRoundKey !== cacheKey) return;
+      roundAllMatches = all;
+      roundPlannedMatches = all.filter((m) => !m.completedAt);
     });
   });
 
