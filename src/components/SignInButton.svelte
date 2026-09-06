@@ -125,7 +125,7 @@
 
 </script>
 
-{#if !user}
+{#if !user || (!user.displayName && !user.email)}
   {#if !signedInOnly}
     <button
       type="button"
