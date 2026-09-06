@@ -1631,27 +1631,30 @@
     <div class="players-block">
       <div class="player-card player-card-a">
         <span class="player-card-label">Player A</span>
-        <div class="player-row">
-          {@render picker('Name', 'playerA', playersLocked)}
+        {@render picker('Name', 'playerA', playersLocked)}
+        <details class="represents-details" open={!!cfg.noteA}>
+          <summary class="represents-summary">Additional details</summary>
           {@render noteInput('Represents', 'noteA', rulesLocked)}
-        </div>
+        </details>
       </div>
       <div class="player-card player-card-b">
         <span class="player-card-label">Player B</span>
-        <div class="player-row">
-          {@render picker('Name', 'playerB', playersLocked)}
+        {@render picker('Name', 'playerB', playersLocked)}
+        <details class="represents-details" open={!!cfg.noteB}>
+          <summary class="represents-summary">Additional details</summary>
           {@render noteInput('Represents', 'noteB', rulesLocked)}
-        </div>
+        </details>
       </div>
     </div>
   {:else if cfg.mode === 'practice'}
     <div class="players-block">
       <div class="player-card player-card-a">
         <span class="player-card-label">Player</span>
-        <div class="player-row">
-          {@render picker('Name', 'playerA', playersLocked)}
+        {@render picker('Name', 'playerA', playersLocked)}
+        <details class="represents-details" open={!!cfg.noteA}>
+          <summary class="represents-summary">Additional details</summary>
           {@render noteInput('Represents', 'noteA', rulesLocked)}
-        </div>
+        </details>
       </div>
     </div>
   {:else}
@@ -1668,7 +1671,10 @@
         {@render picker('Player 1', 'playerA', playersLocked)}
         {@render picker('Player 2', 'playerA2', playersLocked)}
       </div>
-      {@render noteInput('Team A represents', 'noteA', rulesLocked)}
+      <details class="represents-details" open={!!cfg.noteA}>
+        <summary class="represents-summary">Additional details</summary>
+        {@render noteInput('Team A represents', 'noteA', rulesLocked)}
+      </details>
     </div>
     <div class="team-block team-block-b">
       <h3>Team B</h3>
@@ -1676,7 +1682,10 @@
         {@render picker('Player 1', 'playerB', playersLocked)}
         {@render picker('Player 2', 'playerB2', playersLocked)}
       </div>
-      {@render noteInput('Team B represents', 'noteB', rulesLocked)}
+      <details class="represents-details" open={!!cfg.noteB}>
+        <summary class="represents-summary">Additional details</summary>
+        {@render noteInput('Team B represents', 'noteB', rulesLocked)}
+      </details>
     </div>
   {/if}
 
@@ -2158,12 +2167,31 @@
     margin-left: 0.2rem;
   }
 
-  /* Singles: player-row pairs a name picker with a shorter note field.
-     Note gets ~40% width so it stays clearly secondary to the name. */
-  .player-row {
-    display: grid;
-    grid-template-columns: 3fr 2fr;
-    gap: 0.6rem;
+  .represents-details {
+    margin-top: 0.35rem;
+  }
+  .represents-summary {
+    cursor: pointer;
+    font-size: 0.75rem;
+    color: var(--muted);
+    user-select: none;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    width: fit-content;
+  }
+  .represents-summary::-webkit-details-marker { display: none; }
+  .represents-summary::before {
+    content: '▸';
+    font-size: 0.65rem;
+    transition: transform 0.15s;
+  }
+  details[open] > .represents-summary::before {
+    content: '▾';
+  }
+  .represents-details[open] .note-input {
+    margin-top: 0.4rem;
   }
 
   .team-block {
@@ -2666,7 +2694,6 @@
     fieldset.fmt-mode { grid-template-columns: 1fr 1fr 1fr; }
     .row2 { grid-template-columns: 1fr; }
     .row3 { grid-template-columns: 1fr 1fr; }
-    .player-row { grid-template-columns: 1fr; }
   }
 
   /* Planned-match banners (v3.6) — shown when the setup screen was
