@@ -1405,8 +1405,6 @@
               onclick={() => (sortBy = sortBy === 'az' ? 'za' : 'az')}
               title="Sort by name"
             >Name <span class="sort-icon" aria-hidden="true">{sortBy === 'az' ? '↑' : sortBy === 'za' ? '↓' : '↕'}</span></th>
-            <th class="th-type">Type</th>
-            <th class="th-country">Country</th>
             <th class="th-actions">Actions</th>
           </tr>
         </thead>
@@ -1437,22 +1435,6 @@
                   >{t.name}</button>
                 {:else}
                   <div class="row-name-text">{t.name}</div>
-                {/if}
-              </td>
-              <td class="td-type">
-                {#if t.type === 'closed'}
-                  <span class="chip chip-type chip-invite" title="Invite-only — assigned-roster tournament, country-scoped">INVITE-ONLY</span>
-                {:else}
-                  <span class="chip chip-type chip-open" title="Open tournament — any player, any umpire">OPEN</span>
-                {/if}
-              </td>
-              <td class="td-country">
-                {#if t.country}
-                  <span class="chip chip-country" title={countryName(t.country)}>
-                    {flagEmoji(t.country)} {countryName(t.country)}
-                  </span>
-                {:else}
-                  <span class="td-empty">—</span>
                 {/if}
               </td>
               <td class="td-actions">
@@ -2529,8 +2511,6 @@
   .th-sort-asc, .th-sort-desc { color: var(--accent, #ffd54a); }
   .sort-icon { font-style: normal; opacity: 0.7; margin-left: 0.2em; }
   .th-check { width: 2rem; padding: 0.55rem 0.4rem; }
-  .th-type { width: 8rem; }
-  .th-country { width: 9rem; }
   .th-actions { width: 1%; white-space: nowrap; }
 
   .trow {
@@ -2548,8 +2528,6 @@
   }
   .td-check { width: 2rem; padding: 0.55rem 0.4rem; }
   .td-name { min-width: 12rem; max-width: 22rem; word-break: break-word; }
-  .td-type { white-space: nowrap; }
-  .td-country { white-space: nowrap; }
   .td-actions { white-space: nowrap; width: 1%; }
   .td-empty { color: var(--muted); opacity: 0.4; }
   .row-name-text {
@@ -2602,33 +2580,6 @@
     border: 1px solid rgba(255, 255, 255, 0.08);
     padding: 0.15rem 0.55rem;
     border-radius: 999px;
-  }
-  /* Country chip — subtle accent tint, matches AdminPlayers row treatment. */
-  .chip-country {
-    color: var(--accent, #ffd54a);
-    background: rgba(255, 213, 74, 0.08);
-    border-color: rgba(255, 213, 74, 0.3);
-  }
-  /* Access-type chips share a shape (uppercase, letter-spaced) so
-     "OPEN" and "INVITE-ONLY" read as a matched pair on the same
-     row. Colour splits them: accent-yellow for invite-only (calls
-     out roster gating), neutral for open. Legacy `.chip-closed`
-     class kept below for the Rounds sub-modal which still uses
-     "CLOSED" for the round-state semantic. */
-  .chip-type {
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    font-weight: 700;
-  }
-  .chip-invite {
-    color: var(--accent, #ffd54a);
-    background: rgba(255, 213, 74, 0.16);
-    border-color: rgba(255, 213, 74, 0.4);
-  }
-  .chip-open {
-    color: rgba(255, 255, 255, 0.7);
-    background: rgba(255, 255, 255, 0.06);
-    border-color: rgba(255, 255, 255, 0.14);
   }
   /* Legacy chip for the Rounds sub-modal (per-round state), which
      still uses "CLOSED" as the round-state label. Kept separate
