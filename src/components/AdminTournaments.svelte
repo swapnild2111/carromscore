@@ -167,10 +167,10 @@
   let filterType = $state<'all' | 'open' | 'closed'>('all');
   let filterOrganizer = $state('');
   let filterCountry = $state('');
-  let sortBy = $state<'recent' | 'oldest' | 'az' | 'za'>('recent');
+  let sortBy = $state<'recent' | 'oldest' | 'az' | 'za'>('az');
 
   const isFiltered = $derived(
-    query.trim() !== '' || filterType !== 'all' || filterOrganizer !== '' || filterCountry !== '' || sortBy !== 'recent'
+    query.trim() !== '' || filterType !== 'all' || filterOrganizer !== '' || filterCountry !== '' || sortBy !== 'az'
   );
 
   function resetFilters() {
@@ -178,7 +178,7 @@
     filterType = 'all';
     filterOrganizer = '';
     filterCountry = '';
-    sortBy = 'recent';
+    sortBy = 'az';
   }
   /** Add-new-tournament dialog state. Kept as a simple string + open
    *  flag; validation happens on save. */
