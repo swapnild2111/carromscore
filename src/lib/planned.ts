@@ -291,7 +291,6 @@ export async function claimPlannedMatch(
   if (!mid) return { ok: false, error: 'missing mid' };
   await ensureAnonAuth();
   const effectiveUid = uid || currentUser()?.uid || '';
-  console.log('[claimPlanned] mid=', mid, 'effectiveUid=', effectiveUid);
   if (!effectiveUid) return { ok: false, error: 'no auth uid' };
   try {
     const [{ getDatabase, ref, get, set }] = await Promise.all([
@@ -300,11 +299,9 @@ export async function claimPlannedMatch(
     const db = getDatabase(firebaseApp());
     const snap = await get(ref(db, `planned/${mid}`));
     const val = snap.val() as Omit<PlannedMatch, 'mid'> | null;
-    console.log('[claimPlanned] existing record=', val ? 'found' : 'null', 'completedAt=', (val as any)?.completedAt);
     if (!val) return { ok: false, error: 'planned match not found' };
     const next = { ...val, claimedBy: effectiveUid, claimedAt: Date.now() };
     await set(ref(db, `planned/${mid}`), next);
-    console.log('[claimPlanned] set() succeeded');
     return { ok: true, mid };
   } catch (err) {
     console.error('[claimPlanned] FAILED:', err);
