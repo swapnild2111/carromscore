@@ -465,8 +465,8 @@
       return name === filterOrganizer;
     });
     all = [...all].sort((a, b) => {
-      if (sortBy === 'recent') return b.lastActive - a.lastActive;
-      if (sortBy === 'oldest') return a.lastActive - b.lastActive;
+      if (sortBy === 'recent') return b.createdAt - a.createdAt;
+      if (sortBy === 'oldest') return a.createdAt - b.createdAt;
       if (sortBy === 'az') return a.name.localeCompare(b.name);
       return b.name.localeCompare(a.name);
     });
@@ -1272,7 +1272,7 @@
     </select>
     {/if}
     <select class="filter-select" bind:value={sortBy} aria-label="Sort">
-      <option value="recent">Recent first</option>
+      <option value="recent">Newest first</option>
       <option value="oldest">Oldest first</option>
       <option value="az">Name A–Z</option>
       <option value="za">Name Z–A</option>
