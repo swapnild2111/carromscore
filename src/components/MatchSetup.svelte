@@ -938,6 +938,10 @@
     return slot?.mid ?? '';
   });
 
+  // Lock Sets/Points/Boards/Timer when the match rules came from a tournament
+  // planned slot — players must play by the tournament's rules.
+  const rulesLocked = $derived(plannedState.kind === 'loaded');
+
   let canStart = $derived(() => {
     const a1 = cfg.playerA.trim().length > 0;
     if (cfg.mode === 'practice') {
@@ -1395,22 +1399,22 @@
     </label>
   </fieldset>
 
-  <fieldset class="rules" class:rules-practice={cfg.mode === 'practice'}>
-    <legend>Match rules</legend>
+  <fieldset class="rules" class:rules-practice={cfg.mode === 'practice'} class:rules-locked={rulesLocked}>
+    <legend>Match rules{#if rulesLocked}<span class="rules-lock-badge" title="Rules set by tournament">🔒</span>{/if}</legend>
     <label>
       <span>Sets</span>
-      <input type="number" min="1" max="9" step="1" bind:value={cfg.bestOf} />
+      <input type="number" min="1" max="9" step="1" bind:value={cfg.bestOf} disabled={rulesLocked} />
     </label>
     {#if cfg.mode !== 'practice'}
       <label>
         <span>Points</span>
-        <input type="number" min="1" step="1" bind:value={cfg.pointsTarget} />
+        <input type="number" min="1" step="1" bind:value={cfg.pointsTarget} disabled={rulesLocked} />
       </label>
     {/if}
     <label>
       <span>{cfg.mode === 'practice' ? 'Boards per set' : 'Boards'}</span>
       <div class="rules-val-row">
-        <input type="number" min={cfg.mode === 'practice' ? 1 : 0} step="1" bind:value={cfg.maxBoards} />
+        <input type="number" min={cfg.mode === 'practice' ? 1 : 0} step="1" bind:value={cfg.maxBoards} disabled={rulesLocked} />
       </div>
     </label>
     <label>
@@ -1422,6 +1426,7 @@
           max="300"
           step="1"
           bind:value={cfg.timerDuration}
+          disabled={rulesLocked}
           onblur={(e) => {
             const v = (e.currentTarget as HTMLInputElement).value;
             if (v === '' || v === null) cfg.timerDuration = 0;
@@ -1971,6 +1976,21 @@
     width: 100%;
     text-align: center;
     line-height: 1.2;
+  }
+  fieldset.rules.rules-locked label {
+    border-color: #2a2a2a;
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  fieldset.rules.rules-locked input[type='number']:disabled {
+    color: var(--muted);
+    cursor: not-allowed;
+    -webkit-text-fill-color: var(--muted);
+  }
+  .rules-lock-badge {
+    margin-left: 0.4rem;
+    font-size: 0.75rem;
+    opacity: 0.8;
   }
   .rules-hint {
     color: var(--muted);
