@@ -675,10 +675,31 @@
   $effect(() => {
     if (!dialog) return;
     if (openPopup) {
-      if (!dialog.open) dialog.showModal();
+      if (!dialog.open) {
+        dialog.showModal();
+        // Push a history entry so the mobile back button closes the
+        // popup instead of navigating away from /live/ and landing on
+        // a blank page (Svelte remounting with only the header visible).
+        window.history.pushState({ popupOpen: true }, '');
+      }
     } else {
       if (dialog.open) dialog.close();
     }
+  });
+
+  // Handle mobile back button: if a popup-sentinel history entry is
+  // present, close the popup instead of leaving the page.
+  $effect(() => {
+    function onPopState(e: PopStateEvent) {
+      if (e.state?.popupOpen) return; // navigating forward into sentinel — ignore
+      if (openPopup) {
+        openPopup = null;
+        // Re-push the sentinel so a second back press still works if
+        // the user re-opens a popup without navigating away.
+      }
+    }
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
   });
 
   // Auto-open the popup when a deep-link mid finally matches a live
