@@ -849,7 +849,7 @@
               <th class="hist-th-sortable" class:hist-th-sorted={lbSortKey === 'draws'} onclick={() => toggleLBSort('draws')}>
                 D {#if lbSortKey === 'draws'}<span class="sort-caret">{lbSortDir === 'asc' ? '▲' : '▼'}</span>{/if}
               </th>
-              <th class="hist-th-sortable" class:hist-th-sorted={lbSortKey === 'boards'} onclick={() => toggleLBSort('boards')}>
+              <th class="hist-th-sortable" class:hist-th-sorted={lbSortKey === 'boards'} onclick={() => toggleLBSort('boards')} title="Boards won (fewer = more efficient)">
                 Boards {#if lbSortKey === 'boards'}<span class="sort-caret">{lbSortDir === 'asc' ? '▲' : '▼'}</span>{/if}
               </th>
               <th class="hist-th-sortable" class:hist-th-sorted={lbSortKey === 'points'} onclick={() => toggleLBSort('points')} title="Win=2, Draw=1, Loss=0">

@@ -305,7 +305,7 @@ export function buildPlayerSummary(matches: MatchRecord[]): PlayerSummary[] {
   out.sort((a, b) => {
     if (b.strikePoints !== a.strikePoints) return b.strikePoints - a.strikePoints;
     if (b.netPoints !== a.netPoints) return b.netPoints - a.netPoints;
-    return b.boardsWon - a.boardsWon;
+    return a.boardsWon - b.boardsWon; // fewer boards = more efficient, ranks higher
   });
   return out;
 }
