@@ -873,7 +873,7 @@
                 <td>{p.draws}</td>
                 <td>{p.boardsWon}</td>
                 <td class="col-total">{p.strikePoints}</td>
-                <td class="col-total" class:col-net-neg={p.netPoints < 0}>{p.netPoints > 0 ? `+${p.netPoints}` : p.netPoints}</td>
+                <td class="col-total" class:col-net-neg={p.netPoints < 0}>{p.netPoints}</td>
               </tr>
             {/each}
           </tbody>
@@ -1032,7 +1032,7 @@
                             <td>{p.draws}</td>
                             <td>{p.boardsWon}</td>
                             <td class="col-total">{p.strikePoints}</td>
-                            <td class="col-total" class:col-net-neg={p.netPoints < 0}>{p.netPoints > 0 ? `+${p.netPoints}` : p.netPoints}</td>
+                            <td class="col-total" class:col-net-neg={p.netPoints < 0}>{p.netPoints}</td>
                           </tr>
                         {/each}
                       </tbody>
@@ -1682,7 +1682,8 @@
     font-size: 0.7rem;
     color: var(--muted, #9aa0a6);
     font-weight: 700;
-    background: #161616;
+    background: rgba(255, 255, 255, 0.06);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
     position: sticky;
     top: 0;
     z-index: 1;
