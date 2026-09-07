@@ -1676,7 +1676,8 @@
     border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   }
   .summary-tbl th,
-  .matches-tbl th {
+  .matches-tbl th,
+  .leaderboard-tbl th {
     text-transform: uppercase;
     letter-spacing: 0.04em;
     font-size: 0.7rem;
