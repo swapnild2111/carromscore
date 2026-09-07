@@ -711,7 +711,7 @@
       Reset writes to `selection` via pick() (URL sync intact) and
       the effects push back into the proxy selects.
     -->
-    {#if filterSearch.trim() !== '' || filterMode !== 'all' || selection !== null || roundFilter !== null}
+    {#if filterSearch.trim() !== '' || filterMode !== 'all' || (selection !== null && selection !== '__all__') || roundFilter !== null}
       <button
         type="button"
         class="rep-clear"
