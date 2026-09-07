@@ -396,7 +396,7 @@
   // session — an organiser wants to jump to a player quickly but
   // shouldn't come back tomorrow with a stale filter still applied.
   // ─────────────────────────────────────────────────────────────
-  type LBSortKey = 'rank' | 'name' | 'matches' | 'wins' | 'losses' | 'draws' | 'boards' | 'points';
+  type LBSortKey = 'rank' | 'name' | 'matches' | 'wins' | 'losses' | 'draws' | 'boards' | 'points' | 'net';
   type MSortKey = 'endedAt' | 'mode' | 'sideA' | 'sideB' | 'setsA' | 'setsB' | 'points' | 'winner';
   const REPORTS_PREFS_KEY = 'carromscore.reports.prefs.v1';
   function loadReportsPrefs(): {
@@ -415,7 +415,7 @@
       const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(REPORTS_PREFS_KEY) : null;
       if (!raw) return fallback;
       const parsed = JSON.parse(raw) as Record<string, unknown>;
-      const lbKeys: LBSortKey[] = ['rank', 'name', 'matches', 'wins', 'losses', 'draws', 'boards', 'points'];
+      const lbKeys: LBSortKey[] = ['rank', 'name', 'matches', 'wins', 'losses', 'draws', 'boards', 'points', 'net'];
       const mKeys: MSortKey[] = ['endedAt', 'mode', 'sideA', 'sideB', 'setsA', 'setsB', 'points', 'winner'];
       return {
         lbSortKey: lbKeys.includes(parsed.lbSortKey as LBSortKey) ? (parsed.lbSortKey as LBSortKey) : 'rank',
@@ -522,7 +522,8 @@
         case 'losses': av = a.losses; bv = b.losses; break;
         case 'draws': av = a.draws; bv = b.draws; break;
         case 'boards': av = a.boardsWon; bv = b.boardsWon; break;
-        case 'points': av = a.pointsScored; bv = b.pointsScored; break;
+        case 'points': av = a.strikePoints; bv = b.strikePoints; break;
+        case 'net': av = a.netPoints; bv = b.netPoints; break;
       }
       if (av < bv) return -1 * dir;
       if (av > bv) return 1 * dir;
@@ -569,7 +570,8 @@
         case 'losses': av = a.losses; bv = b.losses; break;
         case 'draws': av = a.draws; bv = b.draws; break;
         case 'boards': av = a.boardsWon; bv = b.boardsWon; break;
-        case 'points': av = a.pointsScored; bv = b.pointsScored; break;
+        case 'points': av = a.strikePoints; bv = b.strikePoints; break;
+        case 'net': av = a.netPoints; bv = b.netPoints; break;
       }
       if (av < bv) return -1 * dir;
       if (av > bv) return 1 * dir;
@@ -850,8 +852,11 @@
               <th class="hist-th-sortable" class:hist-th-sorted={lbSortKey === 'boards'} onclick={() => toggleLBSort('boards')}>
                 Boards {#if lbSortKey === 'boards'}<span class="sort-caret">{lbSortDir === 'asc' ? '▲' : '▼'}</span>{/if}
               </th>
-              <th class="hist-th-sortable" class:hist-th-sorted={lbSortKey === 'points'} onclick={() => toggleLBSort('points')}>
+              <th class="hist-th-sortable" class:hist-th-sorted={lbSortKey === 'points'} onclick={() => toggleLBSort('points')} title="Win=2, Draw=1, Loss=0">
                 Points {#if lbSortKey === 'points'}<span class="sort-caret">{lbSortDir === 'asc' ? '▲' : '▼'}</span>{/if}
+              </th>
+              <th class="hist-th-sortable" class:hist-th-sorted={lbSortKey === 'net'} onclick={() => toggleLBSort('net')} title="Sum of (my score − opponent score) per match">
+                Net {#if lbSortKey === 'net'}<span class="sort-caret">{lbSortDir === 'asc' ? '▲' : '▼'}</span>{/if}
               </th>
             </tr>
           </thead>
@@ -867,7 +872,8 @@
                 <td>{p.losses}</td>
                 <td>{p.draws}</td>
                 <td>{p.boardsWon}</td>
-                <td class="col-total">{p.pointsScored}</td>
+                <td class="col-total">{p.strikePoints}</td>
+                <td class="col-total" class:col-net-neg={p.netPoints < 0}>{p.netPoints > 0 ? `+${p.netPoints}` : p.netPoints}</td>
               </tr>
             {/each}
           </tbody>
@@ -1011,7 +1017,8 @@
                           <th class="hist-th-sortable" class:hist-th-sorted={rrLBSortKey === 'losses'} onclick={() => toggleRRLBSort('losses')}>L {rrLBSortKey === 'losses' ? (rrLBSortDir === 'asc' ? '↑' : '↓') : ''}</th>
                           <th class="hist-th-sortable" class:hist-th-sorted={rrLBSortKey === 'draws'} onclick={() => toggleRRLBSort('draws')}>D {rrLBSortKey === 'draws' ? (rrLBSortDir === 'asc' ? '↑' : '↓') : ''}</th>
                           <th class="hist-th-sortable" class:hist-th-sorted={rrLBSortKey === 'boards'} onclick={() => toggleRRLBSort('boards')}>Boards {rrLBSortKey === 'boards' ? (rrLBSortDir === 'asc' ? '↑' : '↓') : ''}</th>
-                          <th class="hist-th-sortable" class:hist-th-sorted={rrLBSortKey === 'points'} onclick={() => toggleRRLBSort('points')}>Points {rrLBSortKey === 'points' ? (rrLBSortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                          <th class="hist-th-sortable" class:hist-th-sorted={rrLBSortKey === 'points'} onclick={() => toggleRRLBSort('points')} title="Win=2, Draw=1, Loss=0">Points {rrLBSortKey === 'points' ? (rrLBSortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                          <th class="hist-th-sortable" class:hist-th-sorted={rrLBSortKey === 'net'} onclick={() => toggleRRLBSort('net')} title="Sum of (my score − opponent score) per match">Net {rrLBSortKey === 'net' ? (rrLBSortDir === 'asc' ? '↑' : '↓') : ''}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1024,7 +1031,8 @@
                             <td>{p.losses}</td>
                             <td>{p.draws}</td>
                             <td>{p.boardsWon}</td>
-                            <td class="col-total">{p.pointsScored}</td>
+                            <td class="col-total">{p.strikePoints}</td>
+                            <td class="col-total" class:col-net-neg={p.netPoints < 0}>{p.netPoints > 0 ? `+${p.netPoints}` : p.netPoints}</td>
                           </tr>
                         {/each}
                       </tbody>
@@ -1387,6 +1395,7 @@
       color: #b8990a !important;
     }
     .leaderboard-tbl .col-total { color: #111 !important; font-weight: 700 !important; }
+    .leaderboard-tbl .col-net-neg { color: #c0392b !important; }
     /* Zebra for readability */
     .matches-tbl tbody tr:nth-child(even) td {
       background: #f9f9f9 !important;
@@ -1694,6 +1703,9 @@
     font-weight: 700;
     color: var(--fg, #f5f5f5);
     font-variant-numeric: tabular-nums;
+  }
+  .leaderboard-tbl .col-net-neg {
+    color: #e05c5c !important;
   }
   /* Top row (rank 1) — gets a subtle accent tint so the leader
      jumps out at a glance. Ties for first also inherit this via the

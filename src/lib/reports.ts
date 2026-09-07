@@ -51,7 +51,9 @@ export type PlayerSummary = {
   losses: number;
   draws: number;
   boardsWon: number;
-  pointsScored: number;
+  pointsScored: number; // legacy — raw cumulative, kept for compat
+  strikePoints: number; // win=2, draw=1, loss=0 — sum across matches
+  netPoints: number;    // Σ (myFinalPoints − opponentFinalPoints), signed
 };
 
 export type TournamentReport = {
@@ -212,6 +214,8 @@ function emptyPlayerSummary(pid: string, displayName?: string): PlayerSummary {
     draws: 0,
     boardsWon: 0,
     pointsScored: 0,
+    strikePoints: 0,
+    netPoints: 0,
   };
 }
 
@@ -226,6 +230,7 @@ function accumulateSide(
   playerIds: string[],
   boardsWon: number,
   pointsScored: number,
+  netDelta: number,
   wasWin: boolean,
   wasLoss: boolean,
   wasDraw: boolean,
@@ -235,9 +240,10 @@ function accumulateSide(
     s.matches += 1;
     s.boardsWon += boardsWon;
     s.pointsScored += pointsScored;
-    if (wasWin) s.wins += 1;
-    else if (wasLoss) s.losses += 1;
-    else if (wasDraw) s.draws += 1;
+    s.netPoints += netDelta;
+    if (wasWin) { s.wins += 1; s.strikePoints += 2; }
+    else if (wasLoss) { s.losses += 1; }
+    else if (wasDraw) { s.draws += 1; s.strikePoints += 1; }
     map.set(pid, s);
   }
 }
@@ -288,15 +294,17 @@ export function buildPlayerSummary(matches: MatchRecord[]): PlayerSummary[] {
     }
 
     const isDraw = winner === 'draw';
+    const netA = pointsA - pointsB;
+    const netB = pointsB - pointsA;
 
-    accumulateSide(map, sideAKeys, boardsWonA, pointsA, winner === 'a', winner === 'b', isDraw);
-    accumulateSide(map, sideBKeys, boardsWonB, pointsB, winner === 'b', winner === 'a', isDraw);
+    accumulateSide(map, sideAKeys, boardsWonA, pointsA, netA, winner === 'a', winner === 'b', isDraw);
+    accumulateSide(map, sideBKeys, boardsWonB, pointsB, netB, winner === 'b', winner === 'a', isDraw);
   }
 
   const out = Array.from(map.values());
   out.sort((a, b) => {
-    if (b.wins !== a.wins) return b.wins - a.wins;
-    if (b.pointsScored !== a.pointsScored) return b.pointsScored - a.pointsScored;
+    if (b.strikePoints !== a.strikePoints) return b.strikePoints - a.strikePoints;
+    if (b.netPoints !== a.netPoints) return b.netPoints - a.netPoints;
     return b.boardsWon - a.boardsWon;
   });
   return out;
