@@ -874,7 +874,7 @@
         </table>
       </div>
 
-    {#if roundFilter !== null || !(report.roundReports?.length)}
+    {#if roundFilter !== null || (report.roundReports?.length ?? 0) <= 1}
     <div class="tbl-hdr">
       <h3 class="section-hdr">Matches ({sortedMatches.length}{#if sortedMatches.length !== view.matches} / {view.matches}{/if})</h3>
       <div class="tbl-actions">
@@ -965,7 +965,7 @@
       table. Charts are deliberately omitted per-round to keep the
       scroll length sane — the combined view has them.
     -->
-    {#if roundFilter === null && report.roundReports && report.roundReports.length > 0}
+    {#if roundFilter === null && report.roundReports && report.roundReports.length > 1}
       <!--
         Per-round accordion only renders when the round filter is
         "All rounds" (v3.3.3). If the umpire has narrowed the top
