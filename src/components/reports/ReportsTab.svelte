@@ -973,52 +973,39 @@
     -->
     {#if roundFilter === null && report.roundReports && report.roundReports.length > 1}
       <!--
-        Per-round accordion only renders when the round filter is
-        "All rounds" (v3.3.3). If the umpire has narrowed the top
-        view to a single round, the accordion below repeating that
-        one round would be visual noise — the top view already
-        shows exactly that data.
+        Per-round breakdown. League format: group rounds rendered
+        side-by-side in a 2-col grid (compact standings only, no
+        accordion chrome). Standard format: stacked accordion as before.
       -->
-      <div class="rounds-section">
-        <h3 class="section-hdr">Per-round breakdown</h3>
-        {#each report.roundReports as rr (rr.roundKey)}
-          {@const open = isRoundOpen(rr.roundKey)}
-          <section
-            class="round-report"
-            class:round-report-unassigned={rr.roundKey === '__unassigned__'}
-            class:round-folded={!open}
-          >
-            <button
-              type="button"
-              class="round-report-hdr"
-              aria-expanded={open}
-              onclick={() => toggleRound(rr.roundKey)}
-            >
-              <span class="round-report-caret" class:round-report-caret-folded={!open} aria-hidden="true">▾</span>
-              <span class="round-report-name">{rr.roundName}</span>
-              <span class="round-report-count">{rr.matches} match{rr.matches === 1 ? '' : 'es'}</span>
-            </button>
-            {#if open}
-              {#if rr.rows.length === 0}
-                <p class="round-report-empty">No matches in this round yet.</p>
-              {:else}
-                {@const rrSorted = sortRRLeaderboard(rr.playerSummary)}
-                {@const rrRankMap = new Map(rr.playerSummary.map((p, i) => [p.playerId, rankLabel(rr.playerSummary, i)]))}
-                {@const rrMatchesSorted = sortRRMatches(rr.rows)}
-                <div class="round-report-body">
-                  <div class="summary-scroll">
-                    <table class="summary-tbl leaderboard-tbl">
+      {@const isLeague = currentTournamentRecord?.format === 'league'}
+      {@const groupRounds = isLeague ? report.roundReports.filter(rr => /^group /i.test(rr.roundName)) : []}
+      {@const nonGroupRounds = isLeague ? report.roundReports.filter(rr => !/^group /i.test(rr.roundName)) : report.roundReports}
+
+      {#if isLeague && groupRounds.length > 0}
+        <div class="rounds-section">
+          <h3 class="section-hdr">Group standings</h3>
+          <div class="group-grid">
+            {#each groupRounds as rr (rr.roundKey)}
+              <div class="group-card">
+                <div class="group-card-hdr">
+                  <span class="group-card-name">{rr.roundName}</span>
+                  <span class="group-card-count">{rr.matches} match{rr.matches === 1 ? '' : 'es'}</span>
+                </div>
+                {#if rr.rows.length === 0}
+                  <p class="round-report-empty">No matches yet.</p>
+                {:else}
+                  {@const rrSorted = sortRRLeaderboard(rr.playerSummary)}
+                  {@const rrRankMap = new Map(rr.playerSummary.map((p, i) => [p.playerId, rankLabel(rr.playerSummary, i)]))}
+                  <div class="group-tbl-scroll">
+                    <table class="summary-tbl leaderboard-tbl group-standings-tbl">
                       <thead>
                         <tr>
-                          <th class="col-rank hist-th-sortable" class:hist-th-sorted={rrLBSortKey === 'rank'} onclick={() => toggleRRLBSort('rank')}># {rrLBSortKey === 'rank' ? (rrLBSortDir === 'asc' ? '↑' : '↓') : ''}</th>
-                          <th class="col-name hist-th-sortable" class:hist-th-sorted={rrLBSortKey === 'name'} onclick={() => toggleRRLBSort('name')}>Player {rrLBSortKey === 'name' ? (rrLBSortDir === 'asc' ? '↑' : '↓') : ''}</th>
-                          <th class="hist-th-sortable" class:hist-th-sorted={rrLBSortKey === 'matches'} onclick={() => toggleRRLBSort('matches')}>Matches {rrLBSortKey === 'matches' ? (rrLBSortDir === 'asc' ? '↑' : '↓') : ''}</th>
-                          <th class="hist-th-sortable" class:hist-th-sorted={rrLBSortKey === 'wins'} onclick={() => toggleRRLBSort('wins')}>W {rrLBSortKey === 'wins' ? (rrLBSortDir === 'asc' ? '↑' : '↓') : ''}</th>
-                          <th class="hist-th-sortable" class:hist-th-sorted={rrLBSortKey === 'losses'} onclick={() => toggleRRLBSort('losses')}>L {rrLBSortKey === 'losses' ? (rrLBSortDir === 'asc' ? '↑' : '↓') : ''}</th>
-                          <th class="hist-th-sortable" class:hist-th-sorted={rrLBSortKey === 'draws'} onclick={() => toggleRRLBSort('draws')}>D {rrLBSortKey === 'draws' ? (rrLBSortDir === 'asc' ? '↑' : '↓') : ''}</th>
-                          <th class="hist-th-sortable" class:hist-th-sorted={rrLBSortKey === 'boards'} onclick={() => toggleRRLBSort('boards')}>Boards {rrLBSortKey === 'boards' ? (rrLBSortDir === 'asc' ? '↑' : '↓') : ''}</th>
-                          <th class="hist-th-sortable" class:hist-th-sorted={rrLBSortKey === 'points'} onclick={() => toggleRRLBSort('points')} title="Win=2, Draw=1, Loss=0">Points {rrLBSortKey === 'points' ? (rrLBSortDir === 'asc' ? '↑' : '↓') : ''}</th>
-                          <th class="hist-th-sortable" class:hist-th-sorted={rrLBSortKey === 'net'} onclick={() => toggleRRLBSort('net')} title="Sum of (my score − opponent score) per match">Net {rrLBSortKey === 'net' ? (rrLBSortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                          <th>#</th>
+                          <th class="col-name">Player</th>
+                          <th title="Win=2, Draw=1, Loss=0">Pts</th>
+                          <th>W</th>
+                          <th>L</th>
+                          <th title="Net points (my score − opponent)">Net</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1026,75 +1013,140 @@
                           <tr class:leaderboard-top={rrLBSortKey === 'rank' && rrLBSortDir === 'asc' && i === 0}>
                             <td class="col-rank">{rrRankMap.get(p.playerId) ?? String(i + 1)}</td>
                             <td class="col-name">{p.name}</td>
-                            <td>{p.matches}</td>
+                            <td class="col-total">{p.strikePoints}</td>
                             <td>{p.wins}</td>
                             <td>{p.losses}</td>
-                            <td>{p.draws}</td>
-                            <td>{p.boardsWon}</td>
-                            <td class="col-total">{p.strikePoints}</td>
                             <td class="col-total" class:col-net-neg={p.netPoints < 0}>{p.netPoints}</td>
                           </tr>
                         {/each}
                       </tbody>
                     </table>
                   </div>
-                  <div class="round-report-actions">
-                    <button
-                      type="button"
-                      class="btn btn-copy"
-                      onclick={() => copyRows(rr.rows, rr.roundKey)}
-                      aria-label="Copy this round's table to clipboard"
-                    >
-                      {#if copiedKey === rr.roundKey}<span aria-hidden="true">✓</span> Copied{:else}<span aria-hidden="true">⧉</span> Copy round table{/if}
-                    </button>
-                  </div>
-                  <div class="tbl-scroll">
-                    <table class="matches-tbl">
-                      <thead>
-                        <tr>
-                          <th class="hist-th-sortable" class:hist-th-sorted={rrMSortKey === 'endedAt'} onclick={() => toggleRRMSort('endedAt')}>Ended {rrMSortKey === 'endedAt' ? (rrMSortDir === 'asc' ? '↑' : '↓') : ''}</th>
-                          <th class="hist-th-sortable" class:hist-th-sorted={rrMSortKey === 'mode'} onclick={() => toggleRRMSort('mode')}>Mode {rrMSortKey === 'mode' ? (rrMSortDir === 'asc' ? '↑' : '↓') : ''}</th>
-                          <th class="col-name hist-th-sortable" class:hist-th-sorted={rrMSortKey === 'sideA'} onclick={() => toggleRRMSort('sideA')}>Side A {rrMSortKey === 'sideA' ? (rrMSortDir === 'asc' ? '↑' : '↓') : ''}</th>
-                          <th class="col-name hist-th-sortable" class:hist-th-sorted={rrMSortKey === 'sideB'} onclick={() => toggleRRMSort('sideB')}>Side B {rrMSortKey === 'sideB' ? (rrMSortDir === 'asc' ? '↑' : '↓') : ''}</th>
-                          <th class="hist-th-sortable" class:hist-th-sorted={rrMSortKey === 'setsA'} onclick={() => toggleRRMSort('setsA')}>Sets A {rrMSortKey === 'setsA' ? (rrMSortDir === 'asc' ? '↑' : '↓') : ''}</th>
-                          <th class="hist-th-sortable" class:hist-th-sorted={rrMSortKey === 'setsB'} onclick={() => toggleRRMSort('setsB')}>Sets B {rrMSortKey === 'setsB' ? (rrMSortDir === 'asc' ? '↑' : '↓') : ''}</th>
-                          <th>Boards A</th>
-                          <th>Boards B</th>
-                          <th class="hist-th-sortable" class:hist-th-sorted={rrMSortKey === 'points'} onclick={() => toggleRRMSort('points')}>Points A {rrMSortKey === 'points' ? (rrMSortDir === 'asc' ? '↑' : '↓') : ''}</th>
-                          <th>Points B</th>
-                          <th class="hist-th-sortable" class:hist-th-sorted={rrMSortKey === 'winner'} onclick={() => toggleRRMSort('winner')}>Winner {rrMSortKey === 'winner' ? (rrMSortDir === 'asc' ? '↑' : '↓') : ''}</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {#each rrMatchesSorted as r (r._matchId)}
+                {/if}
+              </div>
+            {/each}
+          </div>
+        </div>
+      {/if}
+
+      {#if nonGroupRounds.length > 0}
+        <div class="rounds-section">
+          <h3 class="section-hdr">Per-round breakdown</h3>
+          {#each nonGroupRounds as rr (rr.roundKey)}
+            {@const open = isRoundOpen(rr.roundKey)}
+            <section
+              class="round-report"
+              class:round-report-unassigned={rr.roundKey === '__unassigned__'}
+              class:round-folded={!open}
+            >
+              <button
+                type="button"
+                class="round-report-hdr"
+                aria-expanded={open}
+                onclick={() => toggleRound(rr.roundKey)}
+              >
+                <span class="round-report-caret" class:round-report-caret-folded={!open} aria-hidden="true">▾</span>
+                <span class="round-report-name">{rr.roundName}</span>
+                <span class="round-report-count">{rr.matches} match{rr.matches === 1 ? '' : 'es'}</span>
+              </button>
+              {#if open}
+                {#if rr.rows.length === 0}
+                  <p class="round-report-empty">No matches in this round yet.</p>
+                {:else}
+                  {@const rrSorted = sortRRLeaderboard(rr.playerSummary)}
+                  {@const rrRankMap = new Map(rr.playerSummary.map((p, i) => [p.playerId, rankLabel(rr.playerSummary, i)]))}
+                  {@const rrMatchesSorted = sortRRMatches(rr.rows)}
+                  <div class="round-report-body">
+                    <div class="summary-scroll">
+                      <table class="summary-tbl leaderboard-tbl">
+                        <thead>
                           <tr>
-                            <td>{r.endedAt}</td>
-                            <td>{r.mode}</td>
-                            <td class="col-name">{r.sideA}</td>
-                            <td class="col-name">{r.sideB}</td>
-                            <td>{r.setsA}</td>
-                            <td>{r.setsB}</td>
-                            <td>{r.boardsWonA}</td>
-                            <td>{r.boardsWonB}</td>
-                            <td>{r.pointsA}</td>
-                            <td>{r.pointsB}</td>
-                            <td class="winner-cell">
-                              {#if r.winner === 'Draw'}<span class="winner-tag winner-draw">Draw</span>
-                              {:else if r.winner === 'A'}<span class="winner-tag winner-a">A</span>
-                              {:else if r.winner === 'B'}<span class="winner-tag winner-b">B</span>
-                              {/if}
-                            </td>
+                            <th class="col-rank hist-th-sortable" class:hist-th-sorted={rrLBSortKey === 'rank'} onclick={() => toggleRRLBSort('rank')}># {rrLBSortKey === 'rank' ? (rrLBSortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                            <th class="col-name hist-th-sortable" class:hist-th-sorted={rrLBSortKey === 'name'} onclick={() => toggleRRLBSort('name')}>Player {rrLBSortKey === 'name' ? (rrLBSortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                            <th class="hist-th-sortable" class:hist-th-sorted={rrLBSortKey === 'matches'} onclick={() => toggleRRLBSort('matches')}>Matches {rrLBSortKey === 'matches' ? (rrLBSortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                            <th class="hist-th-sortable" class:hist-th-sorted={rrLBSortKey === 'wins'} onclick={() => toggleRRLBSort('wins')}>W {rrLBSortKey === 'wins' ? (rrLBSortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                            <th class="hist-th-sortable" class:hist-th-sorted={rrLBSortKey === 'losses'} onclick={() => toggleRRLBSort('losses')}>L {rrLBSortKey === 'losses' ? (rrLBSortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                            <th class="hist-th-sortable" class:hist-th-sorted={rrLBSortKey === 'draws'} onclick={() => toggleRRLBSort('draws')}>D {rrLBSortKey === 'draws' ? (rrLBSortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                            <th class="hist-th-sortable" class:hist-th-sorted={rrLBSortKey === 'boards'} onclick={() => toggleRRLBSort('boards')}>Boards {rrLBSortKey === 'boards' ? (rrLBSortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                            <th class="hist-th-sortable" class:hist-th-sorted={rrLBSortKey === 'points'} onclick={() => toggleRRLBSort('points')} title="Win=2, Draw=1, Loss=0">Points {rrLBSortKey === 'points' ? (rrLBSortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                            <th class="hist-th-sortable" class:hist-th-sorted={rrLBSortKey === 'net'} onclick={() => toggleRRLBSort('net')} title="Sum of (my score − opponent score) per match">Net {rrLBSortKey === 'net' ? (rrLBSortDir === 'asc' ? '↑' : '↓') : ''}</th>
                           </tr>
-                        {/each}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody>
+                          {#each rrSorted as p, i (p.playerId)}
+                            <tr class:leaderboard-top={rrLBSortKey === 'rank' && rrLBSortDir === 'asc' && i === 0}>
+                              <td class="col-rank">{rrRankMap.get(p.playerId) ?? String(i + 1)}</td>
+                              <td class="col-name">{p.name}</td>
+                              <td>{p.matches}</td>
+                              <td>{p.wins}</td>
+                              <td>{p.losses}</td>
+                              <td>{p.draws}</td>
+                              <td>{p.boardsWon}</td>
+                              <td class="col-total">{p.strikePoints}</td>
+                              <td class="col-total" class:col-net-neg={p.netPoints < 0}>{p.netPoints}</td>
+                            </tr>
+                          {/each}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div class="round-report-actions">
+                      <button
+                        type="button"
+                        class="btn btn-copy"
+                        onclick={() => copyRows(rr.rows, rr.roundKey)}
+                        aria-label="Copy this round's table to clipboard"
+                      >
+                        {#if copiedKey === rr.roundKey}<span aria-hidden="true">✓</span> Copied{:else}<span aria-hidden="true">⧉</span> Copy round table{/if}
+                      </button>
+                    </div>
+                    <div class="tbl-scroll">
+                      <table class="matches-tbl">
+                        <thead>
+                          <tr>
+                            <th class="hist-th-sortable" class:hist-th-sorted={rrMSortKey === 'endedAt'} onclick={() => toggleRRMSort('endedAt')}>Ended {rrMSortKey === 'endedAt' ? (rrMSortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                            <th class="hist-th-sortable" class:hist-th-sorted={rrMSortKey === 'mode'} onclick={() => toggleRRMSort('mode')}>Mode {rrMSortKey === 'mode' ? (rrMSortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                            <th class="col-name hist-th-sortable" class:hist-th-sorted={rrMSortKey === 'sideA'} onclick={() => toggleRRMSort('sideA')}>Side A {rrMSortKey === 'sideA' ? (rrMSortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                            <th class="col-name hist-th-sortable" class:hist-th-sorted={rrMSortKey === 'sideB'} onclick={() => toggleRRMSort('sideB')}>Side B {rrMSortKey === 'sideB' ? (rrMSortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                            <th class="hist-th-sortable" class:hist-th-sorted={rrMSortKey === 'setsA'} onclick={() => toggleRRMSort('setsA')}>Sets A {rrMSortKey === 'setsA' ? (rrMSortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                            <th class="hist-th-sortable" class:hist-th-sorted={rrMSortKey === 'setsB'} onclick={() => toggleRRMSort('setsB')}>Sets B {rrMSortKey === 'setsB' ? (rrMSortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                            <th>Boards A</th>
+                            <th>Boards B</th>
+                            <th class="hist-th-sortable" class:hist-th-sorted={rrMSortKey === 'points'} onclick={() => toggleRRMSort('points')}>Points A {rrMSortKey === 'points' ? (rrMSortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                            <th>Points B</th>
+                            <th class="hist-th-sortable" class:hist-th-sorted={rrMSortKey === 'winner'} onclick={() => toggleRRMSort('winner')}>Winner {rrMSortKey === 'winner' ? (rrMSortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {#each rrMatchesSorted as r (r._matchId)}
+                            <tr>
+                              <td>{r.endedAt}</td>
+                              <td>{r.mode}</td>
+                              <td class="col-name">{r.sideA}</td>
+                              <td class="col-name">{r.sideB}</td>
+                              <td>{r.setsA}</td>
+                              <td>{r.setsB}</td>
+                              <td>{r.boardsWonA}</td>
+                              <td>{r.boardsWonB}</td>
+                              <td>{r.pointsA}</td>
+                              <td>{r.pointsB}</td>
+                              <td class="winner-cell">
+                                {#if r.winner === 'Draw'}<span class="winner-tag winner-draw">Draw</span>
+                                {:else if r.winner === 'A'}<span class="winner-tag winner-a">A</span>
+                                {:else if r.winner === 'B'}<span class="winner-tag winner-b">B</span>
+                                {/if}
+                              </td>
+                            </tr>
+                          {/each}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
-                </div>
+                {/if}
               {/if}
-            {/if}
-          </section>
-        {/each}
-      </div>
+            </section>
+          {/each}
+        </div>
+      {/if}
     {/if}
   {/if}
 
@@ -1971,4 +2023,60 @@
     font-size: 0.85rem;
     font-style: italic;
   }
+
+  /* ─── League group grid (Phase 4) ──────────────────────────────── */
+  .group-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.65rem;
+    margin-top: 0.3rem;
+  }
+  @media (max-width: 540px) {
+    .group-grid { grid-template-columns: 1fr; }
+  }
+  @media (min-width: 1100px) {
+    .group-grid { grid-template-columns: repeat(3, 1fr); }
+  }
+  @media (min-width: 1500px) {
+    .group-grid { grid-template-columns: repeat(4, 1fr); }
+  }
+  .group-card {
+    background: rgba(255, 213, 74, 0.03);
+    border: 1px solid rgba(255, 213, 74, 0.16);
+    border-radius: 0.6rem;
+    overflow: hidden;
+  }
+  .group-card-hdr {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.45rem 0.7rem;
+    background: rgba(255, 213, 74, 0.07);
+    border-bottom: 1px solid rgba(255, 213, 74, 0.14);
+  }
+  .group-card-name {
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--accent, #ffd54a);
+    letter-spacing: 0.03em;
+  }
+  .group-card-count {
+    font-size: 0.7rem;
+    color: rgba(255, 255, 255, 0.45);
+    font-variant-numeric: tabular-nums;
+  }
+  .group-tbl-scroll {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .group-standings-tbl {
+    min-width: 0;
+    width: 100%;
+  }
+  /* Override summary-tbl min-width for group cards — they're already
+     narrow by design so the 460px floor would force horizontal scroll. */
+  .group-standings-tbl.summary-tbl {
+    min-width: 0 !important;
+  }
+
 </style>

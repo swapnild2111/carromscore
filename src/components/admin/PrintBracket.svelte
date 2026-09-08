@@ -299,21 +299,26 @@
 
   $effect(() => {
     if (!tournamentKey) return;
-    // Board QRs.
+    // Board QRs — one per board, few in number, safe to reassign individually.
     for (const b of boards) {
       if (qrByBoard[b]) continue;
       const url = `${scanBase}?tournament=${encodeURIComponent(tournamentKey)}&board=${b}`;
-      void qrToSVG(url, 400).then((svg) => {
-        qrByBoard = { ...qrByBoard, [b]: svg };
-      });
+      void qrToSVG(url, 400).then((svg) => { qrByBoard = { ...qrByBoard, [b]: svg }; });
     }
-    // Match QRs.
-    for (const m of plannedMatches) {
-      if (qrByMid[m.mid]) continue;
-      const url = `${scanBase}?planned=${encodeURIComponent(m.mid)}`;
-      void qrToSVG(url, 280).then((svg) => {
-        qrByMid = { ...qrByMid, [m.mid]: svg };
-      });
+    // Match QRs — generate all in parallel then write the entire batch at once
+    // so concurrent promises don't race-overwrite each other via spread.
+    const pending = plannedMatches.filter((m) => !qrByMid[m.mid]);
+    if (pending.length > 0) {
+      void Promise.all(
+        pending.map((m) =>
+          qrToSVG(`${scanBase}?planned=${encodeURIComponent(m.mid)}`, 280)
+            .then((svg): [string, string] => [m.mid, svg])
+        )
+      ).then((pairs) => {
+        const next = { ...qrByMid };
+        for (const [mid, svg] of pairs) next[mid] = svg;
+        qrByMid = next;
+      }).catch((err) => { console.error('[PrintBracket] QR generation failed:', err); });
     }
   });
 
@@ -396,8 +401,9 @@
     </p>
   {:else if boards.length === 0}
     <p class="hint">
-      Matches exist but none have a board number assigned. Edit each
-      bracket row and set a Board (1..99), then come back and print.
+      Matches exist but none have a board number assigned.<br>
+      If this is a League tournament, open <strong>League Setup → Re-draw groups</strong>
+      to regenerate the schedule with board numbers, then come back and print.
     </p>
   {:else}
     <div class="print-actions no-print">

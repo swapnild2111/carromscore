@@ -113,6 +113,35 @@
           "timerDuration": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 300" },
           "$other":        { ".validate": false }
         },
+        "format": {
+          ".validate": "newData.isString() && (newData.val() == 'standard' || newData.val() == 'league' || newData.val() == 'knockout')"
+        },
+        "leagueCfg": {
+          ".validate": "!newData.exists() || newData.hasChildren(['groupCount', 'playersPerGroup', 'boardsPerGroup'])",
+          "groupCount":      { ".validate": "newData.isNumber() && newData.val() >= 2 && newData.val() <= 16" },
+          "playersPerGroup": { ".validate": "newData.isNumber() && newData.val() >= 2 && newData.val() <= 12" },
+          "boardsPerGroup":  { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 50" },
+          "flightNames": {
+            "$idx": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 40" }
+          },
+          "walkovers": {
+            "phantomScore": { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 500" },
+            "$other": { ".validate": false }
+          },
+          "$other": { ".validate": false }
+        },
+        "groups": {
+          "$groupKey": {
+            ".write": "$groupKey.length >= 1 && $groupKey.length <= 60 && auth != null && ((root.child('adminRoles').child(auth.uid).val() == 'super') || (root.child('tournaments').child($key).child('createdBy').val() == auth.uid))",
+            ".validate": "!newData.exists() || newData.hasChildren(['name', 'order'])",
+            "name":  { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 60" },
+            "order": { ".validate": "newData.isNumber()" },
+            "playerIds": {
+              "$idx": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 64" }
+            },
+            "$other": { ".validate": false }
+          }
+        },
         "$other":     { ".validate": false }
       }
     },

@@ -558,16 +558,13 @@
 
       {#if selectedRound}
         <p class="hint">
-          Default mode: <strong>{defaultMode}</strong>{#if defaultMode !== mode} (this match: <strong>{mode}</strong>){/if}.
-          {#if tournament.defaults?.bestOf || tournament.defaults?.pointsTarget || tournament.defaults?.maxBoards}
-            Config:
-            {#if tournament.defaults?.bestOf}bo{tournament.defaults.bestOf}{/if}
-            {#if tournament.defaults?.pointsTarget}, target {tournament.defaults.pointsTarget}{/if}
-            {#if tournament.defaults?.maxBoards}, max {tournament.defaults.maxBoards} boards{/if}.
+          <strong>{defaultMode === 'doubles' ? 'Doubles' : 'Singles'} Tournament</strong>{#if defaultMode !== mode} (this match: <strong>{mode}</strong>){/if}.
+          {#if tournament.defaults?.bestOf || tournament.defaults?.pointsTarget || tournament.defaults?.maxBoards || tournament.defaults?.timerDuration}
+            {#if tournament.defaults?.bestOf}Sets: {tournament.defaults.bestOf}{/if}{#if tournament.defaults?.pointsTarget}, Points: {tournament.defaults.pointsTarget}{/if}{#if tournament.defaults?.maxBoards}, Boards: {tournament.defaults.maxBoards}{/if}{#if tournament.defaults?.timerDuration}, Time: {tournament.defaults.timerDuration}m{/if}.
           {/if}
         </p>
 
-        {#if isInviteOnly}
+        {#if isInviteOnly && tournament.format !== 'league'}
           <p class="invite-hint" role="note">
             <span aria-hidden="true">🔒</span>
             Invite-only tournament — only players on the roster
@@ -578,6 +575,7 @@
           </p>
         {/if}
 
+        {#if tournament.format !== 'league'}
         <div class="bracket-add">
           <!--
             Per-match mode toggle (v3.6.1). Defaults to the tournament's
@@ -635,6 +633,7 @@
 
         {#if inlineError}<p class="inline-err">{inlineError}</p>{/if}
         {#if flashOk}<p class="inline-ok">{flashOk}</p>{/if}
+        {/if}
 
         {#if rowsForRound.length === 0}
           <p class="empty">No planned matches in this round yet.</p>
@@ -705,6 +704,7 @@
                           title="Reset — remove result so this slot can be played again"
                         >↺</button>
                       {/if}
+                      {#if tournament.format !== 'league'}
                       <button
                         type="button"
                         class="row-del"
@@ -712,6 +712,7 @@
                         aria-label="Delete match"
                         title="Delete match"
                       ><svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M2 2l10 10M12 2L2 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+                      {/if}
                     </td>
                   </tr>
                 {/each}

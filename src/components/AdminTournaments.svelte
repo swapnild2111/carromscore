@@ -40,8 +40,11 @@
     deleteRound,
     reorderRounds,
     countMatchesByRoundKey,
+    updateLeagueCfg,
+    updateLeagueGroups,
     type Round,
     type Tournament,
+    type LeagueCfg,
   } from '../lib/tournaments';
   import { subscribeCurrentUserRole, type Role } from '../lib/roles';
   import { currentUser } from '../lib/auth';
@@ -56,6 +59,7 @@
   import CountrySelect from './CountrySelect.svelte';
   import { countryName, flagEmoji } from '../lib/countries';
   import TournamentBracket from './admin/TournamentBracket.svelte';
+  import LeagueSetup from './admin/LeagueSetup.svelte';
   import { loadPendingPlannedByTournament, deletePlannedMatch } from '../lib/planned';
 
   /**
@@ -186,6 +190,12 @@
   let addingOpen = $state(false);
   let addingName = $state('');
   let addingType = $state<'open' | 'closed'>('open');
+  let addingFormat = $state<'standard' | 'league' | 'knockout'>('standard');
+  let addingTotalPlayers = $state('48');
+  let addingWantedFlights = $state<1 | 2 | 3>(3);
+  let addingBoardCount = $state('16');
+  let addingUsePhantom = $state(false);
+  let addingPhantomScore = $state('');
   /** Country code — only meaningful when addingType === 'closed'.
    *  Required in that case; blocks Save. */
   let addingCountry = $state('');
@@ -343,6 +353,14 @@
   }
   function stopBracket() {
     bracketKey = null;
+  }
+
+  let leagueSetupKey = $state<string | null>(null);
+  function startLeagueSetup(t: Tournament) {
+    leagueSetupKey = t.key;
+  }
+  function stopLeagueSetup() {
+    leagueSetupKey = null;
   }
 
   // Per-tournament counts shown on the row action buttons (2026-08-31).
@@ -510,6 +528,29 @@
     }
     return [...names].sort();
   });
+
+  function computeLeagueLayout(total: number, boards: number, flights: 1 | 2 | 3) {
+    const minPg = flights * 2;
+    const maxPg = 8;
+    let best = { gc: 0, pg: 0, leftovers: Infinity };
+    for (let pg = Math.max(minPg, maxPg); pg >= minPg; pg--) {
+      const gc = Math.floor(total / pg);
+      if (gc < 2) continue;
+      const leftovers = total % pg;
+      if (leftovers < best.leftovers) {
+        best = { gc, pg, leftovers };
+        if (leftovers === 0) break;
+      }
+    }
+    if (best.gc < 2) {
+      const pg = minPg;
+      const gc = Math.max(2, Math.floor(total / pg));
+      best = { gc, pg, leftovers: Math.max(0, total - gc * pg) };
+    }
+    const bpg = Math.max(1, Math.floor(boards / best.gc));
+    const flightNames = (['Gold League', 'Silver League', 'Bronze League'] as const).slice(0, flights) as string[];
+    return { ...best, bpg, flightNames };
+  }
 
   function flash(kind: 'ok' | 'err', message: string) {
     banner = { kind, message };
@@ -957,6 +998,12 @@
     addingOpen = true;
     addingName = '';
     addingType = 'open';
+    addingFormat = 'standard';
+    addingTotalPlayers = '48';
+    addingWantedFlights = 3;
+    addingBoardCount = '16';
+    addingUsePhantom = false;
+    addingPhantomScore = '';
     addingCountry = '';
     addingDescription = '';
     addingDefaultMode = FALLBACK_TOURNAMENT_DEFAULTS.mode;
@@ -969,6 +1016,7 @@
     addingOpen = false;
     addingName = '';
     addingType = 'open';
+    addingFormat = 'standard';
     addingCountry = '';
     addingDescription = '';
     addingDefaultMode = FALLBACK_TOURNAMENT_DEFAULTS.mode;
@@ -997,6 +1045,18 @@
     const desc = addingDescription.trim();
     if (desc) {
       await updateTournamentMeta(outcome.record.key, { description: desc });
+    }
+    if (addingFormat === 'league') {
+      const total = Math.max(4, Number(addingTotalPlayers) || 48);
+      const bc    = Math.max(1, Number(addingBoardCount)   || 16);
+      const { gc, pg, leftovers, bpg, flightNames } = computeLeagueLayout(total, bc, addingWantedFlights);
+      const cfg: LeagueCfg = { groupCount: gc, playersPerGroup: pg, boardsPerGroup: bpg, flightNames };
+      if (addingUsePhantom && leftovers > 0) {
+        const phantomScore = Number(addingPhantomScore) ||
+          Number(addingDefaultPointsTarget) || FALLBACK_TOURNAMENT_DEFAULTS.pointsTarget;
+        cfg.walkovers = { phantomScore };
+      }
+      await updateLeagueCfg(outcome.record.key, cfg);
     }
     await updateTournamentDefaults(outcome.record.key, {
       mode: addingDefaultMode,
@@ -1436,6 +1496,9 @@
                 {:else}
                   <div class="row-name-text">{t.name}</div>
                 {/if}
+                {#if t.format === 'league'}
+                  <span class="chip chip-league" title="League format">LEAGUE</span>
+                {/if}
               </td>
               <td class="td-actions">
                 {#if canManageTournament(t)}
@@ -1454,6 +1517,14 @@
                       onclick={() => startRounds(t)}
                       title="Add / rename rounds"
                     >Rounds{t.rounds && t.rounds.length > 0 ? ` (${t.rounds.length})` : ''}</button>
+                    {#if t.format === 'league'}
+                      <button
+                        type="button"
+                        class="btn btn-league"
+                        onclick={() => startLeagueSetup(t)}
+                        title="League draw and schedule"
+                      >League Setup</button>
+                    {/if}
                     <button
                       type="button"
                       class="btn"
@@ -1857,6 +1928,115 @@
             </span>
           </label>
         </fieldset>
+        <fieldset class="add-type">
+          <legend>Format</legend>
+          <label class="add-type-row">
+            <input
+              type="radio"
+              name="add-tournament-format"
+              value="standard"
+              bind:group={addingFormat}
+            />
+            <span>
+              <strong>Standard</strong>
+              — ad-hoc matches or manual bracket.
+            </span>
+          </label>
+          <label class="add-type-row">
+            <input
+              type="radio"
+              name="add-tournament-format"
+              value="league"
+              bind:group={addingFormat}
+            />
+            <span>
+              <strong>League</strong>
+              — groups stage + knockout flights (auto-scheduled).
+            </span>
+          </label>
+        </fieldset>
+
+        {#if addingFormat === 'league'}
+          <fieldset class="league-cfg-grid">
+            <legend>League setup</legend>
+            <label class="edit-field">
+              <span>Total players</span>
+              <input
+                type="number"
+                min="4"
+                max="256"
+                step="1"
+                bind:value={addingTotalPlayers}
+                disabled={saving}
+                aria-label="Total players"
+              />
+            </label>
+            <label class="edit-field">
+              <span>Boards available</span>
+              <input
+                type="number"
+                min="1"
+                max="99"
+                step="1"
+                bind:value={addingBoardCount}
+                disabled={saving}
+                aria-label="Total boards"
+              />
+            </label>
+            <div class="league-cfg-flights-row">
+              <span class="league-cfg-flights-label">Flights to award</span>
+              <div class="league-cfg-flights-btns">
+                {#each ([1, 2, 3] as const) as f}
+                  <button
+                    type="button"
+                    class="btn-flight-pick {addingWantedFlights === f ? 'active' : ''}"
+                    disabled={saving}
+                    onclick={() => { addingWantedFlights = f; addingUsePhantom = false; }}
+                  >{f === 1 ? '🥇 Gold' : f === 2 ? '🥇 Gold · 🥈 Silver' : '🥇 Gold · 🥈 Silver · 🥉 Bronze'}</button>
+                {/each}
+              </div>
+            </div>
+            {#if true}
+              {@const _total = Math.max(4, Number(addingTotalPlayers) || 48)}
+              {@const _bc = Math.max(1, Number(addingBoardCount) || 16)}
+              {@const _layout = computeLeagueLayout(_total, _bc, addingWantedFlights)}
+              <div class="league-cfg-hint">
+                <p>
+                  <strong>{_layout.gc} groups × {_layout.pg} players</strong>
+                  = {_layout.gc * _layout.pg} assigned players.
+                  {_layout.bpg} board{_layout.bpg !== 1 ? 's' : ''}/group.
+                  {(_layout.pg * (_layout.pg - 1)) / 2} matches/group
+                  ({_layout.gc * ((_layout.pg * (_layout.pg - 1)) / 2)} total).
+                </p>
+                {#if _layout.leftovers > 0}
+                  <p class="league-cfg-warn">
+                    ⚠ {_layout.leftovers} player{_layout.leftovers !== 1 ? 's' : ''} won't fit into full groups.
+                  </p>
+                  <label class="league-cfg-phantom-row">
+                    <input type="checkbox" bind:checked={addingUsePhantom} disabled={saving} />
+                    <span>Add Phantom player (others get a walkover win)</span>
+                  </label>
+                  {#if addingUsePhantom}
+                    <label class="edit-field league-cfg-phantom-score">
+                      <span>Walkover score (for the winner)</span>
+                      <input
+                        type="number"
+                        min="1"
+                        max="500"
+                        step="1"
+                        placeholder={addingDefaultPointsTarget || '25'}
+                        bind:value={addingPhantomScore}
+                        disabled={saving}
+                        aria-label="Phantom walkover score"
+                      />
+                    </label>
+                  {/if}
+                {/if}
+              </div>
+            {/if}
+          </fieldset>
+        {/if}
+
         {#if addingType === 'closed'}
           <label class="add-country-label">
             <span>Country</span>
@@ -2308,6 +2488,18 @@
     {/if}
   {/if}
 
+  {#if leagueSetupKey}
+    {@const t = list().find((x) => x.key === leagueSetupKey)}
+    {#if t}
+      {@const myUid = currentUser()?.uid ?? ''}
+      <LeagueSetup
+        tournament={t}
+        myUid={myUid}
+        onClose={stopLeagueSetup}
+      />
+    {/if}
+  {/if}
+
   <!--
     In-app confirm modal (v3.6.3). Themed to match the other dialogs
     on this page. Backdrop tap = cancel. Escape key also cancels
@@ -2581,6 +2773,14 @@
     padding: 0.15rem 0.55rem;
     border-radius: 999px;
   }
+  .chip-league {
+    color: #7ec8f8;
+    background: rgba(100, 180, 255, 0.1);
+    border-color: rgba(100, 180, 255, 0.35);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 700;
+  }
   /* Legacy chip for the Rounds sub-modal (per-round state), which
      still uses "CLOSED" as the round-state label. Kept separate
      so tournament-access wording can diverge from round-state. */
@@ -2826,6 +3026,84 @@
   }
   @media (max-width: 30rem) {
     .defaults-grid { grid-template-columns: 1fr; }
+  }
+
+  .league-cfg-grid {
+    margin: 0.7rem 0 0.4rem;
+    padding: 0.7rem 0.85rem 0.5rem;
+    border: 1px solid rgba(255, 210, 80, 0.2);
+    border-radius: 0.5rem;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0 0.85rem;
+  }
+  .league-cfg-grid legend {
+    padding: 0 0.4rem;
+    color: var(--accent, #ffd54a);
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .league-cfg-grid .edit-field { margin: 0.25rem 0; }
+  .league-cfg-hint {
+    grid-column: 1 / -1;
+    color: var(--muted, #9aa0a6);
+    font-size: 0.78rem;
+    margin: 0.35rem 0 0;
+    line-height: 1.5;
+  }
+  .league-cfg-hint p { margin: 0 0 0.25rem; }
+  .league-cfg-warn { color: #f59e0b; }
+  .league-cfg-flights-row {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    margin: 0.4rem 0 0.1rem;
+  }
+  .league-cfg-flights-label {
+    font-size: 0.8rem;
+    color: var(--muted, #9aa0a6);
+  }
+  .league-cfg-flights-btns {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+  }
+  .btn-flight-pick {
+    text-align: left;
+    padding: 0.35rem 0.6rem;
+    border-radius: 0.35rem;
+    border: 1px solid rgba(255,255,255,0.12);
+    background: transparent;
+    color: var(--text, #e8eaed);
+    font-size: 0.82rem;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .btn-flight-pick:hover:not(:disabled) {
+    border-color: rgba(255,213,79,0.4);
+    background: rgba(255,213,79,0.06);
+  }
+  .btn-flight-pick.active {
+    border-color: #ffd54a;
+    background: rgba(255,213,79,0.12);
+    color: #ffd54a;
+    font-weight: 600;
+  }
+  .league-cfg-phantom-row {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    margin: 0.2rem 0 0;
+    font-size: 0.8rem;
+    color: var(--text, #e8eaed);
+    cursor: pointer;
+  }
+  .league-cfg-phantom-score { margin-top: 0.3rem !important; }
+  @media (max-width: 30rem) {
+    .league-cfg-grid { grid-template-columns: 1fr; }
   }
 
   .add-country-label {
@@ -3106,6 +3384,15 @@
   .btn-print:hover:not(:disabled) {
     background: rgba(255, 213, 74, 0.24);
     border-color: var(--accent, #ffd54a);
+  }
+  .btn-league {
+    background: rgba(100, 180, 255, 0.1);
+    border-color: rgba(100, 180, 255, 0.4);
+    color: #7ec8f8;
+    font-weight: 700;
+  }
+  .btn-league:hover:not(:disabled) {
+    background: rgba(100, 180, 255, 0.18);
   }
   /* Compact square icon buttons for the round start/close toggle.
      Two tinted variants so the meaning reads at a glance:
