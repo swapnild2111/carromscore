@@ -17,6 +17,7 @@
   } from '../../lib/tournaments';
   import { loadAll as loadAllPlayers, subscribeStore as subscribePlayerStore } from '../../lib/players';
   import { subscribePlannedByTournament, deletePlannedMatch, type PlannedMatch } from '../../lib/planned';
+  import { loadMatchesByTournamentKey, type MatchRecord } from '../../lib/history';
   import {
     potSeeding,
     shuffleArray,
@@ -38,7 +39,7 @@
   const { tournament, myUid, onClose }: Props = $props();
 
   // ─── Tab ────────────────────────────────────────────────────────────────────
-  let activeTab = $state<'draw' | 'stage2'>('draw');
+  let activeTab = $state<'draw' | 'flights'>('draw');
 
   // ─── Players ────────────────────────────────────────────────────────────────
   let players = $state(loadAllPlayers());
@@ -136,6 +137,11 @@
   // True once user has dragged a player — shows the manual lock button
   let groupsDirty = $state(false);
 
+  // True once any group round has been started — locks drag-and-drop
+  const roundsStarted = $derived(
+    (tournament.rounds ?? []).some((r) => /^group /i.test(r.name) && r.startedAt)
+  );
+
   async function lockAndGenerate() {
     if (generating) return;
     // Validate
@@ -206,6 +212,7 @@
   let flightGenRunning = $state(false);
   let flightGenResult = $state<{ flightsCreated: string[]; errors: string[] } | null>(null);
   let forceGenerate = $state(false);
+  let archivedMatches = $state<MatchRecord[]>([]);
 
   type FlightCfgEdit = { bestOf: string; pointsTarget: string; maxBoards: string; timerDuration: string };
   const defaultFlightCfgEdit = (): FlightCfgEdit => ({ bestOf: '', pointsTarget: '', maxBoards: '', timerDuration: '' });
@@ -287,7 +294,33 @@
       }
       a.boardsWon += setsA;
       b.boardsWon += setsB;
-      // Net: from planned results we don't have per-match points — use sets diff as proxy
+      a.netPoints += setsA - setsB;
+      b.netPoints += setsB - setsA;
+    }
+
+    // Also process archived matches (completed matches moved from /planned to /matches)
+    const seenMids = new Set(plannedMatches.map((m) => m.mid));
+    for (const m of archivedMatches) {
+      if (!m.round || !/^Group /i.test(m.round)) continue;
+      if (!m.result || !m.playerAId || !m.playerBId) continue;
+      if (seenMids.has(m.id)) continue;
+      const a = ensurePlayer(m.playerAId, m.aName ?? m.playerAId);
+      const b = ensurePlayer(m.playerBId, m.bName ?? m.playerBId);
+      const { setsA, setsB, winner } = m.result;
+      a.matches++;
+      b.matches++;
+      if (winner === 'a') {
+        a.wins++; a.strikePoints += 2;
+        b.losses++;
+      } else if (winner === 'b') {
+        b.wins++; b.strikePoints += 2;
+        a.losses++;
+      } else {
+        a.draws++; a.strikePoints += 1;
+        b.draws++; b.strikePoints += 1;
+      }
+      a.boardsWon += setsA;
+      b.boardsWon += setsB;
       a.netPoints += setsA - setsB;
       b.netPoints += setsB - setsA;
     }
@@ -323,6 +356,14 @@
       const td = Number(edit.timerDuration); if (td >= 1) entry.timerDuration = Math.floor(td);
       if (Object.keys(entry).length > 0) flightCfg[fname] = entry;
     }
+
+    // Delete any existing planned matches for these flights before re-seeding
+    const flightNameSet = new Set(cfg.flightNames);
+    const existingFlightMatches = plannedMatches.filter((m) => {
+      const dashIdx = m.round?.indexOf(' — ');
+      return dashIdx !== undefined && dashIdx > 0 && flightNameSet.has(m.round!.slice(0, dashIdx));
+    });
+    await Promise.all(existingFlightMatches.map((m) => deletePlannedMatch(m.mid)));
 
     const result = await generateFlightTournaments({
       parentTournamentKey: tournament.key,
@@ -361,6 +402,7 @@
       unsubPlanned = await subscribePlannedByTournament(tournament.key, (arr) => {
         plannedMatches = arr;
       });
+      archivedMatches = await loadMatchesByTournamentKey(tournament.key);
       // Auto-draw and generate if players are assigned but no groups exist yet
       if (assignedPlayerIds.length > 0 && Object.keys(localGroups).length === 0) {
         doRandomDraw();
@@ -404,26 +446,28 @@
         role="tab"
         aria-selected={activeTab === 'draw'}
         onclick={() => { activeTab = 'draw'; }}
-      >Stage 1 — Draw</button>
+      >Groups &amp; Draw</button>
       <button
         type="button"
         class="ls-tab"
-        class:ls-tab-active={activeTab === 'stage2'}
+        class:ls-tab-active={activeTab === 'flights'}
         role="tab"
-        aria-selected={activeTab === 'stage2'}
-        onclick={() => { activeTab = 'stage2'; }}
-      >Stage 2 — Flights</button>
+        aria-selected={activeTab === 'flights'}
+        onclick={() => { activeTab = 'flights'; }}
+      >League Matches</button>
     </div>
 
-    <!-- ─── Stage 1: Draw ───────────────────────────────────────────────────── -->
+    <!-- ─── Groups & Draw ───────────────────────────────────────────────────── -->
     {#if activeTab === 'draw'}
       <div class="ls-body">
         <div class="draw-controls">
           <span class="draw-hint">
             {assignedPlayerIds.length} players → {groupCount} groups of ~{playersPerGroup}
           </span>
-          {#if groupsLocked && !groupsDirty}
-            <span class="draw-auto-hint">Auto-generated — drag players to adjust, then re-generate</span>
+          {#if roundsStarted}
+            <span class="draw-locked-hint">🔒 Groups locked — rounds in progress</span>
+          {:else if groupsLocked && !groupsDirty}
+            <span class="draw-auto-hint">Drag players to adjust, then re-generate</span>
           {/if}
           {#if unassignedPlayers.length > 0}
             <span class="draw-warn">⚠ {unassignedPlayers.length} player{unassignedPlayers.length !== 1 ? 's' : ''} unassigned</span>
@@ -436,16 +480,17 @@
             class="group-col unassigned-col"
             role="list"
             aria-label="Unassigned players"
-            ondragover={(e) => e.preventDefault()}
-            ondrop={() => onDrop('__unassigned__')}
+            ondragover={roundsStarted ? undefined : (e) => e.preventDefault()}
+            ondrop={roundsStarted ? undefined : () => onDrop('__unassigned__')}
           >
             <div class="group-col-header">Unassigned</div>
             {#each unassignedPlayers as pid, i (pid)}
               <div
                 class="player-chip"
-                draggable="true"
+                class:player-chip-locked={roundsStarted}
+                draggable={!roundsStarted}
                 role="listitem"
-                ondragstart={() => onDragStart('__unassigned__', i)}
+                ondragstart={roundsStarted ? undefined : () => onDragStart('__unassigned__', i)}
               >{playerName(pid)}</div>
             {/each}
           </div>
@@ -454,23 +499,33 @@
         <!-- Group grid -->
         <div class="groups-grid" style="grid-template-columns: repeat({Math.min(groupCount, 4)}, 1fr)">
           {#each sortedGroups as [gKey, group] (gKey)}
+            {@const status = groupMatchStatus(gKey, group.name)}
             <div
               class="group-col"
+              class:group-col-locked={roundsStarted}
+              class:group-col-done={roundsStarted && status.done}
               role="list"
               aria-label="Group {group.name}"
-              ondragover={(e) => e.preventDefault()}
-              ondrop={() => onDrop(gKey)}
+              ondragover={roundsStarted ? undefined : (e) => e.preventDefault()}
+              ondrop={roundsStarted ? undefined : () => onDrop(gKey)}
             >
               <div class="group-col-header">
-                {group.name}
-                <span class="group-count">{group.playerIds.length}</span>
+                <span>{group.name}</span>
+                <div class="group-col-header-right">
+                  {#if roundsStarted}
+                    <span class="group-match-status" class:group-match-done={status.done}>{status.label}</span>
+                  {:else}
+                    <span class="group-count">{group.playerIds.length}</span>
+                  {/if}
+                </div>
               </div>
               {#each group.playerIds as pid, i (pid)}
                 <div
                   class="player-chip"
-                  draggable="true"
+                  class:player-chip-locked={roundsStarted}
+                  draggable={!roundsStarted}
                   role="listitem"
-                  ondragstart={() => onDragStart(gKey, i)}
+                  ondragstart={roundsStarted ? undefined : () => onDragStart(gKey, i)}
                 >{playerName(pid)}</div>
               {/each}
               {#if group.playerIds.length === 0}
@@ -496,47 +551,14 @@
           </div>
         {/if}
 
-        <!-- Status per group after generation -->
-        {#if groupsLocked && sortedGroups.length > 0}
-          <div class="group-status-grid">
-            {#each sortedGroups as [gKey, group] (gKey)}
-              {@const status = groupMatchStatus(gKey, group.name)}
-              {@const roundKey = `group-${group.name.toLowerCase()}`}
-              <div class="group-status-row" class:done={status.done}>
-                <div class="group-status-top">
-                  <span class="group-status-name">{group.name}</span>
-                  <a
-                    class="group-print-link"
-                    href="{typeof window !== 'undefined' ? (import.meta.env.BASE_URL ?? '/') : '/'}print-bracket/?tournament={encodeURIComponent(tournament.key)}&round={encodeURIComponent(roundKey)}&qrMode=match"
-                    target="_blank"
-                    rel="noopener"
-                    title="Print {group.name} match cards"
-                  >🖨 Print</a>
-                </div>
-                <span class="group-status-label">{status.label}</span>
-                <div class="group-player-list">
-                  {#each group.playerIds as pid (pid)}
-                    <span class="group-player-chip">{playerName(pid)}</span>
-                  {/each}
-                </div>
-              </div>
-            {/each}
-          </div>
+        {#if groupsLocked || roundsStarted}
           <p class="bracket-hint">Close this panel and click <strong>Bracket</strong> on the tournament row to manage individual matches.</p>
-
-          <!-- Start rounds — shown whenever any group round isn't started yet -->
-          {#if (tournament.rounds ?? []).some((r) => /^group /i.test(r.name) && !r.startedAt)}
-            <button
-              type="button"
-              class="btn btn-primary"
-              onclick={startAllGroupRounds}
-              disabled={startingRounds}
-            >{startingRounds ? 'Starting…' : '▶ Start all group rounds'}</button>
-          {/if}
         {/if}
 
         <div class="ls-actions">
-          {#if generating}
+          {#if roundsStarted}
+            <!-- no actions — groups are locked, rounds in progress -->
+          {:else if generating}
             <button type="button" class="btn btn-primary" disabled>Generating…</button>
           {:else if groupsDirty}
             <button
@@ -546,6 +568,14 @@
               disabled={sortedGroups.length === 0}
             >Lock groups & generate schedule</button>
           {:else if groupsLocked}
+            {#if (tournament.rounds ?? []).some((r) => /^group /i.test(r.name) && !r.startedAt)}
+              <button
+                type="button"
+                class="btn btn-primary"
+                onclick={startAllGroupRounds}
+                disabled={startingRounds}
+              >{startingRounds ? 'Starting…' : '▶ Start all group rounds'}</button>
+            {/if}
             <button
               type="button"
               class="btn btn-secondary"
@@ -562,8 +592,8 @@
       </div>
     {/if}
 
-    <!-- ─── Stage 2: Flights ─────────────────────────────────────────────────── -->
-    {#if activeTab === 'stage2'}
+    <!-- ─── League Flights ────────────────────────────────────────────────────── -->
+    {#if activeTab === 'flights'}
       <div class="ls-body">
         {#if !groupsLocked}
           <p class="ls-info">Complete Stage 1 draw first — lock groups and generate the schedule to enable Stage 2.</p>
@@ -657,7 +687,7 @@
               class="btn btn-primary"
               onclick={generateFlights}
               disabled={flightGenRunning || (!allGroupsDone && !forceGenerate)}
-            >{flightGenRunning ? 'Generating flights…' : 'Generate flights →'}</button>
+            >{flightGenRunning ? 'Generating league matches…' : 'Generate league matches →'}</button>
           </div>
 
           {#if flightGenResult}
@@ -781,6 +811,11 @@
     color: var(--muted, #9aa0a6);
     font-style: italic;
   }
+  .draw-locked-hint {
+    font-size: 0.78rem;
+    color: rgba(255, 213, 74, 0.7);
+    font-style: italic;
+  }
 
   /* Groups grid */
   .groups-grid {
@@ -809,6 +844,7 @@
   .group-col-header {
     display: flex;
     justify-content: space-between;
+    align-items: center;
     font-size: 0.72rem;
     font-weight: 700;
     text-transform: uppercase;
@@ -818,12 +854,34 @@
     padding-bottom: 0.3rem;
     border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   }
+  .group-col-header-right {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+  }
   .group-count {
     background: rgba(255, 255, 255, 0.08);
     border-radius: 0.8rem;
     padding: 0 0.4rem;
     font-size: 0.68rem;
     color: var(--muted, #9aa0a6);
+  }
+  .group-match-status {
+    font-size: 0.65rem;
+    font-weight: 600;
+    color: var(--muted, #9aa0a6);
+    text-transform: none;
+    letter-spacing: 0;
+  }
+  .group-match-done {
+    color: #56cb82;
+  }
+  .group-col-locked {
+    cursor: default;
+  }
+  .group-col-done {
+    border-color: rgba(86, 203, 130, 0.3);
+    background: rgba(86, 203, 130, 0.04);
   }
   .unassigned-col {
     border-color: rgba(229, 166, 35, 0.25);
@@ -846,6 +904,12 @@
   }
   .player-chip:active { cursor: grabbing; }
   .player-chip:hover { background: rgba(255, 255, 255, 0.1); }
+  .player-chip-locked {
+    cursor: default;
+    opacity: 0.85;
+  }
+  .player-chip-locked:active { cursor: default; }
+  .player-chip-locked:hover { background: rgba(255, 255, 255, 0.06); }
 
   .group-empty {
     color: var(--muted, #9aa0a6);
@@ -888,62 +952,6 @@
     margin: 0.4rem 0 0;
   }
 
-  /* Group status */
-  .group-status-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
-    gap: 0.35rem;
-    margin: 0.75rem 0;
-  }
-  .group-status-row {
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.07);
-    border-radius: 0.35rem;
-    padding: 0.3rem 0.55rem;
-    font-size: 0.78rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.1rem;
-  }
-  .group-status-row.done {
-    border-color: rgba(86, 203, 130, 0.3);
-    background: rgba(86, 203, 130, 0.06);
-  }
-  .group-status-top {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.5rem;
-  }
-  .group-status-name {
-    font-weight: 700;
-    color: var(--accent, #ffd54a);
-    font-size: 0.72rem;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-  }
-  .group-print-link {
-    font-size: 0.7rem;
-    color: var(--muted, #9aa0a6);
-    text-decoration: none;
-    white-space: nowrap;
-  }
-  .group-print-link:hover { color: var(--fg, #f5f5f5); }
-  .group-status-label { color: var(--muted, #9aa0a6); }
-  .group-player-list {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.2rem;
-    margin-top: 0.3rem;
-  }
-  .group-player-chip {
-    background: rgba(255,255,255,0.06);
-    border-radius: 0.25rem;
-    padding: 0.1rem 0.35rem;
-    font-size: 0.7rem;
-    color: rgba(255,255,255,0.6);
-    white-space: nowrap;
-  }
   .bracket-hint {
     font-size: 0.78rem;
     color: var(--muted, #9aa0a6);
@@ -993,10 +1001,10 @@
   }
   .flight-cfg-hint-txt { font-weight: 400; text-transform: none; letter-spacing: 0; }
   .flight-cfg-row {
-    display: flex;
+    display: grid;
+    grid-template-columns: 9rem repeat(4, auto);
     align-items: center;
-    gap: 0.5rem;
-    flex-wrap: wrap;
+    gap: 0.5rem 1rem;
     padding: 0.4rem 0;
     border-bottom: 1px solid rgba(255,255,255,0.05);
   }
@@ -1004,8 +1012,10 @@
   .flight-cfg-name {
     font-weight: 600;
     font-size: 0.82rem;
-    min-width: 4.5rem;
     color: var(--accent, #ffd54f);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .flight-cfg-field {
     display: flex;
@@ -1013,6 +1023,7 @@
     gap: 0.3rem;
     font-size: 0.75rem;
     color: var(--muted, #888);
+    white-space: nowrap;
   }
   .flight-cfg-field input {
     width: 4rem;

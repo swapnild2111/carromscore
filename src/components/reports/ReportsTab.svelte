@@ -31,6 +31,7 @@
     loadRounds,
     normalizeKey,
   } from '../../lib/tournaments';
+  import { BRACKET_ROUND_RX } from '../../lib/bracket';
   // BarChart removed v3.4.12 — the two horizontal bar rows above the
   // Leaderboard were redundant with the Leaderboard table itself.
   // Reports now leans on sortable + filterable tables mirroring the
@@ -147,10 +148,15 @@
   const flightGroups = $derived.by<FlightGroup[]>(() => {
     const r = report;
     if (!r?.roundReports || r.roundReports.length <= 1) return [];
-    const isLeague = currentTournamentRecord?.format === 'league';
+    const fmt = currentTournamentRecord?.format;
+    const isLeague = fmt === 'league';
+    const isKnockout = fmt === 'knockout';
+    const isRoundRobin = fmt === 'roundrobin';
     const nonGroupRounds = isLeague
       ? r.roundReports.filter((rr) => !/^group /i.test(rr.roundName))
-      : r.roundReports;
+      : (isKnockout || isRoundRobin)
+        ? r.roundReports.filter((rr) => BRACKET_ROUND_RX.test(rr.roundName))
+        : r.roundReports;
     if (nonGroupRounds.length === 0) return [];
     return groupNonGroupRounds(nonGroupRounds, buildSetScoresMap(matches));
   });
@@ -1247,9 +1253,10 @@
         accordion chrome). Standard format: stacked accordion as before.
       -->
       {@const isLeague = currentTournamentRecord?.format === 'league'}
-      {@const groupRounds = isLeague ? report.roundReports.filter(rr => /^group /i.test(rr.roundName)) : []}
+      {@const isRoundRobin = currentTournamentRecord?.format === 'roundrobin'}
+      {@const groupRounds = (isLeague || isRoundRobin) ? report.roundReports.filter(rr => /^group /i.test(rr.roundName)) : []}
 
-      {#if isLeague && groupRounds.length > 0}
+      {#if (isLeague || isRoundRobin) && groupRounds.length > 0}
         <div class="rounds-section">
           <h3 class="section-hdr">Group standings</h3>
           <div class="group-grid">
@@ -1314,38 +1321,37 @@
                 <span class="flight-section-name">{fg.flightName}</span>
                 <span class="round-report-count">{fgTotalMatches} match{fgTotalMatches === 1 ? '' : 'es'}</span>
               </button>
-              {#if flightOpen}
-                <div class="flight-section-body">
-                  {#if fg.bracketSVG}
-                    <div class="flight-bracket-svg">{@html fg.bracketSVG}</div>
-                  {/if}
-                  <div class="flight-stage-list">
-                    {#each fg.stageGroups as sg (sg.stageKey)}
-                      {@const open = isRoundOpen(sg.stageKey)}
-                      {@const sgAllRows = sg.rounds.flatMap(r => r.rows)}
-                      {@const sgPlayerSummary = sg.rounds.flatMap(r => r.playerSummary)}
-                      <section
-                        class="round-report round-report-nested"
-                        class:round-folded={!open}
+              <div class="flight-section-body">
+                {#if fg.bracketSVG}
+                  <div class="flight-bracket-svg">{@html fg.bracketSVG}</div>
+                {/if}
+                <div class="flight-stage-list">
+                  {#each fg.stageGroups as sg (sg.stageKey)}
+                    {@const open = isRoundOpen(sg.stageKey)}
+                    {@const sgAllRows = sg.rounds.flatMap(r => r.rows)}
+                    {@const sgPlayerSummary = sg.rounds.flatMap(r => r.playerSummary)}
+                    <section
+                      class="round-report round-report-nested"
+                      class:round-folded={!open}
+                    >
+                      <button
+                        type="button"
+                        class="round-report-hdr"
+                        aria-expanded={open}
+                        onclick={() => toggleRound(sg.stageKey)}
                       >
-                        <button
-                          type="button"
-                          class="round-report-hdr"
-                          aria-expanded={open}
-                          onclick={() => toggleRound(sg.stageKey)}
-                        >
-                          <span class="round-report-caret" class:round-report-caret-folded={!open} aria-hidden="true">▾</span>
-                          <span class="round-report-name">{sg.stageName}</span>
-                          <span class="round-report-count">{sg.totalMatches} match{sg.totalMatches === 1 ? '' : 'es'}</span>
-                        </button>
-                        {#if open}
-                          {#if sgAllRows.length === 0}
-                            <p class="round-report-empty">No matches in this round yet.</p>
-                          {:else}
-                            {@const rrSorted = sortRRLeaderboard(sgPlayerSummary)}
-                            {@const rrRankMap = new Map(sgPlayerSummary.map((p, i) => [p.playerId, rankLabel(sgPlayerSummary, i)]))}
-                            {@const rrMatchesSorted = sortRRMatches(sgAllRows)}
-                            <div class="round-report-body">
+                        <span class="round-report-caret" class:round-report-caret-folded={!open} aria-hidden="true">▾</span>
+                        <span class="round-report-name">{sg.stageName}</span>
+                        <span class="round-report-count">{sg.totalMatches} match{sg.totalMatches === 1 ? '' : 'es'}</span>
+                      </button>
+                      <div class="round-report-body-wrap">
+                        {#if sgAllRows.length === 0}
+                          <p class="round-report-empty">No matches in this round yet.</p>
+                        {:else}
+                          {@const rrSorted = sortRRLeaderboard(sgPlayerSummary)}
+                          {@const rrRankMap = new Map(sgPlayerSummary.map((p, i) => [p.playerId, rankLabel(sgPlayerSummary, i)]))}
+                          {@const rrMatchesSorted = sortRRMatches(sgAllRows)}
+                          <div class="round-report-body">
                               <div class="summary-scroll">
                                 <table class="summary-tbl leaderboard-tbl">
                                   <thead>
@@ -1429,14 +1435,13 @@
                                   </tbody>
                                 </table>
                               </div>
-                            </div>
-                          {/if}
+                          </div>
                         {/if}
-                      </section>
-                    {/each}
-                  </div>
+                      </div>
+                    </section>
+                  {/each}
                 </div>
-              {/if}
+              </div>
             </section>
           {/each}
         </div>
@@ -1767,6 +1772,26 @@
       border-color: #bcaaa4 !important;
     }
 
+    /* ── Flight sections: print all open, remove chrome ── */
+    .flight-section {
+      background: transparent !important;
+      border: none !important;
+      border-top: 2px solid #000 !important;
+      border-radius: 0 !important;
+      break-inside: avoid;
+      page-break-inside: avoid;
+      margin-bottom: 0.5rem !important;
+    }
+    .flight-section-hdr {
+      background: transparent !important;
+      padding: 0.35rem 0 !important;
+      color: #111 !important;
+      font-size: 0.88rem !important;
+      pointer-events: none;
+    }
+    .flight-section-name { color: #111 !important; }
+    .flight-section-body { padding: 0 0 0.5rem !important; }
+
     /* ── Per-round accordion: print all open, remove chrome ── */
     .rounds-section { margin-top: 0.8rem !important; }
     .round-report {
@@ -1790,8 +1815,10 @@
       display: flex !important;
       padding: 0 0 0.5rem !important;
     }
-    /* Force all rounds to show when printing */
+    /* Force all sections open when printing */
     .round-folded .round-report-body { display: flex !important; }
+    .round-folded > .flight-section-body { display: flex !important; }
+    .round-folded > .round-report-body-wrap { display: block !important; }
     .round-report-count {
       background: transparent !important;
       color: #555 !important;
@@ -2415,6 +2442,9 @@
     flex-direction: column;
     gap: 0.5rem;
   }
+  .round-folded > .flight-section-body { display: none; }
+  .round-report-body-wrap { display: block; }
+  .round-folded > .round-report-body-wrap { display: none; }
   .flight-stage-list {
     display: flex;
     flex-direction: column;

@@ -110,8 +110,9 @@ export type Tournament = {
  * Configuration for a knockout or round-robin tournament (v5.0).
  */
 export type KnockoutCfg = {
-  participantCount: number; // how many players enter the bracket
-  advanceCount?: number;    // round-robin only: top N that advance to knockout
+  participantCount: number;  // how many players enter the bracket
+  advanceCount?: number;     // round-robin only: top N that advance to knockout
+  flightNames?: string[];    // reward tiers e.g. ['Gold', 'Silver', 'Bronze']
 };
 
 /**

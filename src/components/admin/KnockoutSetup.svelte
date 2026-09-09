@@ -333,7 +333,7 @@
           role="tab"
           aria-selected={activeTab === 'draw'}
           onclick={() => { activeTab = 'draw'; }}
-        >Stage 1 — Round Robin</button>
+        >Groups &amp; Draw</button>
         <button
           type="button"
           class="ks-tab"
@@ -341,7 +341,7 @@
           role="tab"
           aria-selected={activeTab === 'bracket'}
           onclick={() => { activeTab = 'bracket'; }}
-        >Stage 2 — Knockout</button>
+        >Knockout Matches</button>
       </div>
     {/if}
 
@@ -350,72 +350,110 @@
       <div class="ks-body">
 
         {#if !isRR}
-          <!-- Knockout: pool picker (left) + bracket players (right, unordered) -->
-          <div class="draw-panes">
-
-            <!-- Left: tournament pool — click → to add to bracket -->
-            <div class="picker-pane">
-              <div class="picker-header">
-                <span class="picker-title">Tournament players ({poolIds.length})</span>
-                <button type="button" class="btn-link" onclick={addAllToBracket} title="Add all to bracket">Add all →</button>
-              </div>
-              <input
-                class="picker-search"
-                type="search"
-                placeholder="Search…"
-                bind:value={poolSearch}
-                aria-label="Search tournament players"
-              />
-              <div class="picker-list">
-                {#if availablePlayerIds.length === 0}
-                  <p class="ks-info" style="padding:0.5rem 0.6rem">No players assigned. Use the <strong>Players</strong> button on the tournament row to assign players first.</p>
-                {:else if filteredPool.length === 0 && poolSearch}
-                  <p class="ks-info" style="padding:0.5rem 0.6rem">No match.</p>
-                {:else if poolIds.length === 0}
-                  <p class="ks-info" style="padding:0.5rem 0.6rem">All players are in the bracket.</p>
-                {:else}
-                  {#each filteredPool as pid (pid)}
-                    <button type="button" class="pool-row" onclick={() => addToBracket(pid)}>
-                      <span class="pool-name">{playerName(pid)}</span>
-                      <span class="pool-add" aria-hidden="true">→</span>
-                    </button>
-                  {/each}
-                {/if}
-              </div>
-            </div>
-
-            <!-- Right: bracket players — click ← to remove -->
-            <div class="seed-pane">
-              <div class="picker-header">
-                <span class="picker-title">Bracket ({selectedIds.size})</span>
-                <div style="display:flex;align-items:center;gap:0.5rem;">
-                  <span class="draw-hint">{bracketHint(selectedIds.size)}</span>
-                  {#if selectedIds.size > 0}
-                    <button type="button" class="btn-link" onclick={clearBracket} title="Remove all">Clear</button>
+          {#if !bracketLocked}
+            <!-- Knockout: pool picker (left) + bracket players (right) — only shown before generation -->
+            <div class="draw-panes">
+              <!-- Left: tournament pool — click → to add to bracket -->
+              <div class="picker-pane">
+                <div class="picker-header">
+                  <span class="picker-title">Tournament players ({poolIds.length})</span>
+                  <button type="button" class="btn-link" onclick={addAllToBracket} title="Add all to bracket">Add all →</button>
+                </div>
+                <input
+                  class="picker-search"
+                  type="search"
+                  placeholder="Search…"
+                  bind:value={poolSearch}
+                  aria-label="Search tournament players"
+                />
+                <div class="picker-list">
+                  {#if availablePlayerIds.length === 0}
+                    <p class="ks-info" style="padding:0.5rem 0.6rem">No players assigned. Use the <strong>Players</strong> button on the tournament row to assign players first.</p>
+                  {:else if filteredPool.length === 0 && poolSearch}
+                    <p class="ks-info" style="padding:0.5rem 0.6rem">No match.</p>
+                  {:else if poolIds.length === 0}
+                    <p class="ks-info" style="padding:0.5rem 0.6rem">All players are in the bracket.</p>
+                  {:else}
+                    {#each filteredPool as pid (pid)}
+                      <button type="button" class="pool-row" onclick={() => addToBracket(pid)}>
+                        <span class="pool-name">{playerName(pid)}</span>
+                        <span class="pool-add" aria-hidden="true">→</span>
+                      </button>
+                    {/each}
                   {/if}
                 </div>
               </div>
-              <input
-                class="picker-search"
-                type="search"
-                placeholder="Search…"
-                bind:value={bracketSearch}
-                aria-label="Search bracket players"
-              />
-              <div class="picker-list">
-                {#if selectedIds.size === 0}
-                  <p class="ks-info" style="padding:0.5rem 0.6rem">Click players on the left to add them, or use Random draw.</p>
-                {:else}
-                  {#each filteredBracket as pid (pid)}
-                    <button type="button" class="seed-row-btn" onclick={() => removeFromBracket(pid)}>
-                      <span class="pool-remove" aria-hidden="true">←</span>
-                      <span class="pool-name">{playerName(pid)}</span>
-                    </button>
-                  {/each}
-                {/if}
+
+              <!-- Right: bracket players — click ← to remove -->
+              <div class="seed-pane">
+                <div class="picker-header">
+                  <span class="picker-title">Bracket ({selectedIds.size})</span>
+                  <div style="display:flex;align-items:center;gap:0.5rem;">
+                    <span class="draw-hint">{bracketHint(selectedIds.size)}</span>
+                    {#if selectedIds.size > 0}
+                      <button type="button" class="btn-link" onclick={clearBracket} title="Remove all">Clear</button>
+                    {/if}
+                  </div>
+                </div>
+                <input
+                  class="picker-search"
+                  type="search"
+                  placeholder="Search…"
+                  bind:value={bracketSearch}
+                  aria-label="Search bracket players"
+                />
+                <div class="picker-list">
+                  {#if selectedIds.size === 0}
+                    <p class="ks-info" style="padding:0.5rem 0.6rem">Click players on the left to add them, or use Random draw.</p>
+                  {:else}
+                    {#each filteredBracket as pid (pid)}
+                      <button type="button" class="seed-row-btn" onclick={() => removeFromBracket(pid)}>
+                        <span class="pool-remove" aria-hidden="true">←</span>
+                        <span class="pool-name">{playerName(pid)}</span>
+                      </button>
+                    {/each}
+                  {/if}
+                </div>
               </div>
             </div>
-          </div>
+          {:else}
+            <!-- Bracket locked — League-style group boxes per round -->
+            {@const completedCount = bracketMatches.filter(m => !!m.completedAt).length}
+            {@const totalCount = bracketMatches.length}
+            {@const allDone = totalCount > 0 && completedCount === totalCount}
+            <div class="draw-controls">
+              <span class="draw-hint">{bracketIds.length} players → {bracketHint(bracketIds.length)}</span>
+              <span class="draw-locked-hint">🔒 Bracket locked — rounds in progress</span>
+            </div>
+            <div class="groups-grid" style="grid-template-columns: repeat({Math.min(bracketRounds.length, 4)}, 1fr)">
+              {#each bracketRounds as rName}
+                {@const rMatches = bracketMatches.filter((m) => m.round === rName)}
+                {@const rDone = rMatches.length > 0 && rMatches.every(m => !!m.completedAt)}
+                <div class="group-col" class:group-col-done={rDone}>
+                  <div class="group-col-header">
+                    <span>{rName}</span>
+                    <div class="group-col-header-right">
+                      <span class="group-match-status" class:group-match-done={rDone}>
+                        {rMatches.filter(m => !!m.completedAt).length} / {rMatches.length} complete
+                      </span>
+                    </div>
+                  </div>
+                  {#each rMatches as m (m.mid)}
+                    <div class="bracket-match-chip" class:completed={!!m.completedAt}>
+                      <span class="bm-order">{m.matchOrder}</span>
+                      <span class="bm-player" class:winner={m.result?.winner === 'a'}>{m.aName}</span>
+                      <span class="bm-vs">vs</span>
+                      <span class="bm-player" class:winner={m.result?.winner === 'b'}>{m.bName}</span>
+                      {#if m.result}
+                        <span class="bm-result">{m.result.setsA}–{m.result.setsB}</span>
+                      {/if}
+                    </div>
+                  {/each}
+                </div>
+              {/each}
+            </div>
+            <p class="bracket-hint">Close this panel and click <strong>Bracket</strong> on the tournament row to play matches.</p>
+          {/if}
 
           {#if generateError}
             <p class="ks-error">{generateError}</p>
@@ -433,33 +471,7 @@
             </div>
           {/if}
 
-          {#if bracketLocked && bracketRounds.length > 0}
-            <div class="bracket-summary">
-              {#each bracketRounds as rName}
-                {@const rMatches = bracketMatches.filter((m) => m.round === rName)}
-                <div class="bracket-round-block">
-                  <div class="bracket-round-label">{rName}</div>
-                  {#each rMatches as m (m.mid)}
-                    <div class="bracket-match-row" class:completed={!!m.completedAt}>
-                      <span class="bm-order">{m.matchOrder}</span>
-                      <span class="bm-player" class:winner={m.result?.winner === 'a'}>{m.aName}</span>
-                      <span class="bm-vs">vs</span>
-                      <span class="bm-player" class:winner={m.result?.winner === 'b'}>{m.bName}</span>
-                      {#if m.result}
-                        <span class="bm-result">{m.result.setsA}–{m.result.setsB}</span>
-                      {/if}
-                    </div>
-                  {/each}
-                </div>
-              {/each}
-            </div>
-            <p class="bracket-hint">Close this panel and click <strong>Bracket</strong> on the tournament row to play matches.</p>
-          {/if}
-
           <div class="ks-actions">
-            <button type="button" class="btn btn-secondary" onclick={doRandomDraw}>
-              ↺ Random draw
-            </button>
             {#if generating}
               <button type="button" class="btn btn-primary" disabled>Generating…</button>
             {:else if bracketLocked}
@@ -467,85 +479,103 @@
                 type="button"
                 class="btn btn-secondary"
                 onclick={() => { bracketLocked = false; generateResult = null; doRandomDraw(); }}
-              >Re-draw bracket</button>
+              >↺ Re-draw bracket</button>
             {:else}
+              <button type="button" class="btn btn-secondary" onclick={doRandomDraw}>
+                ↺ Random draw
+              </button>
               <button
                 type="button"
                 class="btn btn-primary"
                 onclick={() => doGenerateBracket()}
                 disabled={selectedIds.size < 2}
-              >Generate Bracket →</button>
+              >Generate bracket →</button>
             {/if}
           </div>
 
         {:else}
-          <!-- Round Robin: same two-pane player picker as Knockout -->
-          <div class="draw-panes">
-            <!-- Left: tournament pool -->
-            <div class="picker-pane">
-              <div class="picker-header">
-                <span class="picker-title">Tournament players ({poolIds.length})</span>
-                <button type="button" class="btn-link" onclick={addAllToBracket} title="Add all">Add all →</button>
-              </div>
-              <input
-                class="picker-search"
-                type="search"
-                placeholder="Search…"
-                bind:value={poolSearch}
-                aria-label="Search tournament players"
-              />
-              <div class="picker-list">
-                {#if availablePlayerIds.length === 0}
-                  <p class="ks-info" style="padding:0.5rem 0.6rem">No players assigned. Use the <strong>Players</strong> button on the tournament row to assign players first.</p>
-                {:else if poolIds.length === 0}
-                  <p class="ks-info" style="padding:0.5rem 0.6rem">All players are in the round robin.</p>
-                {:else}
-                  {#each filteredPool as pid (pid)}
-                    <button type="button" class="pool-row" onclick={() => addToBracket(pid)}>
-                      <span class="pool-name">{playerName(pid)}</span>
-                      <span class="pool-add" aria-hidden="true">→</span>
-                    </button>
-                  {/each}
-                {/if}
-              </div>
-            </div>
-
-            <!-- Right: round robin participants -->
-            <div class="seed-pane">
-              <div class="picker-header">
-                <span class="picker-title">Round Robin ({selectedIds.size})</span>
-                <div style="display:flex;align-items:center;gap:0.5rem;">
-                  <span class="draw-hint">
-                    {#if selectedIds.size >= 2}
-                      {(selectedIds.size * (selectedIds.size - 1)) / 2} matches
-                    {/if}
-                  </span>
-                  {#if selectedIds.size > 0}
-                    <button type="button" class="btn-link" onclick={clearBracket}>Clear</button>
+          <!-- Round Robin -->
+          {#if !rrScheduleLocked}
+            <!-- Picker — only before schedule is generated -->
+            <div class="draw-panes">
+              <!-- Left: tournament pool -->
+              <div class="picker-pane">
+                <div class="picker-header">
+                  <span class="picker-title">Tournament players ({poolIds.length})</span>
+                  <button type="button" class="btn-link" onclick={addAllToBracket} title="Add all">Add all →</button>
+                </div>
+                <input
+                  class="picker-search"
+                  type="search"
+                  placeholder="Search…"
+                  bind:value={poolSearch}
+                  aria-label="Search tournament players"
+                />
+                <div class="picker-list">
+                  {#if availablePlayerIds.length === 0}
+                    <p class="ks-info" style="padding:0.5rem 0.6rem">No players assigned. Use the <strong>Players</strong> button on the tournament row to assign players first.</p>
+                  {:else if poolIds.length === 0}
+                    <p class="ks-info" style="padding:0.5rem 0.6rem">All players are in the round robin.</p>
+                  {:else}
+                    {#each filteredPool as pid (pid)}
+                      <button type="button" class="pool-row" onclick={() => addToBracket(pid)}>
+                        <span class="pool-name">{playerName(pid)}</span>
+                        <span class="pool-add" aria-hidden="true">→</span>
+                      </button>
+                    {/each}
                   {/if}
                 </div>
               </div>
-              <input
-                class="picker-search"
-                type="search"
-                placeholder="Search…"
-                bind:value={bracketSearch}
-                aria-label="Search round robin players"
-              />
-              <div class="picker-list">
-                {#if selectedIds.size === 0}
-                  <p class="ks-info" style="padding:0.5rem 0.6rem">Click players on the left to add them to the round robin.</p>
-                {:else}
-                  {#each filteredBracket as pid (pid)}
-                    <button type="button" class="seed-row-btn" onclick={() => removeFromBracket(pid)}>
-                      <span class="pool-remove" aria-hidden="true">←</span>
-                      <span class="pool-name">{playerName(pid)}</span>
-                    </button>
-                  {/each}
-                {/if}
+
+              <!-- Right: round robin participants -->
+              <div class="seed-pane">
+                <div class="picker-header">
+                  <span class="picker-title">Round Robin ({selectedIds.size})</span>
+                  <div style="display:flex;align-items:center;gap:0.5rem;">
+                    <span class="draw-hint">
+                      {#if selectedIds.size >= 2}
+                        {(selectedIds.size * (selectedIds.size - 1)) / 2} matches
+                      {/if}
+                    </span>
+                    {#if selectedIds.size > 0}
+                      <button type="button" class="btn-link" onclick={clearBracket}>Clear</button>
+                    {/if}
+                  </div>
+                </div>
+                <input
+                  class="picker-search"
+                  type="search"
+                  placeholder="Search…"
+                  bind:value={bracketSearch}
+                  aria-label="Search round robin players"
+                />
+                <div class="picker-list">
+                  {#if selectedIds.size === 0}
+                    <p class="ks-info" style="padding:0.5rem 0.6rem">Click players on the left to add them to the round robin.</p>
+                  {:else}
+                    {#each filteredBracket as pid (pid)}
+                      <button type="button" class="seed-row-btn" onclick={() => removeFromBracket(pid)}>
+                        <span class="pool-remove" aria-hidden="true">←</span>
+                        <span class="pool-name">{playerName(pid)}</span>
+                      </button>
+                    {/each}
+                  {/if}
+                </div>
               </div>
             </div>
-          </div>
+          {:else}
+            <!-- Schedule locked — show progress -->
+            <div class="locked-hint">🔒 Schedule locked — {seedList.length} players</div>
+            <div class="rr-progress">
+              <span class="rr-progress-label">
+                Progress: <strong>{rrCompleted} / {rrTotal}</strong> matches complete
+              </span>
+              {#if rrAllDone}
+                <span class="rr-done-badge">All done — go to Knockout Matches</span>
+              {/if}
+            </div>
+            <p class="bracket-hint">Close this panel and click <strong>Bracket</strong> on the tournament row to play matches.</p>
+          {/if}
 
           {#if rrGenResult}
             <div class="generate-result">
@@ -557,18 +587,6 @@
                 </ul>
               {/if}
             </div>
-          {/if}
-
-          {#if rrScheduleLocked}
-            <div class="rr-progress">
-              <span class="rr-progress-label">
-                Progress: <strong>{rrCompleted} / {rrTotal}</strong> matches complete
-              </span>
-              {#if rrAllDone}
-                <span class="rr-done-badge">All done — go to Stage 2</span>
-              {/if}
-            </div>
-            <p class="bracket-hint">Close this panel and click <strong>Bracket</strong> on the tournament row to play matches.</p>
           {/if}
 
           <div class="ks-actions">
@@ -586,7 +604,7 @@
                 class="btn btn-primary"
                 onclick={doGenerateRRSchedule}
                 disabled={selectedIds.size < 2 && availablePlayerIds.length < 2}
-              >Generate Schedule →</button>
+              >Generate schedule →</button>
             {/if}
           </div>
         {/if}
@@ -796,6 +814,79 @@
     font-size: 0.8rem;
     color: var(--muted, #9aa0a6);
   }
+  .locked-hint {
+    font-size: 0.78rem;
+    color: rgba(255, 213, 74, 0.7);
+    font-style: italic;
+    margin-bottom: 0.75rem;
+  }
+  .draw-locked-hint {
+    font-size: 0.78rem;
+    color: rgba(255, 213, 74, 0.7);
+    font-style: italic;
+  }
+
+  /* League-style group boxes (reused for bracket rounds when locked) */
+  .groups-grid {
+    display: grid;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+  }
+  @media (max-width: 40rem) {
+    .groups-grid { grid-template-columns: 1fr 1fr !important; }
+  }
+  @media (max-width: 28rem) {
+    .groups-grid { grid-template-columns: 1fr !important; }
+  }
+  .group-col {
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 0.5rem;
+    padding: 0.5rem;
+    background: rgba(255, 255, 255, 0.02);
+  }
+  .group-col-done {
+    border-color: rgba(86, 203, 130, 0.3);
+    background: rgba(86, 203, 130, 0.04);
+  }
+  .group-col-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--accent, #ffd54a);
+    margin-bottom: 0.4rem;
+    padding-bottom: 0.3rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  }
+  .group-col-header-right {
+    display: flex;
+    align-items: center;
+  }
+  .group-match-status {
+    font-size: 0.65rem;
+    font-weight: 600;
+    color: var(--muted, #9aa0a6);
+    text-transform: none;
+    letter-spacing: 0;
+  }
+  .group-match-done { color: #56cb82; }
+
+  /* Match chip inside a locked group col */
+  .bracket-match-chip {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 0.3rem;
+    padding: 0.22rem 0.45rem;
+    font-size: 0.78rem;
+    margin-bottom: 0.25rem;
+  }
+  .bracket-match-chip.completed { opacity: 0.7; }
 
   /* Two-pane draw layout */
   .draw-panes {

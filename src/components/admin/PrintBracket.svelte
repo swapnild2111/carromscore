@@ -47,6 +47,7 @@
     type Player,
   } from '../../lib/players';
   import { countryName, flagEmoji } from '../../lib/countries';
+  import { BRACKET_ROUND_RX } from '../../lib/bracket';
 
   let tournamentKey = $state<string>('');
   let plannedMatches = $state<PlannedMatch[]>([]);
@@ -411,7 +412,6 @@
   });
 
   // Bracket rounds: QF/SF/Final/R16/R32 only, sorted by order.
-  const BRACKET_ROUND_RX = /\b(R32|R16|round.of.16|QF|SF|Final)\b/i;
   const bracketRounds = $derived.by<ScheduleRound[]>(() =>
     schedule.filter((r) => BRACKET_ROUND_RX.test(r.roundName))
   );
@@ -443,8 +443,9 @@
         // Keep the earliest order for sorting
         if (sr.order < bucket.order) bucket.order = sr.order;
       } else {
-        // Group / non-bracket round — keep as-is
-        out.set(sr.roundKey, { key: sr.roundKey, displayName: sr.roundName, matches: sr.matches, order: sr.order });
+        // Group / non-bracket round — normalise "Group RR" for round-robin
+        const displayName = sr.roundName === 'Group RR' ? 'Round Robin Group' : sr.roundName;
+        out.set(sr.roundKey, { key: sr.roundKey, displayName, matches: sr.matches, order: sr.order });
       }
     }
     return [...out.values()].sort((a, b) => a.order - b.order);

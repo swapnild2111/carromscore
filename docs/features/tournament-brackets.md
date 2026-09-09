@@ -1,4 +1,4 @@
-# Tournament brackets (v3.6)
+# Tournament brackets (v4.0)
 
 **One QR sticker per physical board. Permanent for the entire
 tournament. Umpires scan the same code every round and the app
@@ -42,7 +42,24 @@ Sign in as an organiser (see [Running a tournament](../../README.md#running-a-to
 for how to get organiser access), open the admin panel, and
 switch to the **Tournaments** tab.
 
-Tap **+ Add tournament**. Two things to decide up front:
+Tap **+ Add tournament**. Three things to decide up front:
+
+### Format
+
+Choose the tournament's structure from four card tiles:
+
+| Format | What it does |
+|---|---|
+| **Normal** | Ad-hoc matches or a manually-built bracket. Use this for club nights, informal events, or any event you want to control match-by-match. |
+| **League** | Groups stage + auto-generated knockout flights (Gold / Silver / Bronze). The app draws groups, generates the round-robin schedule, computes standings, and seeds players into flights automatically. |
+| **Knockout** | Single-elimination bracket seeded from a player list. The app generates R16 / QF / SF / Final rounds and planned matches in one step. |
+| **Round Robin** | Everyone plays everyone in a round-robin pool, then the top N advance to a knockout bracket. |
+
+League and Knockout/Round Robin unlock dedicated setup screens
+("League" or "Bracket" button on the tournament row) where you
+configure and generate the schedule.
+
+### Access
 
 - **Access**: **Open** (anyone can play, no roster required) or
   **Invite-only** (players must be on an explicit roster, all
