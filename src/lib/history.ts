@@ -742,6 +742,28 @@ export async function loadHistory(): Promise<MatchRecord[]> {
   }
 }
 
+/** Load only matches for a specific tournament, using the tournamentKey index. */
+export async function loadMatchesByTournamentKey(tournamentKey: string): Promise<MatchRecord[]> {
+  if (!tournamentKey) return [];
+  try {
+    const [{ firebaseApp }, { getDatabase, ref, get, query, orderByChild, equalTo }] =
+      await Promise.all([import('./firebase'), import('firebase/database')]);
+    const db = getDatabase(firebaseApp());
+    const snap = await get(query(ref(db, 'matches'), orderByChild('tournamentKey'), equalTo(tournamentKey)));
+    const val = snap.val() as Record<string, unknown> | null;
+    if (!val) return [];
+    const out: MatchRecord[] = [];
+    for (const [id, r] of Object.entries(val)) {
+      if (!r || typeof r !== 'object') continue;
+      out.push({ id, ...(r as Omit<MatchRecord, 'id'>) });
+    }
+    out.sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0));
+    return out;
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Fields of a match record that admin edits may change. Excludes:
  *   - `id` (identity, not payload)

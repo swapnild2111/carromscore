@@ -180,16 +180,13 @@ export async function loadPlannedByRound(
 ): Promise<PlannedMatch[]> {
   if (!tournamentKey || !roundKey) return [];
   try {
-    const { getDatabase, ref, get } = await import('firebase/database');
+    const { getDatabase, ref, get, query, orderByChild, equalTo } = await import('firebase/database');
     const db = getDatabase(firebaseApp());
-    const snap = await get(ref(db, 'planned'));
+    const snap = await get(query(ref(db, 'planned'), orderByChild('tournamentKey'), equalTo(tournamentKey)));
     const raw = snap.val() as Record<string, Omit<PlannedMatch, 'mid'>> | null;
     if (!raw) return [];
     return Object.entries(raw)
-      .filter(
-        ([, v]) =>
-          v?.tournamentKey === tournamentKey && v?.roundKey === roundKey && !v?.completedAt,
-      )
+      .filter(([, v]) => v?.roundKey === roundKey && !v?.completedAt)
       .map(([mid, v]) => ({ mid, ...v }));
   } catch {
     return [];
@@ -204,13 +201,13 @@ export async function loadAllPlannedByRound(
 ): Promise<PlannedMatch[]> {
   if (!tournamentKey || !roundKey) return [];
   try {
-    const { getDatabase, ref, get } = await import('firebase/database');
+    const { getDatabase, ref, get, query, orderByChild, equalTo } = await import('firebase/database');
     const db = getDatabase(firebaseApp());
-    const snap = await get(ref(db, 'planned'));
+    const snap = await get(query(ref(db, 'planned'), orderByChild('tournamentKey'), equalTo(tournamentKey)));
     const raw = snap.val() as Record<string, Omit<PlannedMatch, 'mid'>> | null;
     if (!raw) return [];
     return Object.entries(raw)
-      .filter(([, v]) => v?.tournamentKey === tournamentKey && v?.roundKey === roundKey)
+      .filter(([, v]) => v?.roundKey === roundKey)
       .map(([mid, v]) => ({ mid, ...v }));
   } catch {
     return [];
@@ -366,14 +363,14 @@ export async function resolvePlannedByBoard(
     return { ok: false, error: 'invalid tournament or board' };
   }
   try {
-    const [{ getDatabase, ref, get }] = await Promise.all([
+    const [{ getDatabase, ref, get, query, orderByChild, equalTo }] = await Promise.all([
       import('firebase/database'),
     ]);
     const db = getDatabase(firebaseApp());
 
     // Read tournament rounds and planned matches in parallel.
     const [plannedSnap, tournamentSnap] = await Promise.all([
-      get(ref(db, 'planned')),
+      get(query(ref(db, 'planned'), orderByChild('tournamentKey'), equalTo(tournamentKey))),
       get(ref(db, `tournaments/${tournamentKey}/rounds`)),
     ]);
 
@@ -460,13 +457,13 @@ export async function loadPendingPlannedByTournament(
 ): Promise<PlannedMatch[]> {
   if (!tournamentKey) return [];
   try {
-    const { getDatabase, ref, get } = await import('firebase/database');
+    const { getDatabase, ref, get, query, orderByChild, equalTo } = await import('firebase/database');
     const db = getDatabase(firebaseApp());
-    const snap = await get(ref(db, 'planned'));
+    const snap = await get(query(ref(db, 'planned'), orderByChild('tournamentKey'), equalTo(tournamentKey)));
     const raw = snap.val() as Record<string, Omit<PlannedMatch, 'mid'>> | null;
     if (!raw) return [];
     return Object.entries(raw)
-      .filter(([, v]) => v?.tournamentKey === tournamentKey && !v?.completedAt)
+      .filter(([, v]) => !v?.completedAt)
       .map(([mid, v]) => ({ mid, ...v }));
   } catch {
     return [];
@@ -479,11 +476,13 @@ export async function subscribePlannedByTournament(
 ): Promise<() => void> {
   if (!tournamentKey) return () => {};
   try {
-    const [{ getDatabase, ref, onValue }] = await Promise.all([
-      import('firebase/database'),
-    ]);
+    const { getDatabase, ref, onValue, query, orderByChild, equalTo } = await import('firebase/database');
     const db = getDatabase(firebaseApp());
-    const unsub = onValue(ref(db, 'planned'), (snap) => {
+    // Use the tournamentKey index so the subscription only receives this
+    // tournament's planned records — avoids downloading the whole /planned
+    // node on every change.
+    const q = query(ref(db, 'planned'), orderByChild('tournamentKey'), equalTo(tournamentKey));
+    const unsub = onValue(q, (snap) => {
       const raw = snap.val() as Record<string, Omit<PlannedMatch, 'mid'>> | null;
       if (!raw) {
         cb([]);
@@ -492,7 +491,6 @@ export async function subscribePlannedByTournament(
       const out: PlannedMatch[] = [];
       for (const [mid, v] of Object.entries(raw)) {
         if (!v || typeof v !== 'object') continue;
-        if (v.tournamentKey !== tournamentKey) continue;
         out.push({ mid, ...v });
       }
       out.sort((a, b) => {
@@ -562,13 +560,13 @@ export async function propagateBracketWinner(
     const targetOrder = Math.ceil(matchOrder / 2);
     const targetSide  = matchOrder % 2 === 1 ? 'a' : 'b';
 
-    // 5. Find the target planned slot
-    const allSnap = await get(ref(db, 'planned'));
+    // 5. Find the target planned slot (indexed by tournamentKey to avoid full scan)
+    const { query, orderByChild, equalTo } = await import('firebase/database');
+    const allSnap = await get(query(ref(db, 'planned'), orderByChild('tournamentKey'), equalTo(tournamentKey)));
     const all = allSnap.val() as Record<string, Omit<PlannedMatch, 'mid'>> | null;
     if (!all) return;
     const entry = Object.entries(all).find(
       ([, v]) =>
-        v?.tournamentKey === tournamentKey &&
         v?.roundKey === nextRound.key &&
         v?.matchOrder === targetOrder,
     );

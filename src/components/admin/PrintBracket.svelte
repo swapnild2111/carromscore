@@ -31,6 +31,7 @@
     subscribePlannedByTournament,
     type PlannedMatch,
   } from '../../lib/planned';
+  import { type MatchRecord } from '../../lib/history';
   import { qrToSVG } from '../../lib/qrcode';
   import {
     subscribeTournaments,
@@ -49,8 +50,8 @@
 
   let tournamentKey = $state<string>('');
   let plannedMatches = $state<PlannedMatch[]>([]);
+  let historyMatches = $state<MatchRecord[]>([]);
   let unsub: (() => void) | null = null;
-  let ready = $state(false);
   // Error surface when the RTDB fetch stalls or the tournament key
   // can't be found. Prevents the print page from hanging on the
   // 'Loading…' text forever if something upstream is wrong.
@@ -61,6 +62,11 @@
   // arrays through the template.
   let tournamentTick = $state(0);
   let playerTick = $state(0);
+  let plannedReady = $state(false);
+  let playersReady = $state(false);
+  let historyReady = $state(false);
+  // Wait for /planned, /players, and /matches history before rendering.
+  const ready = $derived(plannedReady && playersReady && historyReady);
 
   /** Resolve a player id to their current canonical name, falling back
    *  to the stored string. Mirrors history.ts playerName(). */
@@ -81,47 +87,65 @@
     tournamentKey = params.get('tournament') ?? '';
     if (params.get('qrMode') === 'match') qrMode = 'match';
     if (!tournamentKey) {
-      ready = true;
+      plannedReady = true;
+      playersReady = true;
+      historyReady = true;
       return () => {};
     }
     void subscribeTournaments();
     void subscribePlayers();
     const unsubT = subscribeTournamentStore(() => (tournamentTick += 1));
-    const unsubP = subscribePlayerStore(() => (playerTick += 1));
-    // Belt-and-braces load path (v3.6.2 fix): do a one-shot get()
-    // against /planned so the page renders even if the onValue
-    // subscription can't fire (misconfigured rules, malformed
-    // legacy record throwing in the callback, etc.). Then attach
-    // the subscription on top for live updates when boards are
-    // added/removed. Either data source flips `ready`.
+    // Players are cosmetic (canonical name resolution) — don't block rendering.
+    // Set ready immediately; names update reactively when the store arrives.
+    playersReady = true;
+    const unsubP = subscribePlayerStore(() => {
+      playerTick += 1;
+    });
+    // Single import chain — fetch /planned and /matches in parallel,
+    // then attach the live subscription. One module load instead of three.
     (async () => {
       try {
-        const [{ getDatabase, ref, get }, { firebaseApp }] = await Promise.all([
-          import('firebase/database'),
-          import('../../lib/firebase'),
-        ]);
+        const [{ getDatabase, ref, get, query, orderByChild, equalTo }, { firebaseApp }] =
+          await Promise.all([import('firebase/database'), import('../../lib/firebase')]);
         const db = getDatabase(firebaseApp());
-        const snap = await get(ref(db, 'planned'));
-        const raw = snap.val() as Record<string, Omit<PlannedMatch, 'mid'>> | null;
-        const out: PlannedMatch[] = [];
-        if (raw) {
-          for (const [mid, v] of Object.entries(raw)) {
+
+        // Fetch /planned and /matches simultaneously.
+        const [plannedSnap, matchesSnap] = await Promise.all([
+          get(query(ref(db, 'planned'), orderByChild('tournamentKey'), equalTo(tournamentKey))),
+          get(query(ref(db, 'matches'), orderByChild('tournamentKey'), equalTo(tournamentKey))).catch(() => null),
+        ]);
+
+        const plannedRaw = plannedSnap.val() as Record<string, Omit<PlannedMatch, 'mid'>> | null;
+        const plannedOut: PlannedMatch[] = [];
+        if (plannedRaw) {
+          for (const [mid, v] of Object.entries(plannedRaw)) {
             if (!v || typeof v !== 'object') continue;
-            if (v.tournamentKey !== tournamentKey) continue;
-            out.push({ mid, ...v });
+            plannedOut.push({ mid, ...v });
           }
         }
-        plannedMatches = out;
-        ready = true;
+        plannedMatches = plannedOut;
+        plannedReady = true;
+
+        const matchesRaw = matchesSnap?.val() as Record<string, Omit<MatchRecord, 'id'>> | null;
+        const matchesOut: MatchRecord[] = [];
+        if (matchesRaw) {
+          for (const [id, v] of Object.entries(matchesRaw)) {
+            if (!v || typeof v !== 'object') continue;
+            matchesOut.push({ id, ...v });
+          }
+        }
+        historyMatches = matchesOut;
+        historyReady = true;
       } catch (err) {
         loadError = err instanceof Error ? err.message : String(err);
-        ready = true;
+        plannedReady = true;
+        historyReady = true;
       }
-    })();
-    (async () => {
+
+      // Live subscription for board additions/removals (non-blocking).
       unsub = await subscribePlannedByTournament(tournamentKey, (arr) => {
         plannedMatches = arr;
-        ready = true;
+        plannedReady = true;
       });
     })();
     // Safety timeout — if neither the get nor the subscribe fired
@@ -130,7 +154,9 @@
     const timeoutId = window.setTimeout(() => {
       if (!ready) {
         loadError = 'Timed out reading /planned. Check your connection and the tournament key.';
-        ready = true;
+        plannedReady = true;
+        playersReady = true;
+        historyReady = true;
       }
     }, 8000);
     return () => {
@@ -385,154 +411,384 @@
   });
 
   // Bracket rounds: QF/SF/Final/R16/R32 only, sorted by order.
-  const BRACKET_ROUND_RX = /\b(R32|R16|QF|SF|Final)\b/i;
+  const BRACKET_ROUND_RX = /\b(R32|R16|round.of.16|QF|SF|Final)\b/i;
   const bracketRounds = $derived.by<ScheduleRound[]>(() =>
     schedule.filter((r) => BRACKET_ROUND_RX.test(r.roundName))
   );
 
-  // Ordered round labels for display (Final rightmost → R32 leftmost).
-  const ROUND_ORDER = ['R32', 'R16', 'QF', 'SF', 'Final'];
+  // Merged schedule for display: bracket sub-rounds (QF Match 1–4, R16 Match 1–8)
+  // are collapsed into one section per flight+stage (e.g. "Bronze League — Quarter Finals").
+  // Group rounds and non-bracket rounds stay as individual sections.
+  // Matches are deduplicated by mid within each merged section.
+  type MergedRound = { key: string; displayName: string; matches: PlannedMatch[]; order: number };
+  const mergedSchedule = $derived.by<MergedRound[]>(() => {
+    const out = new Map<string, MergedRound>();
+    for (const sr of schedule) {
+      const isBracket = BRACKET_ROUND_RX.test(sr.roundName);
+      if (isBracket) {
+        // Build a merge key: flight + stage label
+        const sep = sr.roundName.indexOf(' — ');
+        const flight = sep !== -1 ? sr.roundName.slice(0, sep) : '';
+        const stage = stageLabel(sr.roundName);
+        const mergeKey = flight ? `${flight} — ${stage}` : stage;
+        if (!out.has(mergeKey)) {
+          out.set(mergeKey, { key: mergeKey, displayName: mergeKey, matches: [], order: sr.order });
+        }
+        const bucket = out.get(mergeKey)!;
+        // Deduplicate by mid
+        const seen = new Set(bucket.matches.map((m) => m.mid));
+        for (const m of sr.matches) {
+          if (!seen.has(m.mid)) { bucket.matches.push(m); seen.add(m.mid); }
+        }
+        // Keep the earliest order for sorting
+        if (sr.order < bucket.order) bucket.order = sr.order;
+      } else {
+        // Group / non-bracket round — keep as-is
+        out.set(sr.roundKey, { key: sr.roundKey, displayName: sr.roundName, matches: sr.matches, order: sr.order });
+      }
+    }
+    return [...out.values()].sort((a, b) => a.order - b.order);
+  });
 
-  // Build an inline SVG string for the bracket tree.
-  // Left-to-right: earliest round on left, Final on right.
-  function buildBracketSVG(
-    rounds: ScheduleRound[],
-    resolveNameFn: (id: string | undefined, fallback: string) => string,
+  // Canonical stage label shared by SVG builder and template header chips
+  function stageLabel(name: string): string {
+    const n = name.replace(/^.*?—\s*/, '');
+    if (n.includes('Final') && !n.includes('SF')) return 'Finals';
+    if (n.includes('SF')) return 'Semi Finals';
+    if (n.includes('QF')) return 'Quarter Finals';
+    if (n.includes('R16') || n.toLowerCase().includes('round of 16')) return 'Rounds';
+    if (n.includes('R32')) return 'Rounds';
+    return n;
+  }
+
+  // Build per-set scores map from match history boardLog.
+  type SetScore = { a: number; b: number };
+  function buildSetScoresMap(records: MatchRecord[]): Map<string, SetScore[]> {
+    const m = new Map<string, SetScore[]>();
+    for (const rec of records) {
+      if (!rec?.id || !rec.boardLog?.length) continue;
+      const bySet = new Map<number, { a: number; b: number }>();
+      for (const entry of rec.boardLog) {
+        if (!entry) continue;
+        const s = entry.set ?? 0;
+        if (!bySet.has(s)) bySet.set(s, { a: 0, b: 0 });
+        const agg = bySet.get(s)!;
+        agg.a += entry.pointsA ?? 0;
+        agg.b += entry.pointsB ?? 0;
+      }
+      const sets = [...bySet.entries()].sort((a, b) => a[0] - b[0]).map(([, v]) => v);
+      if (sets.length > 0) m.set(rec.id, sets);
+    }
+    return m;
+  }
+
+  // Match slot type used by the SVG builder (works with both history and planned data).
+  type BracketSlot = {
+    aId?: string; aName: string;
+    bId?: string; bName: string;
+    isDone: boolean;
+    winner?: 'a' | 'b';
+    setScores?: SetScore[];    // from boardLog when available
+    setsA?: number; setsB?: number; // fallback from result
+  };
+
+  // Build an inline SVG bracket matching the reports-tab style.
+  // Stages are merged (all QF matches → one column) and per-set scores shown.
+  // Light theme for print.
+  function buildFlightBracketSVG(
+    cols: Array<{ label: string; slots: BracketSlot[] }>,
   ): string {
-    if (rounds.length === 0) return '';
-
-    const sorted = [...rounds].sort((a, b) => {
-      const ai = ROUND_ORDER.findIndex((r) => a.roundName.includes(r));
-      const bi = ROUND_ORDER.findIndex((r) => b.roundName.includes(r));
-      return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
-    });
+    if (cols.length < 2) return '';
 
     const COL_W = 200;
     const COL_GAP = 48;
-    const MATCH_H = 56;   // height of one match slot
-    const SLOT_PAD = 10;
     const NAME_MAX = 22;
 
     function clip(s: string): string {
       return s.length > NAME_MAX ? s.slice(0, NAME_MAX - 1) + '…' : s;
     }
 
-    // Count slots per column: first round has max matches, each subsequent halves.
-    const maxSlots = sorted[0].matches.length;
-    const colCount = sorted.length;
+    // Slot height depends on number of set score lines
+    function slotH(slot: BracketSlot): number {
+      const lines = scoreLines(slot);
+      return lines.length <= 1 ? 44 : 44 + (lines.length - 1) * 14;
+    }
+
+    function scoreLines(slot: BracketSlot): string[] {
+      if (!slot.isDone) return [];
+      if (slot.setScores && slot.setScores.length > 0) {
+        return slot.setScores.map((s) => `${s.a}–${s.b}`);
+      }
+      if (slot.setsA !== undefined && slot.setsB !== undefined) {
+        return [`${slot.setsA}–${slot.setsB}`];
+      }
+      return [];
+    }
+
+    const SLOT_PAD = 10;
+    const MATCH_H = 56; // base spacing between match centres
+
+    const maxSlots = cols[0].slots.length;
+    const colCount = cols.length;
     const totalH = maxSlots * MATCH_H + (maxSlots - 1) * SLOT_PAD;
     const totalW = colCount * COL_W + (colCount - 1) * COL_GAP;
 
     const lines: string[] = [];
-
-    // Column x positions
     const colX = (ci: number) => ci * (COL_W + COL_GAP);
 
-    // Slot y-centre for a match at position idx in a column with slotCount slots
     function slotCY(idx: number, slotCount: number): number {
       const spacing = totalH / slotCount;
       return spacing * idx + spacing / 2;
     }
 
-    // Draw connector lines between rounds
-    for (let ci = 0; ci < sorted.length - 1; ci += 1) {
-      const currRound = sorted[ci];
-      const nextRound = sorted[ci + 1];
-      const currCount = currRound.matches.length;
-      const nextCount = nextRound.matches.length;
+    // Column stage labels
+    for (let ci = 0; ci < cols.length; ci++) {
+      const x = colX(ci);
+      lines.push(`<text x="${x + COL_W / 2}" y="-6" text-anchor="middle" font-size="10" font-weight="700"
+            font-family="sans-serif" fill="#888" letter-spacing="0.06em">${cols[ci].label.toUpperCase()}</text>`);
+    }
+
+    // Connector lines
+    for (let ci = 0; ci < cols.length - 1; ci++) {
+      const currCount = cols[ci].slots.length;
+      const nextCount = cols[ci + 1].slots.length;
       const x1 = colX(ci) + COL_W;
       const x2 = colX(ci + 1);
       const xMid = x1 + COL_GAP / 2;
-
-      for (let ni = 0; ni < nextCount; ni += 1) {
+      for (let ni = 0; ni < nextCount; ni++) {
         const cy2 = slotCY(ni, nextCount);
-        // Two source slots feed each next slot
         const srcA = ni * 2;
         const srcB = ni * 2 + 1;
         if (srcA < currCount) {
           const cy1 = slotCY(srcA, currCount);
-          lines.push(`<line x1="${x1}" y1="${cy1}" x2="${xMid}" y2="${cy1}" stroke="#bbb" stroke-width="1"/>`);
-          lines.push(`<line x1="${xMid}" y1="${cy1}" x2="${xMid}" y2="${cy2}" stroke="#bbb" stroke-width="1"/>`);
+          lines.push(`<line x1="${x1}" y1="${cy1}" x2="${xMid}" y2="${cy1}" stroke="#bbb" stroke-width="1.25"/>`);
+          lines.push(`<line x1="${xMid}" y1="${cy1}" x2="${xMid}" y2="${cy2}" stroke="#bbb" stroke-width="1.25"/>`);
         }
         if (srcB < currCount) {
           const cy1 = slotCY(srcB, currCount);
-          lines.push(`<line x1="${x1}" y1="${cy1}" x2="${xMid}" y2="${cy1}" stroke="#bbb" stroke-width="1"/>`);
-          lines.push(`<line x1="${xMid}" y1="${cy1}" x2="${xMid}" y2="${cy2}" stroke="#bbb" stroke-width="1"/>`);
+          lines.push(`<line x1="${x1}" y1="${cy1}" x2="${xMid}" y2="${cy1}" stroke="#bbb" stroke-width="1.25"/>`);
+          lines.push(`<line x1="${xMid}" y1="${cy1}" x2="${xMid}" y2="${cy2}" stroke="#bbb" stroke-width="1.25"/>`);
         }
-        lines.push(`<line x1="${xMid}" y1="${cy2}" x2="${x2}" y2="${cy2}" stroke="#bbb" stroke-width="1"/>`);
+        lines.push(`<line x1="${xMid}" y1="${cy2}" x2="${x2}" y2="${cy2}" stroke="#bbb" stroke-width="1.25"/>`);
       }
     }
 
-    // Draw match slots
-    for (let ci = 0; ci < sorted.length; ci += 1) {
-      const round = sorted[ci];
-      const slotCount = round.matches.length;
+    // Match slots
+    for (let ci = 0; ci < cols.length; ci++) {
+      const col = cols[ci];
       const x = colX(ci);
 
-      for (let mi = 0; mi < slotCount; mi += 1) {
-        const m = round.matches[mi];
-        const cy = slotCY(mi, slotCount);
-        const slotH = 44;
-        const sy = cy - slotH / 2;
+      for (let mi = 0; mi < col.slots.length; mi++) {
+        const slot = col.slots[mi];
+        const cy = slotCY(mi, col.slots.length);
+        const sh = slotH(slot);
+        const sy = cy - sh / 2;
 
-        const aName = clip(resolveNameFn(m.aResolvedId, m.aName));
-        const bName = clip(resolveNameFn(m.bResolvedId, m.bName));
-        const isDone = !!m.completedAt;
-        const winner = isDone ? m.result?.winner : undefined;
+        const aName = clip(resolvedName(slot.aId, slot.aName));
+        const bName = clip(resolvedName(slot.bId, slot.bName));
+        const aIsWinner = slot.isDone && slot.winner === 'a';
+        const bIsWinner = slot.isDone && slot.winner === 'b';
 
-        const aIsWinner = winner === 'a';
-        const bIsWinner = winner === 'b';
-        const aIsTBD = aName === '' || aName.toLowerCase().startsWith('finalist');
-        const bIsTBD = bName === '' || bName.toLowerCase().startsWith('finalist');
-
-        const aFontWeight = aIsWinner ? '700' : '400';
-        const bFontWeight = bIsWinner ? '700' : '400';
-        const aOpacity = isDone && !aIsWinner ? '0.45' : '1';
-        const bOpacity = isDone && !bIsWinner ? '0.45' : '1';
-        const aStyle = aIsTBD ? 'font-style:italic' : '';
-        const bStyle = bIsTBD ? 'font-style:italic' : '';
-
-        const aTxt = aName || 'TBD';
-        const bTxt = bName || 'TBD';
+        const aFill = aIsWinner ? '#000' : '#333';
+        const bFill = bIsWinner ? '#000' : '#333';
+        const aWeight = aIsWinner ? '700' : '400';
+        const bWeight = bIsWinner ? '700' : '400';
+        const aOpacity = slot.isDone && !aIsWinner ? '0.38' : '1';
+        const bOpacity = slot.isDone && !bIsWinner ? '0.38' : '1';
 
         lines.push(`
-          <rect x="${x}" y="${sy}" width="${COL_W}" height="${slotH}" rx="4"
-                fill="#fff" stroke="#ccc" stroke-width="1"/>
-          <line x1="${x + 6}" y1="${sy + slotH / 2}" x2="${x + COL_W - 6}" y2="${sy + slotH / 2}"
-                stroke="#e5e5e5" stroke-width="0.75"/>
-          <text x="${x + 8}" y="${sy + 16}" font-size="12" font-weight="${aFontWeight}"
-                opacity="${aOpacity}" style="${aStyle}" font-family="sans-serif">${aTxt}</text>
-          <text x="${x + 8}" y="${sy + slotH - 7}" font-size="12" font-weight="${bFontWeight}"
-                opacity="${bOpacity}" style="${bStyle}" font-family="sans-serif">${bTxt}</text>
+          <rect x="${x}" y="${sy}" width="${COL_W}" height="${sh}" rx="5"
+                fill="#fff" stroke="#d4d4d4" stroke-width="1"/>
+          <line x1="${x + 1}" y1="${sy + sh / 2}" x2="${x + COL_W - 1}" y2="${sy + sh / 2}"
+                stroke="#ebebeb" stroke-width="0.75"/>
+          <text x="${x + 10}" y="${sy + 16}" font-size="12" font-weight="${aWeight}"
+                opacity="${aOpacity}" font-family="sans-serif" fill="${aFill}">${aName || 'TBD'}</text>
+          <text x="${x + 10}" y="${sy + sh - 7}" font-size="12" font-weight="${bWeight}"
+                opacity="${bOpacity}" font-family="sans-serif" fill="${bFill}">${bName || 'TBD'}</text>
         `);
 
-        // Result pill
-        if (isDone && m.result) {
-          const sA = m.result.setsA;
-          const sB = m.result.setsB;
-          const pill = `${sA}–${sB}`;
-          const px = x + COL_W - 36;
-          const py = cy - 8;
-          lines.push(`
-            <rect x="${px}" y="${py}" width="30" height="16" rx="8" fill="#f0f0f0"/>
-            <text x="${px + 15}" y="${py + 11}" text-anchor="middle" font-size="10"
-                  font-family="sans-serif" fill="#555">${pill}</text>
-          `);
+        // Score pill — per set or set counts
+        const sLines = scoreLines(slot);
+        if (sLines.length > 0) {
+          const pillW = 38;
+          const pillH = sLines.length === 1 ? 17 : sLines.length * 14 + 4;
+          const px = x + COL_W - pillW - 4;
+          const py = cy - pillH / 2;
+          lines.push(`<rect x="${px}" y="${py}" width="${pillW}" height="${pillH}" rx="${Math.min(8, pillH / 2)}" fill="#f5f5f5" stroke="#e0e0e0" stroke-width="0.75"/>`);
+          sLines.forEach((sl, si) => {
+            const ty = py + (sLines.length === 1 ? 12 : 12 + si * 14);
+            lines.push(`<text x="${px + pillW / 2}" y="${ty}" text-anchor="middle" font-size="10" font-family="sans-serif" fill="#444" font-weight="600">${sl}</text>`);
+          });
         }
       }
     }
 
     const svgH = Math.max(totalH, 120);
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-4 -8 ${totalW + 8} ${svgH + 16}"
-      width="${totalW + 8}" height="${svgH + 16}" style="max-width:100%;height:auto;display:block">
+    const svgPadT = 20;
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-8 -${svgPadT} ${totalW + 16} ${svgH + svgPadT + 8}"
+      width="${totalW + 16}" height="${svgH + svgPadT + 8}" style="max-width:100%;height:auto;display:block">
+      <rect x="-8" y="-${svgPadT}" width="${totalW + 16}" height="${svgH + svgPadT + 8}" fill="#fff"/>
       ${lines.join('\n')}
     </svg>`;
   }
 
+  // Group bracket rounds by flight prefix ("Gold League", "Silver League", etc.)
+  // If no " — " prefix, all rounds go into one unnamed flight.
+  type BracketFlight = { name: string; rounds: ScheduleRound[] };
+  // History-based bracket flights — built from /matches records grouped by roundKey.
+  // Deduplicates same-stage rounds and uses boardLog for per-set scores.
+  type HistoryBracketFlight = { name: string; cols: Array<{ label: string; slots: BracketSlot[] }> };
+
+  const STAGE_ORDER = ['Rounds', 'Quarter Finals', 'Semi Finals', 'Finals'];
+
+  const historyBracketFlights = $derived.by<HistoryBracketFlight[]>(() => {
+    void playerTick;
+    void tournamentTick; // for schedule dependency
+    if (historyMatches.length === 0) return [];
+
+    const setScoresMap = buildSetScoresMap(historyMatches);
+
+    // Group history matches by flight name (prefix before " — ") + roundKey
+    type RoundGroup = { label: string; slots: BracketSlot[] };
+    const flightMap = new Map<string, Map<string, RoundGroup>>();
+
+    for (const rec of historyMatches) {
+      const round = rec.round ?? rec.roundKey ?? '';
+      if (!BRACKET_ROUND_RX.test(round)) continue;
+
+      const sep = round.indexOf(' — ');
+      const flightName = sep !== -1 ? round.slice(0, sep) : '';
+      const stageLbl = stageLabel(round);
+
+      if (!flightMap.has(flightName)) flightMap.set(flightName, new Map());
+      const stageMap = flightMap.get(flightName)!;
+      if (!stageMap.has(stageLbl)) stageMap.set(stageLbl, { label: stageLbl, slots: [] });
+
+      const slot: BracketSlot = {
+        aId: rec.playerAId,
+        aName: rec.aName ?? '',
+        bId: rec.playerBId,
+        bName: rec.bName ?? '',
+        isDone: !!(rec.result?.winner),
+        winner: rec.result?.winner === 'a' ? 'a' : rec.result?.winner === 'b' ? 'b' : undefined,
+        setScores: setScoresMap.get(rec.id),
+        setsA: rec.result?.setsA,
+        setsB: rec.result?.setsB,
+      };
+      stageMap.get(stageLbl)!.slots.push(slot);
+    }
+
+    // Build a flight → min round order map from schedule (already sorted by order)
+    // so flights render in the same sequence as the Reports tab.
+    const flightMinOrder = new Map<string, number>();
+    for (const sr of schedule) {
+      const sep = sr.roundName.indexOf(' — ');
+      const fn = sep !== -1 ? sr.roundName.slice(0, sep) : '';
+      if (!flightMinOrder.has(fn) || sr.order < flightMinOrder.get(fn)!) {
+        flightMinOrder.set(fn, sr.order);
+      }
+    }
+
+    const result: HistoryBracketFlight[] = [];
+    for (const [flightName, stageMap] of flightMap) {
+      // Sort stages by STAGE_ORDER
+      const sortedStages = [...stageMap.values()].sort((a, b) => {
+        const ai = STAGE_ORDER.indexOf(a.label);
+        const bi = STAGE_ORDER.indexOf(b.label);
+        return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+      });
+      if (sortedStages.length < 2) continue;
+      result.push({ name: flightName, cols: sortedStages });
+    }
+    // Sort by round order from tournament config (matches Reports tab order).
+    // Fall back to alphabetical if order info isn't available.
+    result.sort((a, b) => {
+      const oa = flightMinOrder.get(a.name) ?? 999;
+      const ob = flightMinOrder.get(b.name) ?? 999;
+      return oa !== ob ? oa - ob : a.name.localeCompare(b.name);
+    });
+    return result;
+  });
+
+  // Fallback: /planned-based bracket flights (used when no history data yet)
+  const plannedBracketFlights = $derived.by<BracketFlight[]>(() => {
+    void tournamentTick;
+    const map = new Map<string, ScheduleRound[]>();
+    for (const r of bracketRounds) {
+      const sep = r.roundName.indexOf(' — ');
+      const key = sep !== -1 ? r.roundName.slice(0, sep) : '';
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(r);
+    }
+    return [...map.entries()].map(([name, rounds]) => ({ name, rounds }));
+  });
+
+  // Build planned-based BracketSlot cols (fallback when no history)
+  function plannedFlightToCols(rounds: ScheduleRound[]): Array<{ label: string; slots: BracketSlot[] }> {
+    const sorted = [...rounds].sort((a, b) => {
+      const ai = STAGE_ORDER.indexOf(stageLabel(a.roundName));
+      const bi = STAGE_ORDER.indexOf(stageLabel(b.roundName));
+      return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+    });
+    const mergedMap = new Map<string, { label: string; slots: BracketSlot[] }>();
+    for (const r of sorted) {
+      const lbl = stageLabel(r.roundName);
+      if (!mergedMap.has(lbl)) mergedMap.set(lbl, { label: lbl, slots: [] });
+      for (const m of r.matches) {
+        mergedMap.get(lbl)!.slots.push({
+          aId: m.aResolvedId,
+          aName: m.aName,
+          bId: m.bResolvedId,
+          bName: m.bName,
+          isDone: !!m.completedAt,
+          winner: m.result?.winner === 'a' ? 'a' : m.result?.winner === 'b' ? 'b' : undefined,
+          setsA: m.result?.setsA,
+          setsB: m.result?.setsB,
+        });
+      }
+    }
+    return [...mergedMap.values()];
+  }
+
+  // Per-flight bracket SVGs — keyed by flight name. Uses history data when available.
+  const flightBracketSVGs = $derived.by<Map<string, string>>(() => {
+    void tournamentTick;
+    void playerTick;
+    const out = new Map<string, string>();
+
+    if (historyBracketFlights.length > 0) {
+      // Use history data (has boardLog → per-set scores, deduped rounds)
+      for (const f of historyBracketFlights) {
+        const svg = buildFlightBracketSVG(f.cols);
+        if (svg) out.set(f.name, svg);
+      }
+    } else {
+      // Fallback to /planned data (no boardLog, set counts only)
+      for (const f of plannedBracketFlights) {
+        const cols = plannedFlightToCols(f.rounds);
+        const svg = buildFlightBracketSVG(cols);
+        if (svg) out.set(f.name, svg);
+      }
+    }
+    return out;
+  });
+
+  // Active flights list — used by the template to decide what to render
+  const activeBracketFlights = $derived.by<Array<{ name: string }>>(() => {
+    if (historyBracketFlights.length > 0) {
+      return historyBracketFlights.map((f) => ({ name: f.name }));
+    }
+    return plannedBracketFlights.map((f) => ({ name: f.name }));
+  });
+
   const bracketSVG = $derived.by<string>(() => {
     void tournamentTick;
     void playerTick;
-    return buildBracketSVG(bracketRounds, resolvedName);
+    // Legacy: single flight — render one SVG
+    if (activeBracketFlights.length <= 1) {
+      return flightBracketSVGs.get(activeBracketFlights[0]?.name ?? '') ?? '';
+    }
+    return '';
   });
 </script>
 
@@ -669,13 +925,13 @@
         <p class="cover-empty">No players registered yet.</p>
       {/if}
 
-      {#if schedule.length > 0}
+      {#if mergedSchedule.length > 0}
         <h2 class="cover-section" style="margin-top:1.4rem">
           Schedule ({matchCount} {matchCount === 1 ? 'match' : 'matches'})
         </h2>
-        {#each schedule as round, ri (round.roundKey)}
+        {#each mergedSchedule as round, ri (round.key)}
           <div class="sched-round">
-            <p class="sched-round-name">{round.roundName}</p>
+            <p class="sched-round-name">{round.displayName}</p>
             <table class="sched-table">
               <thead>
                 <tr>
@@ -685,7 +941,7 @@
               </thead>
               <tbody>
                 {#each round.matches as m, mi (m.mid)}
-                  {@const matchNum = schedule.slice(0, ri).reduce((acc, r) => acc + r.matches.length, 0) + mi + 1}
+                  {@const matchNum = mergedSchedule.slice(0, ri).reduce((acc, r) => acc + r.matches.length, 0) + mi + 1}
                   <tr>
                     <td class="sched-board">{qrMode === 'match' ? `M${matchNum}` : (m.board ? `B${m.board}` : '—')}</td>
                     <td class="sched-matchup">
@@ -713,26 +969,41 @@
       {/if}
     </section>
 
-    {#if bracketRounds.length >= 2}
-      <!-- ─── BRACKET PAGE ──────────────────────────────────────────
-           Horizontal left-to-right tree. Shown for knockout/roundrobin
-           and any tournament that has ≥2 bracket rounds (QF/SF/Final/R16/R32).
-           Always rendered with a white background regardless of theme. -->
-      <section class="page bracket-page">
-        <div class="bracket-hdr">
-          <p class="brand">Carromscore</p>
-          <h2 class="bracket-title">{tournamentName} — Draw</h2>
-          <div class="bracket-round-labels">
-            {#each bracketRounds as r (r.roundKey)}
-              <span class="bracket-round-label">{r.roundName.replace(/^.*[\s—]\s*/, '')}</span>
-            {/each}
-          </div>
-        </div>
-        <div class="bracket-svg-wrap">
-          {@html bracketSVG}
-        </div>
-        <p class="bracket-footer">Generated by Carromscore · carromscore.app</p>
-      </section>
+    {#if flightBracketSVGs.size >= 1}
+      <!-- ─── BRACKET PAGE(S) ─────────────────────────────────────────
+           Single flight: one page with the bracket tree.
+           Multi-flight (league): one bracket section per flight on
+           one shared page, each with its own header and SVG. -->
+      {#if activeBracketFlights.length <= 1}
+        {#if bracketSVG}
+          <section class="page bracket-page">
+            <div class="bracket-hdr">
+              <p class="brand">Carromscore</p>
+              <h2 class="bracket-title">{tournamentName} — Draw</h2>
+            </div>
+            <div class="bracket-svg-wrap">
+              {@html bracketSVG}
+            </div>
+            <p class="bracket-footer">Generated by Carromscore · carromscore.app</p>
+          </section>
+        {/if}
+      {:else}
+        {#each activeBracketFlights as flight (flight.name)}
+          {@const flightSVG = flightBracketSVGs.get(flight.name) ?? ''}
+          {#if flightSVG}
+            <section class="page bracket-page">
+              <div class="bracket-hdr">
+                <p class="brand">Carromscore</p>
+                <h2 class="bracket-title">{tournamentName} — {flight.name || 'Draw'}</h2>
+              </div>
+              <div class="bracket-svg-wrap">
+                {@html flightSVG}
+              </div>
+              <p class="bracket-footer">Generated by Carromscore · carromscore.app</p>
+            </section>
+          {/if}
+        {/each}
+      {/if}
     {/if}
 
     {#if boards.length > 0}

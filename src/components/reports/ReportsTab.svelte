@@ -21,6 +21,7 @@
     type ReportRow,
     type PlayerSummary,
     type TournamentReport,
+    type RoundReport,
   } from '../../lib/reports';
   import {
     loadAll as loadAllTournaments,
@@ -137,6 +138,21 @@
     void tournamentTick;
     if (!selection || selection === '__all__') return null;
     return findByKey(normalizeKey(selection));
+  });
+
+  // Pre-computed flight groups with bracket SVGs. Memoized as a $derived so
+  // SVG string building (expensive for large tournaments) only runs when
+  // matches or the report actually changes — not on every template render.
+  type FlightGroup = ReturnType<typeof groupNonGroupRounds>[number];
+  const flightGroups = $derived.by<FlightGroup[]>(() => {
+    const r = report;
+    if (!r?.roundReports || r.roundReports.length <= 1) return [];
+    const isLeague = currentTournamentRecord?.format === 'league';
+    const nonGroupRounds = isLeague
+      ? r.roundReports.filter((rr) => !/^group /i.test(rr.roundName))
+      : r.roundReports;
+    if (nonGroupRounds.length === 0) return [];
+    return groupNonGroupRounds(nonGroupRounds, buildSetScoresMap(matches));
   });
 
   // Organiser profile for print header — loaded when tournament's createdBy changes.
@@ -619,6 +635,259 @@
     const d = new Date().toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' });
     return `${t}${r} — ${d}`;
   });
+
+  // ─── Bracket SVG from match-history rounds ───────────────────────────────
+  // Used in the per-round breakdown to show a visual bracket for
+  // knockout-style flight rounds (QF/SF/Final etc.).
+
+  type SetScore = { a: number; b: number };
+  type BracketRound = { roundName: string; matches: Array<{ sideA: string; sideB: string; winner: 'A' | 'B' | 'Draw' | ''; setsA: number; setsB: number; pointsA: number; pointsB: number; setScores: SetScore[] }> };
+
+  const BRACKET_SUB_ORDER = ['R32', 'R16', 'Round of 16', 'QF', 'SF', 'Final'];
+
+  function bracketSubSortKey(name: string): number {
+    for (let i = 0; i < BRACKET_SUB_ORDER.length; i++) {
+      if (name.includes(BRACKET_SUB_ORDER[i])) return i;
+    }
+    return 99;
+  }
+
+  function buildFlightBracketSVG(bracketRounds: BracketRound[]): string {
+    if (bracketRounds.length < 2) return '';
+
+    const sorted = [...bracketRounds].sort(
+      (a, b) => bracketSubSortKey(a.roundName) - bracketSubSortKey(b.roundName),
+    );
+
+    // Merge rounds sharing the same stage label (e.g. QF Match 1–4 → one QF column)
+    function stageLabel(name: string): string {
+      const n = name.replace(/^.*?—\s*/, ''); // strip "Bronze League — " prefix
+      if (n.includes('Final')) return 'Finals';
+      if (n.includes('SF')) return 'Semi Finals';
+      if (n.includes('QF')) return 'Quarter Finals';
+      if (n.includes('R16') || n.includes('Round of 16')) return 'Rounds';
+      if (n.includes('R32')) return 'Rounds';
+      return n;
+    }
+    const mergedMap = new Map<string, BracketRound>();
+    for (const r of sorted) {
+      const label = stageLabel(r.roundName);
+      if (!mergedMap.has(label)) {
+        mergedMap.set(label, { roundName: label, matches: [] });
+      }
+      mergedMap.get(label)!.matches.push(...r.matches);
+    }
+    const merged = [...mergedMap.values()];
+
+    const COL_W = 200;
+    const COL_GAP = 48;
+    const MATCH_H = 56;
+    const SLOT_PAD = 10;
+    const NAME_MAX = 22;
+
+    function clip(s: string): string {
+      return s.length > NAME_MAX ? s.slice(0, NAME_MAX - 1) + '…' : s;
+    }
+
+    const maxSlots = merged[0].matches.length;
+    const colCount = merged.length;
+    const totalH = maxSlots * MATCH_H + (maxSlots - 1) * SLOT_PAD;
+    const totalW = colCount * COL_W + (colCount - 1) * COL_GAP;
+
+    const colX = (ci: number) => ci * (COL_W + COL_GAP);
+    function slotCY(idx: number, slotCount: number): number {
+      const spacing = totalH / slotCount;
+      return spacing * idx + spacing / 2;
+    }
+
+    const lines: string[] = [];
+
+    // Connector lines between rounds
+    for (let ci = 0; ci < merged.length - 1; ci++) {
+      const currCount = merged[ci].matches.length;
+      const nextCount = merged[ci + 1].matches.length;
+      const x1 = colX(ci) + COL_W;
+      const x2 = colX(ci + 1);
+      const xMid = x1 + COL_GAP / 2;
+      for (let ni = 0; ni < nextCount; ni++) {
+        const cy2 = slotCY(ni, nextCount);
+        for (const srcIdx of [ni * 2, ni * 2 + 1]) {
+          if (srcIdx < currCount) {
+            const cy1 = slotCY(srcIdx, currCount);
+            lines.push(`<line x1="${x1}" y1="${cy1}" x2="${xMid}" y2="${cy1}" stroke="var(--bracket-conn, rgba(255,213,74,0.35))" stroke-width="1.5"/>`);
+            lines.push(`<line x1="${xMid}" y1="${cy1}" x2="${xMid}" y2="${cy2}" stroke="var(--bracket-conn, rgba(255,213,74,0.35))" stroke-width="1.5"/>`);
+          }
+        }
+        lines.push(`<line x1="${xMid}" y1="${cy2}" x2="${x2}" y2="${cy2}" stroke="var(--bracket-conn, rgba(255,213,74,0.35))" stroke-width="1.5"/>`);
+      }
+    }
+
+    // Match slot boxes
+    for (let ci = 0; ci < merged.length; ci++) {
+      const round = merged[ci];
+      const slotCount = round.matches.length;
+      const x = colX(ci);
+      // Column label — roundName is already the short stage label after merging
+      const labelX = x + COL_W / 2;
+      const labelY = -4;
+      const shortLabel = round.roundName;
+      lines.push(`<text x="${labelX}" y="${labelY}" text-anchor="middle" font-size="11" font-weight="700" fill="var(--bracket-label, #ffd54a)" font-family="sans-serif" letter-spacing="0.06em">${shortLabel}</text>`);
+
+      for (let mi = 0; mi < slotCount; mi++) {
+        const m = round.matches[mi];
+        const cy = slotCY(mi, slotCount);
+        const slotH = 44;
+        const sy = cy - slotH / 2;
+
+        const aName = clip(m.sideA || 'TBD');
+        const bName = clip(m.sideB || 'TBD');
+        const isDone = m.winner === 'A' || m.winner === 'B' || m.winner === 'Draw';
+        const aIsWinner = m.winner === 'A';
+        const bIsWinner = m.winner === 'B';
+
+        const aFill = aIsWinner ? 'var(--bracket-winner, #ffd54a)' : 'var(--bracket-text, #f0f0f0)';
+        const bFill = bIsWinner ? 'var(--bracket-winner, #ffd54a)' : 'var(--bracket-text, #f0f0f0)';
+        lines.push(`
+          <rect x="${x}" y="${sy}" width="${COL_W}" height="${slotH}" rx="5" fill="var(--bracket-fill, #242424)" stroke="var(--bracket-border, rgba(255,213,74,0.18))" stroke-width="1"/>
+          <line x1="${x + 1}" y1="${sy + slotH / 2}" x2="${x + COL_W - 1}" y2="${sy + slotH / 2}" stroke="var(--bracket-divider, rgba(255,255,255,0.07))" stroke-width="0.75"/>
+          <text x="${x + 10}" y="${sy + 16}" font-size="12" font-weight="${aIsWinner ? '700' : '400'}"
+                opacity="${isDone && !aIsWinner ? '0.38' : '1'}" font-family="sans-serif"
+                fill="${aFill}">${aName}</text>
+          <text x="${x + 10}" y="${sy + slotH - 7}" font-size="12" font-weight="${bIsWinner ? '700' : '400'}"
+                opacity="${isDone && !bIsWinner ? '0.38' : '1'}" font-family="sans-serif"
+                fill="${bFill}">${bName}</text>
+        `);
+
+        if (isDone) {
+          // Build per-set score labels: "25–18" per set, or fallback to total/sets
+          const sets = m.setScores && m.setScores.length > 0 ? m.setScores : null;
+          const scoreLines: string[] = sets
+            ? sets.map((s) => `${s.a}–${s.b}`)
+            : (() => {
+                const sa = m.pointsA > 0 || m.pointsB > 0 ? m.pointsA : m.setsA;
+                const sb = m.pointsA > 0 || m.pointsB > 0 ? m.pointsB : m.setsB;
+                return [`${sa}–${sb}`];
+              })();
+
+          // Measure pill width from longest score line
+          const maxLen = Math.max(...scoreLines.map((s) => s.length));
+          const pillW = maxLen <= 5 ? 36 : maxLen <= 7 ? 46 : 54;
+          const pillH = scoreLines.length === 1 ? 17 : scoreLines.length * 14 + 4;
+          const px = x + COL_W - pillW - 4;
+          const py = cy - pillH / 2;
+
+          lines.push(`<rect x="${px}" y="${py}" width="${pillW}" height="${pillH}" rx="${pillH / 2 > 8 ? 8 : pillH / 2}" fill="var(--bracket-pill, rgba(255,213,74,0.15))"/>`);
+          scoreLines.forEach((sl, si) => {
+            const ty = py + (scoreLines.length === 1 ? 12 : 12 + si * 14);
+            lines.push(`<text x="${px + pillW / 2}" y="${ty}" text-anchor="middle" font-size="10"
+                  font-family="sans-serif" fill="var(--bracket-pill-text, #ffd54a)" font-weight="600">${sl}</text>`);
+          });
+        }
+      }
+    }
+
+    const svgH = Math.max(totalH, 120);
+    const svgPadT = 24; // room for column labels above viewBox
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-8 -${svgPadT} ${totalW + 16} ${svgH + svgPadT + 8}"
+      width="${totalW + 16}" height="${svgH + svgPadT + 8}" style="max-width:100%;height:auto;display:block">
+      <rect x="-8" y="-${svgPadT}" width="${totalW + 16}" height="${svgH + svgPadT + 8}" fill="var(--bracket-bg, transparent)" rx="0"/>
+      ${lines.join('\n')}
+    </svg>`;
+  }
+
+  type StageGroup = {
+    stageKey: string;      // e.g. "gold-league-QF"
+    stageName: string;     // e.g. "QF" — shown in dropdown header
+    displayName: string;   // e.g. "Gold League — QF"
+    rounds: RoundReport[]; // all sub-rounds for this stage
+    totalMatches: number;
+  };
+
+  // Human-friendly label for the round filter dropdown
+  // "Gold League — QF - Match 1" → "Gold League — Quarter Finals"
+  // "Bronze League — Round of 16 - Match 2, 4, 6, 8" → "Bronze League — Rounds"
+  // "Group A" stays "Group A"
+  function roundDropdownLabel(roundName: string): string {
+    const sep = roundName.indexOf(' — ');
+    if (sep === -1) return roundName; // Group A, Group B, etc — unchanged
+    const flight = roundName.slice(0, sep);  // "Gold League"
+    const sub = roundName.slice(sep + 3);    // "QF - Match 1"
+    let stage: string;
+    if (sub.includes('Final'))                              stage = 'Finals';
+    else if (sub.includes('SF'))                            stage = 'Semi Finals';
+    else if (sub.includes('QF'))                            stage = 'Quarter Finals';
+    else if (sub.includes('R16') || sub.includes('Round of 16')) stage = 'Rounds';
+    else if (sub.includes('R32'))                           stage = 'Rounds';
+    else                                                    stage = sub;
+    return `${flight} — ${stage}`;
+  }
+
+  function stageShortLabel(roundName: string): string {
+    const n = roundName.replace(/^.*?—\s*/, '');
+    if (n.includes('Final')) return 'Finals';
+    if (n.includes('SF')) return 'Semi Finals';
+    if (n.includes('QF')) return 'Quarter Finals';
+    if (n.includes('R16') || n.includes('Round of 16')) return 'Rounds';
+    if (n.includes('R32')) return 'Rounds';
+    return n;
+  }
+
+  function buildSetScoresMap(rawMatches: typeof matches): Map<string, SetScore[]> {
+    const m = new Map<string, SetScore[]>();
+    for (const rec of rawMatches) {
+      if (!rec || !rec.id) continue;
+      if (!rec.boardLog || rec.boardLog.length === 0) continue;
+      const bySet = new Map<number, { a: number; b: number }>();
+      for (const entry of rec.boardLog) {
+        if (!entry) continue;
+        const s = entry.set ?? 0;
+        if (!bySet.has(s)) bySet.set(s, { a: 0, b: 0 });
+        const agg = bySet.get(s)!;
+        agg.a += entry.pointsA ?? 0;
+        agg.b += entry.pointsB ?? 0;
+      }
+      // Sort by set index ascending
+      const sets = [...bySet.entries()].sort((a, b) => a[0] - b[0]).map(([, v]) => v);
+      if (sets.length > 0) m.set(rec.id, sets);
+    }
+    return m;
+  }
+
+  function groupNonGroupRounds(rounds: RoundReport[], setScoresMap: Map<string, SetScore[]>): Array<{ flightName: string; rounds: RoundReport[]; stageGroups: StageGroup[]; bracketSVG: string }> {
+    const flightMap = new Map<string, RoundReport[]>();
+    for (const rr of rounds) {
+      const sep = rr.roundName.indexOf(' — ');
+      const prefix = sep !== -1 ? rr.roundName.slice(0, sep) : rr.roundName;
+      if (!flightMap.has(prefix)) flightMap.set(prefix, []);
+      flightMap.get(prefix)!.push(rr);
+    }
+    return [...flightMap.entries()].map(([flightName, flightRounds]) => {
+      // Build stage groups within this flight
+      const stageMap = new Map<string, RoundReport[]>();
+      for (const rr of flightRounds) {
+        const label = stageShortLabel(rr.roundName);
+        if (!stageMap.has(label)) stageMap.set(label, []);
+        stageMap.get(label)!.push(rr);
+      }
+      const stageGroups: StageGroup[] = [...stageMap.entries()].map(([stageName, sRounds]) => ({
+        stageKey: `${flightName.toLowerCase().replace(/\s+/g, '-')}-${stageName}`,
+        stageName,
+        displayName: `${flightName} — ${stageName}`,
+        rounds: sRounds,
+        totalMatches: sRounds.reduce((s, r) => s + r.matches, 0),
+      }));
+
+      const bracketRounds: BracketRound[] = flightRounds.map((rr) => ({
+        roundName: rr.roundName,
+        matches: rr.rows.map((r) => ({
+          sideA: r.sideA, sideB: r.sideB, winner: r.winner,
+          setsA: r.setsA, setsB: r.setsB, pointsA: r.pointsA, pointsB: r.pointsB,
+          setScores: setScoresMap.get(r._matchId) ?? [],
+        })),
+      }));
+      return { flightName, rounds: flightRounds, stageGroups, bracketSVG: buildFlightBracketSVG(bracketRounds) };
+    });
+  }
 </script>
 
 <section class="reports" data-print-title={printTitle}>
@@ -699,7 +968,7 @@
       >
         <option value="__all__">All rounds</option>
         {#each report.roundReports ?? [] as rr (rr.roundKey)}
-          <option value={rr.roundKey}>{rr.roundName}</option>
+          <option value={rr.roundKey}>{roundDropdownLabel(rr.roundName)}</option>
         {/each}
       </select>
     {/if}
@@ -827,7 +1096,7 @@
       active — under other sorts the raw 1..N number is shown so
       re-sort doesn't relabel arbitrarily.
     -->
-    <div class="tbl-scroll">
+    <div class="tbl-scroll tbl-scroll-leaderboard">
       <table class="matches-tbl leaderboard-tbl">
           <thead>
             <tr>
@@ -979,7 +1248,6 @@
       -->
       {@const isLeague = currentTournamentRecord?.format === 'league'}
       {@const groupRounds = isLeague ? report.roundReports.filter(rr => /^group /i.test(rr.roundName)) : []}
-      {@const nonGroupRounds = isLeague ? report.roundReports.filter(rr => !/^group /i.test(rr.roundName)) : report.roundReports}
 
       {#if isLeague && groupRounds.length > 0}
         <div class="rounds-section">
@@ -1029,119 +1297,145 @@
         </div>
       {/if}
 
-      {#if nonGroupRounds.length > 0}
+      {#if flightGroups.length > 0}
         <div class="rounds-section">
           <h3 class="section-hdr">Per-round breakdown</h3>
-          {#each nonGroupRounds as rr (rr.roundKey)}
-            {@const open = isRoundOpen(rr.roundKey)}
-            <section
-              class="round-report"
-              class:round-report-unassigned={rr.roundKey === '__unassigned__'}
-              class:round-folded={!open}
-            >
+          {#each flightGroups as fg (fg.flightName)}
+            {@const flightOpen = isRoundOpen('__flight__' + fg.flightName)}
+            {@const fgTotalMatches = fg.rounds.reduce((s, r) => s + r.matches, 0)}
+            <section class="flight-section" class:round-folded={!flightOpen}>
               <button
                 type="button"
-                class="round-report-hdr"
-                aria-expanded={open}
-                onclick={() => toggleRound(rr.roundKey)}
+                class="flight-section-hdr"
+                aria-expanded={flightOpen}
+                onclick={() => toggleRound('__flight__' + fg.flightName)}
               >
-                <span class="round-report-caret" class:round-report-caret-folded={!open} aria-hidden="true">▾</span>
-                <span class="round-report-name">{rr.roundName}</span>
-                <span class="round-report-count">{rr.matches} match{rr.matches === 1 ? '' : 'es'}</span>
+                <span class="round-report-caret" class:round-report-caret-folded={!flightOpen} aria-hidden="true">▾</span>
+                <span class="flight-section-name">{fg.flightName}</span>
+                <span class="round-report-count">{fgTotalMatches} match{fgTotalMatches === 1 ? '' : 'es'}</span>
               </button>
-              {#if open}
-                {#if rr.rows.length === 0}
-                  <p class="round-report-empty">No matches in this round yet.</p>
-                {:else}
-                  {@const rrSorted = sortRRLeaderboard(rr.playerSummary)}
-                  {@const rrRankMap = new Map(rr.playerSummary.map((p, i) => [p.playerId, rankLabel(rr.playerSummary, i)]))}
-                  {@const rrMatchesSorted = sortRRMatches(rr.rows)}
-                  <div class="round-report-body">
-                    <div class="summary-scroll">
-                      <table class="summary-tbl leaderboard-tbl">
-                        <thead>
-                          <tr>
-                            <th class="col-rank hist-th-sortable" class:hist-th-sorted={rrLBSortKey === 'rank'} onclick={() => toggleRRLBSort('rank')}># {rrLBSortKey === 'rank' ? (rrLBSortDir === 'asc' ? '↑' : '↓') : ''}</th>
-                            <th class="col-name hist-th-sortable" class:hist-th-sorted={rrLBSortKey === 'name'} onclick={() => toggleRRLBSort('name')}>Player {rrLBSortKey === 'name' ? (rrLBSortDir === 'asc' ? '↑' : '↓') : ''}</th>
-                            <th class="hist-th-sortable" class:hist-th-sorted={rrLBSortKey === 'matches'} onclick={() => toggleRRLBSort('matches')}>Matches {rrLBSortKey === 'matches' ? (rrLBSortDir === 'asc' ? '↑' : '↓') : ''}</th>
-                            <th class="hist-th-sortable" class:hist-th-sorted={rrLBSortKey === 'wins'} onclick={() => toggleRRLBSort('wins')}>W {rrLBSortKey === 'wins' ? (rrLBSortDir === 'asc' ? '↑' : '↓') : ''}</th>
-                            <th class="hist-th-sortable" class:hist-th-sorted={rrLBSortKey === 'losses'} onclick={() => toggleRRLBSort('losses')}>L {rrLBSortKey === 'losses' ? (rrLBSortDir === 'asc' ? '↑' : '↓') : ''}</th>
-                            <th class="hist-th-sortable" class:hist-th-sorted={rrLBSortKey === 'draws'} onclick={() => toggleRRLBSort('draws')}>D {rrLBSortKey === 'draws' ? (rrLBSortDir === 'asc' ? '↑' : '↓') : ''}</th>
-                            <th class="hist-th-sortable" class:hist-th-sorted={rrLBSortKey === 'boards'} onclick={() => toggleRRLBSort('boards')}>Boards {rrLBSortKey === 'boards' ? (rrLBSortDir === 'asc' ? '↑' : '↓') : ''}</th>
-                            <th class="hist-th-sortable" class:hist-th-sorted={rrLBSortKey === 'points'} onclick={() => toggleRRLBSort('points')} title="Win=2, Draw=1, Loss=0">Points {rrLBSortKey === 'points' ? (rrLBSortDir === 'asc' ? '↑' : '↓') : ''}</th>
-                            <th class="hist-th-sortable" class:hist-th-sorted={rrLBSortKey === 'net'} onclick={() => toggleRRLBSort('net')} title="Sum of (my score − opponent score) per match">Net {rrLBSortKey === 'net' ? (rrLBSortDir === 'asc' ? '↑' : '↓') : ''}</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {#each rrSorted as p, i (p.playerId)}
-                            <tr class:leaderboard-top={rrLBSortKey === 'rank' && rrLBSortDir === 'asc' && i === 0}>
-                              <td class="col-rank">{rrRankMap.get(p.playerId) ?? String(i + 1)}</td>
-                              <td class="col-name">{p.name}</td>
-                              <td>{p.matches}</td>
-                              <td>{p.wins}</td>
-                              <td>{p.losses}</td>
-                              <td>{p.draws}</td>
-                              <td>{p.boardsWon}</td>
-                              <td class="col-total">{p.strikePoints}</td>
-                              <td class="col-total" class:col-net-neg={p.netPoints < 0}>{p.netPoints}</td>
-                            </tr>
-                          {/each}
-                        </tbody>
-                      </table>
-                    </div>
-                    <div class="round-report-actions">
-                      <button
-                        type="button"
-                        class="btn btn-copy"
-                        onclick={() => copyRows(rr.rows, rr.roundKey)}
-                        aria-label="Copy this round's table to clipboard"
+              {#if flightOpen}
+                <div class="flight-section-body">
+                  {#if fg.bracketSVG}
+                    <div class="flight-bracket-svg">{@html fg.bracketSVG}</div>
+                  {/if}
+                  <div class="flight-stage-list">
+                    {#each fg.stageGroups as sg (sg.stageKey)}
+                      {@const open = isRoundOpen(sg.stageKey)}
+                      {@const sgAllRows = sg.rounds.flatMap(r => r.rows)}
+                      {@const sgPlayerSummary = sg.rounds.flatMap(r => r.playerSummary)}
+                      <section
+                        class="round-report round-report-nested"
+                        class:round-folded={!open}
                       >
-                        {#if copiedKey === rr.roundKey}<span aria-hidden="true">✓</span> Copied{:else}<span aria-hidden="true">⧉</span> Copy round table{/if}
-                      </button>
-                    </div>
-                    <div class="tbl-scroll">
-                      <table class="matches-tbl">
-                        <thead>
-                          <tr>
-                            <th class="hist-th-sortable" class:hist-th-sorted={rrMSortKey === 'endedAt'} onclick={() => toggleRRMSort('endedAt')}>Ended {rrMSortKey === 'endedAt' ? (rrMSortDir === 'asc' ? '↑' : '↓') : ''}</th>
-                            <th class="hist-th-sortable" class:hist-th-sorted={rrMSortKey === 'mode'} onclick={() => toggleRRMSort('mode')}>Mode {rrMSortKey === 'mode' ? (rrMSortDir === 'asc' ? '↑' : '↓') : ''}</th>
-                            <th class="col-name hist-th-sortable" class:hist-th-sorted={rrMSortKey === 'sideA'} onclick={() => toggleRRMSort('sideA')}>Side A {rrMSortKey === 'sideA' ? (rrMSortDir === 'asc' ? '↑' : '↓') : ''}</th>
-                            <th class="col-name hist-th-sortable" class:hist-th-sorted={rrMSortKey === 'sideB'} onclick={() => toggleRRMSort('sideB')}>Side B {rrMSortKey === 'sideB' ? (rrMSortDir === 'asc' ? '↑' : '↓') : ''}</th>
-                            <th class="hist-th-sortable" class:hist-th-sorted={rrMSortKey === 'setsA'} onclick={() => toggleRRMSort('setsA')}>Sets A {rrMSortKey === 'setsA' ? (rrMSortDir === 'asc' ? '↑' : '↓') : ''}</th>
-                            <th class="hist-th-sortable" class:hist-th-sorted={rrMSortKey === 'setsB'} onclick={() => toggleRRMSort('setsB')}>Sets B {rrMSortKey === 'setsB' ? (rrMSortDir === 'asc' ? '↑' : '↓') : ''}</th>
-                            <th>Boards A</th>
-                            <th>Boards B</th>
-                            <th class="hist-th-sortable" class:hist-th-sorted={rrMSortKey === 'points'} onclick={() => toggleRRMSort('points')}>Points A {rrMSortKey === 'points' ? (rrMSortDir === 'asc' ? '↑' : '↓') : ''}</th>
-                            <th>Points B</th>
-                            <th class="hist-th-sortable" class:hist-th-sorted={rrMSortKey === 'winner'} onclick={() => toggleRRMSort('winner')}>Winner {rrMSortKey === 'winner' ? (rrMSortDir === 'asc' ? '↑' : '↓') : ''}</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {#each rrMatchesSorted as r (r._matchId)}
-                            <tr>
-                              <td>{r.endedAt}</td>
-                              <td>{r.mode}</td>
-                              <td class="col-name">{r.sideA}</td>
-                              <td class="col-name">{r.sideB}</td>
-                              <td>{r.setsA}</td>
-                              <td>{r.setsB}</td>
-                              <td>{r.boardsWonA}</td>
-                              <td>{r.boardsWonB}</td>
-                              <td>{r.pointsA}</td>
-                              <td>{r.pointsB}</td>
-                              <td class="winner-cell">
-                                {#if r.winner === 'Draw'}<span class="winner-tag winner-draw">Draw</span>
-                                {:else if r.winner === 'A'}<span class="winner-tag winner-a">A</span>
-                                {:else if r.winner === 'B'}<span class="winner-tag winner-b">B</span>
-                                {/if}
-                              </td>
-                            </tr>
-                          {/each}
-                        </tbody>
-                      </table>
-                    </div>
+                        <button
+                          type="button"
+                          class="round-report-hdr"
+                          aria-expanded={open}
+                          onclick={() => toggleRound(sg.stageKey)}
+                        >
+                          <span class="round-report-caret" class:round-report-caret-folded={!open} aria-hidden="true">▾</span>
+                          <span class="round-report-name">{sg.stageName}</span>
+                          <span class="round-report-count">{sg.totalMatches} match{sg.totalMatches === 1 ? '' : 'es'}</span>
+                        </button>
+                        {#if open}
+                          {#if sgAllRows.length === 0}
+                            <p class="round-report-empty">No matches in this round yet.</p>
+                          {:else}
+                            {@const rrSorted = sortRRLeaderboard(sgPlayerSummary)}
+                            {@const rrRankMap = new Map(sgPlayerSummary.map((p, i) => [p.playerId, rankLabel(sgPlayerSummary, i)]))}
+                            {@const rrMatchesSorted = sortRRMatches(sgAllRows)}
+                            <div class="round-report-body">
+                              <div class="summary-scroll">
+                                <table class="summary-tbl leaderboard-tbl">
+                                  <thead>
+                                    <tr>
+                                      <th class="col-rank hist-th-sortable" class:hist-th-sorted={rrLBSortKey === 'rank'} onclick={() => toggleRRLBSort('rank')}># {rrLBSortKey === 'rank' ? (rrLBSortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                                      <th class="col-name hist-th-sortable" class:hist-th-sorted={rrLBSortKey === 'name'} onclick={() => toggleRRLBSort('name')}>Player {rrLBSortKey === 'name' ? (rrLBSortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                                      <th class="hist-th-sortable" class:hist-th-sorted={rrLBSortKey === 'matches'} onclick={() => toggleRRLBSort('matches')}>Matches {rrLBSortKey === 'matches' ? (rrLBSortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                                      <th class="hist-th-sortable" class:hist-th-sorted={rrLBSortKey === 'wins'} onclick={() => toggleRRLBSort('wins')}>W {rrLBSortKey === 'wins' ? (rrLBSortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                                      <th class="hist-th-sortable" class:hist-th-sorted={rrLBSortKey === 'losses'} onclick={() => toggleRRLBSort('losses')}>L {rrLBSortKey === 'losses' ? (rrLBSortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                                      <th class="hist-th-sortable" class:hist-th-sorted={rrLBSortKey === 'draws'} onclick={() => toggleRRLBSort('draws')}>D {rrLBSortKey === 'draws' ? (rrLBSortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                                      <th class="hist-th-sortable" class:hist-th-sorted={rrLBSortKey === 'boards'} onclick={() => toggleRRLBSort('boards')}>Boards {rrLBSortKey === 'boards' ? (rrLBSortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                                      <th class="hist-th-sortable" class:hist-th-sorted={rrLBSortKey === 'points'} onclick={() => toggleRRLBSort('points')} title="Win=2, Draw=1, Loss=0">Points {rrLBSortKey === 'points' ? (rrLBSortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                                      <th class="hist-th-sortable" class:hist-th-sorted={rrLBSortKey === 'net'} onclick={() => toggleRRLBSort('net')} title="Sum of (my score − opponent score) per match">Net {rrLBSortKey === 'net' ? (rrLBSortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {#each rrSorted as p, i (p.playerId)}
+                                      <tr class:leaderboard-top={rrLBSortKey === 'rank' && rrLBSortDir === 'asc' && i === 0}>
+                                        <td class="col-rank">{rrRankMap.get(p.playerId) ?? String(i + 1)}</td>
+                                        <td class="col-name">{p.name}</td>
+                                        <td>{p.matches}</td>
+                                        <td>{p.wins}</td>
+                                        <td>{p.losses}</td>
+                                        <td>{p.draws}</td>
+                                        <td>{p.boardsWon}</td>
+                                        <td class="col-total">{p.strikePoints}</td>
+                                        <td class="col-total" class:col-net-neg={p.netPoints < 0}>{p.netPoints}</td>
+                                      </tr>
+                                    {/each}
+                                  </tbody>
+                                </table>
+                              </div>
+                              <div class="round-report-actions">
+                                <button
+                                  type="button"
+                                  class="btn btn-copy"
+                                  onclick={() => copyRows(sgAllRows, sg.stageKey)}
+                                  aria-label="Copy this round's table to clipboard"
+                                >
+                                  {#if copiedKey === sg.stageKey}<span aria-hidden="true">✓</span> Copied{:else}<span aria-hidden="true">⧉</span> Copy round table{/if}
+                                </button>
+                              </div>
+                              <div class="tbl-scroll">
+                                <table class="matches-tbl">
+                                  <thead>
+                                    <tr>
+                                      <th class="hist-th-sortable" class:hist-th-sorted={rrMSortKey === 'endedAt'} onclick={() => toggleRRMSort('endedAt')}>Ended {rrMSortKey === 'endedAt' ? (rrMSortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                                      <th class="hist-th-sortable" class:hist-th-sorted={rrMSortKey === 'mode'} onclick={() => toggleRRMSort('mode')}>Mode {rrMSortKey === 'mode' ? (rrMSortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                                      <th class="col-name hist-th-sortable" class:hist-th-sorted={rrMSortKey === 'sideA'} onclick={() => toggleRRMSort('sideA')}>Side A {rrMSortKey === 'sideA' ? (rrMSortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                                      <th class="col-name hist-th-sortable" class:hist-th-sorted={rrMSortKey === 'sideB'} onclick={() => toggleRRMSort('sideB')}>Side B {rrMSortKey === 'sideB' ? (rrMSortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                                      <th class="hist-th-sortable" class:hist-th-sorted={rrMSortKey === 'setsA'} onclick={() => toggleRRMSort('setsA')}>Sets A {rrMSortKey === 'setsA' ? (rrMSortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                                      <th class="hist-th-sortable" class:hist-th-sorted={rrMSortKey === 'setsB'} onclick={() => toggleRRMSort('setsB')}>Sets B {rrMSortKey === 'setsB' ? (rrMSortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                                      <th>Boards A</th>
+                                      <th>Boards B</th>
+                                      <th class="hist-th-sortable" class:hist-th-sorted={rrMSortKey === 'points'} onclick={() => toggleRRMSort('points')}>Points A {rrMSortKey === 'points' ? (rrMSortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                                      <th>Points B</th>
+                                      <th class="hist-th-sortable" class:hist-th-sorted={rrMSortKey === 'winner'} onclick={() => toggleRRMSort('winner')}>Winner {rrMSortKey === 'winner' ? (rrMSortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {#each rrMatchesSorted as r (r._matchId)}
+                                      <tr>
+                                        <td>{r.endedAt}</td>
+                                        <td>{r.mode}</td>
+                                        <td class="col-name">{r.sideA}</td>
+                                        <td class="col-name">{r.sideB}</td>
+                                        <td>{r.setsA}</td>
+                                        <td>{r.setsB}</td>
+                                        <td>{r.boardsWonA}</td>
+                                        <td>{r.boardsWonB}</td>
+                                        <td>{r.pointsA}</td>
+                                        <td>{r.pointsB}</td>
+                                        <td class="winner-cell">
+                                          {#if r.winner === 'Draw'}<span class="winner-tag winner-draw">Draw</span>
+                                          {:else if r.winner === 'A'}<span class="winner-tag winner-a">A</span>
+                                          {:else if r.winner === 'B'}<span class="winner-tag winner-b">B</span>
+                                          {/if}
+                                        </td>
+                                      </tr>
+                                    {/each}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          {/if}
+                        {/if}
+                      </section>
+                    {/each}
                   </div>
-                {/if}
+                </div>
               {/if}
             </section>
           {/each}
@@ -1404,8 +1698,10 @@
 
     /* ── Both tables: clean black-on-white ── */
     .tbl-scroll,
+    .tbl-scroll-leaderboard,
     .summary-scroll {
       overflow: visible !important;
+      max-height: none !important;
       background: transparent !important;
       border: none !important;
       border-radius: 0 !important;
@@ -1709,6 +2005,7 @@
     max-height: 70vh;
     -webkit-overflow-scrolling: touch;
     margin: 0 -0.35rem;
+    background: rgba(255, 255, 255, 0.02);
   }
   .summary-tbl {
     min-width: 460px;
@@ -1735,11 +2032,11 @@
     font-size: 0.7rem;
     color: var(--muted, #9aa0a6);
     font-weight: 700;
-    background: rgba(255, 255, 255, 0.06);
+    background: #1e1e1e;
     border-bottom: 1px solid rgba(255, 255, 255, 0.12);
     position: sticky;
     top: 0;
-    z-index: 1;
+    z-index: 2;
   }
   .col-name { text-align: left !important; }
   .summary-tbl tr:last-child td,
@@ -1897,6 +2194,10 @@
     background: rgba(255, 255, 255, 0.02);
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 0.6rem;
+  }
+  /* Leaderboard keeps a tighter cap so the sections below it remain visible */
+  .tbl-scroll-leaderboard {
+    max-height: 34rem;
   }
   .matches-tbl {
     min-width: 620px;
@@ -2077,6 +2378,93 @@
      narrow by design so the 460px floor would force horizontal scroll. */
   .group-standings-tbl.summary-tbl {
     min-width: 0 !important;
+  }
+
+  /* Flight-level collapsible (outer wrapper for Gold/Silver/Bronze) */
+  .flight-section {
+    background: rgba(255, 213, 74, 0.03);
+    border: 1px solid rgba(255, 213, 74, 0.22);
+    border-radius: 0.7rem;
+    overflow: hidden;
+  }
+  .flight-section-hdr {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    width: 100%;
+    padding: 0.7rem 0.9rem;
+    background: transparent;
+    border: 0;
+    color: var(--fg, #f5f5f5);
+    text-align: left;
+    cursor: pointer;
+    font: inherit;
+    font-size: 1rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    transition: background 0.12s;
+  }
+  .flight-section-hdr:hover { background: rgba(255, 213, 74, 0.07); }
+  .flight-section-name {
+    flex: 1;
+    color: var(--accent, #ffd54a);
+  }
+  .flight-section-body {
+    padding: 0 0.9rem 0.9rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .flight-stage-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+  /* Nested stage round (R16/QF/SF/Final inside a flight) */
+  .round-report-nested {
+    background: rgba(255, 213, 74, 0.02);
+    border-color: rgba(255, 213, 74, 0.1);
+  }
+
+  .flight-bracket-svg {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    /* Dark-first defaults — match the app's dark theme */
+    --bracket-bg: transparent;
+    --bracket-fill: #1e1e1e;
+    --bracket-border: rgba(255, 213, 74, 0.22);
+    --bracket-divider: rgba(255, 255, 255, 0.07);
+    --bracket-text: #d8d8d8;
+    --bracket-winner: #ffd54a;
+    --bracket-label: #ffd54a;
+    --bracket-conn: rgba(255, 213, 74, 0.4);
+    --bracket-pill: rgba(255, 213, 74, 0.14);
+    --bracket-pill-text: #ffd54a;
+  }
+  /* Light theme overrides */
+  @media (prefers-color-scheme: light) {
+    :global(:root:not([data-theme='dark'])) .flight-bracket-svg {
+      --bracket-fill: #ffffff;
+      --bracket-border: #d4d4d4;
+      --bracket-divider: #ebebeb;
+      --bracket-text: #1a1a1a;
+      --bracket-winner: #b07800;
+      --bracket-label: #8a6000;
+      --bracket-conn: #c0a020;
+      --bracket-pill: #fff3cc;
+      --bracket-pill-text: #7a5500;
+    }
+  }
+  :global([data-theme='light']) .flight-bracket-svg {
+    --bracket-fill: #ffffff;
+    --bracket-border: #d4d4d4;
+    --bracket-divider: #ebebeb;
+    --bracket-text: #1a1a1a;
+    --bracket-winner: #b07800;
+    --bracket-label: #8a6000;
+    --bracket-conn: #c0a020;
+    --bracket-pill: #fff3cc;
+    --bracket-pill-text: #7a5500;
   }
 
 </style>
