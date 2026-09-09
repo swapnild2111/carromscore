@@ -516,3 +516,130 @@ export async function generateFlightTournaments(
 
   return result;
 }
+
+// ─── Standalone knockout bracket ──────────────────────────────────────────────
+
+export type KnockoutBracketParams = {
+  tournamentKey: string;
+  tournamentName: string;
+  seeds: string[];           // ordered player IDs, seed 1 first
+  playerNames: Map<string, string>;
+  defaults: {
+    mode: 'singles' | 'doubles';
+    bestOf: number;
+    pointsTarget: number;
+    maxBoards: number;
+    timerDuration?: number;
+  };
+  myUid: string;
+};
+
+export type KnockoutBracketResult = {
+  roundsCreated: string[];
+  matchesCreated: number;
+  errors: string[];
+};
+
+/**
+ * Generate a single-elimination bracket directly on a tournament.
+ * Rounds named "QF", "SF", "Final" (no flight prefix).
+ * Existing non-completed bracket-round planned matches are deleted first
+ * so re-generation is safe.
+ */
+export async function generateKnockoutBracket(
+  params: KnockoutBracketParams,
+): Promise<KnockoutBracketResult> {
+  const { addRound, normalizeKey } = await import('./tournaments');
+  const { createPlannedMatch, subscribePlannedByTournament, deletePlannedMatch } = await import('./planned');
+
+  const { tournamentKey, tournamentName, seeds, playerNames, defaults, myUid } = params;
+  const result: KnockoutBracketResult = { roundsCreated: [], matchesCreated: 0, errors: [] };
+
+  if (seeds.length < 2) {
+    result.errors.push('Need at least 2 players to generate a bracket');
+    return result;
+  }
+
+  // Delete existing non-completed bracket-round planned matches (one-shot read)
+  await new Promise<void>((resolve) => {
+    let unsubOnce: (() => void) | null = null;
+    subscribePlannedByTournament(tournamentKey, async (matches) => {
+      if (unsubOnce) unsubOnce();
+      const bracketRoundRx = /^(R32|R16|QF|SF|Final)$/i;
+      const toDelete = matches.filter((m) => bracketRoundRx.test(m.round ?? '') && !m.completedAt);
+      await Promise.all(toDelete.map((m) => deletePlannedMatch(m.mid)));
+      resolve();
+    }).then((fn) => { unsubOnce = fn; });
+  });
+
+  const bracketSize = Math.pow(2, Math.ceil(Math.log2(Math.max(seeds.length, 2))));
+  const allLabels = [
+    { label: 'R32', matchCount: 16 },
+    { label: 'R16', matchCount: 8 },
+    { label: 'QF',  matchCount: 4 },
+    { label: 'SF',  matchCount: 2 },
+    { label: 'Final', matchCount: 1 },
+  ];
+  const roundDefs = allLabels.filter((r) => r.matchCount <= bracketSize / 2);
+
+  const roundKeys: string[] = [];
+  for (const rd of roundDefs) {
+    const rOut = await addRound(tournamentKey, rd.label);
+    if (!rOut.ok) result.errors.push(`${rd.label}: addRound failed`);
+    roundKeys.push(normalizeKey(rd.label));
+    result.roundsCreated.push(rd.label);
+  }
+
+  const cfg = {
+    bestOf: defaults.bestOf,
+    pointsTarget: defaults.pointsTarget,
+    maxBoards: defaults.maxBoards,
+    ...(defaults.timerDuration != null ? { format: `t${defaults.timerDuration}` } : {}),
+  };
+
+  // First round — seeded real players
+  const firstRoundKey = roundKeys[0]!;
+  const firstRoundLabel = roundDefs[0]!.label;
+  const pairs = singleEliminationPairs(seeds);
+  for (let i = 0; i < pairs.length; i++) {
+    const [aId, bId] = pairs[i]!;
+    await createPlannedMatch({
+      mode: defaults.mode,
+      tournament: tournamentName,
+      tournamentKey,
+      round: firstRoundLabel,
+      roundKey: firstRoundKey,
+      matchOrder: i + 1,
+      aName: playerNames.get(aId) ?? aId,
+      aResolvedId: aId,
+      bName: playerNames.get(bId) ?? bId,
+      bResolvedId: bId,
+      cfg,
+      createdBy: myUid,
+    });
+    result.matchesCreated++;
+  }
+
+  // Subsequent rounds — placeholder slots
+  for (let ri = 1; ri < roundDefs.length; ri++) {
+    const rd = roundDefs[ri]!;
+    const rKey = roundKeys[ri]!;
+    for (let i = 0; i < rd.matchCount; i++) {
+      await createPlannedMatch({
+        mode: defaults.mode,
+        tournament: tournamentName,
+        tournamentKey,
+        round: rd.label,
+        roundKey: rKey,
+        matchOrder: i + 1,
+        aName: `Finalist ${i * 2 + 1}`,
+        bName: `Finalist ${i * 2 + 2}`,
+        cfg,
+        createdBy: myUid,
+      });
+      result.matchesCreated++;
+    }
+  }
+
+  return result;
+}

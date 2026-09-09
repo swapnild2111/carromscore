@@ -42,6 +42,8 @@
     countMatchesByRoundKey,
     updateLeagueCfg,
     updateLeagueGroups,
+    updateKnockoutCfg,
+    updateTournamentFormat,
     type Round,
     type Tournament,
     type LeagueCfg,
@@ -60,6 +62,7 @@
   import { countryName, flagEmoji } from '../lib/countries';
   import TournamentBracket from './admin/TournamentBracket.svelte';
   import LeagueSetup from './admin/LeagueSetup.svelte';
+  import KnockoutSetup from './admin/KnockoutSetup.svelte';
   import { loadPendingPlannedByTournament, deletePlannedMatch } from '../lib/planned';
 
   /**
@@ -190,8 +193,10 @@
   let addingOpen = $state(false);
   let addingName = $state('');
   let addingType = $state<'open' | 'closed'>('open');
-  let addingFormat = $state<'standard' | 'league' | 'knockout'>('standard');
+  let addingFormat = $state<'standard' | 'league' | 'knockout' | 'roundrobin'>('standard');
   let addingTotalPlayers = $state('48');
+  let addingKnockoutPlayers = $state('8');
+  let addingAdvanceCount = $state<number>(4);
   let addingWantedFlights = $state<1 | 2 | 3>(3);
   let addingBoardCount = $state('16');
   let addingUsePhantom = $state(false);
@@ -362,6 +367,8 @@
   function stopLeagueSetup() {
     leagueSetupKey = null;
   }
+
+  let knockoutSetupKey = $state<string | null>(null);
 
   // Per-tournament counts shown on the row action buttons (2026-08-31).
   // Populated by the /planned subscription below (once, at mount) and
@@ -584,11 +591,14 @@
    * when the name didn't change; skip updateTournamentMeta when type
    * + country didn't change).
    */
+  let editingFormat = $state<'standard' | 'league' | 'knockout' | 'roundrobin'>('standard');
+
   function startEdit(t: Tournament) {
     editingKey = t.key;
     editingName = t.name;
     editingType = t.type ?? 'open';
     editingCountry = t.country ?? '';
+    editingFormat = (t.format as 'standard' | 'league' | 'knockout' | 'roundrobin') ?? 'standard';
     // Seed with concrete values so the fields never look empty. If the
     // tournament has no stored default, use the sensible fallback
     // (bo3 / 25 / 8 / singles) rather than a placeholder — the
@@ -618,6 +628,7 @@
     editingName = '';
     editingType = 'open';
     editingCountry = '';
+    editingFormat = 'standard';
     editingDescription = '';
     editingDefaultMode = 'singles';
     editingDefaultBestOf = '';
@@ -695,7 +706,9 @@
     const defaultsChanged = Object.keys(defaultsPatch).length > 0;
 
     const descriptionChanged = editingDescription !== editingOriginal.description;
-    const metaExtraChanged = descriptionChanged;
+    const editingTournamentForFormat = list().find((t) => t.key === editingKey);
+    const formatChanged = editingFormat !== ((editingTournamentForFormat?.format ?? 'standard') as string);
+    const metaExtraChanged = descriptionChanged || formatChanged;
 
     if (!nameChanged && !typeChanged && !countryChanged && !defaultsChanged && !metaExtraChanged) {
       // No-op — close the dialog quietly. Prevents a bogus audit
@@ -721,7 +734,7 @@
         const nextRec = list().find((x) => x.name === norm);
         if (nextRec) editingKey = nextRec.key;
       }
-      if (typeChanged || countryChanged || metaExtraChanged) {
+      if (typeChanged || countryChanged || descriptionChanged) {
         const countryPatch =
           editingType === 'open' && !countryNext ? null : countryNext;
         const r = await updateTournamentMeta(editingKey, {
@@ -732,6 +745,15 @@
         if (!r.ok) {
           flash('err', r.error);
           return;
+        }
+      }
+      if (formatChanged) {
+        if (editingFormat === 'knockout' || editingFormat === 'roundrobin') {
+          const r = await updateKnockoutCfg(editingKey, { participantCount: 8 }, editingFormat);
+          if (!r.ok) { flash('err', r.error); return; }
+        } else {
+          const r = await updateTournamentFormat(editingKey, editingFormat);
+          if (!r.ok) { flash('err', r.error); return; }
         }
       }
       if (defaultsChanged) {
@@ -1033,9 +1055,10 @@
       return;
     }
     saving = true;
+    const needsCountry = addingType === 'closed' || addingFormat === 'knockout' || addingFormat === 'roundrobin';
     const outcome = await createOrTouchTournament(trimmed, {
       type: addingType,
-      ...(addingType === 'closed' && addingCountry ? { country: addingCountry } : {}),
+      ...(needsCountry && addingCountry ? { country: addingCountry } : {}),
     });
     if (!outcome.ok) {
       saving = false;
@@ -1057,6 +1080,12 @@
         cfg.walkovers = { phantomScore };
       }
       await updateLeagueCfg(outcome.record.key, cfg);
+    } else if (addingFormat === 'knockout') {
+      const participantCount = Math.max(2, Number(addingKnockoutPlayers) || 8);
+      await updateKnockoutCfg(outcome.record.key, { participantCount }, 'knockout');
+    } else if (addingFormat === 'roundrobin') {
+      const participantCount = Math.max(2, Number(addingKnockoutPlayers) || 8);
+      await updateKnockoutCfg(outcome.record.key, { participantCount, advanceCount: addingAdvanceCount }, 'roundrobin');
     }
     await updateTournamentDefaults(outcome.record.key, {
       mode: addingDefaultMode,
@@ -1498,17 +1527,21 @@
                 {/if}
                 {#if t.format === 'league'}
                   <span class="chip chip-league" title="League format">LEAGUE</span>
+                {:else if t.format === 'knockout'}
+                  <span class="chip chip-knockout" title="Knockout format">KNOCKOUT</span>
+                {:else if t.format === 'roundrobin'}
+                  <span class="chip chip-knockout" title="Round Robin format">ROUND ROBIN</span>
                 {/if}
               </td>
               <td class="td-actions">
                 {#if canManageTournament(t)}
                   <div class="row-actions">
-                    {#if t.type === 'closed'}
+                    {#if t.type === 'closed' || t.format === 'knockout' || t.format === 'roundrobin'}
                       <button
                         type="button"
                         class="btn"
                         onclick={() => startAssign(t)}
-                        title="Assigned players (invite-only)"
+                        title="Assign players to this tournament"
                       >Players{assignedCountByKey[t.key] !== undefined ? ` (${assignedCountByKey[t.key]})` : ''}</button>
                     {/if}
                     <button
@@ -1524,6 +1557,20 @@
                         onclick={() => startLeagueSetup(t)}
                         title="League draw and schedule"
                       >League Setup</button>
+                    {:else if t.format === 'knockout'}
+                      <button
+                        type="button"
+                        class="btn btn-knockout"
+                        onclick={() => { knockoutSetupKey = t.key; }}
+                        title="Knockout draw and bracket"
+                      >Knockout Setup</button>
+                    {:else if t.format === 'roundrobin'}
+                      <button
+                        type="button"
+                        class="btn btn-knockout"
+                        onclick={() => { knockoutSetupKey = t.key; }}
+                        title="Round Robin schedule and bracket"
+                      >RR Setup</button>
                     {/if}
                     <button
                       type="button"
@@ -1622,6 +1669,16 @@
             required={editingType === 'closed'}
             ariaLabel="Tournament country"
           />
+        </label>
+
+        <label class="edit-field">
+          <span>Format</span>
+          <select bind:value={editingFormat} disabled={saving} aria-label="Tournament format">
+            <option value="standard">Standard — ad-hoc matches or manual bracket</option>
+            <option value="knockout">Knockout — seeded single-elimination bracket</option>
+            <option value="roundrobin">Round Robin — everyone vs everyone, top N to knockout</option>
+            <option value="league">League — groups stage + knockout flights</option>
+          </select>
         </label>
 
         <label class="edit-field">
@@ -1954,7 +2011,67 @@
               — groups stage + knockout flights (auto-scheduled).
             </span>
           </label>
+          <label class="add-type-row">
+            <input
+              type="radio"
+              name="add-tournament-format"
+              value="knockout"
+              bind:group={addingFormat}
+            />
+            <span>
+              <strong>Knockout</strong>
+              — seeded single-elimination bracket (QF / SF / Final).
+            </span>
+          </label>
+          <label class="add-type-row">
+            <input
+              type="radio"
+              name="add-tournament-format"
+              value="roundrobin"
+              bind:group={addingFormat}
+            />
+            <span>
+              <strong>Round Robin</strong>
+              — everyone plays everyone, top N advance to knockout.
+            </span>
+          </label>
         </fieldset>
+
+        {#if addingFormat === 'knockout' || addingFormat === 'roundrobin'}
+          <fieldset class="league-cfg-grid">
+            <legend>{addingFormat === 'roundrobin' ? 'Round Robin' : 'Knockout'} setup</legend>
+            <label class="edit-field">
+              <span>Total players</span>
+              <input
+                type="number"
+                min="2"
+                max="256"
+                step="1"
+                bind:value={addingKnockoutPlayers}
+                disabled={saving}
+                aria-label="Total players"
+              />
+            </label>
+            {#if addingFormat === 'roundrobin'}
+              <label class="edit-field">
+                <span>Top N advance to knockout</span>
+                <select bind:value={addingAdvanceCount} disabled={saving}>
+                  {#each [2, 4, 8, 16] as n}
+                    <option value={n}>{n} players</option>
+                  {/each}
+                </select>
+              </label>
+            {:else}
+              {@const n = Math.max(2, Number(addingKnockoutPlayers) || 8)}
+              {@const size = Math.pow(2, Math.ceil(Math.log2(n)))}
+              {@const byes = size - n}
+              <p class="add-ko-hint">
+                {n} players → {size >= 8 ? 'QF + ' : ''}{size >= 4 ? 'SF + ' : ''}Final
+                {byes > 0 ? `(${byes} bye${byes > 1 ? 's' : ''})` : ''}
+              </p>
+            {/if}
+          </fieldset>
+        {/if}
 
         {#if addingFormat === 'league'}
           <fieldset class="league-cfg-grid">
@@ -2037,12 +2154,12 @@
           </fieldset>
         {/if}
 
-        {#if addingType === 'closed'}
+        {#if addingType === 'closed' || addingFormat === 'knockout' || addingFormat === 'roundrobin'}
           <label class="add-country-label">
-            <span>Country</span>
+            <span>Country{addingType !== 'closed' ? ' (used to filter available players)' : ''}</span>
             <CountrySelect
               bind:value={addingCountry}
-              required
+              required={addingType === 'closed'}
               ariaLabel="Tournament country"
             />
           </label>
@@ -2500,6 +2617,18 @@
     {/if}
   {/if}
 
+  {#if knockoutSetupKey}
+    {@const t = list().find((x) => x.key === knockoutSetupKey)}
+    {#if t}
+      {@const myUid = currentUser()?.uid ?? ''}
+      <KnockoutSetup
+        tournament={t}
+        myUid={myUid}
+        onClose={() => { knockoutSetupKey = null; }}
+      />
+    {/if}
+  {/if}
+
   <!--
     In-app confirm modal (v3.6.3). Themed to match the other dialogs
     on this page. Backdrop tap = cancel. Escape key also cancels
@@ -2777,6 +2906,14 @@
     color: #7ec8f8;
     background: rgba(100, 180, 255, 0.1);
     border-color: rgba(100, 180, 255, 0.35);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 700;
+  }
+  .chip-knockout {
+    color: #f8a97e;
+    background: rgba(255, 160, 100, 0.1);
+    border-color: rgba(255, 160, 100, 0.35);
     text-transform: uppercase;
     letter-spacing: 0.05em;
     font-weight: 700;
@@ -3393,6 +3530,21 @@
   }
   .btn-league:hover:not(:disabled) {
     background: rgba(100, 180, 255, 0.18);
+  }
+  .btn-knockout {
+    background: rgba(255, 160, 100, 0.1);
+    border-color: rgba(255, 160, 100, 0.4);
+    color: #f8a97e;
+    font-weight: 700;
+  }
+  .btn-knockout:hover:not(:disabled) {
+    background: rgba(255, 160, 100, 0.18);
+  }
+  .add-ko-hint {
+    font-size: 0.78rem;
+    color: var(--muted, #9aa0a6);
+    margin: 0.25rem 0 0;
+    font-style: italic;
   }
   /* Compact square icon buttons for the round start/close toggle.
      Two tinted variants so the meaning reads at a glance:

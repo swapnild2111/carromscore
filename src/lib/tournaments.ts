@@ -88,17 +88,30 @@ export type Tournament = {
    * knockout flights. `'knockout'` — single-elimination bracket (future).
    * Absent = treat as 'standard' for backwards compatibility.
    */
-  format?: 'standard' | 'league' | 'knockout';
+  format?: 'standard' | 'league' | 'knockout' | 'roundrobin';
   /**
    * League configuration — only meaningful when `format === 'league'`.
    */
   leagueCfg?: LeagueCfg;
+  /**
+   * Knockout / Round Robin configuration — only meaningful when
+   * `format === 'knockout'` or `format === 'roundrobin'`.
+   */
+  knockoutCfg?: KnockoutCfg;
   /**
    * Group assignments for the league stage. Map from group key (e.g.
    * "g1") to group metadata + player ID list. Written by the LeagueSetup
    * admin screen after the organiser locks the draw.
    */
   groups?: Record<string, LeagueGroup>;
+};
+
+/**
+ * Configuration for a knockout or round-robin tournament (v5.0).
+ */
+export type KnockoutCfg = {
+  participantCount: number; // how many players enter the bracket
+  advanceCount?: number;    // round-robin only: top N that advance to knockout
 };
 
 /**
@@ -454,6 +467,17 @@ function parseLeagueCfg(raw: unknown): LeagueCfg | undefined {
   return result;
 }
 
+function parseKnockoutCfg(raw: unknown): KnockoutCfg | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const v = raw as Record<string, unknown>;
+  const participantCount = Number(v.participantCount);
+  if (!Number.isFinite(participantCount) || participantCount < 2) return undefined;
+  const result: KnockoutCfg = { participantCount: Math.floor(participantCount) };
+  const advanceCount = Number(v.advanceCount);
+  if (Number.isFinite(advanceCount) && advanceCount >= 2) result.advanceCount = Math.floor(advanceCount);
+  return result;
+}
+
 function parseGroups(raw: unknown): Record<string, LeagueGroup> | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
   const out: Record<string, LeagueGroup> = {};
@@ -535,10 +559,11 @@ function mergeRemote(raw: Record<string, unknown>): void {
     const rounds = parseRounds(v.rounds);
     const defaults = parseDefaults(v.defaults);
     const format =
-      v.format === 'league' || v.format === 'knockout' || v.format === 'standard'
-        ? (v.format as 'league' | 'knockout' | 'standard')
+      v.format === 'league' || v.format === 'knockout' || v.format === 'standard' || v.format === 'roundrobin'
+        ? (v.format as 'league' | 'knockout' | 'standard' | 'roundrobin')
         : undefined;
     const leagueCfg = parseLeagueCfg(v.leagueCfg);
+    const knockoutCfg = parseKnockoutCfg(v.knockoutCfg);
     const groups = parseGroups(v.groups);
     const existing = memoryStore.find((t) => t.key === key);
     if (existing) {
@@ -565,6 +590,8 @@ function mergeRemote(raw: Record<string, unknown>): void {
       else delete existing.format;
       if (leagueCfg) existing.leagueCfg = leagueCfg;
       else delete existing.leagueCfg;
+      if (knockoutCfg) existing.knockoutCfg = knockoutCfg;
+      else delete existing.knockoutCfg;
       if (groups) existing.groups = groups;
       else delete existing.groups;
     } else {
@@ -583,6 +610,7 @@ function mergeRemote(raw: Record<string, unknown>): void {
         ...(defaults !== undefined ? { defaults } : {}),
         ...(format ? { format } : {}),
         ...(leagueCfg ? { leagueCfg } : {}),
+        ...(knockoutCfg ? { knockoutCfg } : {}),
         ...(groups ? { groups } : {}),
       });
     }
@@ -921,6 +949,77 @@ export async function updateLeagueCfg(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return { ok: false, error: msg || 'League config update failed' };
+  }
+}
+
+/**
+ * Write knockout/round-robin configuration to Firebase (v5.0).
+ * Stamps `format: 'knockout'` or `'roundrobin'` and writes `knockoutCfg`.
+ */
+export async function updateKnockoutCfg(
+  key: string,
+  cfg: KnockoutCfg,
+  format: 'knockout' | 'roundrobin' = 'knockout',
+): Promise<TournamentWriteOutcome> {
+  if (!key) return { ok: false, error: 'Missing tournament key' };
+  const t = memoryStore.find((x) => x.key === key);
+  try {
+    const [{ firebaseApp }, { getDatabase, ref, update }] = await Promise.all([
+      import('./firebase'),
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    const patch: Record<string, unknown> = {
+      [`tournaments/${key}/format`]: format,
+      [`tournaments/${key}/knockoutCfg/participantCount`]: cfg.participantCount,
+      [`tournaments/${key}/lastActive`]: Date.now(),
+    };
+    if (cfg.advanceCount !== undefined) {
+      patch[`tournaments/${key}/knockoutCfg/advanceCount`] = cfg.advanceCount;
+    }
+    await update(ref(db, '/'), patch);
+    if (t) {
+      t.format = format;
+      t.knockoutCfg = { ...cfg };
+      t.lastActive = Date.now();
+      notify();
+    }
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg || 'Knockout config update failed' };
+  }
+}
+
+/**
+ * Change only the format field of a tournament (standard / league).
+ * For knockout / roundrobin use updateKnockoutCfg instead.
+ */
+export async function updateTournamentFormat(
+  key: string,
+  format: 'standard' | 'league',
+): Promise<TournamentWriteOutcome> {
+  if (!key) return { ok: false, error: 'Missing tournament key' };
+  try {
+    const [{ firebaseApp }, { getDatabase, ref, update }] = await Promise.all([
+      import('./firebase'),
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    await update(ref(db, '/'), {
+      [`tournaments/${key}/format`]: format === 'standard' ? null : format,
+      [`tournaments/${key}/lastActive`]: Date.now(),
+    });
+    const t = memoryStore.find((x) => x.key === key);
+    if (t) {
+      t.format = format === 'standard' ? undefined : format;
+      t.lastActive = Date.now();
+      notify();
+    }
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg || 'Format update failed' };
   }
 }
 

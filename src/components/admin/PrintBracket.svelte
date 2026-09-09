@@ -383,6 +383,157 @@
     out.sort((a, b) => a.order - b.order);
     return out;
   });
+
+  // Bracket rounds: QF/SF/Final/R16/R32 only, sorted by order.
+  const BRACKET_ROUND_RX = /\b(R32|R16|QF|SF|Final)\b/i;
+  const bracketRounds = $derived.by<ScheduleRound[]>(() =>
+    schedule.filter((r) => BRACKET_ROUND_RX.test(r.roundName))
+  );
+
+  // Ordered round labels for display (Final rightmost → R32 leftmost).
+  const ROUND_ORDER = ['R32', 'R16', 'QF', 'SF', 'Final'];
+
+  // Build an inline SVG string for the bracket tree.
+  // Left-to-right: earliest round on left, Final on right.
+  function buildBracketSVG(
+    rounds: ScheduleRound[],
+    resolveNameFn: (id: string | undefined, fallback: string) => string,
+  ): string {
+    if (rounds.length === 0) return '';
+
+    const sorted = [...rounds].sort((a, b) => {
+      const ai = ROUND_ORDER.findIndex((r) => a.roundName.includes(r));
+      const bi = ROUND_ORDER.findIndex((r) => b.roundName.includes(r));
+      return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+    });
+
+    const COL_W = 200;
+    const COL_GAP = 48;
+    const MATCH_H = 56;   // height of one match slot
+    const SLOT_PAD = 10;
+    const NAME_MAX = 22;
+
+    function clip(s: string): string {
+      return s.length > NAME_MAX ? s.slice(0, NAME_MAX - 1) + '…' : s;
+    }
+
+    // Count slots per column: first round has max matches, each subsequent halves.
+    const maxSlots = sorted[0].matches.length;
+    const colCount = sorted.length;
+    const totalH = maxSlots * MATCH_H + (maxSlots - 1) * SLOT_PAD;
+    const totalW = colCount * COL_W + (colCount - 1) * COL_GAP;
+
+    const lines: string[] = [];
+
+    // Column x positions
+    const colX = (ci: number) => ci * (COL_W + COL_GAP);
+
+    // Slot y-centre for a match at position idx in a column with slotCount slots
+    function slotCY(idx: number, slotCount: number): number {
+      const spacing = totalH / slotCount;
+      return spacing * idx + spacing / 2;
+    }
+
+    // Draw connector lines between rounds
+    for (let ci = 0; ci < sorted.length - 1; ci += 1) {
+      const currRound = sorted[ci];
+      const nextRound = sorted[ci + 1];
+      const currCount = currRound.matches.length;
+      const nextCount = nextRound.matches.length;
+      const x1 = colX(ci) + COL_W;
+      const x2 = colX(ci + 1);
+      const xMid = x1 + COL_GAP / 2;
+
+      for (let ni = 0; ni < nextCount; ni += 1) {
+        const cy2 = slotCY(ni, nextCount);
+        // Two source slots feed each next slot
+        const srcA = ni * 2;
+        const srcB = ni * 2 + 1;
+        if (srcA < currCount) {
+          const cy1 = slotCY(srcA, currCount);
+          lines.push(`<line x1="${x1}" y1="${cy1}" x2="${xMid}" y2="${cy1}" stroke="#bbb" stroke-width="1"/>`);
+          lines.push(`<line x1="${xMid}" y1="${cy1}" x2="${xMid}" y2="${cy2}" stroke="#bbb" stroke-width="1"/>`);
+        }
+        if (srcB < currCount) {
+          const cy1 = slotCY(srcB, currCount);
+          lines.push(`<line x1="${x1}" y1="${cy1}" x2="${xMid}" y2="${cy1}" stroke="#bbb" stroke-width="1"/>`);
+          lines.push(`<line x1="${xMid}" y1="${cy1}" x2="${xMid}" y2="${cy2}" stroke="#bbb" stroke-width="1"/>`);
+        }
+        lines.push(`<line x1="${xMid}" y1="${cy2}" x2="${x2}" y2="${cy2}" stroke="#bbb" stroke-width="1"/>`);
+      }
+    }
+
+    // Draw match slots
+    for (let ci = 0; ci < sorted.length; ci += 1) {
+      const round = sorted[ci];
+      const slotCount = round.matches.length;
+      const x = colX(ci);
+
+      for (let mi = 0; mi < slotCount; mi += 1) {
+        const m = round.matches[mi];
+        const cy = slotCY(mi, slotCount);
+        const slotH = 44;
+        const sy = cy - slotH / 2;
+
+        const aName = clip(resolveNameFn(m.aResolvedId, m.aName));
+        const bName = clip(resolveNameFn(m.bResolvedId, m.bName));
+        const isDone = !!m.completedAt;
+        const winner = isDone ? m.result?.winner : undefined;
+
+        const aIsWinner = winner === 'a';
+        const bIsWinner = winner === 'b';
+        const aIsTBD = aName === '' || aName.toLowerCase().startsWith('finalist');
+        const bIsTBD = bName === '' || bName.toLowerCase().startsWith('finalist');
+
+        const aFontWeight = aIsWinner ? '700' : '400';
+        const bFontWeight = bIsWinner ? '700' : '400';
+        const aOpacity = isDone && !aIsWinner ? '0.45' : '1';
+        const bOpacity = isDone && !bIsWinner ? '0.45' : '1';
+        const aStyle = aIsTBD ? 'font-style:italic' : '';
+        const bStyle = bIsTBD ? 'font-style:italic' : '';
+
+        const aTxt = aName || 'TBD';
+        const bTxt = bName || 'TBD';
+
+        lines.push(`
+          <rect x="${x}" y="${sy}" width="${COL_W}" height="${slotH}" rx="4"
+                fill="#fff" stroke="#ccc" stroke-width="1"/>
+          <line x1="${x + 6}" y1="${sy + slotH / 2}" x2="${x + COL_W - 6}" y2="${sy + slotH / 2}"
+                stroke="#e5e5e5" stroke-width="0.75"/>
+          <text x="${x + 8}" y="${sy + 16}" font-size="12" font-weight="${aFontWeight}"
+                opacity="${aOpacity}" style="${aStyle}" font-family="sans-serif">${aTxt}</text>
+          <text x="${x + 8}" y="${sy + slotH - 7}" font-size="12" font-weight="${bFontWeight}"
+                opacity="${bOpacity}" style="${bStyle}" font-family="sans-serif">${bTxt}</text>
+        `);
+
+        // Result pill
+        if (isDone && m.result) {
+          const sA = m.result.setsA;
+          const sB = m.result.setsB;
+          const pill = `${sA}–${sB}`;
+          const px = x + COL_W - 36;
+          const py = cy - 8;
+          lines.push(`
+            <rect x="${px}" y="${py}" width="30" height="16" rx="8" fill="#f0f0f0"/>
+            <text x="${px + 15}" y="${py + 11}" text-anchor="middle" font-size="10"
+                  font-family="sans-serif" fill="#555">${pill}</text>
+          `);
+        }
+      }
+    }
+
+    const svgH = Math.max(totalH, 120);
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-4 -8 ${totalW + 8} ${svgH + 16}"
+      width="${totalW + 8}" height="${svgH + 16}" style="max-width:100%;height:auto;display:block">
+      ${lines.join('\n')}
+    </svg>`;
+  }
+
+  const bracketSVG = $derived.by<string>(() => {
+    void tournamentTick;
+    void playerTick;
+    return buildBracketSVG(bracketRounds, resolvedName);
+  });
 </script>
 
 <div class="print-wrap">
@@ -399,7 +550,7 @@
       No matches planned yet for <strong>{tournamentKey}</strong>.
       Open the tournament's Bracket and add matches first.
     </p>
-  {:else if boards.length === 0}
+  {:else if boards.length === 0 && bracketRounds.length === 0}
     <p class="hint">
       Matches exist but none have a board number assigned.<br>
       If this is a League tournament, open <strong>League Setup → Re-draw groups</strong>
@@ -408,34 +559,38 @@
   {:else}
     <div class="print-actions no-print">
       <div class="print-toolbar">
-        <div class="qr-type-group" role="group" aria-label="QR type">
-          <span class="qr-type-label">QR type</span>
-          <div class="seg-ctrl">
-            <button
-              type="button"
-              class="seg-btn"
-              class:seg-active={qrMode === 'board'}
-              aria-pressed={qrMode === 'board'}
-              onclick={() => setQrMode('board')}
-            >Per board</button>
-            <button
-              type="button"
-              class="seg-btn"
-              class:seg-active={qrMode === 'match'}
-              aria-pressed={qrMode === 'match'}
-              onclick={() => setQrMode('match')}
-            >Per match</button>
+        {#if boards.length > 0}
+          <div class="qr-type-group" role="group" aria-label="QR type">
+            <span class="qr-type-label">QR type</span>
+            <div class="seg-ctrl">
+              <button
+                type="button"
+                class="seg-btn"
+                class:seg-active={qrMode === 'board'}
+                aria-pressed={qrMode === 'board'}
+                onclick={() => setQrMode('board')}
+              >Per board</button>
+              <button
+                type="button"
+                class="seg-btn"
+                class:seg-active={qrMode === 'match'}
+                aria-pressed={qrMode === 'match'}
+                onclick={() => setQrMode('match')}
+              >Per match</button>
+            </div>
           </div>
-        </div>
+        {/if}
         <button type="button" class="print-btn" onclick={() => window.print()}>🖨 Print</button>
       </div>
-      <p class="hint">
-        {#if qrMode === 'board'}
-          Board stickers — permanent QR per board, same every round. Cut out and stick to each physical board.
-        {:else}
-          Match cards — one QR per match. Cut out and place at the board for that match.
-        {/if}
-      </p>
+      {#if boards.length > 0}
+        <p class="hint">
+          {#if qrMode === 'board'}
+            Board stickers — permanent QR per board, same every round. Cut out and stick to each physical board.
+          {:else}
+            Match cards — one QR per match. Cut out and place at the board for that match.
+          {/if}
+        </p>
+      {/if}
     </div>
 
     <!-- ─── COVER PAGE ─────────────────────────────────────────────
@@ -558,6 +713,29 @@
       {/if}
     </section>
 
+    {#if bracketRounds.length >= 2}
+      <!-- ─── BRACKET PAGE ──────────────────────────────────────────
+           Horizontal left-to-right tree. Shown for knockout/roundrobin
+           and any tournament that has ≥2 bracket rounds (QF/SF/Final/R16/R32).
+           Always rendered with a white background regardless of theme. -->
+      <section class="page bracket-page">
+        <div class="bracket-hdr">
+          <p class="brand">Carromscore</p>
+          <h2 class="bracket-title">{tournamentName} — Draw</h2>
+          <div class="bracket-round-labels">
+            {#each bracketRounds as r (r.roundKey)}
+              <span class="bracket-round-label">{r.roundName.replace(/^.*[\s—]\s*/, '')}</span>
+            {/each}
+          </div>
+        </div>
+        <div class="bracket-svg-wrap">
+          {@html bracketSVG}
+        </div>
+        <p class="bracket-footer">Generated by Carromscore · carromscore.app</p>
+      </section>
+    {/if}
+
+    {#if boards.length > 0}
     {#if qrMode === 'board'}
       <!-- ─── BOARD STICKERS (permanent per-board QR, 2-column grid) ── -->
       <section class="page qr-grid-page">
@@ -634,6 +812,7 @@
           {/if}
         </section>
       {/each}
+    {/if}
     {/if}
   {/if}
 
@@ -1109,6 +1288,60 @@
     .roster {
       grid-template-columns: 1fr;
       column-count: 1;
+    }
+  }
+
+  /* ── Bracket page ─────────────────────────────────────── */
+  .bracket-page {
+    color-scheme: light;
+    background: #fff;
+    color: #000;
+  }
+  .bracket-hdr {
+    margin-bottom: 1.25rem;
+    border-bottom: 2px solid #e0e0e0;
+    padding-bottom: 0.75rem;
+  }
+  .bracket-title {
+    font-size: 1.25rem;
+    font-weight: 700;
+    margin: 0.15rem 0 0.5rem;
+    line-height: 1.2;
+  }
+  .bracket-round-labels {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+  .bracket-round-label {
+    background: #f0f0f0;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 0.78rem;
+    padding: 0.15rem 0.55rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #444;
+  }
+  .bracket-svg-wrap {
+    overflow-x: auto;
+    padding: 0.5rem 0 1rem;
+  }
+  .bracket-footer {
+    font-size: 0.72rem;
+    color: #aaa;
+    text-align: center;
+    margin-top: 1rem;
+    border-top: 1px solid #eee;
+    padding-top: 0.6rem;
+  }
+  @media print {
+    .bracket-page {
+      page-break-before: always;
+    }
+    .bracket-svg-wrap {
+      overflow: visible;
     }
   }
 </style>

@@ -19,6 +19,8 @@
     isPlausibleName,
     updatePlayerName,
     updatePlayerCountry,
+    updatePlayerMeta,
+    type PlayerMetaUpdate,
     deletePlayer,
     deletePlayers,
     mergePlayers,
@@ -112,14 +114,12 @@
    */
   let addingOpen = $state(false);
   let addingInput = $state('');
-  /** Country applied to every player in the current bulk-add batch.
-   *  Whole-batch scope: a batch is usually a club roster / delegation,
-   *  which share a country. Mandatory; blocks the Add button when
-   *  empty. Age/email/phone were considered but dropped — see the
-   *  Player type in src/lib/players.ts for optional fields still in
-   *  the schema (they land on records but the admin flow doesn't
-   *  set them). */
   let addingCountry = $state('');
+  let addingGender = $state<'male' | 'female' | 'other' | ''>('');
+  let addingDob = $state('');
+  let addingPhone = $state('');
+  let addingEmail = $state('');
+  let addingAddress = $state('');
 
   /** One decision the admin has to make about a candidate name that
    *  matches an existing player. */
@@ -214,16 +214,32 @@
 
   // ─── Edit Player dialog ────────────────────────────────────────
 
+  let editGender = $state<'male' | 'female' | 'other' | ''>('');
+  let editDob = $state('');
+  let editEmail = $state('');
+  let editPhone = $state('');
+  let editAddress = $state('');
+
   function startEdit(p: Player) {
     editingId = p.id;
     editName = p.canonicalName;
     editCountry = p.country ?? '';
+    editGender = p.gender ?? '';
+    editDob = p.dob ?? '';
+    editEmail = p.email ?? '';
+    editPhone = p.phone ?? '';
+    editAddress = p.address ?? '';
     editAliasBuffer = '';
   }
   function stopEdit() {
     editingId = null;
     editName = '';
     editCountry = '';
+    editGender = '';
+    editDob = '';
+    editEmail = '';
+    editPhone = '';
+    editAddress = '';
     editAliasBuffer = '';
   }
   /** Reactive lookup of the currently-edited player from the store,
@@ -244,9 +260,14 @@
     void tick;
     const p = editingPlayer();
     if (!p) return false;
-    const nameChanged = editName.trim() !== p.canonicalName && !!editName.trim();
-    const countryChanged = editCountry.trim() !== (p.country ?? '');
-    return nameChanged || countryChanged;
+    const nameChanged    = editName.trim()    !== p.canonicalName && !!editName.trim();
+    const countryChanged = editCountry.trim() !== (p.country  ?? '');
+    const genderChanged  = editGender         !== (p.gender   ?? '');
+    const dobChanged     = editDob.trim()     !== (p.dob      ?? '');
+    const emailChanged   = editEmail.trim()   !== (p.email    ?? '');
+    const phoneChanged   = editPhone.trim()   !== (p.phone    ?? '');
+    const addressChanged = editAddress.trim() !== (p.address  ?? '');
+    return nameChanged || countryChanged || genderChanged || dobChanged || emailChanged || phoneChanged || addressChanged;
   });
 
   /**
@@ -283,6 +304,23 @@
           results.push('country');
         } else {
           flash('err', `Country: ${r.error}`);
+        }
+      }
+      // Collect all optional meta fields in one update call
+      const metaPatch: PlayerMetaUpdate = {};
+      let hasMeta = false;
+      if (editGender       !== (current.gender  ?? '')) { metaPatch.gender  = editGender;        hasMeta = true; }
+      if (editDob.trim()   !== (current.dob     ?? '')) { metaPatch.dob     = editDob.trim();     hasMeta = true; }
+      if (editEmail.trim() !== (current.email   ?? '')) { metaPatch.email   = editEmail.trim();   hasMeta = true; }
+      if (editPhone.trim() !== (current.phone   ?? '')) { metaPatch.phone   = editPhone.trim();   hasMeta = true; }
+      if (editAddress.trim() !== (current.address ?? '')) { metaPatch.address = editAddress.trim(); hasMeta = true; }
+      if (hasMeta) {
+        const r = await updatePlayerMeta(editingId, metaPatch);
+        if (r.ok) {
+          anyChanged = true;
+          results.push(...Object.keys(metaPatch));
+        } else {
+          flash('err', `Meta: ${r.error}`);
         }
       }
     } finally {
@@ -420,6 +458,11 @@
     addingOpen = true;
     addingInput = '';
     addingCountry = '';
+    addingGender = '';
+    addingDob = '';
+    addingPhone = '';
+    addingEmail = '';
+    addingAddress = '';
     conflicts = [];
     cleanCandidates = [];
     addStep = 'input';
@@ -428,6 +471,11 @@
     addingOpen = false;
     addingInput = '';
     addingCountry = '';
+    addingGender = '';
+    addingDob = '';
+    addingPhone = '';
+    addingEmail = '';
+    addingAddress = '';
     conflicts = [];
     cleanCandidates = [];
     addStep = 'input';
@@ -545,7 +593,14 @@
     // is mandatory; no other player-level metadata is captured at
     // add time (v3.1 scope: name + country only).
     const batchCountry = addingCountry;
-    const meta = batchCountry ? { country: batchCountry } : {};
+    const meta = {
+      ...(batchCountry ? { country: batchCountry } : {}),
+      ...(addingGender ? { gender: addingGender } : {}),
+      ...(addingDob ? { dob: addingDob } : {}),
+      ...(addingPhone ? { phone: addingPhone } : {}),
+      ...(addingEmail ? { email: addingEmail } : {}),
+      ...(addingAddress ? { address: addingAddress } : {}),
+    };
     let created = 0;
     let aliased = 0;
     let skipped = 0;
@@ -806,6 +861,41 @@
           <CountrySelect bind:value={editCountry} ariaLabel="Player country" />
         </label>
 
+        <label class="edit-field">
+          <span>Gender</span>
+          <select bind:value={editGender} aria-label="Gender">
+            <option value="">— not set —</option>
+            <option value="male">Male</option>
+            <option value="female">Female</option>
+            <option value="other">Other</option>
+          </select>
+        </label>
+
+        <label class="edit-field">
+          <span>Date of birth</span>
+          <input
+            type="date"
+            bind:value={editDob}
+            aria-label="Date of birth"
+            max={new Date().toISOString().slice(0, 10)}
+          />
+        </label>
+
+        <label class="edit-field">
+          <span>Phone</span>
+          <input type="tel" bind:value={editPhone} aria-label="Phone number" maxlength="32" placeholder="+45 12 34 56 78" />
+        </label>
+
+        <label class="edit-field">
+          <span>Email</span>
+          <input type="email" bind:value={editEmail} aria-label="Email address" maxlength="128" placeholder="player@example.com" />
+        </label>
+
+        <label class="edit-field">
+          <span>City / Region</span>
+          <input type="text" bind:value={editAddress} aria-label="City or region" maxlength="200" placeholder="Copenhagen, Denmark" />
+        </label>
+
         {#if editingPlayer()}
           {@const aliasKeys = Object.keys(editingPlayer()?.aliases ?? {})}
           <div class="edit-field">
@@ -953,6 +1043,35 @@
               required
               ariaLabel="Batch country"
             />
+          </label>
+          <div class="add-meta-row">
+            <label class="add-meta-field">
+              <span>Gender</span>
+              <select bind:value={addingGender} aria-label="Gender">
+                <option value="">— optional —</option>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+                <option value="other">Other</option>
+              </select>
+            </label>
+            <label class="add-meta-field">
+              <span>Date of birth</span>
+              <input type="date" bind:value={addingDob} aria-label="Date of birth" />
+            </label>
+          </div>
+          <div class="add-meta-row">
+            <label class="add-meta-field">
+              <span>Phone</span>
+              <input type="tel" bind:value={addingPhone} placeholder="optional" aria-label="Phone" />
+            </label>
+            <label class="add-meta-field">
+              <span>Email</span>
+              <input type="email" bind:value={addingEmail} placeholder="optional" aria-label="Email" />
+            </label>
+          </div>
+          <label class="add-country-label">
+            <span>Address</span>
+            <input type="text" bind:value={addingAddress} placeholder="optional" aria-label="Address" />
           </label>
           <textarea
             class="add-textarea"
@@ -1392,6 +1511,20 @@
     letter-spacing: 0.06em;
     font-size: 0.7rem;
   }
+  .edit-field input,
+  .edit-field select {
+    width: 100%;
+    background: #0f0f0f;
+    color: var(--fg);
+    border: 1px solid #2a2a2a;
+    border-radius: 0.4rem;
+    padding: 0.45rem 0.55rem;
+    font: inherit;
+    font-size: 0.9rem;
+  }
+  .edit-field select option {
+    background: #1a1a1a;
+  }
   .edit-row {
     display: flex;
     gap: 0.35rem;
@@ -1463,6 +1596,24 @@
     margin: 0.5rem 0 0.75rem;
     font-size: 0.85rem;
     color: var(--muted);
+  }
+  .add-meta-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+    margin: 0.5rem 0 0.75rem;
+  }
+  .add-meta-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    font-size: 0.85rem;
+    color: var(--muted);
+  }
+  .add-meta-field input,
+  .add-meta-field select {
+    width: 100%;
+    box-sizing: border-box;
   }
   /* Bulk-add textarea. Same visual language as .dialog-card input[type=text];
      multi-line so it fits comma + newline batches without a scroll bar. */

@@ -575,7 +575,7 @@
           </p>
         {/if}
 
-        {#if tournament.format !== 'league'}
+        {#if tournament.format !== 'league' && tournament.format !== 'knockout' && tournament.format !== 'roundrobin'}
         <div class="bracket-add">
           <!--
             Per-match mode toggle (v3.6.1). Defaults to the tournament's
@@ -704,7 +704,7 @@
                           title="Reset — remove result so this slot can be played again"
                         >↺</button>
                       {/if}
-                      {#if tournament.format !== 'league'}
+                      {#if tournament.format !== 'league' && tournament.format !== 'knockout' && tournament.format !== 'roundrobin'}
                       <button
                         type="button"
                         class="row-del"
