@@ -266,15 +266,23 @@ function seed() {
   const newMatches = {};
 
   // Group matches (reliable — one round per group tournament)
+  // endedAt must be recent (within 90 days) to avoid sweepOldMatches deletion.
+  // Spread across July 2026, 10 min apart per match.
+  const GROUP_MATCH_BASE = 1782900000000; // 2026-07-01T10:00Z
+  let groupMatchIdx = 0;
   for (const [srcKey, srcMatch] of sourceMatches) {
     const tk = srcMatch.tournamentKey;
     if (!LEAGUE_GROUP_MAP[tk]) continue;
+    const endedAt = GROUP_MATCH_BASE + groupMatchIdx * 600_000;
+    groupMatchIdx++;
     newMatches[`_UAE_TST_${srcKey}`] = {
       ...srcMatch,
       tournament: DISPLAY_NAME,
       tournamentKey: TK,
       round: LEAGUE_GROUP_MAP[tk].newRound,
       roundKey: LEAGUE_GROUP_MAP[tk].newRoundKey,
+      endedAt,
+      startedAt: endedAt - 60_000,
     };
   }
 
@@ -282,10 +290,11 @@ function seed() {
   const pairKey = (a, b) => [a, b].sort().join('|||');
 
   // Timestamp bases spaced 4 h apart so flights sort distinctly
+  // Must be recent (within 3 months) — sweepOldMatches deletes records older than 90 days
   const FLIGHT_BASES = {
-    '3rd-singles-ranking-knock-out-round-of-16-gold':   1757000000000,
-    '3rd-singles-ranking-knock-out-round-of-16-silver': 1757014400000,
-    '3rd-singles-ranking-knock-out-round-of-16-bronze': 1757028800000,
+    '3rd-singles-ranking-knock-out-round-of-16-gold':   1788602400000, // 2026-09-05T10:00Z
+    '3rd-singles-ranking-knock-out-round-of-16-silver': 1788616800000, // 2026-09-05T14:00Z
+    '3rd-singles-ranking-knock-out-round-of-16-bronze': 1788631200000, // 2026-09-05T18:00Z
   };
 
   function flightRoundFromOrder(flightSlug, order) {
@@ -381,17 +390,22 @@ function seed() {
         newPlanned[uaePlanKey].roundKey = newRoundKey;
       }
 
+      // Use real match as ground truth for names+result (planned can have swapped player order)
+      const aName = real ? real.aName : srcPlan.aName;
+      const bName = real ? real.bName : srcPlan.bName;
+      const playerAId = real ? (real.playerAId ?? srcPlan.aResolvedId) : srcPlan.aResolvedId;
+      const playerBId = real ? (real.playerBId ?? srcPlan.bResolvedId) : srcPlan.bResolvedId;
       const result = real?.result ?? srcPlan.result ?? { winner: 'a', setsA: 1, setsB: 0, finalPointsA: 0, finalPointsB: 0, boardCount: 0 };
       newMatches[uaeMatchKey] = {
         tournament: DISPLAY_NAME,
         tournamentKey: TK,
         round: newRound,
         roundKey: newRoundKey,
-        aName: srcPlan.aName,
-        bName: srcPlan.bName,
-        ...(srcPlan.aResolvedId ? { playerAId: srcPlan.aResolvedId } : {}),
-        ...(srcPlan.bResolvedId ? { playerBId: srcPlan.bResolvedId } : {}),
-        mode: srcPlan.mode || 'Singles',
+        aName,
+        bName,
+        ...(playerAId ? { playerAId } : {}),
+        ...(playerBId ? { playerBId } : {}),
+        mode: real?.mode ?? srcPlan.mode ?? 'Singles',
         result,
         endedAt,
         startedAt: endedAt - 60_000,

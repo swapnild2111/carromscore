@@ -33,6 +33,7 @@ export type ReportRow = {
   setsB: number;
   boardsWonA: number;
   boardsWonB: number;
+  boardCount: number;   // result.boardCount — authoritative total boards played
   pointsA: number;
   pointsB: number;
   winner: 'A' | 'B' | 'Draw' | '';
@@ -187,6 +188,7 @@ export function buildReportRows(matches: MatchRecord[]): ReportRow[] {
       setsB: m.result?.setsB ?? 0,
       boardsWonA,
       boardsWonB,
+      boardCount: m.result?.boardCount ?? boardsWonA + boardsWonB,
       pointsA: m.result?.finalPointsA ?? 0,
       pointsB: m.result?.finalPointsB ?? 0,
       winner,

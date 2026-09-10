@@ -311,10 +311,7 @@
     if (!r || r.rows.length === 0) return null;
     const matchesCount = r.matches;
     const playersCount = r.playerSummary.length;
-    const boardsCount = r.rows.reduce(
-      (n, row) => n + row.boardsWonA + row.boardsWonB,
-      0,
-    );
+    const boardsCount = r.rows.reduce((n, row) => n + row.boardCount, 0);
     const top = r.playerSummary[0] ?? null;
     const second = r.playerSummary[1] ?? null;
     const tiedAtTop =
@@ -1094,8 +1091,14 @@
               {#each flightWinners as fw (fw.flight)}
                 <div class="trophy-row">
                   <span class="trophy-flight">{fw.flight}</span>
-                  <span class="trophy-winner"><span class="podium-medal" aria-hidden="true">🥇</span><span class="trophy-name" title={fw.champion}>{fw.champion}</span></span>
-                  <span class="trophy-winner trophy-runner"><span class="podium-medal" aria-hidden="true">🥈</span><span class="trophy-name" title={fw.runnerUp}>{fw.runnerUp}</span></span>
+                  <span class="trophy-cell">
+                    <span class="trophy-medal" aria-hidden="true">🥇</span>
+                    <span class="trophy-name trophy-champion" title={fw.champion}>{fw.champion}</span>
+                  </span>
+                  <span class="trophy-cell">
+                    <span class="trophy-medal" aria-hidden="true">🥈</span>
+                    <span class="trophy-name trophy-runner" title={fw.runnerUp}>{fw.runnerUp}</span>
+                  </span>
                 </div>
               {/each}
             </div>
@@ -1736,16 +1739,15 @@
     .podium-1 .podium-name { color: #b8990a !important; }
     .podium-wins { color: #555 !important; }
     .trophy-flight { color: #666 !important; }
-    .trophy-row { grid-template-columns: minmax(72px, max-content) 1fr 1fr !important; }
+    .trophy-row { grid-template-columns: 8rem 1fr 1fr !important; }
     .trophy-name {
-      color: #111 !important;
       white-space: normal !important;
       overflow: visible !important;
       text-overflow: unset !important;
       word-break: break-word !important;
     }
-    .trophy-winner:first-of-type .trophy-name { color: #b8990a !important; }
-    .trophy-runner .trophy-name { opacity: 1 !important; color: #444 !important; }
+    .trophy-champion { color: #b8990a !important; }
+    .trophy-runner { opacity: 1 !important; color: #444 !important; }
 
     /* ── Section headings ── */
     .section-hdr {
@@ -2059,7 +2061,7 @@
   /* Trophy Winners tile (league format) */
   .stat-tile-trophies {
     min-width: 0;
-    flex: 3 1 340px;
+    flex: 3 1 420px;
   }
   .trophy-list {
     display: flex;
@@ -2068,10 +2070,10 @@
   }
   .trophy-row {
     display: grid;
-    /* flight label | champion | runner-up — flight fixed, names flex-equal */
-    grid-template-columns: minmax(72px, max-content) 1fr 1fr;
+    grid-template-columns: 8rem 1fr 1fr;
     align-items: center;
-    column-gap: 0.75rem;
+    justify-items: start;
+    column-gap: 1rem;
     min-width: 0;
     padding: 0.15rem 0;
   }
@@ -2083,25 +2085,31 @@
     letter-spacing: 0.05em;
     white-space: nowrap;
   }
-  .trophy-winner {
+  .trophy-cell {
     display: flex;
     align-items: center;
-    gap: 0.3rem;
+    gap: 0.35rem;
     min-width: 0;
+    width: 100%;
+  }
+  .trophy-medal {
+    flex-shrink: 0;
+    font-size: 1rem;
+    line-height: 1;
   }
   .trophy-name {
     font-size: 0.9rem;
     font-weight: 700;
-    color: var(--fg, #f5f5f5);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     min-width: 0;
   }
-  .trophy-winner:first-of-type .trophy-name {
+  .trophy-champion {
     color: var(--accent, #ffd54a);
   }
-  .trophy-runner .trophy-name {
+  .trophy-runner {
+    color: var(--fg, #f5f5f5);
     opacity: 0.85;
   }
 
