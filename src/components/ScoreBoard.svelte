@@ -32,7 +32,7 @@
   import { subscribeCurrentUserRole, type Role } from '../lib/roles';
   import { subscribeAuth, currentUser } from '../lib/auth';
   import { clearResume } from '../lib/resume';
-  import { markPlannedComplete } from '../lib/planned';
+  import { markPlannedComplete, propagateBracketWinner } from '../lib/planned';
   import { normalizeKey, findByKey } from '../lib/tournaments';
   import type { MatchRecord } from '../lib/history';
   import { subscribeConnectivity, getConnectivity } from '../lib/connectivity';
@@ -2223,11 +2223,14 @@
         // claim, so this should succeed in the common path.
         if (plannedMid) {
           const uid = currentUser()?.uid ?? '';
+          const result = matchResult ?? 'draw';
           void markPlannedComplete(
             plannedMid,
-            { setsA: sideA.sets, setsB: sideB.sets, winner: matchResult ?? 'draw' },
+            { setsA: sideA.sets, setsB: sideB.sets, winner: result },
             uid,
-          );
+          ).then(() => {
+            void propagateBracketWinner(plannedMid, result);
+          });
         }
       });
       // Clear the handoff so a "same names again" match after this one
@@ -2888,7 +2891,13 @@
         <span class="foot-ico" aria-hidden="true">📊</span><span class="foot-lbl">Scores</span>
       </button>
       {#if !isPractice}
-        <button type="button" class="foot-btn swap" onclick={swapSides} aria-label="Swap sides">
+        <button
+          type="button"
+          class="foot-btn swap"
+          onclick={swapSides}
+          disabled={endMatchInProgress || matchResult !== null}
+          aria-label="Swap sides"
+        >
           <span class="foot-ico" aria-hidden="true">⇄</span><span class="foot-lbl">Swap</span>
         </button>
       {/if}
@@ -2913,7 +2922,13 @@
       <button type="button" class="foot-btn endm" onclick={endMatch} disabled={endMatchInProgress} aria-label="End match">
         <span class="foot-ico" aria-hidden="true">🏁</span><span class="foot-lbl">End</span>
       </button>
-      <button type="button" class="foot-btn close" onclick={requestExit} aria-label="Close match">
+      <button
+        type="button"
+        class="foot-btn close"
+        class:close-cta={endMatchInProgress || matchResult !== null}
+        onclick={requestExit}
+        aria-label="Close match"
+      >
         <span class="foot-ico" aria-hidden="true">✕</span><span class="foot-lbl">Close</span>
       </button>
     </div>
@@ -4187,7 +4202,7 @@
        (SET / BOARD) from overflowing when the parent column becomes
        very narrow, and stays vh-driven on typical phone-in-portrait
        windows. */
-    font-size: min(clamp(2.8rem, 20vh, 7rem), 70cqi);
+    font-size: min(20vh, 70cqi);
     font-variant-numeric: tabular-nums;
     letter-spacing: 0.03em;
   }
@@ -4197,7 +4212,7 @@
      their em box). This is what prevents the digit spilling past
      the coloured pill on wide-short windows, while still filling
      the column on typical portrait phone windows. */
-  .digit.big { font-size: min(clamp(4.5rem, 38vh, 14rem), 55cqi); }
+  .digit.big { font-size: min(38vh, 55cqi); }
   .col.tone-a .digit { color: var(--side-a); text-shadow: 0 0 12px rgba(79,195,247,0.35); }
   .col.tone-b .digit { color: var(--side-b); text-shadow: 0 0 12px rgba(255,138,101,0.35); }
   .mid .digit { color: var(--accent); text-shadow: 0 0 12px rgba(255,213,74,0.35); }
@@ -4348,6 +4363,16 @@
   .foot-btn.reset { border-color: rgba(255,213,74,0.4); color: var(--accent); }
   .foot-btn.endm { border-color: rgba(76,175,80,0.5); color: #66bb6a; }
   .foot-btn.close { border-color: rgba(239,83,80,0.4); color: var(--danger); }
+  .foot-btn.close.close-cta {
+    background: var(--danger);
+    border-color: var(--danger);
+    color: #fff;
+    animation: close-pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes close-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(239,83,80,0.5); }
+    50%       { box-shadow: 0 0 0 6px rgba(239,83,80,0); }
+  }
 
   /* Tight-height layout tweaks — labels stay visible (landscape has
      room); only the button padding and hint size get trimmed. */

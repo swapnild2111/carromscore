@@ -180,16 +180,13 @@ export async function loadPlannedByRound(
 ): Promise<PlannedMatch[]> {
   if (!tournamentKey || !roundKey) return [];
   try {
-    const { getDatabase, ref, get } = await import('firebase/database');
+    const { getDatabase, ref, get, query, orderByChild, equalTo } = await import('firebase/database');
     const db = getDatabase(firebaseApp());
-    const snap = await get(ref(db, 'planned'));
+    const snap = await get(query(ref(db, 'planned'), orderByChild('tournamentKey'), equalTo(tournamentKey)));
     const raw = snap.val() as Record<string, Omit<PlannedMatch, 'mid'>> | null;
     if (!raw) return [];
     return Object.entries(raw)
-      .filter(
-        ([, v]) =>
-          v?.tournamentKey === tournamentKey && v?.roundKey === roundKey && !v?.completedAt,
-      )
+      .filter(([, v]) => v?.roundKey === roundKey && !v?.completedAt)
       .map(([mid, v]) => ({ mid, ...v }));
   } catch {
     return [];
@@ -204,13 +201,13 @@ export async function loadAllPlannedByRound(
 ): Promise<PlannedMatch[]> {
   if (!tournamentKey || !roundKey) return [];
   try {
-    const { getDatabase, ref, get } = await import('firebase/database');
+    const { getDatabase, ref, get, query, orderByChild, equalTo } = await import('firebase/database');
     const db = getDatabase(firebaseApp());
-    const snap = await get(ref(db, 'planned'));
+    const snap = await get(query(ref(db, 'planned'), orderByChild('tournamentKey'), equalTo(tournamentKey)));
     const raw = snap.val() as Record<string, Omit<PlannedMatch, 'mid'>> | null;
     if (!raw) return [];
     return Object.entries(raw)
-      .filter(([, v]) => v?.tournamentKey === tournamentKey && v?.roundKey === roundKey)
+      .filter(([, v]) => v?.roundKey === roundKey)
       .map(([mid, v]) => ({ mid, ...v }));
   } catch {
     return [];
@@ -366,14 +363,14 @@ export async function resolvePlannedByBoard(
     return { ok: false, error: 'invalid tournament or board' };
   }
   try {
-    const [{ getDatabase, ref, get }] = await Promise.all([
+    const [{ getDatabase, ref, get, query, orderByChild, equalTo }] = await Promise.all([
       import('firebase/database'),
     ]);
     const db = getDatabase(firebaseApp());
 
     // Read tournament rounds and planned matches in parallel.
     const [plannedSnap, tournamentSnap] = await Promise.all([
-      get(ref(db, 'planned')),
+      get(query(ref(db, 'planned'), orderByChild('tournamentKey'), equalTo(tournamentKey))),
       get(ref(db, `tournaments/${tournamentKey}/rounds`)),
     ]);
 
@@ -460,13 +457,13 @@ export async function loadPendingPlannedByTournament(
 ): Promise<PlannedMatch[]> {
   if (!tournamentKey) return [];
   try {
-    const { getDatabase, ref, get } = await import('firebase/database');
+    const { getDatabase, ref, get, query, orderByChild, equalTo } = await import('firebase/database');
     const db = getDatabase(firebaseApp());
-    const snap = await get(ref(db, 'planned'));
+    const snap = await get(query(ref(db, 'planned'), orderByChild('tournamentKey'), equalTo(tournamentKey)));
     const raw = snap.val() as Record<string, Omit<PlannedMatch, 'mid'>> | null;
     if (!raw) return [];
     return Object.entries(raw)
-      .filter(([, v]) => v?.tournamentKey === tournamentKey && !v?.completedAt)
+      .filter(([, v]) => !v?.completedAt)
       .map(([mid, v]) => ({ mid, ...v }));
   } catch {
     return [];
@@ -479,11 +476,13 @@ export async function subscribePlannedByTournament(
 ): Promise<() => void> {
   if (!tournamentKey) return () => {};
   try {
-    const [{ getDatabase, ref, onValue }] = await Promise.all([
-      import('firebase/database'),
-    ]);
+    const { getDatabase, ref, onValue, query, orderByChild, equalTo } = await import('firebase/database');
     const db = getDatabase(firebaseApp());
-    const unsub = onValue(ref(db, 'planned'), (snap) => {
+    // Use the tournamentKey index so the subscription only receives this
+    // tournament's planned records — avoids downloading the whole /planned
+    // node on every change.
+    const q = query(ref(db, 'planned'), orderByChild('tournamentKey'), equalTo(tournamentKey));
+    const unsub = onValue(q, (snap) => {
       const raw = snap.val() as Record<string, Omit<PlannedMatch, 'mid'>> | null;
       if (!raw) {
         cb([]);
@@ -492,7 +491,6 @@ export async function subscribePlannedByTournament(
       const out: PlannedMatch[] = [];
       for (const [mid, v] of Object.entries(raw)) {
         if (!v || typeof v !== 'object') continue;
-        if (v.tournamentKey !== tournamentKey) continue;
         out.push({ mid, ...v });
       }
       out.sort((a, b) => {
@@ -511,5 +509,81 @@ export async function subscribePlannedByTournament(
     return () => unsub();
   } catch {
     return () => {};
+  }
+}
+
+/**
+ * After a bracket match completes, advance the winner's name into the
+ * next round's placeholder slot. Called from ScoreBoard after
+ * markPlannedComplete succeeds.
+ *
+ * Logic:
+ *   - Reads the completed planned slot to get tournamentKey, roundKey,
+ *     matchOrder, and the winner identity.
+ *   - Reads the parent tournament's round list to find the round whose
+ *     order is one higher than the completed slot's round.
+ *   - The next-round slot index is ceil(matchOrder / 2). Within that
+ *     slot, odd matchOrder → side A, even matchOrder → side B.
+ *   - Patches aName/aResolvedId or bName/bResolvedId on the target slot.
+ *
+ * Silent-on-failure — bracket still works; admin can fix manually.
+ */
+export async function propagateBracketWinner(
+  completedMid: string,
+  winner: 'a' | 'b' | 'draw',
+): Promise<void> {
+  if (!completedMid || winner === 'draw') return;
+  try {
+    const { getDatabase, ref, get, update } = await import('firebase/database');
+    const { loadRounds } = await import('./tournaments');
+    const db = getDatabase(firebaseApp());
+
+    // 1. Load the completed slot
+    const snap = await get(ref(db, `planned/${completedMid}`));
+    if (!snap.exists()) return;
+    const slot = snap.val() as Omit<PlannedMatch, 'mid'>;
+    const { tournamentKey, roundKey, matchOrder } = slot;
+    if (!tournamentKey || !roundKey || !matchOrder) return;
+
+    // 2. Winner identity
+    const winnerName    = winner === 'a' ? slot.aName    : slot.bName;
+    const winnerResolved = winner === 'a' ? slot.aResolvedId : slot.bResolvedId;
+
+    // 3. Find the next round by order
+    const rounds = loadRounds(tournamentKey);
+    const thisRound = rounds.find((r) => r.key === roundKey);
+    if (!thisRound) return;
+    const nextRound = rounds.find((r) => r.order === thisRound.order + 1);
+    if (!nextRound) return; // Final has no next round
+
+    // 4. Target slot: ceil(matchOrder / 2), side A if matchOrder odd, B if even
+    const targetOrder = Math.ceil(matchOrder / 2);
+    const targetSide  = matchOrder % 2 === 1 ? 'a' : 'b';
+
+    // 5. Find the target planned slot (indexed by tournamentKey to avoid full scan)
+    const { query, orderByChild, equalTo } = await import('firebase/database');
+    const allSnap = await get(query(ref(db, 'planned'), orderByChild('tournamentKey'), equalTo(tournamentKey)));
+    const all = allSnap.val() as Record<string, Omit<PlannedMatch, 'mid'>> | null;
+    if (!all) return;
+    const entry = Object.entries(all).find(
+      ([, v]) =>
+        v?.roundKey === nextRound.key &&
+        v?.matchOrder === targetOrder,
+    );
+    if (!entry) return;
+    const [targetMid] = entry;
+
+    // 6. Patch the name into the target slot
+    const patch: Record<string, unknown> = {};
+    if (targetSide === 'a') {
+      patch['aName'] = winnerName ?? '';
+      if (winnerResolved) patch['aResolvedId'] = winnerResolved;
+    } else {
+      patch['bName'] = winnerName ?? '';
+      if (winnerResolved) patch['bResolvedId'] = winnerResolved;
+    }
+    await update(ref(db, `planned/${targetMid}`), patch);
+  } catch {
+    // silent — bracket still works without propagation
   }
 }

@@ -40,10 +40,13 @@ export type Player = {
    */
   country?: string;
   /** Optional player metadata — none of these are required or used for
-   *  scoring; they exist for organiser rosters. */
-  age?: number;
+   *  scoring; they exist for organiser rosters and category awards. */
+  gender?: 'male' | 'female' | 'other';
+  dob?: string;     // ISO 8601 date string, e.g. "2005-03-14"
+  age?: number;     // kept for legacy records; prefer dob going forward
   email?: string;
   phone?: string;
+  address?: string; // free-form, e.g. city/region
 };
 
 /**
@@ -54,9 +57,12 @@ export type Player = {
 export type CreatePlayerMeta = {
   createdBy?: string;
   country?: string;
+  gender?: 'male' | 'female' | 'other';
+  dob?: string;
   age?: number;
   email?: string;
   phone?: string;
+  address?: string;
 };
 
 /**
@@ -488,9 +494,13 @@ function mergeOneRemotePlayer(id: string, val: unknown): void {
   const createdAt = typeof v.createdAt === 'number' ? v.createdAt : 0;
   const aliases = parseAliases(v.aliases);
   const country = typeof v.country === 'string' ? v.country : undefined;
+  const genderRaw = typeof v.gender === 'string' ? v.gender : undefined;
+  const gender = genderRaw === 'male' || genderRaw === 'female' || genderRaw === 'other' ? genderRaw : undefined;
+  const dob = typeof v.dob === 'string' ? v.dob : undefined;
   const age = typeof v.age === 'number' && Number.isFinite(v.age) ? v.age : undefined;
   const email = typeof v.email === 'string' ? v.email : undefined;
   const phone = typeof v.phone === 'string' ? v.phone : undefined;
+  const address = typeof v.address === 'string' ? v.address : undefined;
   const idx = memoryStore.findIndex((p) => p.id === id);
   if (idx !== -1) {
     // Replace with a fresh object so downstream {#each} keyed
@@ -505,10 +515,13 @@ function mergeOneRemotePlayer(id: string, val: unknown): void {
       canonicalName,
       aliases: { ...cur.aliases, ...aliases },
       createdAt: createdAt || cur.createdAt,
-      ...(country !== undefined ? { country } : cur.country ? { country: cur.country } : {}),
-      ...(age !== undefined ? { age } : cur.age !== undefined ? { age: cur.age } : {}),
-      ...(email !== undefined ? { email } : cur.email ? { email: cur.email } : {}),
-      ...(phone !== undefined ? { phone } : cur.phone ? { phone: cur.phone } : {}),
+      ...(country  !== undefined ? { country }  : cur.country  ? { country:  cur.country  } : {}),
+      ...(gender   !== undefined ? { gender }   : cur.gender   ? { gender:   cur.gender   } : {}),
+      ...(dob      !== undefined ? { dob }      : cur.dob      ? { dob:      cur.dob      } : {}),
+      ...(age      !== undefined ? { age }      : cur.age      !== undefined ? { age: cur.age } : {}),
+      ...(email    !== undefined ? { email }    : cur.email    ? { email:    cur.email    } : {}),
+      ...(phone    !== undefined ? { phone }    : cur.phone    ? { phone:    cur.phone    } : {}),
+      ...(address  !== undefined ? { address }  : cur.address  ? { address:  cur.address  } : {}),
     };
     return;
   }
@@ -519,9 +532,12 @@ function mergeOneRemotePlayer(id: string, val: unknown): void {
     createdAt,
     ...(typeof v.createdBy === 'string' ? { createdBy: v.createdBy } : {}),
     ...(country ? { country } : {}),
+    ...(gender  ? { gender  } : {}),
+    ...(dob     ? { dob     } : {}),
     ...(age !== undefined ? { age } : {}),
-    ...(email ? { email } : {}),
-    ...(phone ? { phone } : {}),
+    ...(email   ? { email   } : {}),
+    ...(phone   ? { phone   } : {}),
+    ...(address ? { address } : {}),
   });
 }
 
@@ -572,9 +588,12 @@ async function writePlayerToFirebase(p: Player): Promise<PlayerFirebaseWriteOutc
       createdAt: p.createdAt,
       ...(p.createdBy ? { createdBy: p.createdBy } : {}),
       ...(p.country ? { country: p.country } : {}),
+      ...(p.gender ? { gender: p.gender } : {}),
+      ...(p.dob ? { dob: p.dob } : {}),
       ...(typeof p.age === 'number' && Number.isFinite(p.age) ? { age: p.age } : {}),
       ...(p.email ? { email: p.email } : {}),
       ...(p.phone ? { phone: p.phone } : {}),
+      ...(p.address ? { address: p.address } : {}),
       aliases: { ...p.aliases },
       normalisedIndex: normalisedIndex(p),
     });
@@ -741,6 +760,63 @@ export async function updatePlayerCountry(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return { ok: false, error: msg || 'Country update failed' };
+  }
+}
+
+export type PlayerMetaUpdate = {
+  gender?: 'male' | 'female' | 'other' | '';
+  dob?: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+};
+
+/**
+ * Update optional metadata fields (gender, dob, email, phone, address).
+ * Pass an empty string to clear a field. Country and name have their own
+ * dedicated update functions since they need extra logic.
+ */
+export async function updatePlayerMeta(
+  playerId: string,
+  meta: PlayerMetaUpdate,
+): Promise<PlayerWriteOutcome> {
+  if (!playerId) return { ok: false, error: 'Missing player id' };
+  try {
+    const [{ firebaseApp }, { getDatabase, ref, get, update }] = await Promise.all([
+      import('./firebase'),
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    const path = `players/${playerId}`;
+    const snap = await get(ref(db, path));
+    const existing = snap.val() as Record<string, unknown> | null;
+    if (!existing) return { ok: false, error: 'Player not found' };
+
+    const patch: Record<string, unknown> = {};
+    if ('gender' in meta)  patch.gender  = meta.gender  || null;
+    if ('dob' in meta)     patch.dob     = meta.dob     || null;
+    if ('email' in meta)   patch.email   = meta.email   || null;
+    if ('phone' in meta)   patch.phone   = meta.phone   || null;
+    if ('address' in meta) patch.address = meta.address || null;
+
+    const idx = memoryStore.findIndex((x) => x.id === playerId);
+    if (idx !== -1) {
+      const cur = memoryStore[idx]!;
+      const next: Player = { ...cur };
+      if ('gender' in meta)  { if (meta.gender)  next.gender  = meta.gender as Player['gender']; else delete next.gender; }
+      if ('dob' in meta)     { if (meta.dob)     next.dob     = meta.dob;     else delete next.dob; }
+      if ('email' in meta)   { if (meta.email)   next.email   = meta.email;   else delete next.email; }
+      if ('phone' in meta)   { if (meta.phone)   next.phone   = meta.phone;   else delete next.phone; }
+      if ('address' in meta) { if (meta.address) next.address = meta.address; else delete next.address; }
+      memoryStore[idx] = next;
+    }
+
+    await update(ref(db, path), patch);
+    notify();
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg || 'Meta update failed' };
   }
 }
 

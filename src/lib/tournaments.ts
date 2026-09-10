@@ -82,6 +82,65 @@ export type Tournament = {
     maxBoards?: number;
     timerDuration?: number;
   };
+  /**
+   * Tournament format (v4.0). `'standard'` (default / absent) — ad-hoc
+   * matches or manual bracket. `'league'` — groups stage + auto-generated
+   * knockout flights. `'knockout'` — single-elimination bracket (future).
+   * Absent = treat as 'standard' for backwards compatibility.
+   */
+  format?: 'standard' | 'league' | 'knockout' | 'roundrobin';
+  /**
+   * League configuration — only meaningful when `format === 'league'`.
+   */
+  leagueCfg?: LeagueCfg;
+  /**
+   * Knockout / Round Robin configuration — only meaningful when
+   * `format === 'knockout'` or `format === 'roundrobin'`.
+   */
+  knockoutCfg?: KnockoutCfg;
+  /**
+   * Group assignments for the league stage. Map from group key (e.g.
+   * "g1") to group metadata + player ID list. Written by the LeagueSetup
+   * admin screen after the organiser locks the draw.
+   */
+  groups?: Record<string, LeagueGroup>;
+};
+
+/**
+ * Configuration for a knockout or round-robin tournament (v5.0).
+ */
+export type KnockoutCfg = {
+  participantCount: number;  // how many players enter the bracket
+  advanceCount?: number;     // round-robin only: top N that advance to knockout
+  flightNames?: string[];    // reward tiers e.g. ['Gold', 'Silver', 'Bronze']
+};
+
+/**
+ * Configuration for a league-format tournament (v4.0).
+ */
+export type FlightMatchCfg = {
+  bestOf?: number;
+  pointsTarget?: number;
+  maxBoards?: number;
+  timerDuration?: number; // minutes
+};
+
+export type LeagueCfg = {
+  groupCount: number;        // 2–16 — number of groups (e.g. 8)
+  playersPerGroup: number;   // 2–12 — target players per group (e.g. 6)
+  boardsPerGroup: number;    // boards assigned to each group (e.g. 2)
+  flightNames: string[];     // ordered flight names e.g. ['Gold', 'Silver', 'Bronze']
+  walkovers?: { phantomScore: number }; // if set, short groups get a Phantom bye player
+  flightCfg?: Record<string, FlightMatchCfg>; // per-flight overrides keyed by flight name
+};
+
+/**
+ * One group in the league stage (v4.0). Keyed by a slug like "g1".
+ */
+export type LeagueGroup = {
+  name: string;        // display name, e.g. "G1"
+  order: number;       // 1-indexed sort order
+  playerIds: string[]; // ordered array of assigned player IDs
 };
 
 /**
@@ -349,6 +408,99 @@ function parseDefaults(raw: unknown): Tournament['defaults'] | undefined {
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
+function parseLeagueCfg(raw: unknown): LeagueCfg | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const v = raw as Record<string, unknown>;
+  const groupCount = Number(v.groupCount);
+  const playersPerGroup = Number(v.playersPerGroup);
+  const boardsPerGroup = Number(v.boardsPerGroup);
+  if (
+    !Number.isFinite(groupCount) || groupCount < 2 || groupCount > 16 ||
+    !Number.isFinite(playersPerGroup) || playersPerGroup < 2 || playersPerGroup > 12 ||
+    !Number.isFinite(boardsPerGroup) || boardsPerGroup < 1 || boardsPerGroup > 50
+  ) return undefined;
+  const rawFlights = v.flightNames;
+  const flightNames: string[] = [];
+  if (Array.isArray(rawFlights)) {
+    for (const f of rawFlights) {
+      if (typeof f === 'string' && f.trim()) flightNames.push(f.trim());
+    }
+  } else if (rawFlights && typeof rawFlights === 'object') {
+    // Firebase stores arrays as {0: val, 1: val, ...} objects
+    for (const k of Object.keys(rawFlights as object).sort((a, b) => Number(a) - Number(b))) {
+      const f = (rawFlights as Record<string, unknown>)[k];
+      if (typeof f === 'string' && f.trim()) flightNames.push(f.trim());
+    }
+  }
+  const result: LeagueCfg = {
+    groupCount: Math.floor(groupCount),
+    playersPerGroup: Math.floor(playersPerGroup),
+    boardsPerGroup: Math.floor(boardsPerGroup),
+    flightNames: flightNames.length > 0 ? flightNames : ['Gold League', 'Silver League', 'Bronze League'],
+  };
+  const rawWalkovers = v.walkovers;
+  if (rawWalkovers && typeof rawWalkovers === 'object') {
+    const wo = rawWalkovers as Record<string, unknown>;
+    const phantomScore = Number(wo.phantomScore);
+    if (Number.isFinite(phantomScore) && phantomScore >= 1) {
+      result.walkovers = { phantomScore: Math.floor(phantomScore) };
+    }
+  }
+  const rawFlightCfg = v.flightCfg;
+  if (rawFlightCfg && typeof rawFlightCfg === 'object') {
+    const flightCfg: Record<string, FlightMatchCfg> = {};
+    for (const [name, raw] of Object.entries(rawFlightCfg as Record<string, unknown>)) {
+      if (!raw || typeof raw !== 'object') continue;
+      const fc = raw as Record<string, unknown>;
+      const entry: FlightMatchCfg = {};
+      const bestOf = Number(fc.bestOf);
+      if (Number.isFinite(bestOf) && bestOf >= 1) entry.bestOf = Math.floor(bestOf);
+      const pointsTarget = Number(fc.pointsTarget);
+      if (Number.isFinite(pointsTarget) && pointsTarget >= 1) entry.pointsTarget = Math.floor(pointsTarget);
+      const maxBoards = Number(fc.maxBoards);
+      if (Number.isFinite(maxBoards) && maxBoards >= 1) entry.maxBoards = Math.floor(maxBoards);
+      const timerDuration = Number(fc.timerDuration);
+      if (Number.isFinite(timerDuration) && timerDuration >= 1) entry.timerDuration = Math.floor(timerDuration);
+      if (Object.keys(entry).length > 0) flightCfg[name] = entry;
+    }
+    if (Object.keys(flightCfg).length > 0) result.flightCfg = flightCfg;
+  }
+  return result;
+}
+
+function parseKnockoutCfg(raw: unknown): KnockoutCfg | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const v = raw as Record<string, unknown>;
+  const participantCount = Number(v.participantCount);
+  if (!Number.isFinite(participantCount) || participantCount < 2) return undefined;
+  const result: KnockoutCfg = { participantCount: Math.floor(participantCount) };
+  const advanceCount = Number(v.advanceCount);
+  if (Number.isFinite(advanceCount) && advanceCount >= 2) result.advanceCount = Math.floor(advanceCount);
+  return result;
+}
+
+function parseGroups(raw: unknown): Record<string, LeagueGroup> | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const out: Record<string, LeagueGroup> = {};
+  for (const [gKey, gVal] of Object.entries(raw as Record<string, unknown>)) {
+    if (!gVal || typeof gVal !== 'object') continue;
+    const g = gVal as Record<string, unknown>;
+    const name = typeof g.name === 'string' && g.name.trim() ? g.name.trim() : gKey.toUpperCase();
+    const order = typeof g.order === 'number' ? g.order : 0;
+    const playerIds: string[] = [];
+    const rawIds = g.playerIds;
+    if (rawIds && typeof rawIds === 'object') {
+      // Firebase arrays come back as objects {0: id, 1: id, ...}
+      for (const k of Object.keys(rawIds as object).sort((a, b) => Number(a) - Number(b))) {
+        const id = (rawIds as Record<string, unknown>)[k];
+        if (typeof id === 'string' && id) playerIds.push(id);
+      }
+    }
+    out[gKey] = { name, order, playerIds };
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 function parseRounds(raw: unknown): Round[] | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
   const rounds: Round[] = [];
@@ -407,6 +559,13 @@ function mergeRemote(raw: Record<string, unknown>): void {
     const logoUrl = typeof v.logoUrl === 'string' && v.logoUrl.trim() ? v.logoUrl.trim() : undefined;
     const rounds = parseRounds(v.rounds);
     const defaults = parseDefaults(v.defaults);
+    const format =
+      v.format === 'league' || v.format === 'knockout' || v.format === 'standard' || v.format === 'roundrobin'
+        ? (v.format as 'league' | 'knockout' | 'standard' | 'roundrobin')
+        : undefined;
+    const leagueCfg = parseLeagueCfg(v.leagueCfg);
+    const knockoutCfg = parseKnockoutCfg(v.knockoutCfg);
+    const groups = parseGroups(v.groups);
     const existing = memoryStore.find((t) => t.key === key);
     if (existing) {
       existing.name = name;
@@ -428,6 +587,14 @@ function mergeRemote(raw: Record<string, unknown>): void {
       else delete existing.rounds;
       if (defaults !== undefined) existing.defaults = defaults;
       else delete existing.defaults;
+      if (format) existing.format = format;
+      else delete existing.format;
+      if (leagueCfg) existing.leagueCfg = leagueCfg;
+      else delete existing.leagueCfg;
+      if (knockoutCfg) existing.knockoutCfg = knockoutCfg;
+      else delete existing.knockoutCfg;
+      if (groups) existing.groups = groups;
+      else delete existing.groups;
     } else {
       memoryStore.push({
         key,
@@ -442,6 +609,10 @@ function mergeRemote(raw: Record<string, unknown>): void {
         ...(logoUrl ? { logoUrl } : {}),
         ...(rounds !== undefined ? { rounds } : {}),
         ...(defaults !== undefined ? { defaults } : {}),
+        ...(format ? { format } : {}),
+        ...(leagueCfg ? { leagueCfg } : {}),
+        ...(knockoutCfg ? { knockoutCfg } : {}),
+        ...(groups ? { groups } : {}),
       });
     }
   }
@@ -481,6 +652,7 @@ async function writeTournamentToFirebase(t: Tournament): Promise<FirebaseWriteOu
       ...(t.createdBy ? { createdBy: t.createdBy } : {}),
       ...(t.type ? { type: t.type } : {}),
       ...(t.country ? { country: t.country } : {}),
+      ...(t.format ? { format: t.format } : {}),
     });
     return { ok: true };
   } catch (err) {
@@ -730,6 +902,156 @@ export async function updateTournamentDefaults(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return { ok: false, error: msg || 'Update failed' };
+  }
+}
+
+/**
+ * Write league configuration to Firebase (v4.0). Creates or replaces
+ * `/tournaments/{key}/leagueCfg` and stamps `format: 'league'`.
+ */
+export async function updateLeagueCfg(
+  key: string,
+  cfg: LeagueCfg,
+): Promise<TournamentWriteOutcome> {
+  if (!key) return { ok: false, error: 'Missing tournament key' };
+  const t = memoryStore.find((x) => x.key === key); // may be undefined for brand-new tournaments
+  try {
+    const [{ firebaseApp }, { getDatabase, ref, update }] = await Promise.all([
+      import('./firebase'),
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    const patch: Record<string, unknown> = {
+      [`tournaments/${key}/format`]: 'league',
+      [`tournaments/${key}/leagueCfg/groupCount`]: cfg.groupCount,
+      [`tournaments/${key}/leagueCfg/playersPerGroup`]: cfg.playersPerGroup,
+      [`tournaments/${key}/leagueCfg/boardsPerGroup`]: cfg.boardsPerGroup,
+      [`tournaments/${key}/leagueCfg/flightNames`]: cfg.flightNames,
+      [`tournaments/${key}/lastActive`]: Date.now(),
+    };
+    if (cfg.walkovers) {
+      patch[`tournaments/${key}/leagueCfg/walkovers/phantomScore`] = cfg.walkovers.phantomScore;
+    }
+    if (cfg.flightCfg) {
+      for (const [fname, fc] of Object.entries(cfg.flightCfg)) {
+        for (const [field, val] of Object.entries(fc)) {
+          patch[`tournaments/${key}/leagueCfg/flightCfg/${fname}/${field}`] = val;
+        }
+      }
+    }
+    await update(ref(db, '/'), patch);
+    if (t) {
+      t.format = 'league';
+      t.leagueCfg = { ...cfg };
+      t.lastActive = Date.now();
+      notify();
+    }
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg || 'League config update failed' };
+  }
+}
+
+/**
+ * Write knockout/round-robin configuration to Firebase (v5.0).
+ * Stamps `format: 'knockout'` or `'roundrobin'` and writes `knockoutCfg`.
+ */
+export async function updateKnockoutCfg(
+  key: string,
+  cfg: KnockoutCfg,
+  format: 'knockout' | 'roundrobin' = 'knockout',
+): Promise<TournamentWriteOutcome> {
+  if (!key) return { ok: false, error: 'Missing tournament key' };
+  const t = memoryStore.find((x) => x.key === key);
+  try {
+    const [{ firebaseApp }, { getDatabase, ref, update }] = await Promise.all([
+      import('./firebase'),
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    const patch: Record<string, unknown> = {
+      [`tournaments/${key}/format`]: format,
+      [`tournaments/${key}/knockoutCfg/participantCount`]: cfg.participantCount,
+      [`tournaments/${key}/lastActive`]: Date.now(),
+    };
+    if (cfg.advanceCount !== undefined) {
+      patch[`tournaments/${key}/knockoutCfg/advanceCount`] = cfg.advanceCount;
+    }
+    await update(ref(db, '/'), patch);
+    if (t) {
+      t.format = format;
+      t.knockoutCfg = { ...cfg };
+      t.lastActive = Date.now();
+      notify();
+    }
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg || 'Knockout config update failed' };
+  }
+}
+
+/**
+ * Change only the format field of a tournament (standard / league).
+ * For knockout / roundrobin use updateKnockoutCfg instead.
+ */
+export async function updateTournamentFormat(
+  key: string,
+  format: 'standard' | 'league',
+): Promise<TournamentWriteOutcome> {
+  if (!key) return { ok: false, error: 'Missing tournament key' };
+  try {
+    const [{ firebaseApp }, { getDatabase, ref, update }] = await Promise.all([
+      import('./firebase'),
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    await update(ref(db, '/'), {
+      [`tournaments/${key}/format`]: format === 'standard' ? null : format,
+      [`tournaments/${key}/lastActive`]: Date.now(),
+    });
+    const t = memoryStore.find((x) => x.key === key);
+    if (t) {
+      t.format = format === 'standard' ? undefined : format;
+      t.lastActive = Date.now();
+      notify();
+    }
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg || 'Format update failed' };
+  }
+}
+
+/**
+ * Write group assignments to Firebase (v4.0). Full replace of
+ * `/tournaments/{key}/groups` — group membership is always rewritten
+ * atomically (draw changes are all-or-nothing).
+ */
+export async function updateLeagueGroups(
+  key: string,
+  groups: Record<string, LeagueGroup>,
+): Promise<TournamentWriteOutcome> {
+  if (!key) return { ok: false, error: 'Missing tournament key' };
+  const t = memoryStore.find((x) => x.key === key);
+  if (!t) return { ok: false, error: 'Tournament not found in local store' };
+  try {
+    const [{ firebaseApp }, { getDatabase, ref, set, update }] = await Promise.all([
+      import('./firebase'),
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    // Full replace via set() on the groups subtree, then bump lastActive
+    await set(ref(db, `tournaments/${key}/groups`), groups);
+    await update(ref(db, `tournaments/${key}`), { lastActive: Date.now() });
+    t.groups = { ...groups };
+    t.lastActive = Date.now();
+    notify();
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg || 'Group update failed' };
   }
 }
 

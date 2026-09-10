@@ -31,6 +31,7 @@
     subscribePlannedByTournament,
     type PlannedMatch,
   } from '../../lib/planned';
+  import { type MatchRecord } from '../../lib/history';
   import { qrToSVG } from '../../lib/qrcode';
   import {
     subscribeTournaments,
@@ -46,11 +47,12 @@
     type Player,
   } from '../../lib/players';
   import { countryName, flagEmoji } from '../../lib/countries';
+  import { BRACKET_ROUND_RX } from '../../lib/bracket';
 
   let tournamentKey = $state<string>('');
   let plannedMatches = $state<PlannedMatch[]>([]);
+  let historyMatches = $state<MatchRecord[]>([]);
   let unsub: (() => void) | null = null;
-  let ready = $state(false);
   // Error surface when the RTDB fetch stalls or the tournament key
   // can't be found. Prevents the print page from hanging on the
   // 'Loading…' text forever if something upstream is wrong.
@@ -61,6 +63,11 @@
   // arrays through the template.
   let tournamentTick = $state(0);
   let playerTick = $state(0);
+  let plannedReady = $state(false);
+  let playersReady = $state(false);
+  let historyReady = $state(false);
+  // Wait for /planned, /players, and /matches history before rendering.
+  const ready = $derived(plannedReady && playersReady && historyReady);
 
   /** Resolve a player id to their current canonical name, falling back
    *  to the stored string. Mirrors history.ts playerName(). */
@@ -81,47 +88,65 @@
     tournamentKey = params.get('tournament') ?? '';
     if (params.get('qrMode') === 'match') qrMode = 'match';
     if (!tournamentKey) {
-      ready = true;
+      plannedReady = true;
+      playersReady = true;
+      historyReady = true;
       return () => {};
     }
     void subscribeTournaments();
     void subscribePlayers();
     const unsubT = subscribeTournamentStore(() => (tournamentTick += 1));
-    const unsubP = subscribePlayerStore(() => (playerTick += 1));
-    // Belt-and-braces load path (v3.6.2 fix): do a one-shot get()
-    // against /planned so the page renders even if the onValue
-    // subscription can't fire (misconfigured rules, malformed
-    // legacy record throwing in the callback, etc.). Then attach
-    // the subscription on top for live updates when boards are
-    // added/removed. Either data source flips `ready`.
+    // Players are cosmetic (canonical name resolution) — don't block rendering.
+    // Set ready immediately; names update reactively when the store arrives.
+    playersReady = true;
+    const unsubP = subscribePlayerStore(() => {
+      playerTick += 1;
+    });
+    // Single import chain — fetch /planned and /matches in parallel,
+    // then attach the live subscription. One module load instead of three.
     (async () => {
       try {
-        const [{ getDatabase, ref, get }, { firebaseApp }] = await Promise.all([
-          import('firebase/database'),
-          import('../../lib/firebase'),
-        ]);
+        const [{ getDatabase, ref, get, query, orderByChild, equalTo }, { firebaseApp }] =
+          await Promise.all([import('firebase/database'), import('../../lib/firebase')]);
         const db = getDatabase(firebaseApp());
-        const snap = await get(ref(db, 'planned'));
-        const raw = snap.val() as Record<string, Omit<PlannedMatch, 'mid'>> | null;
-        const out: PlannedMatch[] = [];
-        if (raw) {
-          for (const [mid, v] of Object.entries(raw)) {
+
+        // Fetch /planned and /matches simultaneously.
+        const [plannedSnap, matchesSnap] = await Promise.all([
+          get(query(ref(db, 'planned'), orderByChild('tournamentKey'), equalTo(tournamentKey))),
+          get(query(ref(db, 'matches'), orderByChild('tournamentKey'), equalTo(tournamentKey))).catch(() => null),
+        ]);
+
+        const plannedRaw = plannedSnap.val() as Record<string, Omit<PlannedMatch, 'mid'>> | null;
+        const plannedOut: PlannedMatch[] = [];
+        if (plannedRaw) {
+          for (const [mid, v] of Object.entries(plannedRaw)) {
             if (!v || typeof v !== 'object') continue;
-            if (v.tournamentKey !== tournamentKey) continue;
-            out.push({ mid, ...v });
+            plannedOut.push({ mid, ...v });
           }
         }
-        plannedMatches = out;
-        ready = true;
+        plannedMatches = plannedOut;
+        plannedReady = true;
+
+        const matchesRaw = matchesSnap?.val() as Record<string, Omit<MatchRecord, 'id'>> | null;
+        const matchesOut: MatchRecord[] = [];
+        if (matchesRaw) {
+          for (const [id, v] of Object.entries(matchesRaw)) {
+            if (!v || typeof v !== 'object') continue;
+            matchesOut.push({ id, ...v });
+          }
+        }
+        historyMatches = matchesOut;
+        historyReady = true;
       } catch (err) {
         loadError = err instanceof Error ? err.message : String(err);
-        ready = true;
+        plannedReady = true;
+        historyReady = true;
       }
-    })();
-    (async () => {
+
+      // Live subscription for board additions/removals (non-blocking).
       unsub = await subscribePlannedByTournament(tournamentKey, (arr) => {
         plannedMatches = arr;
-        ready = true;
+        plannedReady = true;
       });
     })();
     // Safety timeout — if neither the get nor the subscribe fired
@@ -130,7 +155,9 @@
     const timeoutId = window.setTimeout(() => {
       if (!ready) {
         loadError = 'Timed out reading /planned. Check your connection and the tournament key.';
-        ready = true;
+        plannedReady = true;
+        playersReady = true;
+        historyReady = true;
       }
     }, 8000);
     return () => {
@@ -188,10 +215,10 @@
   // Organizer name: organiser profile only (the old per-tournament organizerName
   // field was removed from the add/edit dialogs).
   const printLogoUrl = $derived(
-    orgProfile?.logoUrl ?? tournament?.logoUrl ?? null,
+    overrideLogoUrl.trim() || orgProfile?.logoUrl || tournament?.logoUrl || null,
   );
   const printOrganizerName = $derived(
-    orgProfile?.orgName || orgProfile?.displayName ||
+    overrideOrgName.trim() || orgProfile?.orgName || orgProfile?.displayName ||
     tournament?.organizerName || null,
   );
 
@@ -277,6 +304,11 @@
     return out;
   });
 
+  // Manual overrides for organizer name/logo — typed directly in the toolbar.
+  // Take priority over the Firebase-loaded profile values.
+  let overrideOrgName = $state('');
+  let overrideLogoUrl = $state('');
+
   // QR mode: 'board' = one permanent sticker per physical board (default),
   //          'match' = one QR per planned match showing who plays who.
   let qrMode = $state<'board' | 'match'>('board');
@@ -299,42 +331,61 @@
 
   $effect(() => {
     if (!tournamentKey) return;
-    // Board QRs.
+    // Board QRs — one per board, few in number, safe to reassign individually.
     for (const b of boards) {
       if (qrByBoard[b]) continue;
       const url = `${scanBase}?tournament=${encodeURIComponent(tournamentKey)}&board=${b}`;
-      void qrToSVG(url, 400).then((svg) => {
-        qrByBoard = { ...qrByBoard, [b]: svg };
-      });
+      void qrToSVG(url, 400).then((svg) => { qrByBoard = { ...qrByBoard, [b]: svg }; });
     }
-    // Match QRs.
-    for (const m of plannedMatches) {
-      if (qrByMid[m.mid]) continue;
-      const url = `${scanBase}?planned=${encodeURIComponent(m.mid)}`;
-      void qrToSVG(url, 280).then((svg) => {
-        qrByMid = { ...qrByMid, [m.mid]: svg };
-      });
+    // Match QRs — generate all in parallel then write the entire batch at once
+    // so concurrent promises don't race-overwrite each other via spread.
+    const pending = plannedMatches.filter((m) => !qrByMid[m.mid]);
+    if (pending.length > 0) {
+      void Promise.all(
+        pending.map((m) =>
+          qrToSVG(`${scanBase}?planned=${encodeURIComponent(m.mid)}`, 280)
+            .then((svg): [string, string] => [m.mid, svg])
+        )
+      ).then((pairs) => {
+        const next = { ...qrByMid };
+        for (const [mid, svg] of pairs) next[mid] = svg;
+        qrByMid = next;
+      }).catch((err) => { console.error('[PrintBracket] QR generation failed:', err); });
     }
   });
 
-  // Human-readable config line for the cover page. Uses the same
-  // fallbacks that AdminTournaments seeds new tournaments with when
-  // a field is missing (bo3 / 25 / 8 / singles).
-  const configLine = $derived.by<string>(() => {
-    const d = tournament?.defaults ?? {};
+  function fmtCfg(d: { mode?: string; bestOf?: number; pointsTarget?: number; maxBoards?: number; timerDuration?: number }, showMode = true): string {
     const mode = d.mode === 'doubles' ? 'Doubles' : 'Singles';
     const bo = d.bestOf ?? 3;
     const pts = d.pointsTarget ?? 25;
     const mb = d.maxBoards ?? 8;
     const mbTxt = mb === 0 ? 'unlimited boards' : `max ${mb} boards`;
-    return `${mode} · best of ${bo} · target ${pts} points · ${mbTxt}`;
-  });
+    const timer = (d.timerDuration ?? 0) > 0 ? ` · ${d.timerDuration} min` : '';
+    return `${showMode ? mode + ' · ' : ''}Best of ${bo} · target ${pts} pts · ${mbTxt}${timer}`;
+  }
+
+  // Human-readable config line for the cover page.
+  const configLine = $derived.by<string>(() => fmtCfg(tournament?.defaults ?? {}));
 
   const timerLine = $derived<string | null>(
     (tournament?.defaults?.timerDuration ?? 0) > 0
       ? `${tournament!.defaults!.timerDuration} min`
       : null
   );
+
+  // Per-flight config rows for league tournaments (QF/SF/Final may differ).
+  type FlightCfgRow = { flight: string; cfg: string };
+  const flightCfgRows = $derived.by<FlightCfgRow[]>(() => {
+    const lc = tournament?.leagueCfg;
+    if (!lc?.flightCfg) return [];
+    const defaults = tournament?.defaults ?? {};
+    const rows: FlightCfgRow[] = [];
+    for (const [flight, fc] of Object.entries(lc.flightCfg)) {
+      const merged = { ...defaults, ...fc };
+      rows.push({ flight, cfg: fmtCfg(merged, false) });
+    }
+    return rows;
+  });
 
   const tournamentName = $derived<string>(
     tournament?.name ?? plannedMatches[0]?.tournament ?? tournamentKey,
@@ -378,6 +429,397 @@
     out.sort((a, b) => a.order - b.order);
     return out;
   });
+
+  // Bracket rounds: QF/SF/Final/R16/R32 only, sorted by order.
+  const bracketRounds = $derived.by<ScheduleRound[]>(() =>
+    schedule.filter((r) => BRACKET_ROUND_RX.test(r.roundName))
+  );
+
+  // Merged schedule for display: bracket sub-rounds (QF Match 1–4, R16 Match 1–8)
+  // are collapsed into one section per flight+stage (e.g. "Bronze League — Quarter Finals").
+  // Group rounds and non-bracket rounds stay as individual sections.
+  // Matches are deduplicated by mid within each merged section.
+  type MergedRound = { key: string; displayName: string; matches: PlannedMatch[]; order: number };
+  const mergedSchedule = $derived.by<MergedRound[]>(() => {
+    const out = new Map<string, MergedRound>();
+    for (const sr of schedule) {
+      const isBracket = BRACKET_ROUND_RX.test(sr.roundName);
+      if (isBracket) {
+        // Build a merge key: flight + stage label
+        const sep = sr.roundName.indexOf(' — ');
+        const flight = sep !== -1 ? sr.roundName.slice(0, sep) : '';
+        const stage = stageLabel(sr.roundName);
+        const mergeKey = flight ? `${flight} — ${stage}` : stage;
+        if (!out.has(mergeKey)) {
+          out.set(mergeKey, { key: mergeKey, displayName: mergeKey, matches: [], order: sr.order });
+        }
+        const bucket = out.get(mergeKey)!;
+        // Deduplicate by mid
+        const seen = new Set(bucket.matches.map((m) => m.mid));
+        for (const m of sr.matches) {
+          if (!seen.has(m.mid)) { bucket.matches.push(m); seen.add(m.mid); }
+        }
+        // Keep the earliest order for sorting
+        if (sr.order < bucket.order) bucket.order = sr.order;
+      } else {
+        // Group / non-bracket round — normalise "Group RR" for round-robin
+        const displayName = sr.roundName === 'Group RR' ? 'Round Robin Group' : sr.roundName;
+        out.set(sr.roundKey, { key: sr.roundKey, displayName, matches: sr.matches, order: sr.order });
+      }
+    }
+    return [...out.values()].sort((a, b) => a.order - b.order);
+  });
+
+  // Canonical stage label shared by SVG builder and template header chips
+  function stageLabel(name: string): string {
+    const n = name.replace(/^.*?—\s*/, '');
+    if (n.includes('Final') && !n.includes('SF')) return 'Finals';
+    if (n.includes('SF')) return 'Semi Finals';
+    if (n.includes('QF')) return 'Quarter Finals';
+    if (n.includes('R16') || n.toLowerCase().includes('round of 16')) return 'Rounds';
+    if (n.includes('R32')) return 'Rounds';
+    return n;
+  }
+
+  // Build per-board scores map from match history boardLog.
+  // Each entry is one physical board played: { set, board, a, b }.
+  type BoardScore = { set: number; board: number; a: number; b: number };
+  function buildBoardScoresMap(records: MatchRecord[]): Map<string, BoardScore[]> {
+    const m = new Map<string, BoardScore[]>();
+    for (const rec of records) {
+      if (!rec?.id || !rec.boardLog?.length) continue;
+      const boards: BoardScore[] = rec.boardLog
+        .filter((e) => e != null)
+        .map((e) => ({
+          set: e.set ?? 0,
+          board: e.board ?? 0,
+          a: e.pointsA ?? 0,
+          b: e.pointsB ?? 0,
+        }))
+        .sort((x, y) => x.set !== y.set ? x.set - y.set : x.board - y.board);
+      if (boards.length > 0) m.set(rec.id, boards);
+    }
+    return m;
+  }
+
+  // Match slot type used by the SVG builder (works with both history and planned data).
+  type BracketSlot = {
+    aId?: string; aName: string;
+    bId?: string; bName: string;
+    isDone: boolean;
+    winner?: 'a' | 'b';
+    boardScores?: BoardScore[];  // per-board scores from boardLog
+    setsA?: number; setsB?: number;
+    pointsA?: number; pointsB?: number; // total match points fallback
+  };
+
+  // Build an inline SVG bracket matching the reports-tab style.
+  // Stages are merged (all QF matches → one column) and per-set scores shown.
+  // Light theme for print.
+  function buildFlightBracketSVG(
+    cols: Array<{ label: string; slots: BracketSlot[] }>,
+  ): string {
+    if (cols.length < 2) return '';
+
+    const COL_W = 240;
+    const COL_GAP = 48;
+    const NAME_MAX = 22;
+
+    function clip(s: string): string {
+      return s.length > NAME_MAX ? s.slice(0, NAME_MAX - 1) + '…' : s;
+    }
+
+    // Slot height is fixed — score always fits on one line (single-set = boards, multi-set = count)
+    function slotH(_slot: BracketSlot): number {
+      return 44;
+    }
+
+    // Score display logic:
+    // - setsA + setsB === 1 → single set: show per-board scores (boardLog) > total points > set count
+    // - setsA + setsB > 1  → multiple sets: show set count "2–1"
+    function scoreLines(slot: BracketSlot): string[] {
+      if (!slot.isDone) return [];
+      const sA = slot.setsA ?? 0;
+      const sB = slot.setsB ?? 0;
+      const totalSets = sA + sB;
+      if (totalSets <= 1) {
+        if (slot.boardScores && slot.boardScores.length > 0) {
+          return [slot.boardScores.map((b) => `${b.a}–${b.b}`).join('  ')];
+        }
+        const pA = slot.pointsA ?? 0;
+        const pB = slot.pointsB ?? 0;
+        if (pA > 0 || pB > 0) return [`${pA}–${pB}`];
+        return [`${sA}–${sB}`];
+      }
+      return [`${sA}–${sB}`];
+    }
+
+    const SLOT_PAD = 10;
+    const MATCH_H = 56; // base spacing between match centres
+
+    const maxSlots = cols[0].slots.length;
+    const colCount = cols.length;
+    const totalH = maxSlots * MATCH_H + (maxSlots - 1) * SLOT_PAD;
+    const totalW = colCount * COL_W + (colCount - 1) * COL_GAP;
+
+    const lines: string[] = [];
+    const colX = (ci: number) => ci * (COL_W + COL_GAP);
+
+    function slotCY(idx: number, slotCount: number): number {
+      const spacing = totalH / slotCount;
+      return spacing * idx + spacing / 2;
+    }
+
+    // Column stage labels
+    for (let ci = 0; ci < cols.length; ci++) {
+      const x = colX(ci);
+      lines.push(`<text x="${x + COL_W / 2}" y="-6" text-anchor="middle" font-size="10" font-weight="700"
+            font-family="sans-serif" fill="#888" letter-spacing="0.06em">${cols[ci].label.toUpperCase()}</text>`);
+    }
+
+    // Connector lines
+    for (let ci = 0; ci < cols.length - 1; ci++) {
+      const currCount = cols[ci].slots.length;
+      const nextCount = cols[ci + 1].slots.length;
+      const x1 = colX(ci) + COL_W;
+      const x2 = colX(ci + 1);
+      const xMid = x1 + COL_GAP / 2;
+      for (let ni = 0; ni < nextCount; ni++) {
+        const cy2 = slotCY(ni, nextCount);
+        const srcA = ni * 2;
+        const srcB = ni * 2 + 1;
+        if (srcA < currCount) {
+          const cy1 = slotCY(srcA, currCount);
+          lines.push(`<line x1="${x1}" y1="${cy1}" x2="${xMid}" y2="${cy1}" stroke="#bbb" stroke-width="1.25"/>`);
+          lines.push(`<line x1="${xMid}" y1="${cy1}" x2="${xMid}" y2="${cy2}" stroke="#bbb" stroke-width="1.25"/>`);
+        }
+        if (srcB < currCount) {
+          const cy1 = slotCY(srcB, currCount);
+          lines.push(`<line x1="${x1}" y1="${cy1}" x2="${xMid}" y2="${cy1}" stroke="#bbb" stroke-width="1.25"/>`);
+          lines.push(`<line x1="${xMid}" y1="${cy1}" x2="${xMid}" y2="${cy2}" stroke="#bbb" stroke-width="1.25"/>`);
+        }
+        lines.push(`<line x1="${xMid}" y1="${cy2}" x2="${x2}" y2="${cy2}" stroke="#bbb" stroke-width="1.25"/>`);
+      }
+    }
+
+    // Match slots
+    for (let ci = 0; ci < cols.length; ci++) {
+      const col = cols[ci];
+      const x = colX(ci);
+
+      for (let mi = 0; mi < col.slots.length; mi++) {
+        const slot = col.slots[mi];
+        const cy = slotCY(mi, col.slots.length);
+        const sh = slotH(slot);
+        const sy = cy - sh / 2;
+
+        const aName = clip(resolvedName(slot.aId, slot.aName));
+        const bName = clip(resolvedName(slot.bId, slot.bName));
+        const aIsWinner = slot.isDone && slot.winner === 'a';
+        const bIsWinner = slot.isDone && slot.winner === 'b';
+
+        const aFill = aIsWinner ? '#000' : '#333';
+        const bFill = bIsWinner ? '#000' : '#333';
+        const aWeight = aIsWinner ? '700' : '400';
+        const bWeight = bIsWinner ? '700' : '400';
+        const aOpacity = slot.isDone && !aIsWinner ? '0.38' : '1';
+        const bOpacity = slot.isDone && !bIsWinner ? '0.38' : '1';
+
+        const sLines = scoreLines(slot);
+        // Estimate pill width: board scores like "25–14  21–4" need ~7px/char at font-size 10
+        const maxLineLen = sLines.reduce((m, l) => Math.max(m, l.length), 0);
+        const pillW = Math.max(36, Math.min(maxLineLen * 6.5 + 10, COL_W - 90));
+
+        lines.push(`
+          <rect x="${x}" y="${sy}" width="${COL_W}" height="${sh}" rx="5"
+                fill="#fff" stroke="#d4d4d4" stroke-width="1"/>
+          <line x1="${x + 1}" y1="${sy + sh / 2}" x2="${x + COL_W - 1}" y2="${sy + sh / 2}"
+                stroke="#ebebeb" stroke-width="0.75"/>
+          <text x="${x + 8}" y="${sy + 16}" font-size="11" font-weight="${aWeight}"
+                opacity="${aOpacity}" font-family="sans-serif" fill="${aFill}">${aName || 'TBD'}</text>
+          <text x="${x + 8}" y="${sy + sh - 8}" font-size="11" font-weight="${bWeight}"
+                opacity="${bOpacity}" font-family="sans-serif" fill="${bFill}">${bName || 'TBD'}</text>
+        `);
+
+        if (sLines.length > 0) {
+          const px = x + COL_W - pillW - 4;
+          const pillH = 17;
+          const py = cy - pillH / 2;
+          lines.push(`<rect x="${px}" y="${py}" width="${pillW}" height="${pillH}" rx="8" fill="#f5f5f5" stroke="#e0e0e0" stroke-width="0.75"/>`);
+          lines.push(`<text x="${px + pillW / 2}" y="${py + 12}" text-anchor="middle" font-size="9.5" font-family="sans-serif" fill="#444" font-weight="600">${sLines[0]}</text>`);
+        }
+      }
+    }
+
+    const svgH = Math.max(totalH, 120);
+    const svgPadT = 20;
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-8 -${svgPadT} ${totalW + 16} ${svgH + svgPadT + 8}"
+      width="${totalW + 16}" height="${svgH + svgPadT + 8}" style="max-width:100%;height:auto;display:block">
+      <rect x="-8" y="-${svgPadT}" width="${totalW + 16}" height="${svgH + svgPadT + 8}" fill="#fff"/>
+      ${lines.join('\n')}
+    </svg>`;
+  }
+
+  // Group bracket rounds by flight prefix ("Gold League", "Silver League", etc.)
+  // If no " — " prefix, all rounds go into one unnamed flight.
+  type BracketFlight = { name: string; rounds: ScheduleRound[] };
+  // History-based bracket flights — built from /matches records grouped by roundKey.
+  // Deduplicates same-stage rounds and uses boardLog for per-set scores.
+  type HistoryBracketFlight = { name: string; cols: Array<{ label: string; slots: BracketSlot[] }> };
+
+  const STAGE_ORDER = ['Rounds', 'Quarter Finals', 'Semi Finals', 'Finals'];
+
+  const historyBracketFlights = $derived.by<HistoryBracketFlight[]>(() => {
+    void playerTick;
+    void tournamentTick; // for schedule dependency
+    if (historyMatches.length === 0) return [];
+
+    const setScoresMap = buildBoardScoresMap(historyMatches);
+
+    // Group history matches by flight name (prefix before " — ") + roundKey
+    type RoundGroup = { label: string; slots: BracketSlot[] };
+    const flightMap = new Map<string, Map<string, RoundGroup>>();
+
+    for (const rec of historyMatches) {
+      const round = rec.round ?? rec.roundKey ?? '';
+      if (!BRACKET_ROUND_RX.test(round)) continue;
+
+      const sep = round.indexOf(' — ');
+      const flightName = sep !== -1 ? round.slice(0, sep) : '';
+      const stageLbl = stageLabel(round);
+
+      if (!flightMap.has(flightName)) flightMap.set(flightName, new Map());
+      const stageMap = flightMap.get(flightName)!;
+      if (!stageMap.has(stageLbl)) stageMap.set(stageLbl, { label: stageLbl, slots: [] });
+
+      const slot: BracketSlot = {
+        aId: rec.playerAId,
+        aName: rec.aName ?? '',
+        bId: rec.playerBId,
+        bName: rec.bName ?? '',
+        isDone: !!(rec.result?.winner),
+        winner: rec.result?.winner === 'a' ? 'a' : rec.result?.winner === 'b' ? 'b' : undefined,
+        boardScores: setScoresMap.get(rec.id),
+        setsA: rec.result?.setsA,
+        setsB: rec.result?.setsB,
+        pointsA: rec.result?.finalPointsA,
+        pointsB: rec.result?.finalPointsB,
+      };
+      stageMap.get(stageLbl)!.slots.push(slot);
+    }
+
+    // Build a flight → min round order map from schedule (already sorted by order)
+    // so flights render in the same sequence as the Reports tab.
+    const flightMinOrder = new Map<string, number>();
+    for (const sr of schedule) {
+      const sep = sr.roundName.indexOf(' — ');
+      const fn = sep !== -1 ? sr.roundName.slice(0, sep) : '';
+      if (!flightMinOrder.has(fn) || sr.order < flightMinOrder.get(fn)!) {
+        flightMinOrder.set(fn, sr.order);
+      }
+    }
+
+    const result: HistoryBracketFlight[] = [];
+    for (const [flightName, stageMap] of flightMap) {
+      // Sort stages by STAGE_ORDER
+      const sortedStages = [...stageMap.values()].sort((a, b) => {
+        const ai = STAGE_ORDER.indexOf(a.label);
+        const bi = STAGE_ORDER.indexOf(b.label);
+        return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+      });
+      if (sortedStages.length < 2) continue;
+      result.push({ name: flightName, cols: sortedStages });
+    }
+    // Sort by round order from tournament config (matches Reports tab order).
+    // Fall back to alphabetical if order info isn't available.
+    result.sort((a, b) => {
+      const oa = flightMinOrder.get(a.name) ?? 999;
+      const ob = flightMinOrder.get(b.name) ?? 999;
+      return oa !== ob ? oa - ob : a.name.localeCompare(b.name);
+    });
+    return result;
+  });
+
+  // Fallback: /planned-based bracket flights (used when no history data yet)
+  const plannedBracketFlights = $derived.by<BracketFlight[]>(() => {
+    void tournamentTick;
+    const map = new Map<string, ScheduleRound[]>();
+    for (const r of bracketRounds) {
+      const sep = r.roundName.indexOf(' — ');
+      const key = sep !== -1 ? r.roundName.slice(0, sep) : '';
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(r);
+    }
+    return [...map.entries()].map(([name, rounds]) => ({ name, rounds }));
+  });
+
+  // Build planned-based BracketSlot cols (fallback when no history)
+  function plannedFlightToCols(rounds: ScheduleRound[]): Array<{ label: string; slots: BracketSlot[] }> {
+    const sorted = [...rounds].sort((a, b) => {
+      const ai = STAGE_ORDER.indexOf(stageLabel(a.roundName));
+      const bi = STAGE_ORDER.indexOf(stageLabel(b.roundName));
+      return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+    });
+    const mergedMap = new Map<string, { label: string; slots: BracketSlot[] }>();
+    for (const r of sorted) {
+      const lbl = stageLabel(r.roundName);
+      if (!mergedMap.has(lbl)) mergedMap.set(lbl, { label: lbl, slots: [] });
+      for (const m of r.matches) {
+        mergedMap.get(lbl)!.slots.push({
+          aId: m.aResolvedId,
+          aName: m.aName,
+          bId: m.bResolvedId,
+          bName: m.bName,
+          isDone: !!m.completedAt,
+          winner: m.result?.winner === 'a' ? 'a' : m.result?.winner === 'b' ? 'b' : undefined,
+          setsA: m.result?.setsA,
+          setsB: m.result?.setsB,
+        });
+      }
+    }
+    return [...mergedMap.values()];
+  }
+
+  // Per-flight bracket SVGs — keyed by flight name. Uses history data when available.
+  const flightBracketSVGs = $derived.by<Map<string, string>>(() => {
+    void tournamentTick;
+    void playerTick;
+    const out = new Map<string, string>();
+
+    if (historyBracketFlights.length > 0) {
+      // Use history data (has boardLog → per-set scores, deduped rounds)
+      for (const f of historyBracketFlights) {
+        const svg = buildFlightBracketSVG(f.cols);
+        if (svg) out.set(f.name, svg);
+      }
+    } else {
+      // Fallback to /planned data (no boardLog, set counts only)
+      for (const f of plannedBracketFlights) {
+        const cols = plannedFlightToCols(f.rounds);
+        const svg = buildFlightBracketSVG(cols);
+        if (svg) out.set(f.name, svg);
+      }
+    }
+    return out;
+  });
+
+  // Active flights list — used by the template to decide what to render
+  const activeBracketFlights = $derived.by<Array<{ name: string }>>(() => {
+    if (historyBracketFlights.length > 0) {
+      return historyBracketFlights.map((f) => ({ name: f.name }));
+    }
+    return plannedBracketFlights.map((f) => ({ name: f.name }));
+  });
+
+  const bracketSVG = $derived.by<string>(() => {
+    void tournamentTick;
+    void playerTick;
+    // Legacy: single flight — render one SVG
+    if (activeBracketFlights.length <= 1) {
+      return flightBracketSVGs.get(activeBracketFlights[0]?.name ?? '') ?? '';
+    }
+    return '';
+  });
 </script>
 
 <div class="print-wrap">
@@ -394,42 +836,68 @@
       No matches planned yet for <strong>{tournamentKey}</strong>.
       Open the tournament's Bracket and add matches first.
     </p>
-  {:else if boards.length === 0}
+  {:else if boards.length === 0 && bracketRounds.length === 0}
     <p class="hint">
-      Matches exist but none have a board number assigned. Edit each
-      bracket row and set a Board (1..99), then come back and print.
+      Matches exist but none have a board number assigned.<br>
+      If this is a League tournament, open <strong>League Setup → Re-draw groups</strong>
+      to regenerate the schedule with board numbers, then come back and print.
     </p>
   {:else}
     <div class="print-actions no-print">
       <div class="print-toolbar">
-        <div class="qr-type-group" role="group" aria-label="QR type">
-          <span class="qr-type-label">QR type</span>
-          <div class="seg-ctrl">
-            <button
-              type="button"
-              class="seg-btn"
-              class:seg-active={qrMode === 'board'}
-              aria-pressed={qrMode === 'board'}
-              onclick={() => setQrMode('board')}
-            >Per board</button>
-            <button
-              type="button"
-              class="seg-btn"
-              class:seg-active={qrMode === 'match'}
-              aria-pressed={qrMode === 'match'}
-              onclick={() => setQrMode('match')}
-            >Per match</button>
+        {#if boards.length > 0}
+          <div class="qr-type-group" role="group" aria-label="QR type">
+            <span class="qr-type-label">QR type</span>
+            <div class="seg-ctrl">
+              <button
+                type="button"
+                class="seg-btn"
+                class:seg-active={qrMode === 'board'}
+                aria-pressed={qrMode === 'board'}
+                onclick={() => setQrMode('board')}
+              >Per board</button>
+              <button
+                type="button"
+                class="seg-btn"
+                class:seg-active={qrMode === 'match'}
+                aria-pressed={qrMode === 'match'}
+                onclick={() => setQrMode('match')}
+              >Per match</button>
+            </div>
           </div>
+        {/if}
+        <div class="org-override-group">
+          <label class="org-override-label" for="override-org-name">Organizer</label>
+          <input
+            id="override-org-name"
+            type="text"
+            class="org-override-input"
+            placeholder={printOrganizerName ?? 'Organizer name…'}
+            bind:value={overrideOrgName}
+          />
+          <label class="org-override-label" for="override-logo-url">Logo URL</label>
+          <input
+            id="override-logo-url"
+            type="url"
+            class="org-override-input"
+            placeholder={printLogoUrl ?? 'https://…logo.png'}
+            bind:value={overrideLogoUrl}
+          />
+          {#if printLogoUrl}
+            <img src={printLogoUrl} alt="logo preview" class="logo-preview" />
+          {/if}
         </div>
         <button type="button" class="print-btn" onclick={() => window.print()}>🖨 Print</button>
       </div>
-      <p class="hint">
-        {#if qrMode === 'board'}
-          Board stickers — permanent QR per board, same every round. Cut out and stick to each physical board.
-        {:else}
-          Match cards — one QR per match. Cut out and place at the board for that match.
-        {/if}
-      </p>
+      {#if boards.length > 0}
+        <p class="hint">
+          {#if qrMode === 'board'}
+            Board stickers — permanent QR per board, same every round. Cut out and stick to each physical board.
+          {:else}
+            Match cards — one QR per match. Cut out and place at the board for that match.
+          {/if}
+        </p>
+      {/if}
     </div>
 
     <!-- ─── COVER PAGE ─────────────────────────────────────────────
@@ -458,21 +926,21 @@
 
       <div class="cover-meta">
         <div class="meta-row">
-          <span class="meta-label">Format</span>
+          <span class="meta-label">Default format</span>
           <span class="meta-value">{configLine}</span>
         </div>
+        {#each flightCfgRows as row (row.flight)}
+        <div class="meta-row meta-row-flight">
+          <span class="meta-label">{row.flight}</span>
+          <span class="meta-value">{row.cfg}</span>
+        </div>
+        {/each}
         <div class="meta-row">
           <span class="meta-label">Type</span>
           <span class="meta-value">
             {tournament?.type === 'closed' ? 'Invite-only (assigned roster)' : 'Open'}
           </span>
         </div>
-        {#if timerLine}
-        <div class="meta-row">
-          <span class="meta-label">Timer</span>
-          <span class="meta-value">{timerLine}</span>
-        </div>
-        {/if}
         <div class="meta-row">
           <span class="meta-label">Boards</span>
           <span class="meta-value">{boards.length}</span>
@@ -508,13 +976,13 @@
         <p class="cover-empty">No players registered yet.</p>
       {/if}
 
-      {#if schedule.length > 0}
+      {#if mergedSchedule.length > 0}
         <h2 class="cover-section" style="margin-top:1.4rem">
           Schedule ({matchCount} {matchCount === 1 ? 'match' : 'matches'})
         </h2>
-        {#each schedule as round, ri (round.roundKey)}
+        {#each mergedSchedule as round, ri (round.key)}
           <div class="sched-round">
-            <p class="sched-round-name">{round.roundName}</p>
+            <p class="sched-round-name">{round.displayName}</p>
             <table class="sched-table">
               <thead>
                 <tr>
@@ -524,7 +992,7 @@
               </thead>
               <tbody>
                 {#each round.matches as m, mi (m.mid)}
-                  {@const matchNum = schedule.slice(0, ri).reduce((acc, r) => acc + r.matches.length, 0) + mi + 1}
+                  {@const matchNum = mergedSchedule.slice(0, ri).reduce((acc, r) => acc + r.matches.length, 0) + mi + 1}
                   <tr>
                     <td class="sched-board">{qrMode === 'match' ? `M${matchNum}` : (m.board ? `B${m.board}` : '—')}</td>
                     <td class="sched-matchup">
@@ -540,18 +1008,56 @@
         {/each}
       {/if}
 
-      {#if printOrganizerName || printLogoUrl}
-        <div class="page-footer">
-          {#if printLogoUrl}
-            <img src={printLogoUrl} alt="Organiser logo" class="page-footer-logo" />
-          {/if}
-          {#if printOrganizerName}
-            <span class="page-footer-org">Organised by {printOrganizerName}</span>
-          {/if}
-        </div>
-      {/if}
+      <div class="page-footer">
+        {#if printLogoUrl}
+          <img src={printLogoUrl} alt="Organiser logo" class="page-footer-logo" />
+        {/if}
+        {#if printOrganizerName}
+          <span class="page-footer-org">Organised by {printOrganizerName}</span>
+        {/if}
+        <span class="page-footer-brand">carromscore.app</span>
+      </div>
     </section>
 
+    {#if flightBracketSVGs.size >= 1}
+      <!-- ─── BRACKET PAGE(S) ─────────────────────────────────────────
+           Single flight: one page with the bracket tree.
+           Multi-flight (league): one bracket section per flight on
+           one shared page, each with its own header and SVG. -->
+      {#each activeBracketFlights as flight (flight.name)}
+        {@const flightSVG = flightBracketSVGs.get(flight.name) ?? (activeBracketFlights.length <= 1 ? bracketSVG : '')}
+        {#if flightSVG}
+          <section class="page bracket-page">
+            <div class="bracket-hdr">
+              <div class="bracket-hdr-main">
+                <p class="brand">Carromscore</p>
+                <h2 class="bracket-title">{tournamentName}{flight.name ? ` — ${flight.name}` : ' — Draw'}</h2>
+                {#if printOrganizerName}
+                  <p class="bracket-organizer">Organised by {printOrganizerName}</p>
+                {/if}
+              </div>
+              {#if printLogoUrl}
+                <img src={printLogoUrl} alt="Organiser logo" class="bracket-logo" />
+              {/if}
+            </div>
+            <div class="bracket-svg-wrap">
+              {@html flightSVG}
+            </div>
+            <div class="page-footer">
+              {#if printLogoUrl}
+                <img src={printLogoUrl} alt="Organiser logo" class="page-footer-logo" />
+              {/if}
+              {#if printOrganizerName}
+                <span class="page-footer-org">Organised by {printOrganizerName}</span>
+              {/if}
+              <span class="page-footer-brand">carromscore.app</span>
+            </div>
+          </section>
+        {/if}
+      {/each}
+    {/if}
+
+    {#if boards.length > 0}
     {#if qrMode === 'board'}
       <!-- ─── BOARD STICKERS (permanent per-board QR, 2-column grid) ── -->
       <section class="page qr-grid-page">
@@ -575,16 +1081,15 @@
             </div>
           {/each}
         </div>
-        {#if printOrganizerName || printLogoUrl}
-          <div class="page-footer">
-            {#if printLogoUrl}
-              <img src={printLogoUrl} alt="Organiser logo" class="page-footer-logo" />
-            {/if}
-            {#if printOrganizerName}
-              <span class="page-footer-org">Organised by {printOrganizerName}</span>
-            {/if}
-          </div>
-        {/if}
+        <div class="page-footer">
+          {#if printLogoUrl}
+            <img src={printLogoUrl} alt="Organiser logo" class="page-footer-logo" />
+          {/if}
+          {#if printOrganizerName}
+            <span class="page-footer-org">Organised by {printOrganizerName}</span>
+          {/if}
+          <span class="page-footer-brand">carromscore.app</span>
+        </div>
       </section>
     {:else}
       <!-- ─── PER-MATCH QR CARDS (one QR per planned match) ─────────── -->
@@ -616,18 +1121,18 @@
               </div>
             {/each}
           </div>
-          {#if printOrganizerName || printLogoUrl}
-            <div class="page-footer">
-              {#if printLogoUrl}
-                <img src={printLogoUrl} alt="Organiser logo" class="page-footer-logo" />
-              {/if}
-              {#if printOrganizerName}
-                <span class="page-footer-org">Organised by {printOrganizerName}</span>
-              {/if}
-            </div>
-          {/if}
+          <div class="page-footer">
+            {#if printLogoUrl}
+              <img src={printLogoUrl} alt="Organiser logo" class="page-footer-logo" />
+            {/if}
+            {#if printOrganizerName}
+              <span class="page-footer-org">Organised by {printOrganizerName}</span>
+            {/if}
+            <span class="page-footer-brand">carromscore.app</span>
+          </div>
         </section>
       {/each}
+    {/if}
     {/if}
   {/if}
 
@@ -699,6 +1204,42 @@
     background: #ffd54a;
     color: #000;
     box-shadow: 0 1px 4px rgba(0,0,0,0.18);
+  }
+  /* Organizer override inputs */
+  .org-override-group {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    flex-wrap: wrap;
+  }
+  .org-override-label {
+    font-size: 0.78rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #666;
+    white-space: nowrap;
+  }
+  .org-override-input {
+    height: 2rem;
+    padding: 0 0.6rem;
+    font-size: 0.85rem;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    background: #fff;
+    color: #111;
+    outline: none;
+    min-width: 0;
+  }
+  .org-override-input:first-of-type { width: 11rem; }
+  .org-override-input:last-of-type  { width: 14rem; }
+  .org-override-input:focus { border-color: #888; }
+  .logo-preview {
+    max-height: 1.8rem;
+    max-width: 4rem;
+    object-fit: contain;
+    border-radius: 3px;
+    border: 1px solid #e0e0e0;
   }
   /* Print action button — visually distinct from the selector */
   .print-btn {
@@ -810,11 +1351,21 @@
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    min-width: 4.5rem;
+    min-width: 6.5rem;
+    flex-shrink: 0;
   }
   .meta-value {
     color: #000;
     font-weight: 600;
+  }
+  .meta-row-flight {
+    grid-column: 1 / -1;
+    border-left: 3px solid #000;
+    padding-left: 0.6rem;
+    margin: 0.1rem 0;
+  }
+  .meta-row-flight .meta-label {
+    color: #333;
   }
 
   .cover-section {
@@ -1094,6 +1645,16 @@
       font-style: italic;
       letter-spacing: 0.01em;
     }
+    .page-footer-brand {
+      font-size: 0.68rem;
+      color: #bbb;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      margin-left: auto;
+    }
+    .cover-meta {
+      grid-template-columns: 1fr;
+    }
   }
 
   /* Narrow phone preview: single-column meta + roster so the
@@ -1103,6 +1664,82 @@
     .roster {
       grid-template-columns: 1fr;
       column-count: 1;
+    }
+  }
+
+  /* ── Bracket page ─────────────────────────────────────── */
+  .bracket-page {
+    display: flex;
+    flex-direction: column;
+    color-scheme: light;
+    background: #fff;
+    color: #000;
+  }
+  .bracket-hdr {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.9rem;
+    margin-bottom: 1.25rem;
+    border-bottom: 2px solid #e0e0e0;
+    padding-bottom: 0.75rem;
+  }
+  .bracket-hdr-main {
+    flex: 1;
+    min-width: 0;
+  }
+  .bracket-title {
+    font-size: 1.25rem;
+    font-weight: 700;
+    margin: 0.15rem 0 0.25rem;
+    line-height: 1.2;
+  }
+  .bracket-organizer {
+    margin: 0;
+    font-size: 0.82rem;
+    color: #555;
+    font-weight: 500;
+  }
+  .bracket-logo {
+    flex-shrink: 0;
+    max-height: 3rem;
+    max-width: 5rem;
+    object-fit: contain;
+    align-self: center;
+  }
+  .bracket-round-labels {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+  .bracket-round-label {
+    background: #f0f0f0;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 0.78rem;
+    padding: 0.15rem 0.55rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #444;
+  }
+  .bracket-svg-wrap {
+    overflow-x: auto;
+    padding: 0.5rem 0 1rem;
+  }
+  .bracket-footer {
+    font-size: 0.72rem;
+    color: #aaa;
+    text-align: center;
+    margin-top: 1rem;
+    border-top: 1px solid #eee;
+    padding-top: 0.6rem;
+  }
+  @media print {
+    .bracket-page {
+      page-break-before: always;
+    }
+    .bracket-svg-wrap {
+      overflow: visible;
     }
   }
 </style>

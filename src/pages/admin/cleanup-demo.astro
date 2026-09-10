@@ -1,0 +1,7 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import CleanupDemoData from '../../components/admin/CleanupDemoData.svelte';
+---
+<BaseLayout title="Cleanup Demo Data">
+  <CleanupDemoData client:only="svelte" />
+</BaseLayout>

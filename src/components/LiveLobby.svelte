@@ -22,6 +22,7 @@
   import { subscribeAllLive, sweepStaleLive, type LobbyEntry } from '../lib/live-sync';
   import {
     loadHistory,
+    loadMatchesByTournamentKey,
     playerName,
     reconcileResultFromBoardLog,
     selfDeleteMatch,
@@ -661,14 +662,22 @@
     void loadHistory().then((m) => (matches = m));
   }
 
-  // Load History on tab switch. Reloads every time the tab is opened
-  // so the tournament dropdown and match list pick up new matches
-  // without requiring a hard refresh. Firebase caches the read locally
-  // so repeated tab switches are cheap.
+  // Load History on tab switch. For the Reports tab with a specific
+  // tournament selected, use the indexed query (fast). For the History
+  // tab or Reports with "All" / Default, load the full archive.
   $effect(() => {
     if (tab !== 'history' && tab !== 'reports') return;
+    const sel = reportsSelection;
+    const useIndexed =
+      tab === 'reports' &&
+      sel !== undefined &&
+      sel !== null &&
+      sel !== '__all__';
     historyLoading = true;
-    void loadHistory().then((m) => {
+    const loader = useIndexed
+      ? loadMatchesByTournamentKey(normalizeKey(sel as string))
+      : loadHistory();
+    void loader.then((m) => {
       matches = m;
       historyLoading = false;
       historyLoaded = true;
