@@ -38,6 +38,7 @@ export type ReportRow = {
   pointsB: number;
   winner: 'A' | 'B' | 'Draw' | '';
   recordedBy: string;
+  matchOrder?: number;  // from match record — used to order bracket slots
 };
 
 /**
@@ -193,6 +194,7 @@ export function buildReportRows(matches: MatchRecord[]): ReportRow[] {
       pointsB: m.result?.finalPointsB ?? 0,
       winner,
       recordedBy: m.createdByName ?? '',
+      ...(typeof (m as any).matchOrder === 'number' ? { matchOrder: (m as any).matchOrder } : {}),
     });
   }
   rows.sort((a, b) => b.endedAtRaw - a.endedAtRaw);
