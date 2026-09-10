@@ -509,7 +509,8 @@
     isDone: boolean;
     winner?: 'a' | 'b';
     boardScores?: BoardScore[];  // per-board scores from boardLog
-    setsA?: number; setsB?: number; // fallback set counts from result
+    setsA?: number; setsB?: number;
+    pointsA?: number; pointsB?: number; // total match points fallback
   };
 
   // Build an inline SVG bracket matching the reports-tab style.
@@ -534,21 +535,22 @@
     }
 
     // Score display logic:
-    // - setsA + setsB === 1 (single set played) → show per-board scores from boardLog, or "0–1"/"1–0"
-    // - setsA + setsB > 1 (multiple sets played) → show set count "2–1"
+    // - setsA + setsB === 1 → single set: show per-board scores (boardLog) > total points > set count
+    // - setsA + setsB > 1  → multiple sets: show set count "2–1"
     function scoreLines(slot: BracketSlot): string[] {
       if (!slot.isDone) return [];
       const sA = slot.setsA ?? 0;
       const sB = slot.setsB ?? 0;
       const totalSets = sA + sB;
       if (totalSets <= 1) {
-        // Single set — show per-board scores if available
         if (slot.boardScores && slot.boardScores.length > 0) {
           return [slot.boardScores.map((b) => `${b.a}–${b.b}`).join('  ')];
         }
+        const pA = slot.pointsA ?? 0;
+        const pB = slot.pointsB ?? 0;
+        if (pA > 0 || pB > 0) return [`${pA}–${pB}`];
         return [`${sA}–${sB}`];
       }
-      // Multiple sets — compact set count
       return [`${sA}–${sB}`];
     }
 
@@ -700,6 +702,8 @@
         boardScores: setScoresMap.get(rec.id),
         setsA: rec.result?.setsA,
         setsB: rec.result?.setsB,
+        pointsA: rec.result?.finalPointsA,
+        pointsB: rec.result?.finalPointsB,
       };
       stageMap.get(stageLbl)!.slots.push(slot);
     }
