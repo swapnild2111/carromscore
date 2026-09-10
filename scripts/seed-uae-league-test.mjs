@@ -257,29 +257,148 @@ function seed() {
   }
 
   // ── 8. Build new match history ───────────────────────────────────────────
+  // Group matches: copy directly from source /matches using LEAGUE_GROUP_MAP.
+  // Flight matches (Gold/Silver/Bronze): ALL three source tournaments have
+  // unreliable roundKeys in /matches (and sometimes no roundKey at all, or
+  // a single round key for all stages). Build from /planned instead, using
+  // matchOrder to derive the correct stage, then look up boardCount from the
+  // real /matches record if it exists.
   const newMatches = {};
+
+  // Group matches (reliable — one round per group tournament)
   for (const [srcKey, srcMatch] of sourceMatches) {
     const tk = srcMatch.tournamentKey;
-    let newRound, newRoundKey;
-
-    if (LEAGUE_GROUP_MAP[tk]) {
-      newRound = LEAGUE_GROUP_MAP[tk].newRound;
-      newRoundKey = LEAGUE_GROUP_MAP[tk].newRoundKey;
-    } else {
-      const mapping = flightRoundMapping[tk];
-      const mapped = mapping?.get(srcMatch.roundKey);
-      if (!mapped) continue;
-      newRound = mapped.newRoundName;
-      newRoundKey = mapped.newRoundKey;
-    }
-
+    if (!LEAGUE_GROUP_MAP[tk]) continue;
     newMatches[`_UAE_TST_${srcKey}`] = {
       ...srcMatch,
       tournament: DISPLAY_NAME,
       tournamentKey: TK,
-      round: newRound,
-      roundKey: newRoundKey,
+      round: LEAGUE_GROUP_MAP[tk].newRound,
+      roundKey: LEAGUE_GROUP_MAP[tk].newRoundKey,
     };
+  }
+
+  // Flight matches: derive round from matchOrder, build from planned
+  const pairKey = (a, b) => [a, b].sort().join('|||');
+
+  // Timestamp bases spaced 4 h apart so flights sort distinctly
+  const FLIGHT_BASES = {
+    '3rd-singles-ranking-knock-out-round-of-16-gold':   1757000000000,
+    '3rd-singles-ranking-knock-out-round-of-16-silver': 1757014400000,
+    '3rd-singles-ranking-knock-out-round-of-16-bronze': 1757028800000,
+  };
+
+  function flightRoundFromOrder(flightSlug, order) {
+    const r16  = { key: `${flightSlug}-round-of-16`, name: `${flightSlug.replace(/-/g,' ').replace(/\b\w/g,c=>c.toUpperCase())} — Round of 16` };
+    const qf   = { key: `${flightSlug}-qf`,          name: `${flightSlug.replace(/-/g,' ').replace(/\b\w/g,c=>c.toUpperCase())} — QF` };
+    const sf   = { key: `${flightSlug}-sf`,           name: `${flightSlug.replace(/-/g,' ').replace(/\b\w/g,c=>c.toUpperCase())} — SF` };
+    const fin  = { key: `${flightSlug}-final`,        name: `${flightSlug.replace(/-/g,' ').replace(/\b\w/g,c=>c.toUpperCase())} — Final` };
+    if (order >= 1  && order <= 8)  return r16;
+    if (order >= 9  && order <= 12) return qf;
+    if (order === 13 || order === 14) return sf;
+    if (order === 15) return fin;
+    return null;
+  }
+
+  function flightEndedAt(base, order) {
+    if (order >= 1  && order <= 8)  return base + (8 - order) * 600_000;
+    if (order >= 9  && order <= 12) return base + 3_600_000 + (12 - order) * 600_000;
+    if (order === 13) return base + 7_200_000 + 600_000;
+    if (order === 14) return base + 7_200_000;
+    if (order === 15) return base + 10_800_000;
+    return base;
+  }
+
+  // Replace split flight sub-rounds in `rounds` with clean 4-round structure
+  for (const { srcKey, flightName } of FLIGHT_SOURCES) {
+    const slug = flightName.toLowerCase().replace(/\s+/g, '-');
+    // Remove any split sub-rounds from flightRoundMapping
+    for (const k of Object.keys(rounds)) {
+      if (k.startsWith(`${slug}-`)) delete rounds[k];
+    }
+    const flightOrderBase = { gold: 9, silver: 14, bronze: 19 }[slug.split('-')[0]] ?? 9;
+    rounds[`${slug}-round-of-16`] = { name: `${flightName} — Round of 16`, order: flightOrderBase,     state: 'closed', createdBy: TAG, createdAt: now };
+    rounds[`${slug}-qf`]          = { name: `${flightName} — QF`,           order: flightOrderBase + 1, state: 'closed', createdBy: TAG, createdAt: now };
+    rounds[`${slug}-sf`]          = { name: `${flightName} — SF`,           order: flightOrderBase + 2, state: 'closed', createdBy: TAG, createdAt: now };
+    rounds[`${slug}-final`]       = { name: `${flightName} — Final`,        order: flightOrderBase + 3, state: 'closed', createdBy: TAG, createdAt: now };
+
+    const base = FLIGHT_BASES[srcKey];
+    const slug2 = slug;
+
+    // Build pair → real match lookup for this flight (for boardCount)
+    const realByPair = {};
+    for (const [k, v] of Object.entries(allMatches)) {
+      if (v?.tournamentKey === srcKey) realByPair[pairKey(v.aName, v.bName)] = { key: k, ...v };
+    }
+
+    // Consolidation map: source split roundKeys → canonical stage key
+    const ROUND_CONSOLIDATION = {
+      'round-of-16-match-1-3-5-7': `${slug}-round-of-16`,
+      'round-of-16-match-2-4-6-8': `${slug}-round-of-16`,
+      'qf-match-1': `${slug}-qf`, 'qf-match-2': `${slug}-qf`,
+      'qf-match-3': `${slug}-qf`, 'qf-match-4': `${slug}-qf`,
+      'sf-match-1': `${slug}-sf`, 'sf-match-2': `${slug}-sf`,
+      'final': `${slug}-final`,
+    };
+
+    // Deduplicate planned by unique key, prefer entries with a result
+    const srcFlightPlanned = sourcePlanned
+      .filter(([, v]) => v?.tournamentKey === srcKey)
+      .sort((a, b) => (a[1].matchOrder || 0) - (b[1].matchOrder || 0));
+
+    // Track which UAE match keys we've written to avoid duplicates
+    const writtenMatchKeys = new Set();
+
+    for (const [srcPlanKey, srcPlan] of srcFlightPlanned) {
+      const real = realByPair[pairKey(srcPlan.aName, srcPlan.bName)];
+      const uaePlanKey = `_UAE_TST_${srcPlanKey}`;
+      const uaeMatchKey = real ? `_UAE_TST_${real.key}` : uaePlanKey;
+      if (writtenMatchKeys.has(uaeMatchKey)) continue;
+      writtenMatchKeys.add(uaeMatchKey);
+
+      // Prefer real /matches roundKey if it's a proper sub-round (not the catch-all)
+      // otherwise fall back to matchOrder-based derivation
+      const srcRoundKey = real?.roundKey;
+      const isCatchAll = !srcRoundKey || srcRoundKey === 'round-of-16-match-1-3-5-7';
+      let newRoundKey, newRound;
+      if (!isCatchAll && ROUND_CONSOLIDATION[srcRoundKey]) {
+        newRoundKey = ROUND_CONSOLIDATION[srcRoundKey];
+        newRound = rounds[newRoundKey]?.name ?? newRoundKey;
+      } else {
+        const order = srcPlan.matchOrder || 0;
+        const roundInfo = flightRoundFromOrder(slug2, order);
+        if (!roundInfo) continue;
+        newRoundKey = roundInfo.key;
+        newRound = roundInfo.name;
+      }
+
+      const order = srcPlan.matchOrder || 0;
+      const endedAt = flightEndedAt(base, order);
+
+      // Fix planned entry to correct stage
+      if (newPlanned[uaePlanKey]) {
+        newPlanned[uaePlanKey].round = newRound;
+        newPlanned[uaePlanKey].roundKey = newRoundKey;
+      }
+
+      const result = real?.result ?? srcPlan.result ?? { winner: 'a', setsA: 1, setsB: 0, finalPointsA: 0, finalPointsB: 0, boardCount: 0 };
+      newMatches[uaeMatchKey] = {
+        tournament: DISPLAY_NAME,
+        tournamentKey: TK,
+        round: newRound,
+        roundKey: newRoundKey,
+        aName: srcPlan.aName,
+        bName: srcPlan.bName,
+        ...(srcPlan.aResolvedId ? { playerAId: srcPlan.aResolvedId } : {}),
+        ...(srcPlan.bResolvedId ? { playerBId: srcPlan.bResolvedId } : {}),
+        mode: srcPlan.mode || 'Singles',
+        result,
+        endedAt,
+        startedAt: endedAt - 60_000,
+        createdBy: TAG,
+      };
+    }
+    console.log(`  ${flightName}: ${writtenMatchKeys.size} matches written`);
   }
 
   // ── 9. Write in bulk ─────────────────────────────────────────────────────

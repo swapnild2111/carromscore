@@ -83,7 +83,7 @@
   type PickerOption = { key: string | null; label: string };
   const options = $derived.by<PickerOption[]>(() => {
     void tournamentTick;
-    const opts: PickerOption[] = [{ key: '__all__', label: 'All tournaments' }];
+    const opts: PickerOption[] = [];
     for (const t of loadAllTournaments()) {
       opts.push({ key: t.name, label: t.name });
     }
@@ -105,14 +105,14 @@
    * picked (renders the "pick a tournament" empty state).
    */
   const selection = $derived<string | null | undefined>(
-    initialTournament === undefined ? '__all__' : initialTournament,
+    initialTournament === undefined ? undefined : initialTournament,
   );
   const selectionProxy = $derived(
-    selection === null ? '__default__' : (selection ?? '__all__'),
+    selection === null ? '__default__' : (selection ?? '__unset__'),
   );
   function onTournamentChange(e: Event) {
     const v = (e.currentTarget as HTMLSelectElement).value;
-    const next = v === '__default__' ? null : v;
+    const next = v === '__default__' ? null : v === '__unset__' ? undefined : v;
     onSelectionChange(next);
   }
 
@@ -159,6 +159,30 @@
         : r.roundReports;
     if (nonGroupRounds.length === 0) return [];
     return groupNonGroupRounds(nonGroupRounds, buildSetScoresMap(matches));
+  });
+
+  // Trophy winners for league format: 1st + 2nd per flight, from Final matches.
+  type FlightWinner = { flight: string; champion: string; runnerUp: string };
+  const flightWinners = $derived.by<FlightWinner[]>(() => {
+    const rec = currentTournamentRecord;
+    if (rec?.format !== 'league') return [];
+    const flightNames: string[] = rec.leagueCfg?.flightNames ?? [];
+    if (flightNames.length === 0) return [];
+    // Build slug from flight name: "Gold League" → "gold-league"
+    const slug = (name: string) => name.toLowerCase().replace(/\s+/g, '-');
+    const tk = normalizeKey(selection ?? '');
+    const tournamentMatches = matches.filter((m) => m.tournamentKey === tk);
+    return flightNames.flatMap((flight) => {
+      const finalKey = `${slug(flight)}-final`;
+      const finalMatch = tournamentMatches.find((m) => m.roundKey === finalKey);
+      if (!finalMatch?.result?.winner) return [];
+      const isA = finalMatch.result.winner === 'a';
+      return [{
+        flight,
+        champion: isA ? finalMatch.aName : finalMatch.bName,
+        runnerUp: isA ? finalMatch.bName : finalMatch.aName,
+      }];
+    });
   });
 
   // Organiser profile for print header — loaded when tournament's createdBy changes.
@@ -956,8 +980,9 @@
       onchange={onTournamentChange}
       aria-label="Tournament"
     >
+      <option value="__unset__" disabled selected={selection === undefined}>Select a tournament…</option>
       {#each options as opt (opt.key ?? '__default__')}
-        <option value={opt.key === null ? '__default__' : opt.key === '__all__' ? '__all__' : opt.key}>{opt.label}</option>
+        <option value={opt.key === null ? '__default__' : opt.key}>{opt.label}</option>
       {/each}
     </select>
     {#if report && (report.roundReports?.length ?? 0) > 0}
@@ -1028,8 +1053,8 @@
 
   {#if !viewReport}
     <div class="empty">
-      <p><strong>Pick a tournament above.</strong></p>
-      <p class="empty-sub">Every match tagged to that tournament will show up here with per-player summary, charts, and a copy-to-spreadsheet table.</p>
+      <p><strong>Select a tournament to view its report.</strong></p>
+      <p class="empty-sub">Each tournament has its own format — league, knockout, round-robin — so reports are per-tournament. Choose one from the dropdown above to see match history, standings, brackets, and player stats.</p>
     </div>
   {:else if viewReport!.rows.length === 0}
     <div class="empty">
@@ -1062,18 +1087,33 @@
           anchor the row visually. Podium is the FIRST tile in the
           stat row — the eye lands here before the numeric summaries.
         -->
-        <div class="stat-tile stat-tile-podium">
-          <div class="stat-label podium-lbl">Top players</div>
-          <div class="podium-list">
-            {#each view.playerSummary.slice(0, 3) as p, i (p.playerId)}
-              <div class="podium-row" class:podium-1={i === 0} class:podium-2={i === 1} class:podium-3={i === 2}>
-                <span class="podium-medal" aria-hidden="true">{i === 0 ? '🥇' : i === 1 ? '🥈' : '🥉'}</span>
-                <span class="podium-name" title={p.name}>{p.name}</span>
-                <span class="podium-wins">{p.wins === 1 ? '1 W' : `${p.wins} W`}</span>
-              </div>
-            {/each}
+        {#if flightWinners.length > 0}
+          <div class="stat-tile stat-tile-podium stat-tile-trophies">
+            <div class="stat-label podium-lbl">🏆 Trophy Winners</div>
+            <div class="podium-list trophy-list">
+              {#each flightWinners as fw (fw.flight)}
+                <div class="trophy-row">
+                  <span class="trophy-flight">{fw.flight}</span>
+                  <span class="trophy-winner"><span class="podium-medal" aria-hidden="true">🥇</span><span class="trophy-name" title={fw.champion}>{fw.champion}</span></span>
+                  <span class="trophy-winner trophy-runner"><span class="podium-medal" aria-hidden="true">🥈</span><span class="trophy-name" title={fw.runnerUp}>{fw.runnerUp}</span></span>
+                </div>
+              {/each}
+            </div>
           </div>
-        </div>
+        {:else}
+          <div class="stat-tile stat-tile-podium">
+            <div class="stat-label podium-lbl">Top players</div>
+            <div class="podium-list">
+              {#each view.playerSummary.slice(0, 3) as p, i (p.playerId)}
+                <div class="podium-row" class:podium-1={i === 0} class:podium-2={i === 1} class:podium-3={i === 2}>
+                  <span class="podium-medal" aria-hidden="true">{i === 0 ? '🥇' : i === 1 ? '🥈' : '🥉'}</span>
+                  <span class="podium-name" title={p.name}>{p.name}</span>
+                  <span class="podium-wins">{p.wins === 1 ? '1 W' : `${p.wins} W`}</span>
+                </div>
+              {/each}
+            </div>
+          </div>
+        {/if}
         <div class="stat-tile">
           <div class="stat-value">{stats.matchesCount}</div>
           <div class="stat-label">{stats.matchesCount === 1 ? 'Match' : 'Matches'}</div>
@@ -1684,12 +1724,28 @@
       border-color: #b8990a !important;
       background: #fffbe6 !important;
     }
+    .stat-tile-trophies {
+      flex: 3 1 320px !important;
+      border-color: #b8990a !important;
+      background: #fffbe6 !important;
+    }
     .stat-value { color: #111 !important; font-size: 1.3rem !important; }
     .stat-label { color: #555 !important; }
     .podium-lbl { color: #b8990a !important; }
     .podium-name { color: #111 !important; }
     .podium-1 .podium-name { color: #b8990a !important; }
     .podium-wins { color: #555 !important; }
+    .trophy-flight { color: #666 !important; }
+    .trophy-row { grid-template-columns: minmax(72px, max-content) 1fr 1fr !important; }
+    .trophy-name {
+      color: #111 !important;
+      white-space: normal !important;
+      overflow: visible !important;
+      text-overflow: unset !important;
+      word-break: break-word !important;
+    }
+    .trophy-winner:first-of-type .trophy-name { color: #b8990a !important; }
+    .trophy-runner .trophy-name { opacity: 1 !important; color: #444 !important; }
 
     /* ── Section headings ── */
     .section-hdr {
@@ -1778,8 +1834,8 @@
       border: none !important;
       border-top: 2px solid #000 !important;
       border-radius: 0 !important;
-      break-inside: avoid;
-      page-break-inside: avoid;
+      break-inside: auto;
+      page-break-inside: auto;
       margin-bottom: 0.5rem !important;
     }
     .flight-section-hdr {
@@ -1799,10 +1855,14 @@
       border: none !important;
       border-top: 2px solid #000 !important;
       border-radius: 0 !important;
-      break-inside: avoid;
-      page-break-inside: avoid;
+      /* Allow page breaks inside large round sections so rows fill the page */
+      break-inside: auto;
+      page-break-inside: auto;
       margin-bottom: 0.5rem !important;
     }
+    /* Keep thead attached to the first body row; allow break after header row */
+    .matches-tbl thead { display: table-header-group !important; }
+    .matches-tbl tbody tr { break-inside: avoid; page-break-inside: avoid; }
     .round-report-hdr {
       background: transparent !important;
       padding: 0.35rem 0 !important;
@@ -1994,6 +2054,55 @@
   .podium-2 .podium-name,
   .podium-3 .podium-name {
     opacity: 0.9;
+  }
+
+  /* Trophy Winners tile (league format) */
+  .stat-tile-trophies {
+    min-width: 0;
+    flex: 3 1 340px;
+  }
+  .trophy-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+  .trophy-row {
+    display: grid;
+    /* flight label | champion | runner-up — flight fixed, names flex-equal */
+    grid-template-columns: minmax(72px, max-content) 1fr 1fr;
+    align-items: center;
+    column-gap: 0.75rem;
+    min-width: 0;
+    padding: 0.15rem 0;
+  }
+  .trophy-flight {
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: var(--muted, #9aa0a6);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    white-space: nowrap;
+  }
+  .trophy-winner {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    min-width: 0;
+  }
+  .trophy-name {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: var(--fg, #f5f5f5);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
+  .trophy-winner:first-of-type .trophy-name {
+    color: var(--accent, #ffd54a);
+  }
+  .trophy-runner .trophy-name {
+    opacity: 0.85;
   }
 
   /* Empty states */
