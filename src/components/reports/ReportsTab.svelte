@@ -778,22 +778,13 @@
         `);
 
         if (isDone) {
-          // setsA + setsB === 1 → single set → show per-board scores (boardLog) or total points
-          // setsA + setsB > 1  → multiple sets → show set count "2–1"
           const totalSets = m.setsA + m.setsB;
           let scoreLine = '';
           if (totalSets <= 1) {
-            if (m.setScores && m.setScores.length > 0 && m.setScores.length <= 2) {
-              // boardLog available, compact enough — show per-board scores
-              scoreLine = m.setScores.map((s) => `${s.a}–${s.b}`).join('  ');
-            } else if (m.pointsA > 0 || m.pointsB > 0) {
-              // no boardLog but have total points — show those
-              scoreLine = `${m.pointsA}–${m.pointsB}`;
-            } else {
-              scoreLine = `${m.setsA}–${m.setsB}`;
-            }
+            // Single set — show total points
+            scoreLine = `${m.pointsA}–${m.pointsB}`;
           } else {
-            // Multiple sets — compact set count
+            // Multiple sets — show set count e.g. 2–1
             scoreLine = `${m.setsA}–${m.setsB}`;
           }
 
