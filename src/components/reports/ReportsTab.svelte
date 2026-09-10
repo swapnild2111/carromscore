@@ -484,14 +484,8 @@
     if (typeof window === 'undefined') return '';
     return new URL(window.location.href).searchParams.get('rSearch') ?? '';
   }
-  function initialFilterMode(): 'all' | 'singles' | 'doubles' {
-    if (typeof window === 'undefined') return 'all';
-    const v = new URL(window.location.href).searchParams.get('rMode');
-    return v === 'singles' || v === 'doubles' ? v : 'all';
-  }
   let filterSearch = $state<string>(initialFilterSearch());
-  let filterMode = $state<'all' | 'singles' | 'doubles'>(initialFilterMode());
-  // Mirror filter state to URL (rSearch, rMode). Guarded by !== '__init'
+  // Mirror filter state to URL (rSearch). Guarded by !== '__init'
   // check on first run isn't needed because the initial values equal
   // whatever's already in the URL — writing them back is a no-op.
   $effect(() => {
@@ -499,8 +493,7 @@
     const url = new URL(window.location.href);
     if (filterSearch.trim() === '') url.searchParams.delete('rSearch');
     else url.searchParams.set('rSearch', filterSearch);
-    if (filterMode === 'all') url.searchParams.delete('rMode');
-    else url.searchParams.set('rMode', filterMode);
+    url.searchParams.delete('rMode');
     window.history.replaceState({}, '', url.toString());
   });
   $effect(() => {
@@ -626,7 +619,6 @@
     if (!r) return [];
     const q = filterSearch.trim().toLowerCase();
     const arr = r.rows.filter((row) => {
-      if (filterMode !== 'all' && String(row.mode).toLowerCase() !== filterMode) return false;
       if (q) {
         const hay = `${row.sideA} ${row.sideB}`.toLowerCase();
         if (!hay.includes(q)) return false;
@@ -667,7 +659,7 @@
   // Used in the per-round breakdown to show a visual bracket for
   // knockout-style flight rounds (QF/SF/Final etc.).
 
-  type SetScore = { a: number; b: number };
+  type SetScore = { set: number; board: number; a: number; b: number };
   type BracketRound = { roundName: string; matches: Array<{ sideA: string; sideB: string; winner: 'A' | 'B' | 'Draw' | ''; setsA: number; setsB: number; pointsA: number; pointsB: number; setScores: SetScore[] }> };
 
   const BRACKET_SUB_ORDER = ['R32', 'R16', 'Round of 16', 'QF', 'SF', 'Final'];
@@ -786,29 +778,28 @@
         `);
 
         if (isDone) {
-          // Build per-set score labels: "25–18" per set, or fallback to total/sets
-          const sets = m.setScores && m.setScores.length > 0 ? m.setScores : null;
-          const scoreLines: string[] = sets
-            ? sets.map((s) => `${s.a}–${s.b}`)
-            : (() => {
-                const sa = m.pointsA > 0 || m.pointsB > 0 ? m.pointsA : m.setsA;
-                const sb = m.pointsA > 0 || m.pointsB > 0 ? m.pointsB : m.setsB;
-                return [`${sa}–${sb}`];
-              })();
+          // setsA + setsB === 1 → single set played → show board scores
+          // setsA + setsB > 1  → multiple sets → show set count "2–1"
+          const totalSets = m.setsA + m.setsB;
+          let scoreLine = '';
+          if (totalSets <= 1) {
+            // Single set — board scores if available, else set count
+            scoreLine = m.setScores && m.setScores.length > 0
+              ? m.setScores.map((s) => `${s.a}–${s.b}`).join('  ')
+              : `${m.setsA}–${m.setsB}`;
+          } else {
+            // Multiple sets — compact set count
+            scoreLine = `${m.setsA}–${m.setsB}`;
+          }
 
-          // Measure pill width from longest score line
-          const maxLen = Math.max(...scoreLines.map((s) => s.length));
-          const pillW = maxLen <= 5 ? 36 : maxLen <= 7 ? 46 : 54;
-          const pillH = scoreLines.length === 1 ? 17 : scoreLines.length * 14 + 4;
+          const pillW = Math.max(36, Math.min(scoreLine.length * 6.5 + 12, COL_W - 80));
+          const pillH = 17;
           const px = x + COL_W - pillW - 4;
           const py = cy - pillH / 2;
 
-          lines.push(`<rect x="${px}" y="${py}" width="${pillW}" height="${pillH}" rx="${pillH / 2 > 8 ? 8 : pillH / 2}" fill="var(--bracket-pill, rgba(255,213,74,0.15))"/>`);
-          scoreLines.forEach((sl, si) => {
-            const ty = py + (scoreLines.length === 1 ? 12 : 12 + si * 14);
-            lines.push(`<text x="${px + pillW / 2}" y="${ty}" text-anchor="middle" font-size="10"
-                  font-family="sans-serif" fill="var(--bracket-pill-text, #ffd54a)" font-weight="600">${sl}</text>`);
-          });
+          lines.push(`<rect x="${px}" y="${py}" width="${pillW}" height="${pillH}" rx="8" fill="var(--bracket-pill, rgba(255,213,74,0.15))"/>`);
+          lines.push(`<text x="${px + pillW / 2}" y="${py + 12}" text-anchor="middle" font-size="9.5"
+                font-family="sans-serif" fill="var(--bracket-pill-text, #ffd54a)" font-weight="600">${scoreLine}</text>`);
         }
       }
     }
@@ -864,18 +855,16 @@
     for (const rec of rawMatches) {
       if (!rec || !rec.id) continue;
       if (!rec.boardLog || rec.boardLog.length === 0) continue;
-      const bySet = new Map<number, { a: number; b: number }>();
-      for (const entry of rec.boardLog) {
-        if (!entry) continue;
-        const s = entry.set ?? 0;
-        if (!bySet.has(s)) bySet.set(s, { a: 0, b: 0 });
-        const agg = bySet.get(s)!;
-        agg.a += entry.pointsA ?? 0;
-        agg.b += entry.pointsB ?? 0;
-      }
-      // Sort by set index ascending
-      const sets = [...bySet.entries()].sort((a, b) => a[0] - b[0]).map(([, v]) => v);
-      if (sets.length > 0) m.set(rec.id, sets);
+      const boards: SetScore[] = rec.boardLog
+        .filter((e) => e != null)
+        .map((e) => ({
+          set: e.set ?? 0,
+          board: e.board ?? 0,
+          a: e.pointsA ?? 0,
+          b: e.pointsB ?? 0,
+        }))
+        .sort((x, y) => x.set !== y.set ? x.set - y.set : x.board - y.board);
+      if (boards.length > 0) m.set(rec.id, boards);
     }
     return m;
   }
@@ -953,15 +942,6 @@
       bind:value={filterSearch}
       aria-label="Filter by player name"
     />
-    <select
-      class="rep-select"
-      bind:value={filterMode}
-      aria-label="Filter by match mode"
-    >
-      <option value="all">All modes</option>
-      <option value="singles">Singles</option>
-      <option value="doubles">Doubles</option>
-    </select>
     <!--
       Tournament select (v3.4.12). Value derived from `selection`
       reactively; onchange writes back via pick() so the report
@@ -1010,13 +990,12 @@
       Reset writes to `selection` via pick() (URL sync intact) and
       the effects push back into the proxy selects.
     -->
-    {#if filterSearch.trim() !== '' || filterMode !== 'all' || (selection !== null && selection !== '__all__') || roundFilter !== null}
+    {#if filterSearch.trim() !== '' || (selection !== null && selection !== '__all__') || roundFilter !== null}
       <button
         type="button"
         class="rep-clear"
         onclick={() => {
           filterSearch = '';
-          filterMode = 'all';
           if (selection !== null) onSelectionChange(null);
           roundFilter = null;
         }}
@@ -1029,7 +1008,7 @@
         class="rep-print"
         onclick={() => window.print()}
         aria-label="Print report"
-        title="Print landscape report"
+        title="Print landscape · Tip: uncheck 'Headers and footers' in the print dialog to hide browser URL/title"
       >
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true" style="flex-shrink:0">
           <rect x="2" y="5" width="10" height="6" rx="1" stroke="currentColor" stroke-width="1.3"/>
@@ -1068,6 +1047,7 @@
     {@const view = viewReport!}
     {@const stats = summaryStats}
 
+    <div class="print-section-leaderboard">
     {#if stats}
       <!--
         Summary tiles (v3.3.3). One glance tells the umpire what
@@ -1197,6 +1177,7 @@
           </tbody>
         </table>
       </div>
+    </div><!-- /print-section-leaderboard -->
 
     {#if roundFilter !== null || (report.roundReports?.length ?? 0) <= 1}
     <div class="tbl-hdr">
@@ -1492,16 +1473,15 @@
     {/if}
   {/if}
 
-  {#if printOrganizerName || printLogoUrl}
-    <div class="rep-print-footer" aria-hidden="true">
-      {#if printLogoUrl}
-        <img src={printLogoUrl} alt="Organiser logo" class="rep-print-footer-logo" />
-      {/if}
-      {#if printOrganizerName}
-        <span class="rep-print-footer-org">Organised by {printOrganizerName}</span>
-      {/if}
-    </div>
-  {/if}
+  <div class="rep-print-footer" aria-hidden="true">
+    {#if printLogoUrl}
+      <img src={printLogoUrl} alt="Organiser logo" class="rep-print-footer-logo" />
+    {/if}
+    {#if printOrganizerName}
+      <span class="rep-print-footer-org">Organised by {printOrganizerName}</span>
+    {/if}
+    <span class="rep-print-footer-brand">carromscore.app</span>
+  </div>
 </section>
 
 <style>
@@ -1706,6 +1686,13 @@
       font-style: italic;
       letter-spacing: 0.01em;
     }
+    .rep-print-footer-brand {
+      font-size: 0.68rem;
+      color: #bbb;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      margin-left: auto;
+    }
 
     /* ── Stat tiles: horizontal strip, compact ── */
     .stat-row {
@@ -1732,7 +1719,7 @@
       border-color: #b8990a !important;
       background: #fffbe6 !important;
     }
-    .stat-value { color: #111 !important; font-size: 1.3rem !important; }
+    .stat-value { color: #111 !important; font-size: 1.6rem !important; }
     .stat-label { color: #555 !important; }
     .podium-lbl { color: #b8990a !important; }
     .podium-name { color: #111 !important; }
@@ -1830,12 +1817,24 @@
       border-color: #bcaaa4 !important;
     }
 
-    /* ── Flight sections: print all open, remove chrome ── */
+    /* ── Print page sections ── */
+    .print-section-leaderboard {
+      break-after: page;
+      page-break-after: always;
+    }
+    .rounds-section:first-of-type {
+      break-after: page;
+      page-break-after: always;
+    }
+
+    /* ── Flight sections: each on its own page ── */
     .flight-section {
       background: transparent !important;
       border: none !important;
       border-top: 2px solid #000 !important;
       border-radius: 0 !important;
+      break-before: page;
+      page-break-before: always;
       break-inside: auto;
       page-break-inside: auto;
       margin-bottom: 0.5rem !important;
@@ -1928,6 +1927,7 @@
     display: grid;
     grid-template-columns: repeat(2, 1fr);
     gap: 0.6rem;
+    margin-bottom: 1rem;
   }
   /* Wider viewport: 3 number tiles + podium spanning 2 = 5 cols. */
   @media (min-width: 720px) {
@@ -1958,32 +1958,34 @@
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-top: 2px solid rgba(255, 213, 74, 0.35);
     border-radius: 0.6rem;
-    padding: 0.75rem 0.9rem;
+    padding: 1rem 0.9rem;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     text-align: center;
-    gap: 0.1rem;
+    gap: 0.25rem;
     min-width: 0;
   }
   .stat-value {
-    font-size: 1.5rem;
-    font-weight: 700;
-    line-height: 1.1;
+    font-size: 2.4rem;
+    font-weight: 800;
+    line-height: 1;
     color: var(--accent, #ffd54a);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    letter-spacing: -0.02em;
   }
   .stat-value-name {
     font-size: 1.05rem;
     color: var(--accent, #ffd54a);
   }
   .stat-label {
-    font-size: 0.7rem;
+    font-size: 0.72rem;
+    font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.06em;
+    letter-spacing: 0.08em;
     color: var(--muted, #9aa0a6);
   }
   .stat-tile-leader {
@@ -2311,6 +2313,7 @@
     align-items: center;
     gap: 0.5rem;
     flex-wrap: wrap;
+    margin-bottom: 0.5rem;
   }
   .tbl-actions {
     display: flex;

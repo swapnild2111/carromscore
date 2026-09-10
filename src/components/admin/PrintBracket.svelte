@@ -215,10 +215,10 @@
   // Organizer name: organiser profile only (the old per-tournament organizerName
   // field was removed from the add/edit dialogs).
   const printLogoUrl = $derived(
-    orgProfile?.logoUrl ?? tournament?.logoUrl ?? null,
+    overrideLogoUrl.trim() || orgProfile?.logoUrl || tournament?.logoUrl || null,
   );
   const printOrganizerName = $derived(
-    orgProfile?.orgName || orgProfile?.displayName ||
+    overrideOrgName.trim() || orgProfile?.orgName || orgProfile?.displayName ||
     tournament?.organizerName || null,
   );
 
@@ -304,6 +304,11 @@
     return out;
   });
 
+  // Manual overrides for organizer name/logo — typed directly in the toolbar.
+  // Take priority over the Firebase-loaded profile values.
+  let overrideOrgName = $state('');
+  let overrideLogoUrl = $state('');
+
   // QR mode: 'board' = one permanent sticker per physical board (default),
   //          'match' = one QR per planned match showing who plays who.
   let qrMode = $state<'board' | 'match'>('board');
@@ -349,24 +354,38 @@
     }
   });
 
-  // Human-readable config line for the cover page. Uses the same
-  // fallbacks that AdminTournaments seeds new tournaments with when
-  // a field is missing (bo3 / 25 / 8 / singles).
-  const configLine = $derived.by<string>(() => {
-    const d = tournament?.defaults ?? {};
+  function fmtCfg(d: { mode?: string; bestOf?: number; pointsTarget?: number; maxBoards?: number; timerDuration?: number }, showMode = true): string {
     const mode = d.mode === 'doubles' ? 'Doubles' : 'Singles';
     const bo = d.bestOf ?? 3;
     const pts = d.pointsTarget ?? 25;
     const mb = d.maxBoards ?? 8;
     const mbTxt = mb === 0 ? 'unlimited boards' : `max ${mb} boards`;
-    return `${mode} · best of ${bo} · target ${pts} points · ${mbTxt}`;
-  });
+    const timer = (d.timerDuration ?? 0) > 0 ? ` · ${d.timerDuration} min` : '';
+    return `${showMode ? mode + ' · ' : ''}Best of ${bo} · target ${pts} pts · ${mbTxt}${timer}`;
+  }
+
+  // Human-readable config line for the cover page.
+  const configLine = $derived.by<string>(() => fmtCfg(tournament?.defaults ?? {}));
 
   const timerLine = $derived<string | null>(
     (tournament?.defaults?.timerDuration ?? 0) > 0
       ? `${tournament!.defaults!.timerDuration} min`
       : null
   );
+
+  // Per-flight config rows for league tournaments (QF/SF/Final may differ).
+  type FlightCfgRow = { flight: string; cfg: string };
+  const flightCfgRows = $derived.by<FlightCfgRow[]>(() => {
+    const lc = tournament?.leagueCfg;
+    if (!lc?.flightCfg) return [];
+    const defaults = tournament?.defaults ?? {};
+    const rows: FlightCfgRow[] = [];
+    for (const [flight, fc] of Object.entries(lc.flightCfg)) {
+      const merged = { ...defaults, ...fc };
+      rows.push({ flight, cfg: fmtCfg(merged, false) });
+    }
+    return rows;
+  });
 
   const tournamentName = $derived<string>(
     tournament?.name ?? plannedMatches[0]?.tournament ?? tournamentKey,
@@ -462,23 +481,23 @@
     return n;
   }
 
-  // Build per-set scores map from match history boardLog.
-  type SetScore = { a: number; b: number };
-  function buildSetScoresMap(records: MatchRecord[]): Map<string, SetScore[]> {
-    const m = new Map<string, SetScore[]>();
+  // Build per-board scores map from match history boardLog.
+  // Each entry is one physical board played: { set, board, a, b }.
+  type BoardScore = { set: number; board: number; a: number; b: number };
+  function buildBoardScoresMap(records: MatchRecord[]): Map<string, BoardScore[]> {
+    const m = new Map<string, BoardScore[]>();
     for (const rec of records) {
       if (!rec?.id || !rec.boardLog?.length) continue;
-      const bySet = new Map<number, { a: number; b: number }>();
-      for (const entry of rec.boardLog) {
-        if (!entry) continue;
-        const s = entry.set ?? 0;
-        if (!bySet.has(s)) bySet.set(s, { a: 0, b: 0 });
-        const agg = bySet.get(s)!;
-        agg.a += entry.pointsA ?? 0;
-        agg.b += entry.pointsB ?? 0;
-      }
-      const sets = [...bySet.entries()].sort((a, b) => a[0] - b[0]).map(([, v]) => v);
-      if (sets.length > 0) m.set(rec.id, sets);
+      const boards: BoardScore[] = rec.boardLog
+        .filter((e) => e != null)
+        .map((e) => ({
+          set: e.set ?? 0,
+          board: e.board ?? 0,
+          a: e.pointsA ?? 0,
+          b: e.pointsB ?? 0,
+        }))
+        .sort((x, y) => x.set !== y.set ? x.set - y.set : x.board - y.board);
+      if (boards.length > 0) m.set(rec.id, boards);
     }
     return m;
   }
@@ -489,8 +508,8 @@
     bId?: string; bName: string;
     isDone: boolean;
     winner?: 'a' | 'b';
-    setScores?: SetScore[];    // from boardLog when available
-    setsA?: number; setsB?: number; // fallback from result
+    boardScores?: BoardScore[];  // per-board scores from boardLog
+    setsA?: number; setsB?: number; // fallback set counts from result
   };
 
   // Build an inline SVG bracket matching the reports-tab style.
@@ -501,7 +520,7 @@
   ): string {
     if (cols.length < 2) return '';
 
-    const COL_W = 200;
+    const COL_W = 240;
     const COL_GAP = 48;
     const NAME_MAX = 22;
 
@@ -509,21 +528,28 @@
       return s.length > NAME_MAX ? s.slice(0, NAME_MAX - 1) + '…' : s;
     }
 
-    // Slot height depends on number of set score lines
-    function slotH(slot: BracketSlot): number {
-      const lines = scoreLines(slot);
-      return lines.length <= 1 ? 44 : 44 + (lines.length - 1) * 14;
+    // Slot height is fixed — score always fits on one line (single-set = boards, multi-set = count)
+    function slotH(_slot: BracketSlot): number {
+      return 44;
     }
 
+    // Score display logic:
+    // - setsA + setsB === 1 (single set played) → show per-board scores from boardLog, or "0–1"/"1–0"
+    // - setsA + setsB > 1 (multiple sets played) → show set count "2–1"
     function scoreLines(slot: BracketSlot): string[] {
       if (!slot.isDone) return [];
-      if (slot.setScores && slot.setScores.length > 0) {
-        return slot.setScores.map((s) => `${s.a}–${s.b}`);
+      const sA = slot.setsA ?? 0;
+      const sB = slot.setsB ?? 0;
+      const totalSets = sA + sB;
+      if (totalSets <= 1) {
+        // Single set — show per-board scores if available
+        if (slot.boardScores && slot.boardScores.length > 0) {
+          return [slot.boardScores.map((b) => `${b.a}–${b.b}`).join('  ')];
+        }
+        return [`${sA}–${sB}`];
       }
-      if (slot.setsA !== undefined && slot.setsB !== undefined) {
-        return [`${slot.setsA}–${slot.setsB}`];
-      }
-      return [];
+      // Multiple sets — compact set count
+      return [`${sA}–${sB}`];
     }
 
     const SLOT_PAD = 10;
@@ -597,29 +623,28 @@
         const aOpacity = slot.isDone && !aIsWinner ? '0.38' : '1';
         const bOpacity = slot.isDone && !bIsWinner ? '0.38' : '1';
 
+        const sLines = scoreLines(slot);
+        // Estimate pill width: board scores like "25–14  21–4" need ~7px/char at font-size 10
+        const maxLineLen = sLines.reduce((m, l) => Math.max(m, l.length), 0);
+        const pillW = Math.max(36, Math.min(maxLineLen * 6.5 + 10, COL_W - 90));
+
         lines.push(`
           <rect x="${x}" y="${sy}" width="${COL_W}" height="${sh}" rx="5"
                 fill="#fff" stroke="#d4d4d4" stroke-width="1"/>
           <line x1="${x + 1}" y1="${sy + sh / 2}" x2="${x + COL_W - 1}" y2="${sy + sh / 2}"
                 stroke="#ebebeb" stroke-width="0.75"/>
-          <text x="${x + 10}" y="${sy + 16}" font-size="12" font-weight="${aWeight}"
+          <text x="${x + 8}" y="${sy + 16}" font-size="11" font-weight="${aWeight}"
                 opacity="${aOpacity}" font-family="sans-serif" fill="${aFill}">${aName || 'TBD'}</text>
-          <text x="${x + 10}" y="${sy + sh - 7}" font-size="12" font-weight="${bWeight}"
+          <text x="${x + 8}" y="${sy + sh - 8}" font-size="11" font-weight="${bWeight}"
                 opacity="${bOpacity}" font-family="sans-serif" fill="${bFill}">${bName || 'TBD'}</text>
         `);
 
-        // Score pill — per set or set counts
-        const sLines = scoreLines(slot);
         if (sLines.length > 0) {
-          const pillW = 38;
-          const pillH = sLines.length === 1 ? 17 : sLines.length * 14 + 4;
           const px = x + COL_W - pillW - 4;
+          const pillH = 17;
           const py = cy - pillH / 2;
-          lines.push(`<rect x="${px}" y="${py}" width="${pillW}" height="${pillH}" rx="${Math.min(8, pillH / 2)}" fill="#f5f5f5" stroke="#e0e0e0" stroke-width="0.75"/>`);
-          sLines.forEach((sl, si) => {
-            const ty = py + (sLines.length === 1 ? 12 : 12 + si * 14);
-            lines.push(`<text x="${px + pillW / 2}" y="${ty}" text-anchor="middle" font-size="10" font-family="sans-serif" fill="#444" font-weight="600">${sl}</text>`);
-          });
+          lines.push(`<rect x="${px}" y="${py}" width="${pillW}" height="${pillH}" rx="8" fill="#f5f5f5" stroke="#e0e0e0" stroke-width="0.75"/>`);
+          lines.push(`<text x="${px + pillW / 2}" y="${py + 12}" text-anchor="middle" font-size="9.5" font-family="sans-serif" fill="#444" font-weight="600">${sLines[0]}</text>`);
         }
       }
     }
@@ -647,7 +672,7 @@
     void tournamentTick; // for schedule dependency
     if (historyMatches.length === 0) return [];
 
-    const setScoresMap = buildSetScoresMap(historyMatches);
+    const setScoresMap = buildBoardScoresMap(historyMatches);
 
     // Group history matches by flight name (prefix before " — ") + roundKey
     type RoundGroup = { label: string; slots: BracketSlot[] };
@@ -672,7 +697,7 @@
         bName: rec.bName ?? '',
         isDone: !!(rec.result?.winner),
         winner: rec.result?.winner === 'a' ? 'a' : rec.result?.winner === 'b' ? 'b' : undefined,
-        setScores: setScoresMap.get(rec.id),
+        boardScores: setScoresMap.get(rec.id),
         setsA: rec.result?.setsA,
         setsB: rec.result?.setsB,
       };
@@ -837,6 +862,27 @@
             </div>
           </div>
         {/if}
+        <div class="org-override-group">
+          <label class="org-override-label" for="override-org-name">Organizer</label>
+          <input
+            id="override-org-name"
+            type="text"
+            class="org-override-input"
+            placeholder={printOrganizerName ?? 'Organizer name…'}
+            bind:value={overrideOrgName}
+          />
+          <label class="org-override-label" for="override-logo-url">Logo URL</label>
+          <input
+            id="override-logo-url"
+            type="url"
+            class="org-override-input"
+            placeholder={printLogoUrl ?? 'https://…logo.png'}
+            bind:value={overrideLogoUrl}
+          />
+          {#if printLogoUrl}
+            <img src={printLogoUrl} alt="logo preview" class="logo-preview" />
+          {/if}
+        </div>
         <button type="button" class="print-btn" onclick={() => window.print()}>🖨 Print</button>
       </div>
       {#if boards.length > 0}
@@ -876,21 +922,21 @@
 
       <div class="cover-meta">
         <div class="meta-row">
-          <span class="meta-label">Format</span>
+          <span class="meta-label">Default format</span>
           <span class="meta-value">{configLine}</span>
         </div>
+        {#each flightCfgRows as row (row.flight)}
+        <div class="meta-row meta-row-flight">
+          <span class="meta-label">{row.flight}</span>
+          <span class="meta-value">{row.cfg}</span>
+        </div>
+        {/each}
         <div class="meta-row">
           <span class="meta-label">Type</span>
           <span class="meta-value">
             {tournament?.type === 'closed' ? 'Invite-only (assigned roster)' : 'Open'}
           </span>
         </div>
-        {#if timerLine}
-        <div class="meta-row">
-          <span class="meta-label">Timer</span>
-          <span class="meta-value">{timerLine}</span>
-        </div>
-        {/if}
         <div class="meta-row">
           <span class="meta-label">Boards</span>
           <span class="meta-value">{boards.length}</span>
@@ -958,16 +1004,15 @@
         {/each}
       {/if}
 
-      {#if printOrganizerName || printLogoUrl}
-        <div class="page-footer">
-          {#if printLogoUrl}
-            <img src={printLogoUrl} alt="Organiser logo" class="page-footer-logo" />
-          {/if}
-          {#if printOrganizerName}
-            <span class="page-footer-org">Organised by {printOrganizerName}</span>
-          {/if}
-        </div>
-      {/if}
+      <div class="page-footer">
+        {#if printLogoUrl}
+          <img src={printLogoUrl} alt="Organiser logo" class="page-footer-logo" />
+        {/if}
+        {#if printOrganizerName}
+          <span class="page-footer-org">Organised by {printOrganizerName}</span>
+        {/if}
+        <span class="page-footer-brand">carromscore.app</span>
+      </div>
     </section>
 
     {#if flightBracketSVGs.size >= 1}
@@ -975,36 +1020,37 @@
            Single flight: one page with the bracket tree.
            Multi-flight (league): one bracket section per flight on
            one shared page, each with its own header and SVG. -->
-      {#if activeBracketFlights.length <= 1}
-        {#if bracketSVG}
+      {#each activeBracketFlights as flight (flight.name)}
+        {@const flightSVG = flightBracketSVGs.get(flight.name) ?? (activeBracketFlights.length <= 1 ? bracketSVG : '')}
+        {#if flightSVG}
           <section class="page bracket-page">
             <div class="bracket-hdr">
-              <p class="brand">Carromscore</p>
-              <h2 class="bracket-title">{tournamentName} — Draw</h2>
+              <div class="bracket-hdr-main">
+                <p class="brand">Carromscore</p>
+                <h2 class="bracket-title">{tournamentName}{flight.name ? ` — ${flight.name}` : ' — Draw'}</h2>
+                {#if printOrganizerName}
+                  <p class="bracket-organizer">Organised by {printOrganizerName}</p>
+                {/if}
+              </div>
+              {#if printLogoUrl}
+                <img src={printLogoUrl} alt="Organiser logo" class="bracket-logo" />
+              {/if}
             </div>
             <div class="bracket-svg-wrap">
-              {@html bracketSVG}
+              {@html flightSVG}
             </div>
-            <p class="bracket-footer">Generated by Carromscore · carromscore.app</p>
+            <div class="page-footer">
+              {#if printLogoUrl}
+                <img src={printLogoUrl} alt="Organiser logo" class="page-footer-logo" />
+              {/if}
+              {#if printOrganizerName}
+                <span class="page-footer-org">Organised by {printOrganizerName}</span>
+              {/if}
+              <span class="page-footer-brand">carromscore.app</span>
+            </div>
           </section>
         {/if}
-      {:else}
-        {#each activeBracketFlights as flight (flight.name)}
-          {@const flightSVG = flightBracketSVGs.get(flight.name) ?? ''}
-          {#if flightSVG}
-            <section class="page bracket-page">
-              <div class="bracket-hdr">
-                <p class="brand">Carromscore</p>
-                <h2 class="bracket-title">{tournamentName} — {flight.name || 'Draw'}</h2>
-              </div>
-              <div class="bracket-svg-wrap">
-                {@html flightSVG}
-              </div>
-              <p class="bracket-footer">Generated by Carromscore · carromscore.app</p>
-            </section>
-          {/if}
-        {/each}
-      {/if}
+      {/each}
     {/if}
 
     {#if boards.length > 0}
@@ -1031,16 +1077,15 @@
             </div>
           {/each}
         </div>
-        {#if printOrganizerName || printLogoUrl}
-          <div class="page-footer">
-            {#if printLogoUrl}
-              <img src={printLogoUrl} alt="Organiser logo" class="page-footer-logo" />
-            {/if}
-            {#if printOrganizerName}
-              <span class="page-footer-org">Organised by {printOrganizerName}</span>
-            {/if}
-          </div>
-        {/if}
+        <div class="page-footer">
+          {#if printLogoUrl}
+            <img src={printLogoUrl} alt="Organiser logo" class="page-footer-logo" />
+          {/if}
+          {#if printOrganizerName}
+            <span class="page-footer-org">Organised by {printOrganizerName}</span>
+          {/if}
+          <span class="page-footer-brand">carromscore.app</span>
+        </div>
       </section>
     {:else}
       <!-- ─── PER-MATCH QR CARDS (one QR per planned match) ─────────── -->
@@ -1072,16 +1117,15 @@
               </div>
             {/each}
           </div>
-          {#if printOrganizerName || printLogoUrl}
-            <div class="page-footer">
-              {#if printLogoUrl}
-                <img src={printLogoUrl} alt="Organiser logo" class="page-footer-logo" />
-              {/if}
-              {#if printOrganizerName}
-                <span class="page-footer-org">Organised by {printOrganizerName}</span>
-              {/if}
-            </div>
-          {/if}
+          <div class="page-footer">
+            {#if printLogoUrl}
+              <img src={printLogoUrl} alt="Organiser logo" class="page-footer-logo" />
+            {/if}
+            {#if printOrganizerName}
+              <span class="page-footer-org">Organised by {printOrganizerName}</span>
+            {/if}
+            <span class="page-footer-brand">carromscore.app</span>
+          </div>
         </section>
       {/each}
     {/if}
@@ -1156,6 +1200,42 @@
     background: #ffd54a;
     color: #000;
     box-shadow: 0 1px 4px rgba(0,0,0,0.18);
+  }
+  /* Organizer override inputs */
+  .org-override-group {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    flex-wrap: wrap;
+  }
+  .org-override-label {
+    font-size: 0.78rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #666;
+    white-space: nowrap;
+  }
+  .org-override-input {
+    height: 2rem;
+    padding: 0 0.6rem;
+    font-size: 0.85rem;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    background: #fff;
+    color: #111;
+    outline: none;
+    min-width: 0;
+  }
+  .org-override-input:first-of-type { width: 11rem; }
+  .org-override-input:last-of-type  { width: 14rem; }
+  .org-override-input:focus { border-color: #888; }
+  .logo-preview {
+    max-height: 1.8rem;
+    max-width: 4rem;
+    object-fit: contain;
+    border-radius: 3px;
+    border: 1px solid #e0e0e0;
   }
   /* Print action button — visually distinct from the selector */
   .print-btn {
@@ -1267,11 +1347,21 @@
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    min-width: 4.5rem;
+    min-width: 6.5rem;
+    flex-shrink: 0;
   }
   .meta-value {
     color: #000;
     font-weight: 600;
+  }
+  .meta-row-flight {
+    grid-column: 1 / -1;
+    border-left: 3px solid #000;
+    padding-left: 0.6rem;
+    margin: 0.1rem 0;
+  }
+  .meta-row-flight .meta-label {
+    color: #333;
   }
 
   .cover-section {
@@ -1551,6 +1641,16 @@
       font-style: italic;
       letter-spacing: 0.01em;
     }
+    .page-footer-brand {
+      font-size: 0.68rem;
+      color: #bbb;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      margin-left: auto;
+    }
+    .cover-meta {
+      grid-template-columns: 1fr;
+    }
   }
 
   /* Narrow phone preview: single-column meta + roster so the
@@ -1565,20 +1665,42 @@
 
   /* ── Bracket page ─────────────────────────────────────── */
   .bracket-page {
+    display: flex;
+    flex-direction: column;
     color-scheme: light;
     background: #fff;
     color: #000;
   }
   .bracket-hdr {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.9rem;
     margin-bottom: 1.25rem;
     border-bottom: 2px solid #e0e0e0;
     padding-bottom: 0.75rem;
   }
+  .bracket-hdr-main {
+    flex: 1;
+    min-width: 0;
+  }
   .bracket-title {
     font-size: 1.25rem;
     font-weight: 700;
-    margin: 0.15rem 0 0.5rem;
+    margin: 0.15rem 0 0.25rem;
     line-height: 1.2;
+  }
+  .bracket-organizer {
+    margin: 0;
+    font-size: 0.82rem;
+    color: #555;
+    font-weight: 500;
+  }
+  .bracket-logo {
+    flex-shrink: 0;
+    max-height: 3rem;
+    max-width: 5rem;
+    object-fit: contain;
+    align-self: center;
   }
   .bracket-round-labels {
     display: flex;
