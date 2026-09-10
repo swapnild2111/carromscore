@@ -543,7 +543,7 @@
       const sB = slot.setsB ?? 0;
       const totalSets = sA + sB;
       if (totalSets <= 1) {
-        if (slot.boardScores && slot.boardScores.length > 0) {
+        if (slot.boardScores && slot.boardScores.length > 0 && slot.boardScores.length <= 2) {
           return [slot.boardScores.map((b) => `${b.a}–${b.b}`).join('  ')];
         }
         const pA = slot.pointsA ?? 0;
@@ -632,7 +632,7 @@
 
         lines.push(`
           <rect x="${x}" y="${sy}" width="${COL_W}" height="${sh}" rx="5"
-                fill="#fff" stroke="#d4d4d4" stroke-width="1"/>
+                fill="#fff" stroke="#bbb" stroke-width="1"/>
           <line x1="${x + 1}" y1="${sy + sh / 2}" x2="${x + COL_W - 1}" y2="${sy + sh / 2}"
                 stroke="#ebebeb" stroke-width="0.75"/>
           <text x="${x + 8}" y="${sy + 16}" font-size="11" font-weight="${aWeight}"

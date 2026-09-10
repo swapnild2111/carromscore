@@ -660,7 +660,7 @@
   // knockout-style flight rounds (QF/SF/Final etc.).
 
   type SetScore = { set: number; board: number; a: number; b: number };
-  type BracketRound = { roundName: string; matches: Array<{ sideA: string; sideB: string; winner: 'A' | 'B' | 'Draw' | ''; setsA: number; setsB: number; pointsA: number; pointsB: number; setScores: SetScore[] }> };
+  type BracketRound = { roundName: string; matches: Array<{ sideA: string; sideB: string; winner: 'A' | 'B' | 'Draw' | ''; setsA: number; setsB: number; pointsA: number; pointsB: number; setScores: SetScore[]; matchOrder?: number }> };
 
   const BRACKET_SUB_ORDER = ['R32', 'R16', 'Round of 16', 'QF', 'SF', 'Final'];
 
@@ -733,11 +733,11 @@
         for (const srcIdx of [ni * 2, ni * 2 + 1]) {
           if (srcIdx < currCount) {
             const cy1 = slotCY(srcIdx, currCount);
-            lines.push(`<line x1="${x1}" y1="${cy1}" x2="${xMid}" y2="${cy1}" stroke="var(--bracket-conn, rgba(255,213,74,0.35))" stroke-width="1.5"/>`);
-            lines.push(`<line x1="${xMid}" y1="${cy1}" x2="${xMid}" y2="${cy2}" stroke="var(--bracket-conn, rgba(255,213,74,0.35))" stroke-width="1.5"/>`);
+            lines.push(`<line x1="${x1}" y1="${cy1}" x2="${xMid}" y2="${cy1}" stroke="var(--bracket-conn, rgba(255,255,255,0.15))" stroke-width="1.5"/>`);
+            lines.push(`<line x1="${xMid}" y1="${cy1}" x2="${xMid}" y2="${cy2}" stroke="var(--bracket-conn, rgba(255,255,255,0.15))" stroke-width="1.5"/>`);
           }
         }
-        lines.push(`<line x1="${xMid}" y1="${cy2}" x2="${x2}" y2="${cy2}" stroke="var(--bracket-conn, rgba(255,213,74,0.35))" stroke-width="1.5"/>`);
+        lines.push(`<line x1="${xMid}" y1="${cy2}" x2="${x2}" y2="${cy2}" stroke="var(--bracket-conn, rgba(255,255,255,0.15))" stroke-width="1.5"/>`);
       }
     }
 
@@ -767,7 +767,7 @@
         const aFill = aIsWinner ? 'var(--bracket-winner, #ffd54a)' : 'var(--bracket-text, #f0f0f0)';
         const bFill = bIsWinner ? 'var(--bracket-winner, #ffd54a)' : 'var(--bracket-text, #f0f0f0)';
         lines.push(`
-          <rect x="${x}" y="${sy}" width="${COL_W}" height="${slotH}" rx="5" fill="var(--bracket-fill, #242424)" stroke="var(--bracket-border, rgba(255,213,74,0.18))" stroke-width="1"/>
+          <rect x="${x}" y="${sy}" width="${COL_W}" height="${slotH}" rx="5" fill="var(--bracket-fill, #141414)" stroke="var(--bracket-border, rgba(255,255,255,0.08))" stroke-width="1"/>
           <line x1="${x + 1}" y1="${sy + slotH / 2}" x2="${x + COL_W - 1}" y2="${sy + slotH / 2}" stroke="var(--bracket-divider, rgba(255,255,255,0.07))" stroke-width="0.75"/>
           <text x="${x + 10}" y="${sy + 16}" font-size="12" font-weight="${aIsWinner ? '700' : '400'}"
                 opacity="${isDone && !aIsWinner ? '0.38' : '1'}" font-family="sans-serif"
@@ -783,8 +783,8 @@
           const totalSets = m.setsA + m.setsB;
           let scoreLine = '';
           if (totalSets <= 1) {
-            if (m.setScores && m.setScores.length > 0) {
-              // boardLog available — show each board score
+            if (m.setScores && m.setScores.length > 0 && m.setScores.length <= 2) {
+              // boardLog available, compact enough — show per-board scores
               scoreLine = m.setScores.map((s) => `${s.a}–${s.b}`).join('  ');
             } else if (m.pointsA > 0 || m.pointsB > 0) {
               // no boardLog but have total points — show those
@@ -802,9 +802,9 @@
           const px = x + COL_W - pillW - 4;
           const py = cy - pillH / 2;
 
-          lines.push(`<rect x="${px}" y="${py}" width="${pillW}" height="${pillH}" rx="8" fill="var(--bracket-pill, rgba(255,213,74,0.15))"/>`);
+          lines.push(`<rect x="${px}" y="${py}" width="${pillW}" height="${pillH}" rx="8" fill="var(--bracket-pill, rgba(255,255,255,0.06))"/>`);
           lines.push(`<text x="${px + pillW / 2}" y="${py + 12}" text-anchor="middle" font-size="9.5"
-                font-family="sans-serif" fill="var(--bracket-pill-text, #ffd54a)" font-weight="600">${scoreLine}</text>`);
+                font-family="sans-serif" fill="var(--bracket-pill-text, #c8c8c8)" font-weight="600">${scoreLine}</text>`);
         }
       }
     }
@@ -900,11 +900,18 @@
 
       const bracketRounds: BracketRound[] = flightRounds.map((rr) => ({
         roundName: rr.roundName,
-        matches: rr.rows.map((r) => ({
-          sideA: r.sideA, sideB: r.sideB, winner: r.winner,
-          setsA: r.setsA, setsB: r.setsB, pointsA: r.pointsA, pointsB: r.pointsB,
-          setScores: setScoresMap.get(r._matchId) ?? [],
-        })),
+        matches: rr.rows
+          .map((r) => ({
+            sideA: r.sideA, sideB: r.sideB, winner: r.winner,
+            setsA: r.setsA, setsB: r.setsB, pointsA: r.pointsA, pointsB: r.pointsB,
+            setScores: setScoresMap.get(r._matchId) ?? [],
+            matchOrder: r.matchOrder,
+          }))
+          .sort((a, b) =>
+            a.matchOrder != null && b.matchOrder != null
+              ? a.matchOrder - b.matchOrder
+              : 0
+          ),
       }));
       return { flightName, rounds: flightRounds, stageGroups, bracketSVG: buildFlightBracketSVG(bracketRounds) };
     });
@@ -2494,8 +2501,8 @@
     .group-grid { grid-template-columns: repeat(4, 1fr); }
   }
   .group-card {
-    background: rgba(255, 213, 74, 0.03);
-    border: 1px solid rgba(255, 213, 74, 0.16);
+    background: #141414;
+    border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 0.6rem;
     overflow: hidden;
   }
@@ -2504,8 +2511,8 @@
     align-items: center;
     justify-content: space-between;
     padding: 0.45rem 0.7rem;
-    background: rgba(255, 213, 74, 0.07);
-    border-bottom: 1px solid rgba(255, 213, 74, 0.14);
+    background: rgba(255, 255, 255, 0.04);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
   }
   .group-card-name {
     font-size: 0.85rem;
@@ -2534,8 +2541,8 @@
 
   /* Flight-level collapsible (outer wrapper for Gold/Silver/Bronze) */
   .flight-section {
-    background: rgba(255, 213, 74, 0.03);
-    border: 1px solid rgba(255, 213, 74, 0.22);
+    background: #141414;
+    border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 0.7rem;
     overflow: hidden;
   }
@@ -2577,8 +2584,8 @@
   }
   /* Nested stage round (R16/QF/SF/Final inside a flight) */
   .round-report-nested {
-    background: rgba(255, 213, 74, 0.02);
-    border-color: rgba(255, 213, 74, 0.1);
+    background: rgba(255, 255, 255, 0.02);
+    border-color: rgba(255, 255, 255, 0.07);
   }
 
   .flight-bracket-svg {
@@ -2586,21 +2593,21 @@
     -webkit-overflow-scrolling: touch;
     /* Dark-first defaults — match the app's dark theme */
     --bracket-bg: transparent;
-    --bracket-fill: #1e1e1e;
-    --bracket-border: rgba(255, 213, 74, 0.22);
-    --bracket-divider: rgba(255, 255, 255, 0.07);
+    --bracket-fill: #141414;
+    --bracket-border: rgba(255, 255, 255, 0.08);
+    --bracket-divider: rgba(255, 255, 255, 0.05);
     --bracket-text: #d8d8d8;
     --bracket-winner: #ffd54a;
-    --bracket-label: #ffd54a;
-    --bracket-conn: rgba(255, 213, 74, 0.4);
-    --bracket-pill: rgba(255, 213, 74, 0.14);
-    --bracket-pill-text: #ffd54a;
+    --bracket-label: rgba(255, 213, 74, 0.65);
+    --bracket-conn: rgba(255, 255, 255, 0.15);
+    --bracket-pill: rgba(255, 255, 255, 0.06);
+    --bracket-pill-text: #c8c8c8;
   }
   /* Light theme overrides */
   @media (prefers-color-scheme: light) {
     :global(:root:not([data-theme='dark'])) .flight-bracket-svg {
       --bracket-fill: #ffffff;
-      --bracket-border: #d4d4d4;
+      --bracket-border: #c0a020;
       --bracket-divider: #ebebeb;
       --bracket-text: #1a1a1a;
       --bracket-winner: #b07800;
@@ -2612,7 +2619,7 @@
   }
   :global([data-theme='light']) .flight-bracket-svg {
     --bracket-fill: #ffffff;
-    --bracket-border: #d4d4d4;
+    --bracket-border: #c0a020;
     --bracket-divider: #ebebeb;
     --bracket-text: #1a1a1a;
     --bracket-winner: #b07800;
