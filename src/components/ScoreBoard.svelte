@@ -470,6 +470,8 @@
    */
   let pendingDrawChoice = $state(false);
   let confirmExit = $state(false);
+  // 'mid-set' | 'between-sets' | null
+  let pendingEndMatchWarning = $state<'mid-set' | 'between-sets' | null>(null);
   let isPortrait = $state(false);
   let storageKey = $state<string | null>(null);
   /**
@@ -1741,8 +1743,29 @@
   });
   // Fixed array of spark indices for the fireworks each-loop.
   const SPARK_INDICES = Array.from({ length: 20 }, (_, i) => i);
-  function endMatch() {
+  function endMatch(skipWarning = false) {
     if (endMatchInProgress) return;
+    // Multi-set warning: prompt if ending mid-set or between sets without
+    // completing all intended sets, unless the umpire already confirmed.
+    if (!skipWarning && !isPractice && cfg.bestOf > 1 && matchResult === null) {
+      const setsPlayed = sideA.sets + sideB.sets;
+      const winThreshold = Math.ceil(cfg.bestOf / 2);
+      const alreadyClinched = sideA.sets >= winThreshold || sideB.sets >= winThreshold;
+      if (!alreadyClinched) {
+        const hasRunningScore = sideA.points > 0 || sideB.points > 0;
+        const betweenSets = setsPlayed > 0 && !hasRunningScore;
+        if (hasRunningScore) {
+          pendingEndMatchWarning = 'mid-set';
+          endMatchInProgress = false;
+          return;
+        }
+        if (betweenSets) {
+          pendingEndMatchWarning = 'between-sets';
+          endMatchInProgress = false;
+          return;
+        }
+      }
+    }
     endMatchInProgress = true;
     // Practice: no winner concept. Surface the recap matrix + archive
     // to /matches. Explicitly delete the /live/{mid} record so the
@@ -2919,7 +2942,7 @@
       </button>
       -->
 
-      <button type="button" class="foot-btn endm" onclick={endMatch} disabled={endMatchInProgress} aria-label="End match">
+      <button type="button" class="foot-btn endm" onclick={() => endMatch()} disabled={endMatchInProgress} aria-label="End match">
         <span class="foot-ico" aria-hidden="true">🏁</span><span class="foot-lbl">End</span>
       </button>
       <button
@@ -3371,6 +3394,45 @@
     </div>
   {/if}
 
+  {#if pendingEndMatchWarning !== null}
+    <div
+      class="swap-prompt-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="end-warn-title"
+      onclick={(e) => { if (e.target === e.currentTarget) pendingEndMatchWarning = null; }}
+    >
+      <div class="swap-prompt-card">
+        <p id="end-warn-title" class="swap-prompt-title">
+          {#if pendingEndMatchWarning === 'mid-set'}
+            Set {currentSet} is in progress — end match?
+          {:else}
+            Set {sideA.sets + sideB.sets} done but set {sideA.sets + sideB.sets + 1} hasn't started — end match?
+          {/if}
+        </p>
+        <p class="end-warn-sub">
+          {#if pendingEndMatchWarning === 'mid-set'}
+            Current set scores will be counted as-is.
+          {:else}
+            Match will end on current set results.
+          {/if}
+        </p>
+        <div class="swap-prompt-actions">
+          <button
+            type="button"
+            class="swap-prompt-btn swap-prompt-no"
+            onclick={() => { pendingEndMatchWarning = null; }}
+          >Keep playing</button>
+          <button
+            type="button"
+            class="swap-prompt-btn swap-prompt-yes"
+            onclick={() => { pendingEndMatchWarning = null; endMatch(true); }}
+          >End match</button>
+        </div>
+      </div>
+    </div>
+  {/if}
+
   {#if boardCapToast}
     <!--
       Fires when a POINTS tap would take this side past 12 on the
@@ -3608,6 +3670,12 @@
     color: var(--accent, #ffd54a);
     font-weight: 700;
     font-size: 1rem;
+    text-align: center;
+  }
+  .end-warn-sub {
+    margin: -0.4rem 0 0.9rem;
+    color: #aaa;
+    font-size: 0.85rem;
     text-align: center;
   }
   .swap-prompt-actions {
