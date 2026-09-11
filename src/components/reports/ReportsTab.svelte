@@ -1067,9 +1067,9 @@
           anchor the row visually. Podium is the FIRST tile in the
           stat row — the eye lands here before the numeric summaries.
         -->
-        {#if flightWinners.length > 0}
+        {#if flightWinners.length > 0 && roundFilter === null}
           <div class="stat-tile stat-tile-podium stat-tile-trophies">
-            <div class="stat-label podium-lbl">🏆 Trophy Winners</div>
+            <div class="stat-label podium-lbl">🏆 Leaders</div>
             <div class="podium-list trophy-list">
               {#each flightWinners as fw (fw.flight)}
                 <div class="trophy-row">
@@ -1088,7 +1088,7 @@
           </div>
         {:else}
           <div class="stat-tile stat-tile-podium">
-            <div class="stat-label podium-lbl">Top players</div>
+            <div class="stat-label podium-lbl">Leaders</div>
             <div class="podium-list">
               {#each view.playerSummary.slice(0, 3) as p, i (p.playerId)}
                 <div class="podium-row" class:podium-1={i === 0} class:podium-2={i === 1} class:podium-3={i === 2}>
