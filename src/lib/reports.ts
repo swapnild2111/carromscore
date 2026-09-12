@@ -100,12 +100,23 @@ export const UNASSIGNED_ROUND_KEY = '__unassigned__';
  * rule LiveScoreboardView applies at the set level. Trims legacy
  * phantom rows (pre-2026-08-09 records where boardLog.length can
  * exceed result.boardCount) so counts don't overshoot.
+ *
+ * Fallback for older records (pre-boardLog era): if boardLog is absent
+ * but boardCount > 0 and the set winner is known, attribute all boards
+ * to the winning side. This is an approximation but avoids showing 0
+ * boards for every player in tournaments seeded from legacy records.
  */
 function countBoardsWon(m: MatchRecord): { boardsWonA: number; boardsWonB: number } {
   let log = m.boardLog ?? [];
   const bc = m.result?.boardCount;
   if (typeof bc === 'number' && bc > 0 && log.length > bc) {
     log = log.slice(0, bc);
+  }
+  // No boardLog — fall back to attributing all boards to the set winner.
+  if (log.length === 0 && typeof bc === 'number' && bc > 0) {
+    const winner = m.result?.winner;
+    if (winner === 'a') return { boardsWonA: bc, boardsWonB: 0 };
+    if (winner === 'b') return { boardsWonA: 0, boardsWonB: bc };
   }
   let a = 0;
   let b = 0;
