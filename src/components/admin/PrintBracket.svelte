@@ -325,6 +325,11 @@
   // QR SVG cache — keyed by board number (board mode) or mid (match mode).
   let qrByBoard = $state<Record<number, string>>({});
   let qrByMid = $state<Record<string, string>>({});
+  // Plain (non-reactive) Sets tracking which QRs have already been kicked off —
+  // avoids reading qrByMid/qrByBoard inside the $effect, which would make the
+  // effect re-run every time a QR resolves and cause a reactive loop in Svelte 5.
+  const qrBoardStarted = new Set<number>();
+  const qrMidStarted = new Set<string>();
   const scanBase = (() => {
     if (typeof window === 'undefined') return '';
     const base = import.meta.env.BASE_URL ?? '/';
@@ -350,27 +355,30 @@
 
   $effect(() => {
     if (!tournamentKey) return;
-    // Board QRs — one per board, few in number, safe to reassign individually.
+    // Board QRs — one per board. Use qrBoardStarted (plain Set) to guard against
+    // re-starting the same QR fetch when this effect re-runs (e.g. live sub fires).
     for (const b of boards) {
-      if (qrByBoard[b]) continue;
+      if (qrBoardStarted.has(b)) continue;
+      qrBoardStarted.add(b);
       const url = `${scanBase}?tournament=${encodeURIComponent(tournamentKey)}&board=${b}`;
       void qrToSVG(url, 400).then((svg) => { qrByBoard = { ...qrByBoard, [b]: svg }; });
     }
-    // Match QRs — generate all in parallel then write the entire batch at once
-    // so concurrent promises don't race-overwrite each other via spread.
-    const pending = plannedMatches.filter((m) => !qrByMid[m.mid]);
-    if (pending.length > 0) {
-      void Promise.all(
-        pending.map((m) =>
-          qrToSVG(`${scanBase}?planned=${encodeURIComponent(m.mid)}`, 280)
-            .then((svg): [string, string] => [m.mid, svg])
-        )
-      ).then((pairs) => {
-        const next = { ...qrByMid };
-        for (const [mid, svg] of pairs) next[mid] = svg;
-        qrByMid = next;
-      }).catch((err) => { console.error('[PrintBracket] QR generation failed:', err); });
-    }
+    // Match QRs — generate all in parallel, batch-write on completion.
+    // qrMidStarted guards without reading qrByMid inside the effect, avoiding a
+    // reactive loop that can silently drop the final state assignment in Svelte 5.
+    const toGenerate = plannedMatches.filter((m) => !qrMidStarted.has(m.mid));
+    if (toGenerate.length === 0) return;
+    for (const m of toGenerate) qrMidStarted.add(m.mid);
+    void Promise.all(
+      toGenerate.map((m) =>
+        qrToSVG(`${scanBase}?planned=${encodeURIComponent(m.mid)}`, 280)
+          .then((svg): [string, string] => [m.mid, svg])
+      )
+    ).then((pairs) => {
+      const next = { ...qrByMid };
+      for (const [mid, svg] of pairs) next[mid] = svg;
+      qrByMid = next;
+    }).catch((err) => { console.error('[PrintBracket] QR generation failed:', err); });
   });
 
   function fmtCfg(d: { mode?: string; bestOf?: number; pointsTarget?: number; maxBoards?: number; timerDuration?: number }, showMode = true): string {
