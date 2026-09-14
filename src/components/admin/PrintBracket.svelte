@@ -89,8 +89,8 @@
     if (typeof window === 'undefined') return () => {};
     const params = new URLSearchParams(window.location.search);
     tournamentKey = params.get('tournament') ?? '';
-    if (params.get('qrMode') === 'match') { qrMode = 'match'; qrModeExplicit = true; }
-    else if (params.get('qrMode') === 'board') qrModeExplicit = true;
+    if (params.get('qrMode') === 'match') qrMode = 'match';
+    else if (params.get('qrMode') === 'board') qrMode = 'board';
     if (!tournamentKey) {
       plannedReady = true;
       playersReady = true;
@@ -319,8 +319,6 @@
   // QR mode: 'board' = one permanent sticker per physical board (default),
   //          'match' = one QR per planned match showing who plays who.
   let qrMode = $state<'board' | 'match'>('board');
-  // true when the user (or URL param) has explicitly chosen a mode
-  let qrModeExplicit = $state(false);
 
   // QR SVG cache — keyed by board number (board mode) or mid (match mode).
   let qrByBoard = $state<Record<number, string>>({});
@@ -338,20 +336,10 @@
 
   function setQrMode(m: 'board' | 'match') {
     qrMode = m;
-    qrModeExplicit = true;
     const url = new URL(window.location.href);
     url.searchParams.set('qrMode', m);
     window.history.replaceState(null, '', url.toString());
   }
-
-  // Auto-switch to 'match' mode once planned data is ready and there are
-  // no board assignments — prevents the blank QR page on first load for
-  // KO tournaments that don't assign board numbers.
-  $effect(() => {
-    if (plannedReady && !qrModeExplicit && boards.length === 0 && plannedMatches.length > 0) {
-      qrMode = 'match';
-    }
-  });
 
   $effect(() => {
     if (!tournamentKey) return;
@@ -371,8 +359,6 @@
       }).catch((err) => { console.error('[PrintBracket] Board QR generation failed:', err); });
     }
     // Match QRs — generate all in parallel, batch-write on completion.
-    // qrMidStarted guards without reading qrByMid inside the effect, avoiding a
-    // reactive loop that can silently drop the final state assignment in Svelte 5.
     const toGenerate = plannedMatches.filter((m) => !qrMidStarted.has(m.mid));
     if (toGenerate.length === 0) return;
     for (const m of toGenerate) qrMidStarted.add(m.mid);
@@ -1011,14 +997,10 @@
       </div>
       {#if boards.length > 0 || plannedMatches.length > 0}
         <p class="hint">
-          {#if qrMode === 'board'}
-            {#if boards.length > 0}
-              Board stickers — permanent QR per board, same every round. Cut out and stick to each physical board.
-            {:else}
-              No board numbers assigned yet. Switch to <strong>Per match</strong> for per-match QR cards.
-            {/if}
+          {#if qrMode === 'board' && boards.length > 0}
+            Board stickers — permanent QR per board, same every round. Cut out and stick to each physical board.
           {:else}
-            Match cards — one QR per match. Cut out and place at the board for that match.
+            Match cards — one QR per match. Cut out and place at the board for that match.{#if qrMode === 'board' && boards.length === 0} <em>(no board numbers assigned — showing per-match QRs)</em>{/if}
           {/if}
         </p>
       {/if}
@@ -1238,7 +1220,7 @@
       {/each}
     {/if}
 
-    {#if boards.length > 0 || (qrMode === 'match' && plannedMatches.length > 0)}
+    {#if boards.length > 0 || plannedMatches.length > 0}
     {#if qrMode === 'board' && boards.length > 0}
       <!-- ─── BOARD STICKERS (permanent per-board QR, 2-column grid) ── -->
       <section class="page qr-grid-page">
