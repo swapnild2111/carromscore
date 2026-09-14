@@ -599,12 +599,63 @@ export async function generateKnockoutBracket(
     ...(defaults.timerDuration != null ? { format: `t${defaults.timerDuration}` } : {}),
   };
 
-  // First round — seeded real players
+  // First round — seeded real players (+ bye placeholders for empty slots)
   const firstRoundKey = roundKeys[0]!;
   const firstRoundLabel = roundDefs[0]!.label;
-  const pairs = singleEliminationPairs(seeds);
-  for (let i = 0; i < pairs.length; i++) {
-    const [aId, bId] = pairs[i]!;
+  const firstRoundMatchCount = roundDefs[0]!.matchCount;
+
+  // Build a full slot list: real pairs first, then bye slots to fill the round.
+  // Bye slots have one real player and a "Bye" placeholder — the real player
+  // auto-advances to the next round.
+  type FirstRoundSlot = { aId: string; aName: string; bId: string; bName: string; isBye: boolean };
+  const firstRoundSlots: FirstRoundSlot[] = [];
+
+  // Place real pairs into their seeded positions using the same bracket positions
+  // that singleEliminationPairs uses, but now track all slots including byes.
+  {
+    function buildBracketPositions(size: number): number[] {
+      if (size === 2) return [1, 2];
+      const prev = buildBracketPositions(size / 2);
+      const result: number[] = [];
+      for (const s of prev) result.push(s, size + 1 - s);
+      return result;
+    }
+    // Use actual seed count for seeding positions (not the inflated bracketSize)
+    const seedBracketSize = Math.pow(2, Math.ceil(Math.log2(Math.max(seeds.length, 2))));
+    const positions = buildBracketPositions(seedBracketSize);
+
+    // Group positions into pairs for first-round matches
+    const slotPairs: [number, number][] = [];
+    for (let i = 0; i < positions.length; i += 2) {
+      slotPairs.push([positions[i]! - 1, positions[i + 1]! - 1]); // 0-indexed seed positions
+    }
+
+    // Fill up to firstRoundMatchCount slots; extra slots beyond real pairs are byes
+    for (let i = 0; i < firstRoundMatchCount; i++) {
+      const sp = slotPairs[i];
+      if (sp) {
+        const [sA, sB] = sp;
+        const aId = seeds[sA] ?? '';
+        const bId = seeds[sB] ?? '';
+        if (aId && bId) {
+          firstRoundSlots.push({ aId, aName: playerNames.get(aId) ?? aId, bId, bName: playerNames.get(bId) ?? bId, isBye: false });
+        } else if (aId) {
+          // One-sided bye — real player auto-advances
+          firstRoundSlots.push({ aId, aName: playerNames.get(aId) ?? aId, bId: '', bName: 'Bye', isBye: true });
+        } else if (bId) {
+          firstRoundSlots.push({ aId: '', aName: 'Bye', bId, bName: playerNames.get(bId) ?? bId, isBye: true });
+        } else {
+          // Both sides empty (shouldn't happen with min bracket size ≥ seeds)
+          firstRoundSlots.push({ aId: '', aName: 'TBD', bId: '', bName: 'TBD', isBye: false });
+        }
+      } else {
+        firstRoundSlots.push({ aId: '', aName: 'TBD', bId: '', bName: 'TBD', isBye: false });
+      }
+    }
+  }
+
+  for (let i = 0; i < firstRoundSlots.length; i++) {
+    const slot = firstRoundSlots[i]!;
     await createPlannedMatch({
       mode: defaults.mode,
       tournament: tournamentName,
@@ -612,21 +663,23 @@ export async function generateKnockoutBracket(
       round: firstRoundLabel,
       roundKey: firstRoundKey,
       matchOrder: i + 1,
-      aName: playerNames.get(aId) ?? aId,
-      aResolvedId: aId,
-      bName: playerNames.get(bId) ?? bId,
-      bResolvedId: bId,
+      aName: slot.aName,
+      aResolvedId: slot.aId || undefined,
+      bName: slot.bName,
+      bResolvedId: slot.bId || undefined,
       cfg,
       createdBy: myUid,
     });
     result.matchesCreated++;
   }
 
-  // Subsequent rounds — placeholder slots
+  // Subsequent rounds — placeholder slots, count halves each round from first round actual count
+  let prevMatchCount = firstRoundSlots.length;
   for (let ri = 1; ri < roundDefs.length; ri++) {
     const rd = roundDefs[ri]!;
     const rKey = roundKeys[ri]!;
-    for (let i = 0; i < rd.matchCount; i++) {
+    const slotCount = Math.max(1, Math.ceil(prevMatchCount / 2));
+    for (let i = 0; i < slotCount; i++) {
       await createPlannedMatch({
         mode: defaults.mode,
         tournament: tournamentName,
@@ -641,6 +694,7 @@ export async function generateKnockoutBracket(
       });
       result.matchesCreated++;
     }
+    prevMatchCount = slotCount;
   }
 
   return result;
