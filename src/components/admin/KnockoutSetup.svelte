@@ -292,9 +292,11 @@
 
       unsubPlanned = await subscribePlannedByTournament(tournament.key, (arr) => {
         plannedMatches = arr;
-        // Detect if bracket already exists
+        // Detect if bracket already exists — only auto-lock when not mid-generation.
+        // During generation, doGenerateBracket sets bracketLocked after ALL matches
+        // are written, preventing the SVG from showing a partial bracket.
         const hasBracket = arr.some((m) => KO_BRACKET_ROUND_RX.test(m.round ?? ''));
-        if (hasBracket) bracketLocked = true;
+        if (hasBracket && !generating) bracketLocked = true;
         // Detect if RR schedule exists
         const hasRR = arr.some((m) => m.round === 'Group RR');
         if (hasRR) {

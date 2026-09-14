@@ -50,7 +50,7 @@
   } from '../../lib/players';
   import { countryName, flagEmoji } from '../../lib/countries';
   import { BRACKET_ROUND_RX } from '../../lib/bracket';
-  import { buildKOBracketSVG, koRoundsFromMatches, KO_BRACKET_ROUND_RX } from '../../lib/bracketSvg';
+  import { koRoundsFromMatches, KO_BRACKET_ROUND_RX } from '../../lib/bracketSvg';
 
   let tournamentKey = $state<string>('');
   let plannedMatches = $state<PlannedMatch[]>([]);
@@ -831,7 +831,7 @@
   });
 
   // Standalone KO bracket SVG — for format='knockout' tournaments.
-  // Uses plannedMatches directly (no flight grouping needed).
+  // Uses buildFlightBracketSVG (light/print theme) built from planned matches.
   const standaloneKOBracketSVG = $derived.by<string>(() => {
     void tournamentTick;
     void playerTick;
@@ -839,10 +839,24 @@
     const koMatches = plannedMatches.filter((m) => KO_BRACKET_ROUND_RX.test(m.round ?? ''));
     if (koMatches.length === 0) return '';
     const rounds = koRoundsFromMatches(koMatches);
-    return buildKOBracketSVG(rounds, koMatches, (id) => {
-      const p = loadAllPlayersFn().find((pl) => pl.id === id);
-      return p?.canonicalName ?? id;
-    });
+    if (rounds.length === 0) return '';
+    const cols = rounds.map((r) => ({
+      label: stageLabel(r),
+      slots: koMatches
+        .filter((m) => m.round === r)
+        .sort((a, b) => (a.matchOrder ?? 0) - (b.matchOrder ?? 0))
+        .map((m): BracketSlot => ({
+          aId: m.aResolvedId,
+          aName: m.aName,
+          bId: m.bResolvedId,
+          bName: m.bName,
+          isDone: !!m.completedAt,
+          winner: m.result?.winner === 'a' ? 'a' : m.result?.winner === 'b' ? 'b' : undefined,
+          setsA: m.result?.setsA,
+          setsB: m.result?.setsB,
+        })),
+    }));
+    return buildFlightBracketSVG(cols);
   });
 
   // RR schedule SVG — shown for roundrobin tournaments that have Group RR matches
@@ -944,7 +958,7 @@
   {:else}
     <div class="print-actions no-print">
       <div class="print-toolbar">
-        {#if boards.length > 0}
+        {#if boards.length > 0 || plannedMatches.length > 0}
           <div class="qr-type-group" role="group" aria-label="QR type">
             <span class="qr-type-label">QR type</span>
             <div class="seg-ctrl">
@@ -954,6 +968,8 @@
                 class:seg-active={qrMode === 'board'}
                 aria-pressed={qrMode === 'board'}
                 onclick={() => setQrMode('board')}
+                disabled={boards.length === 0}
+                title={boards.length === 0 ? 'No board numbers assigned to matches' : undefined}
               >Per board</button>
               <button
                 type="button"
@@ -967,10 +983,14 @@
         {/if}
         <button type="button" class="print-btn" onclick={() => window.print()}>🖨 Print</button>
       </div>
-      {#if boards.length > 0}
+      {#if boards.length > 0 || plannedMatches.length > 0}
         <p class="hint">
           {#if qrMode === 'board'}
-            Board stickers — permanent QR per board, same every round. Cut out and stick to each physical board.
+            {#if boards.length > 0}
+              Board stickers — permanent QR per board, same every round. Cut out and stick to each physical board.
+            {:else}
+              No board numbers assigned yet. Switch to <strong>Per match</strong> for per-match QR cards.
+            {/if}
           {:else}
             Match cards — one QR per match. Cut out and place at the board for that match.
           {/if}
