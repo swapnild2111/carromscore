@@ -89,7 +89,8 @@
     if (typeof window === 'undefined') return () => {};
     const params = new URLSearchParams(window.location.search);
     tournamentKey = params.get('tournament') ?? '';
-    if (params.get('qrMode') === 'match') qrMode = 'match';
+    if (params.get('qrMode') === 'match') { qrMode = 'match'; qrModeExplicit = true; }
+    else if (params.get('qrMode') === 'board') qrModeExplicit = true;
     if (!tournamentKey) {
       plannedReady = true;
       playersReady = true;
@@ -318,6 +319,8 @@
   // QR mode: 'board' = one permanent sticker per physical board (default),
   //          'match' = one QR per planned match showing who plays who.
   let qrMode = $state<'board' | 'match'>('board');
+  // true when the user (or URL param) has explicitly chosen a mode
+  let qrModeExplicit = $state(false);
 
   // QR SVG cache — keyed by board number (board mode) or mid (match mode).
   let qrByBoard = $state<Record<number, string>>({});
@@ -330,10 +333,20 @@
 
   function setQrMode(m: 'board' | 'match') {
     qrMode = m;
+    qrModeExplicit = true;
     const url = new URL(window.location.href);
     url.searchParams.set('qrMode', m);
     window.history.replaceState(null, '', url.toString());
   }
+
+  // Auto-switch to 'match' mode once planned data is ready and there are
+  // no board assignments — prevents the blank QR page on first load for
+  // KO tournaments that don't assign board numbers.
+  $effect(() => {
+    if (plannedReady && !qrModeExplicit && boards.length === 0 && plannedMatches.length > 0) {
+      qrMode = 'match';
+    }
+  });
 
   $effect(() => {
     if (!tournamentKey) return;
