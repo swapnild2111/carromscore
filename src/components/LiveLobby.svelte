@@ -2961,7 +2961,7 @@
   }
   .hist-tbl tr:last-child td { border-bottom: 0; }
   .hist-th {
-    background: rgba(255, 255, 255, 0.06);
+    background: #1a1a1a;
     border-bottom: 1px solid rgba(255, 255, 255, 0.12);
     color: var(--muted, #9aa0a6);
     font-size: 0.7rem;
