@@ -113,7 +113,7 @@
   // place. Umpires can still override per match.
   const FALLBACK_TOURNAMENT_DEFAULTS = {
     mode: 'singles' as 'singles' | 'doubles',
-    bestOf: 3,
+    bestOf: 1,
     pointsTarget: 25,
     maxBoards: 8,
     timerDuration: 0,
@@ -1904,7 +1904,7 @@
             </select>
           </label>
           <label class="edit-field">
-            <span>Best of (sets)</span>
+            <span>Best of sets</span>
             <input
               type="number"
               min="1"
@@ -2400,7 +2400,7 @@
             </select>
           </label>
           <label class="edit-field">
-            <span>Best of (sets)</span>
+            <span>Best of sets</span>
             <input
               type="number"
               min="1"
