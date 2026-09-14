@@ -171,7 +171,7 @@
     const leagueCfg = {
       groupCount: 1,
       playersPerGroup: rrParticipants.length,
-      boardsPerGroup: tournament.defaults?.maxBoards ?? 2,
+      boardsPerGroup: tournament.knockoutCfg?.boardsAvailable ?? tournament.defaults?.maxBoards ?? 2,
       flightNames: [] as string[],
     };
     const result = await generateLeagueSchedule({

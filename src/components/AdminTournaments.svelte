@@ -47,6 +47,7 @@
     type Round,
     type Tournament,
     type LeagueCfg,
+    type KnockoutCfg,
   } from '../lib/tournaments';
   import { subscribeCurrentUserRole, type Role } from '../lib/roles';
   import { currentUser } from '../lib/auth';
@@ -124,6 +125,11 @@
   let editingDefaultTimerDuration = $state<string>('');
   let editingDescription = $state<string>('');
   let editingStartDate = $state<string>('');
+  // KO/RR setup fields in the edit dialog (v5.1)
+  let editingKnockoutPlayers = $state<string>('8');
+  let editingAdvanceCount = $state<number>(4);
+  let editingKnockoutRewards = $state<string[]>(['Gold', 'Silver', 'Bronze']);
+  let editingBoardsAvailable = $state<string>('2');
   let editingOriginal = $state<{
     name: string;
     type: 'open' | 'closed';
@@ -137,6 +143,12 @@
       maxBoards: string;
       timerDuration: string;
     };
+    knockoutCfg: {
+      knockoutPlayers: string;
+      advanceCount: number;
+      rewards: string[];
+      boardsAvailable: string;
+    } | null;
   } | null>(null);
   let deleteConfirmKey = $state<string | null>(null);
   let deleteConfirmText = $state('');
@@ -203,6 +215,7 @@
   let addingAdvanceCount = $state<number>(4);
   let addingWantedFlights = $state<1 | 2 | 3>(3);
   let addingKnockoutRewards = $state<string[]>(['Gold', 'Silver', 'Bronze']);
+  let addingBoardsAvailable = $state<number>(2);
   let addingBoardCount = $state('16');
   let addingUsePhantom = $state(false);
   let addingPhantomScore = $state('');
@@ -617,6 +630,11 @@
     editingDefaultTimerDuration = String(t.defaults?.timerDuration ?? FALLBACK_TOURNAMENT_DEFAULTS.timerDuration);
     editingDescription = t.description ?? '';
     editingStartDate = t.startDate ?? '';
+    editingKnockoutPlayers = String(t.knockoutCfg?.participantCount ?? 8);
+    editingAdvanceCount = t.knockoutCfg?.advanceCount ?? 4;
+    editingKnockoutRewards = t.knockoutCfg?.flightNames ?? ['Gold', 'Silver', 'Bronze'];
+    editingBoardsAvailable = String(t.knockoutCfg?.boardsAvailable ?? 2);
+    const isKoRr = (t.format === 'knockout' || t.format === 'roundrobin');
     editingOriginal = {
       name: t.name,
       type: t.type ?? 'open',
@@ -630,6 +648,12 @@
         maxBoards: editingDefaultMaxBoards,
         timerDuration: editingDefaultTimerDuration,
       },
+      knockoutCfg: isKoRr ? {
+        knockoutPlayers: editingKnockoutPlayers,
+        advanceCount: editingAdvanceCount,
+        rewards: [...editingKnockoutRewards],
+        boardsAvailable: editingBoardsAvailable,
+      } : null,
     };
   }
   function cancelEdit() {
@@ -640,6 +664,10 @@
     editingFormat = 'standard';
     editingDescription = '';
     editingStartDate = '';
+    editingKnockoutPlayers = '8';
+    editingAdvanceCount = 4;
+    editingKnockoutRewards = ['Gold', 'Silver', 'Bronze'];
+    editingBoardsAvailable = '2';
     editingDefaultMode = 'singles';
     editingDefaultBestOf = '';
     editingDefaultPointsTarget = '';
@@ -719,7 +747,15 @@
     const startDateChanged = editingStartDate !== editingOriginal.startDate;
     const editingTournamentForFormat = list().find((t) => t.key === editingKey);
     const formatChanged = editingFormat !== ((editingTournamentForFormat?.format ?? 'standard') as string);
-    const metaExtraChanged = descriptionChanged || startDateChanged || formatChanged;
+    const isKoRrFormat = editingFormat === 'knockout' || editingFormat === 'roundrobin';
+    const origKO = editingOriginal.knockoutCfg;
+    const knockoutCfgChanged = isKoRrFormat && !formatChanged && (
+      editingKnockoutPlayers !== (origKO?.knockoutPlayers ?? '8') ||
+      editingBoardsAvailable !== (origKO?.boardsAvailable ?? '2') ||
+      editingAdvanceCount !== (origKO?.advanceCount ?? 4) ||
+      JSON.stringify(editingKnockoutRewards) !== JSON.stringify(origKO?.rewards ?? ['Gold', 'Silver', 'Bronze'])
+    );
+    const metaExtraChanged = descriptionChanged || startDateChanged || formatChanged || knockoutCfgChanged;
 
     if (!nameChanged && !typeChanged && !countryChanged && !defaultsChanged && !metaExtraChanged) {
       // No-op — close the dialog quietly. Prevents a bogus audit
@@ -759,9 +795,19 @@
           return;
         }
       }
-      if (formatChanged) {
+      if (formatChanged || knockoutCfgChanged) {
         if (editingFormat === 'knockout' || editingFormat === 'roundrobin') {
-          const r = await updateKnockoutCfg(editingKey, { participantCount: 8 }, editingFormat);
+          const parsedPlayers = parseIntField(editingKnockoutPlayers, 2, 256, 'Total players');
+          if (parsedPlayers === undefined) return;
+          const parsedBoards = parseIntField(editingBoardsAvailable, 1, 99, 'Boards available');
+          if (parsedBoards === undefined) return;
+          const cfg: KnockoutCfg = {
+            participantCount: parsedPlayers,
+            boardsAvailable: parsedBoards,
+            ...(editingFormat === 'roundrobin' ? { advanceCount: editingAdvanceCount } : {}),
+            ...(editingKnockoutRewards.length > 0 ? { flightNames: editingKnockoutRewards } : {}),
+          };
+          const r = await updateKnockoutCfg(editingKey, cfg, editingFormat as 'knockout' | 'roundrobin');
           if (!r.ok) { flash('err', r.error); return; }
         } else {
           const r = await updateTournamentFormat(editingKey, editingFormat);
@@ -1036,6 +1082,7 @@
     addingTotalPlayers = '48';
     addingWantedFlights = 3;
     addingKnockoutRewards = ['Gold', 'Silver', 'Bronze'];
+    addingBoardsAvailable = 2;
     addingBoardCount = '16';
     addingUsePhantom = false;
     addingPhantomScore = '';
@@ -1105,10 +1152,12 @@
     } else if (addingFormat === 'knockout') {
       const participantCount = Math.max(2, Number(addingKnockoutPlayers) || 8);
       const flightNames = addingKnockoutRewards.length > 0 ? addingKnockoutRewards : undefined;
-      await updateKnockoutCfg(outcome.record.key, { participantCount, flightNames }, 'knockout');
+      const boardsAvailable = Math.max(1, addingBoardsAvailable);
+      await updateKnockoutCfg(outcome.record.key, { participantCount, flightNames, boardsAvailable }, 'knockout');
     } else if (addingFormat === 'roundrobin') {
       const participantCount = Math.max(2, Number(addingKnockoutPlayers) || 8);
-      await updateKnockoutCfg(outcome.record.key, { participantCount, advanceCount: addingAdvanceCount }, 'roundrobin');
+      const boardsAvailable = Math.max(1, addingBoardsAvailable);
+      await updateKnockoutCfg(outcome.record.key, { participantCount, advanceCount: addingAdvanceCount, boardsAvailable }, 'roundrobin');
     }
     await updateTournamentDefaults(outcome.record.key, {
       mode: addingDefaultMode,
@@ -1760,6 +1809,75 @@
 
         </fieldset>
 
+        {#if editingFormat === 'knockout' || editingFormat === 'roundrobin'}
+          {@const editingTournamentForKO = list().find((t) => t.key === editingKey) ?? null}
+          {@const schedLocked = !!(editingTournamentForKO?.knockoutCfg?.participantCount)}
+          <fieldset class="league-cfg-grid">
+            <legend>{editingFormat === 'roundrobin' ? 'Round Robin' : 'Knockout'} setup</legend>
+            {#if schedLocked}
+              <p class="cfg-locked-note">🔒 Schedule generated — structural settings are read-only</p>
+            {/if}
+            <label class="edit-field" class:edit-field-locked={schedLocked}>
+              <span>Total players</span>
+              <input
+                type="number"
+                min="2"
+                max="256"
+                step="1"
+                bind:value={editingKnockoutPlayers}
+                disabled={saving || schedLocked}
+                aria-label="Total players"
+              />
+            </label>
+            <label class="edit-field">
+              <span>Boards available</span>
+              <input
+                type="number"
+                min="1"
+                max="99"
+                step="1"
+                bind:value={editingBoardsAvailable}
+                disabled={saving}
+                aria-label="Boards available"
+              />
+            </label>
+            {#if editingFormat === 'roundrobin'}
+              <label class="edit-field" class:edit-field-locked={schedLocked}>
+                <span>Top N advance to knockout</span>
+                <select bind:value={editingAdvanceCount} disabled={saving || schedLocked}>
+                  {#each [2, 4, 8, 16] as n}
+                    <option value={n}>{n} players</option>
+                  {/each}
+                </select>
+              </label>
+            {/if}
+            <div class="league-cfg-flights-row" class:edit-field-locked={schedLocked}>
+              <span class="league-cfg-flights-label">Rewards</span>
+              <div class="add-rewards-checks">
+                {#each [['Gold', '🥇'], ['Silver', '🥈'], ['Bronze', '🥉']] as [tier, emoji]}
+                  <label class="add-rewards-row">
+                    <input
+                      type="checkbox"
+                      checked={editingKnockoutRewards.includes(tier)}
+                      disabled={saving || schedLocked}
+                      onchange={(e) => {
+                        if ((e.target as HTMLInputElement).checked) {
+                          editingKnockoutRewards = ['Gold', 'Silver', 'Bronze'].filter(
+                            (t) => t === tier || editingKnockoutRewards.includes(t)
+                          );
+                        } else {
+                          editingKnockoutRewards = editingKnockoutRewards.filter((t) => t !== tier);
+                        }
+                      }}
+                    />
+                    <span>{emoji} {tier}</span>
+                  </label>
+                {/each}
+              </div>
+            </div>
+          </fieldset>
+        {/if}
+
         <!--
           Match defaults (v3.6.1). Each field is optional — leaving it
           blank falls back to the app-wide defaults (singles / bo1 /
@@ -2133,7 +2251,7 @@
                 min="1"
                 max="99"
                 step="1"
-                bind:value={addingDefaultMaxBoards}
+                bind:value={addingBoardsAvailable}
                 disabled={saving}
                 aria-label="Boards available"
               />
@@ -3500,6 +3618,20 @@
     width: 1rem;
     height: 1rem;
     cursor: pointer;
+  }
+  .cfg-locked-note {
+    grid-column: 1 / -1;
+    color: var(--warn, #f59e0b);
+    font-size: 0.8rem;
+    margin: 0 0 0.25rem;
+  }
+  .edit-field-locked input,
+  .edit-field-locked select {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  .edit-field-locked > span {
+    opacity: 0.6;
   }
   .btn-flight-pick {
     text-align: left;

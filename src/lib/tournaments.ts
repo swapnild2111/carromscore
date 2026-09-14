@@ -115,6 +115,7 @@ export type KnockoutCfg = {
   participantCount: number;  // how many players enter the bracket
   advanceCount?: number;     // round-robin only: top N that advance to knockout
   flightNames?: string[];    // reward tiers e.g. ['Gold', 'Silver', 'Bronze']
+  boardsAvailable?: number;  // physical carrom boards at the venue (for schedule rotation)
 };
 
 /**
@@ -995,6 +996,12 @@ export async function updateKnockoutCfg(
     };
     if (cfg.advanceCount !== undefined) {
       patch[`tournaments/${key}/knockoutCfg/advanceCount`] = cfg.advanceCount;
+    }
+    if (cfg.boardsAvailable !== undefined) {
+      patch[`tournaments/${key}/knockoutCfg/boardsAvailable`] = cfg.boardsAvailable;
+    }
+    if (cfg.flightNames !== undefined) {
+      patch[`tournaments/${key}/knockoutCfg/flightNames`] = cfg.flightNames;
     }
     await update(ref(db, '/'), patch);
     if (t) {
