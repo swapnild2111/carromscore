@@ -1652,115 +1652,113 @@
       <div class="dialog-card dialog-card-wide">
         <h3>Edit tournament</h3>
 
-        <!--
-          v3.6.1: Rounds / Bracket / Assigned players are now direct
-          row buttons on the tournament list (no longer nested here).
-          This dialog focuses on the tournament's own metadata: name,
-          type, country, and defaults. The row buttons open their
-          respective modals side-by-side, not stacked.
-        -->
+        <fieldset class="add-type add-details-section">
+          <legend class="legend-hidden">Tournament Details</legend>
 
-        <label class="edit-field">
-          <span>Name</span>
-          <input
-            type="text"
-            bind:value={editingName}
-            aria-label="Tournament name"
-            maxlength="60"
-            disabled={saving}
-          />
-        </label>
+          <label class="edit-field">
+            <span>Name</span>
+            <input
+              type="text"
+              bind:value={editingName}
+              aria-label="Tournament name"
+              maxlength="60"
+              disabled={saving}
+            />
+          </label>
 
-        <label class="edit-field">
-          <span>Description <em class="hint-inline">(optional, shown on print cover)</em></span>
-          <input
-            type="text"
-            bind:value={editingDescription}
-            placeholder="Venue, date range, short blurb…"
-            maxlength="300"
-            disabled={saving}
-            aria-label="Tournament description"
-          />
-        </label>
+          <label class="edit-field">
+            <span>Description <em class="hint-inline">(optional, shown on print cover)</em></span>
+            <input
+              type="text"
+              bind:value={editingDescription}
+              placeholder="Venue, date range, short blurb…"
+              maxlength="300"
+              disabled={saving}
+              aria-label="Tournament description"
+            />
+          </label>
 
-        <label class="edit-field">
-          <span>Tournament date <em class="hint-inline">(optional)</em></span>
-          <input
-            type="date"
-            bind:value={editingStartDate}
-            disabled={saving}
-            aria-label="Tournament start date"
-          />
-        </label>
+          <label class="edit-field">
+            <span>Tournament date <em class="hint-inline">(optional)</em></span>
+            <input
+              type="date"
+              bind:value={editingStartDate}
+              disabled={saving}
+              aria-label="Tournament start date"
+            />
+          </label>
 
-        <div class="add-sub-section">
-          <span class="field-label-white">Type</span>
-          <div class="add-type-rows">
-            <label class="add-type-row">
-              <input
-                type="radio"
-                name="edit-tournament-type"
-                value="open"
-                bind:group={editingType}
-                disabled={saving}
-              />
-              <span>
-                <strong>Open</strong>
-                — casual event, no roster gating.
-              </span>
-            </label>
-            <label class="add-type-row">
-              <input
-                type="radio"
-                name="edit-tournament-type"
-                value="closed"
-                bind:group={editingType}
-                disabled={saving}
-              />
-              <span>
-                <strong>Invite-only</strong>
-                — country-scoped, players assigned explicitly.
-              </span>
-            </label>
+          <div class="add-sub-section">
+            <span class="field-label-white">Type</span>
+            <div class="add-type-rows">
+              <label class="add-type-row">
+                <input
+                  type="radio"
+                  name="edit-tournament-type"
+                  value="open"
+                  bind:group={editingType}
+                  disabled={saving}
+                />
+                <span>
+                  <strong>Open</strong>
+                  — casual event, no roster gating.
+                </span>
+              </label>
+              <label class="add-type-row">
+                <input
+                  type="radio"
+                  name="edit-tournament-type"
+                  value="closed"
+                  bind:group={editingType}
+                  disabled={saving}
+                />
+                <span>
+                  <strong>Invite-only</strong>
+                  — country-scoped, players assigned explicitly.
+                </span>
+              </label>
+            </div>
           </div>
-        </div>
-        <label class="add-country-label">
-          <span class="field-label-white">
-            Country
-            {#if editingType === 'closed'}<em class="hint-inline">(required)</em>{:else}<em class="hint-inline">(optional)</em>{/if}
-          </span>
-          <CountrySelect
-            bind:value={editingCountry}
-            required={editingType === 'closed'}
-            ariaLabel="Tournament country"
-          />
-        </label>
 
-        <div class="add-sub-section">
-          <span class="field-label-white">Format</span>
-          <fieldset class="fmt fmt-format fmt-format-inline">
-            <label class:selected={editingFormat === 'standard'} onclick={() => (editingFormat = 'standard')}>
-              <input type="radio" name="edit-tournament-format" value="standard" bind:group={editingFormat} disabled={saving} />
-              <span class="opt-title">Regular</span>
-              <span class="opt-meta">Ad-hoc matches</span>
-            </label>
-            <label class:selected={editingFormat === 'league'} onclick={() => (editingFormat = 'league')}>
-              <input type="radio" name="edit-tournament-format" value="league" bind:group={editingFormat} disabled={saving} />
-              <span class="opt-title">League</span>
-              <span class="opt-meta">Groups + flights</span>
-            </label>
-            <label class:selected={editingFormat === 'knockout'} onclick={() => (editingFormat = 'knockout')}>
-              <input type="radio" name="edit-tournament-format" value="knockout" bind:group={editingFormat} disabled={saving} />
-              <span class="opt-title">Knockout</span>
-              <span class="opt-meta">Single elimination</span>
-            </label>
-            <label class:selected={editingFormat === 'roundrobin'} onclick={() => (editingFormat = 'roundrobin')}>
-              <input type="radio" name="edit-tournament-format" value="roundrobin" bind:group={editingFormat} disabled={saving} />
-              <span class="opt-title">Round Robin</span>
-              <span class="opt-meta">Everyone plays all</span>
-            </label>
-          </fieldset>
-        </div>
+          <label class="add-country-label">
+            <span class="field-label-white">
+              Country
+              {#if editingType === 'closed'}<em class="hint-inline">(required)</em>{:else}<em class="hint-inline">(optional)</em>{/if}
+            </span>
+            <CountrySelect
+              bind:value={editingCountry}
+              required={editingType === 'closed'}
+              ariaLabel="Tournament country"
+            />
+          </label>
+
+          <div class="add-sub-section">
+            <span class="field-label-white">Format</span>
+            <fieldset class="fmt fmt-format fmt-format-inline">
+              <label class:selected={editingFormat === 'standard'} onclick={() => (editingFormat = 'standard')}>
+                <input type="radio" name="edit-tournament-format" value="standard" bind:group={editingFormat} disabled={saving} />
+                <span class="opt-title">Regular</span>
+                <span class="opt-meta">Ad-hoc matches</span>
+              </label>
+              <label class:selected={editingFormat === 'league'} onclick={() => (editingFormat = 'league')}>
+                <input type="radio" name="edit-tournament-format" value="league" bind:group={editingFormat} disabled={saving} />
+                <span class="opt-title">League</span>
+                <span class="opt-meta">Groups + flights</span>
+              </label>
+              <label class:selected={editingFormat === 'knockout'} onclick={() => (editingFormat = 'knockout')}>
+                <input type="radio" name="edit-tournament-format" value="knockout" bind:group={editingFormat} disabled={saving} />
+                <span class="opt-title">Knockout</span>
+                <span class="opt-meta">Single elimination</span>
+              </label>
+              <label class:selected={editingFormat === 'roundrobin'} onclick={() => (editingFormat = 'roundrobin')}>
+                <input type="radio" name="edit-tournament-format" value="roundrobin" bind:group={editingFormat} disabled={saving} />
+                <span class="opt-title">Round Robin</span>
+                <span class="opt-meta">Everyone plays all</span>
+              </label>
+            </fieldset>
+          </div>
+
+        </fieldset>
 
         {#if editingFormat === 'knockout' || editingFormat === 'roundrobin'}
           <fieldset class="league-cfg-grid">
