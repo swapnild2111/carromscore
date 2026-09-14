@@ -96,7 +96,7 @@
 
   function bracketHint(n: number): string {
     if (n < 2) return '';
-    const size = Math.max(8, Math.pow(2, Math.ceil(Math.log2(n))));
+    const size = Math.pow(2, Math.ceil(Math.log2(n)));
     const byes = size - n;
     const rounds: string[] = [];
     if (size >= 32) rounds.push('R32');
