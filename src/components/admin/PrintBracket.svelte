@@ -355,13 +355,20 @@
 
   $effect(() => {
     if (!tournamentKey) return;
-    // Board QRs — one per board. Use qrBoardStarted (plain Set) to guard against
-    // re-starting the same QR fetch when this effect re-runs (e.g. live sub fires).
-    for (const b of boards) {
-      if (qrBoardStarted.has(b)) continue;
-      qrBoardStarted.add(b);
-      const url = `${scanBase}?tournament=${encodeURIComponent(tournamentKey)}&board=${b}`;
-      void qrToSVG(url, 400).then((svg) => { qrByBoard = { ...qrByBoard, [b]: svg }; });
+    // Board QRs — batch-generate new boards, write all at once to avoid spread races.
+    const newBoards = boards.filter((b) => !qrBoardStarted.has(b));
+    if (newBoards.length > 0) {
+      for (const b of newBoards) qrBoardStarted.add(b);
+      void Promise.all(
+        newBoards.map((b) =>
+          qrToSVG(`${scanBase}?tournament=${encodeURIComponent(tournamentKey)}&board=${b}`, 400)
+            .then((svg): [number, string] => [b, svg])
+        )
+      ).then((pairs) => {
+        const next = { ...qrByBoard };
+        for (const [b, svg] of pairs) next[b] = svg;
+        qrByBoard = next;
+      }).catch((err) => { console.error('[PrintBracket] Board QR generation failed:', err); });
     }
     // Match QRs — generate all in parallel, batch-write on completion.
     // qrMidStarted guards without reading qrByMid inside the effect, avoiding a
