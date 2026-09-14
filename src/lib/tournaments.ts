@@ -184,6 +184,7 @@ export type Round = {
 export type CreateTournamentMeta = {
   type?: 'open' | 'closed';
   country?: string;
+  format?: 'standard' | 'league' | 'knockout' | 'roundrobin';
 };
 
 /**
@@ -309,6 +310,7 @@ export async function createOrTouchTournament(
   }
   const type = meta?.type;
   const country = meta?.country;
+  const format = meta?.format;
   const record: Tournament = existing
     ? {
         ...existing,
@@ -318,6 +320,7 @@ export async function createOrTouchTournament(
         // switching a tournament open↔closed goes here.
         ...(type ? { type } : {}),
         ...(country ? { country } : {}),
+        ...(format ? { format } : {}),
       }
     : {
         key,
@@ -327,6 +330,7 @@ export async function createOrTouchTournament(
         ...(creator ? { createdBy: creator } : {}),
         ...(type ? { type } : {}),
         ...(country ? { country } : {}),
+        ...(format ? { format } : {}),
       };
   // Snapshot the pre-write state so we can roll back on rule-denial.
   const priorSnapshot = existing ? { ...existing } : null;
@@ -336,6 +340,7 @@ export async function createOrTouchTournament(
       lastActive: now,
       ...(type ? { type } : {}),
       ...(country ? { country } : {}),
+      ...(format ? { format } : {}),
     });
   } else {
     memoryStore.push(record);

@@ -1074,6 +1074,7 @@
     const outcome = await createOrTouchTournament(trimmed, {
       type: addingType,
       ...(needsCountry && addingCountry ? { country: addingCountry } : {}),
+      ...(addingFormat !== 'standard' ? { format: addingFormat } : {}),
     });
     if (!outcome.ok) {
       saving = false;
