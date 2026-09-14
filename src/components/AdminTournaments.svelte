@@ -2423,20 +2423,18 @@
               aria-label="Default points target"
             />
           </label>
-          {#if addingFormat !== 'knockout' && addingFormat !== 'roundrobin'}
-            <label class="edit-field">
-              <span>Max boards <em class="hint-inline">(0 = unlimited)</em></span>
-              <input
-                type="number"
-                min="0"
-                max="50"
-                step="1"
-                bind:value={addingDefaultMaxBoards}
-                disabled={saving}
-                aria-label="Default max boards"
-              />
-            </label>
-          {/if}
+          <label class="edit-field">
+            <span>Max boards <em class="hint-inline">(0 = unlimited)</em></span>
+            <input
+              type="number"
+              min="0"
+              max="50"
+              step="1"
+              bind:value={addingDefaultMaxBoards}
+              disabled={saving}
+              aria-label="Default max boards"
+            />
+          </label>
           <label class="edit-field">
             <span>Timer <em class="hint-inline">(mins, 0 = off)</em></span>
             <input
