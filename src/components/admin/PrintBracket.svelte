@@ -50,6 +50,7 @@
   } from '../../lib/players';
   import { countryName, flagEmoji } from '../../lib/countries';
   import { BRACKET_ROUND_RX } from '../../lib/bracket';
+  import { buildKOBracketSVG, koRoundsFromMatches, KO_BRACKET_ROUND_RX } from '../../lib/bracketSvg';
 
   let tournamentKey = $state<string>('');
   let plannedMatches = $state<PlannedMatch[]>([]);
@@ -826,6 +827,21 @@
     return '';
   });
 
+  // Standalone KO bracket SVG — for format='knockout' tournaments.
+  // Uses plannedMatches directly (no flight grouping needed).
+  const standaloneKOBracketSVG = $derived.by<string>(() => {
+    void tournamentTick;
+    void playerTick;
+    if (tournament?.format !== 'knockout') return '';
+    const koMatches = plannedMatches.filter((m) => KO_BRACKET_ROUND_RX.test(m.round ?? ''));
+    if (koMatches.length === 0) return '';
+    const rounds = koRoundsFromMatches(koMatches);
+    return buildKOBracketSVG(rounds, koMatches, (id) => {
+      const p = loadAllPlayersFn().find((pl) => pl.id === id);
+      return p?.name ?? id;
+    });
+  });
+
   // RR schedule SVG — shown for roundrobin tournaments that have Group RR matches
   // but no knockout bracket yet.
   function buildRRScheduleSVG(matches: PlannedMatch[]): string {
@@ -1092,6 +1108,36 @@
         </div>
         <div class="bracket-svg-wrap">
           {@html rrScheduleSVG}
+        </div>
+        <div class="page-footer">
+          {#if printLogoUrl}
+            <img src={printLogoUrl} alt="Organiser logo" class="page-footer-logo" />
+          {/if}
+          {#if printOrganizerName}
+            <span class="page-footer-org">Organised by {printOrganizerName}</span>
+          {/if}
+          <span class="page-footer-brand">carromscore.app</span>
+        </div>
+      </section>
+    {/if}
+
+    {#if standaloneKOBracketSVG}
+      <!-- ─── STANDALONE KO BRACKET PAGE ──────────────────────────── -->
+      <section class="page bracket-page">
+        <div class="bracket-hdr">
+          <div class="bracket-hdr-main">
+            <p class="brand">Carromscore</p>
+            <h2 class="bracket-title">{tournamentName} — Draw</h2>
+            {#if printOrganizerName}
+              <p class="bracket-organizer">Organised by {printOrganizerName}</p>
+            {/if}
+          </div>
+          {#if printLogoUrl}
+            <img src={printLogoUrl} alt="Organiser logo" class="bracket-logo" />
+          {/if}
+        </div>
+        <div class="bracket-svg-wrap">
+          {@html standaloneKOBracketSVG}
         </div>
         <div class="page-footer">
           {#if printLogoUrl}
