@@ -572,7 +572,9 @@ export async function generateKnockoutBracket(
     }).then((fn) => { unsubOnce = fn; });
   });
 
-  const bracketSize = Math.pow(2, Math.ceil(Math.log2(Math.max(seeds.length, 2))));
+  // Minimum bracket size of 8 so QF is always the first round (QF → SF → Final).
+  // With fewer than 5 real players some QF slots become byes — that's expected.
+  const bracketSize = Math.max(8, Math.pow(2, Math.ceil(Math.log2(Math.max(seeds.length, 2)))));
   const allLabels = [
     { label: 'R32', matchCount: 16 },
     { label: 'R16', matchCount: 8 },
