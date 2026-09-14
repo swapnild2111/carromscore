@@ -981,8 +981,6 @@
                 class:seg-active={qrMode === 'board'}
                 aria-pressed={qrMode === 'board'}
                 onclick={() => setQrMode('board')}
-                disabled={boards.length === 0}
-                title={boards.length === 0 ? 'No board numbers assigned to matches' : undefined}
               >Per board</button>
               <button
                 type="button"
