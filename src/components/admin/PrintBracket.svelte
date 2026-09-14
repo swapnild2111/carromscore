@@ -27,6 +27,8 @@
    *     the name resolves cleanly against the /players store.
    */
   import { onMount } from 'svelte';
+  import { getDatabase, ref, get } from 'firebase/database';
+  import { firebaseApp } from '../../lib/firebase';
   import {
     subscribePlannedByTournament,
     type PlannedMatch,
@@ -95,6 +97,16 @@
     }
     void subscribeTournaments();
     void subscribePlayers();
+    // Eagerly load organiser profile — fetch createdBy and profile immediately
+    // using static Firebase imports (no dynamic import delay).
+    void (async () => {
+      try {
+        const db = getDatabase(firebaseApp());
+        const tSnap = await get(ref(db, `tournaments/${tournamentKey}/createdBy`));
+        const uid = tSnap.val() as string | null;
+        if (uid) await loadOrgProfile(uid);
+      } catch { /* non-fatal */ }
+    })();
     const unsubT = subscribeTournamentStore(() => (tournamentTick += 1));
     // Players are cosmetic (canonical name resolution) — don't block rendering.
     // Set ready immediately; names update reactively when the store arrives.
@@ -190,23 +202,21 @@
     return loadAllTournaments().find((t) => t.key === tournamentKey) ?? null;
   });
 
-  // Load organiser profile once the tournament record's createdBy is known.
+  // Load organiser profile — kicked off as early as possible (in onMount via
+  // loadOrgProfile) so the logo is ready before the user hits Print.
+  async function loadOrgProfile(uid: string) {
+    try {
+      const db = getDatabase(firebaseApp());
+      const snap = await get(ref(db, `organiserProfiles/${uid}`));
+      orgProfile = snap.exists() ? (snap.val() as OrgProfile) : null;
+    } catch {
+      orgProfile = null;
+    }
+  }
+  // Re-run only if profile not yet loaded (onMount beat the store, or createdBy changed).
   $effect(() => {
     const uid = tournament?.createdBy;
-    if (!uid) return;
-    void (async () => {
-      try {
-        const [{ getDatabase, ref, get }, { firebaseApp }] = await Promise.all([
-          import('firebase/database'),
-          import('../../lib/firebase'),
-        ]);
-        const db = getDatabase(firebaseApp());
-        const snap = await get(ref(db, `organiserProfiles/${uid}`));
-        orgProfile = snap.exists() ? (snap.val() as OrgProfile) : null;
-      } catch {
-        orgProfile = null;
-      }
-    })();
+    if (uid && !orgProfile) void loadOrgProfile(uid);
   });
 
   // Derived print values.
@@ -214,12 +224,9 @@
   // logoUrl (tournaments created before the profile system stored the logo directly).
   // Organizer name: organiser profile only (the old per-tournament organizerName
   // field was removed from the add/edit dialogs).
-  const printLogoUrl = $derived(
-    overrideLogoUrl.trim() || orgProfile?.logoUrl || tournament?.logoUrl || null,
-  );
+  const printLogoUrl = $derived(orgProfile?.logoUrl || tournament?.logoUrl || null);
   const printOrganizerName = $derived(
-    overrideOrgName.trim() || orgProfile?.orgName || orgProfile?.displayName ||
-    tournament?.organizerName || null,
+    orgProfile?.orgName || orgProfile?.displayName || tournament?.organizerName || null,
   );
 
   // Load assigned-player set once when we have both the tournament
@@ -306,8 +313,6 @@
 
   // Manual overrides for organizer name/logo — typed directly in the toolbar.
   // Take priority over the Firebase-loaded profile values.
-  let overrideOrgName = $state('');
-  let overrideLogoUrl = $state('');
 
   // QR mode: 'board' = one permanent sticker per physical board (default),
   //          'match' = one QR per planned match showing who plays who.
@@ -866,27 +871,6 @@
             </div>
           </div>
         {/if}
-        <div class="org-override-group">
-          <label class="org-override-label" for="override-org-name">Organizer</label>
-          <input
-            id="override-org-name"
-            type="text"
-            class="org-override-input"
-            placeholder={printOrganizerName ?? 'Organizer name…'}
-            bind:value={overrideOrgName}
-          />
-          <label class="org-override-label" for="override-logo-url">Logo URL</label>
-          <input
-            id="override-logo-url"
-            type="url"
-            class="org-override-input"
-            placeholder={printLogoUrl ?? 'https://…logo.png'}
-            bind:value={overrideLogoUrl}
-          />
-          {#if printLogoUrl}
-            <img src={printLogoUrl} alt="logo preview" class="logo-preview" />
-          {/if}
-        </div>
         <button type="button" class="print-btn" onclick={() => window.print()}>🖨 Print</button>
       </div>
       {#if boards.length > 0}
@@ -925,12 +909,12 @@
       </div>
 
       <div class="cover-meta">
-        <div class="meta-row">
+        <div class="meta-row meta-row-full">
           <span class="meta-label">Default format</span>
           <span class="meta-value">{configLine}</span>
         </div>
         {#each flightCfgRows as row (row.flight)}
-        <div class="meta-row meta-row-flight">
+        <div class="meta-row meta-row-full meta-row-flight">
           <span class="meta-label">{row.flight}</span>
           <span class="meta-value">{row.cfg}</span>
         </div>
@@ -964,10 +948,7 @@
             <li class="roster-row">
               <span class="roster-name">{p.name}</span>
               {#if p.country && p.country !== 'Unknown'}
-                <span class="roster-country">
-                  <span aria-hidden="true">{flagEmoji(p.country)}</span>
-                  {countryName(p.country)}
-                </span>
+                <span class="roster-flag" aria-label={countryName(p.country)}>{flagEmoji(p.country)}</span>
               {/if}
             </li>
           {/each}
@@ -1062,9 +1043,17 @@
       <!-- ─── BOARD STICKERS (permanent per-board QR, 2-column grid) ── -->
       <section class="page qr-grid-page">
         <div class="qr-grid-hdr">
-          <p class="brand">Carromscore</p>
-          <p class="qr-grid-title">{tournamentName} — Board QR Codes</p>
-          <p class="qr-grid-sub">Cut out each sticker and stick it on the physical board. Same QR used every round.</p>
+          <div class="qr-grid-hdr-main">
+            <p class="brand">Carromscore</p>
+            <p class="qr-grid-title">{tournamentName} — Board QR Codes</p>
+            {#if printOrganizerName}
+              <p class="bracket-organizer">Organised by {printOrganizerName}</p>
+            {/if}
+            <p class="qr-grid-sub">Cut out each sticker and stick it on the physical board. Same QR used every round.</p>
+          </div>
+          {#if printLogoUrl}
+            <img src={printLogoUrl} alt="Organiser logo" class="bracket-logo" />
+          {/if}
         </div>
         <div class="qr-grid">
           {#each boards as b (b)}
@@ -1096,9 +1085,17 @@
       {#each schedule as round, ri (round.roundKey)}
         <section class="page qr-grid-page">
           <div class="qr-grid-hdr">
-            <p class="brand">Carromscore</p>
-            <p class="qr-grid-title">{tournamentName} — {round.roundName}</p>
-            <p class="qr-grid-sub">Cut out each card and place at the board for that match. Scan to start scoring.</p>
+            <div class="qr-grid-hdr-main">
+              <p class="brand">Carromscore</p>
+              <p class="qr-grid-title">{tournamentName} — {round.roundName}</p>
+              {#if printOrganizerName}
+                <p class="bracket-organizer">Organised by {printOrganizerName}</p>
+              {/if}
+              <p class="qr-grid-sub">Cut out each card and place at the board for that match. Scan to start scoring.</p>
+            </div>
+            {#if printLogoUrl}
+              <img src={printLogoUrl} alt="Organiser logo" class="bracket-logo" />
+            {/if}
           </div>
           <div class="match-qr-grid">
             {#each round.matches as m, mi (m.mid)}
@@ -1206,41 +1203,6 @@
     box-shadow: 0 1px 4px rgba(0,0,0,0.18);
   }
   /* Organizer override inputs */
-  .org-override-group {
-    display: flex;
-    align-items: center;
-    gap: 0.45rem;
-    flex-wrap: wrap;
-  }
-  .org-override-label {
-    font-size: 0.78rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: #666;
-    white-space: nowrap;
-  }
-  .org-override-input {
-    height: 2rem;
-    padding: 0 0.6rem;
-    font-size: 0.85rem;
-    border: 1px solid #ccc;
-    border-radius: 6px;
-    background: #fff;
-    color: #111;
-    outline: none;
-    min-width: 0;
-  }
-  .org-override-input:first-of-type { width: 11rem; }
-  .org-override-input:last-of-type  { width: 14rem; }
-  .org-override-input:focus { border-color: #888; }
-  .logo-preview {
-    max-height: 1.8rem;
-    max-width: 4rem;
-    object-fit: contain;
-    border-radius: 3px;
-    border: 1px solid #e0e0e0;
-  }
   /* Print action button — visually distinct from the selector */
   .print-btn {
     background: #222;
@@ -1340,7 +1302,8 @@
     border-bottom: 1px solid #ddd;
   }
   .meta-row {
-    display: flex;
+    display: grid;
+    grid-template-columns: 10rem 1fr;
     align-items: baseline;
     gap: 0.6rem;
     font-size: 0.95rem;
@@ -1351,15 +1314,16 @@
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    min-width: 6.5rem;
-    flex-shrink: 0;
+    white-space: nowrap;
   }
   .meta-value {
     color: #000;
     font-weight: 600;
   }
-  .meta-row-flight {
+  .meta-row-full {
     grid-column: 1 / -1;
+  }
+  .meta-row-flight {
     border-left: 3px solid #000;
     padding-left: 0.6rem;
     margin: 0.1rem 0;
@@ -1380,9 +1344,6 @@
     list-style: decimal;
     padding-left: 1.6rem;
     margin: 0.4rem 0 0;
-    /* Two columns on wide-ish pages so a ~30-player list fits on one
-       A4 sheet. Each row is a single line, so the columns balance
-       reasonably even with uneven names. */
     column-count: 2;
     column-gap: 2rem;
   }
@@ -1390,16 +1351,23 @@
     break-inside: avoid;
     -webkit-column-break-inside: avoid;
     page-break-inside: avoid;
-    padding: 0.15rem 0;
-    font-size: 0.92rem;
+    padding: 0.18rem 0;
+    font-size: 0.9rem;
     color: #111;
-  }
-  .roster-name { font-weight: 600; }
-  .roster-country {
-    color: #555;
-    font-size: 0.82rem;
-    margin-left: 0.35rem;
+    display: flex;
+    align-items: baseline;
+    gap: 0.3rem;
     white-space: nowrap;
+    overflow: hidden;
+  }
+  .roster-name {
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .roster-flag {
+    flex-shrink: 0;
+    font-size: 0.85rem;
   }
   .cover-empty {
     color: #666;
@@ -1483,10 +1451,16 @@
     page-break-after: always;
   }
   .qr-grid-hdr {
-    text-align: center;
+    display: flex;
+    align-items: flex-start;
+    gap: 1rem;
     padding-bottom: 1rem;
     border-bottom: 2px solid #000;
     margin-bottom: 1.2rem;
+  }
+  .qr-grid-hdr-main {
+    flex: 1;
+    text-align: center;
   }
   .qr-grid-title {
     margin: 0.2rem 0 0.2rem;
@@ -1502,7 +1476,8 @@
   .qr-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 1.5rem 2rem;
+    gap: 0.75rem 1.2rem;
+    flex: 1;
   }
   .qr-cell {
     display: flex;
@@ -1510,26 +1485,26 @@
     align-items: center;
     text-align: center;
     border: 1.5px dashed #ccc;
-    padding: 1rem 0.8rem 0.8rem;
+    padding: 0.5rem 0.6rem 0.5rem;
     break-inside: avoid;
     page-break-inside: avoid;
   }
   .qr-cell-board {
-    margin: 0 0 0.6rem;
-    font-size: 1.5rem;
+    margin: 0 0 0.3rem;
+    font-size: 1.2rem;
     font-weight: 900;
     color: #000;
     letter-spacing: 0.02em;
   }
   .qr-holder {
     background: #fff;
-    padding: 0.4rem;
+    padding: 0.3rem;
     border: 2px solid #000;
     line-height: 0;
   }
   .qr-holder :global(svg) {
-    width: 220px;
-    height: 220px;
+    width: 160px;
+    height: 160px;
     display: block;
   }
   .qr-placeholder {

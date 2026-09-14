@@ -205,16 +205,43 @@
   });
   const printLogoUrl = $derived(orgProfile?.logoUrl ?? null);
   const printOrganizerName = $derived(orgProfile?.orgName || orgProfile?.displayName || null);
+  function fmtMatchCfg(cfg: { bestOf?: number; pointsTarget?: number; maxBoards?: number; timerDuration?: number }, mode?: string): string {
+    const bo = cfg.bestOf ?? 3;
+    const pts = cfg.pointsTarget ?? 25;
+    const mb = cfg.maxBoards ?? 8;
+    const mbTxt = mb === 0 ? 'unlimited boards' : `max ${mb} boards`;
+    const timer = cfg.timerDuration ? ` · ${cfg.timerDuration} min timer` : '';
+    const prefix = mode ? `${mode} · ` : '';
+    return `${prefix}best of ${bo} · target ${pts} pts · ${mbTxt}${timer}`;
+  }
+
   const printConfigLine = $derived.by(() => {
-    const d = currentTournamentRecord?.defaults;
+    const rec = currentTournamentRecord;
+    if (!rec) return null;
+    const d = rec.defaults;
+    const mode = d?.mode === 'doubles' ? 'Doubles' : 'Singles';
+
+    if (rec.format === 'league') {
+      const lines: string[] = [];
+      // Group stage — uses tournament defaults
+      if (d) lines.push(`Group matches: ${fmtMatchCfg(d, mode)}`);
+      // Per-flight knockout config
+      const fc = rec.leagueCfg?.flightCfg;
+      if (fc) {
+        for (const [flight, cfg] of Object.entries(fc)) {
+          lines.push(`${flight} league: ${fmtMatchCfg(cfg, mode)}`);
+        }
+      } else if (d) {
+        lines.push(`League matches: ${fmtMatchCfg(d, mode)}`);
+      }
+      return lines.join('\n');
+    }
+
     if (!d) return null;
-    const mode = d.mode === 'doubles' ? 'Doubles' : 'Singles';
-    const bo = d.bestOf ?? 3;
-    const pts = d.pointsTarget ?? 25;
     const mb = d.maxBoards ?? 8;
     const mbTxt = mb === 0 ? 'unlimited boards' : `max ${mb} boards`;
     const timer = d.timerDuration ? ` · ${d.timerDuration} min timer` : '';
-    return `${mode} · best of ${bo} · target ${pts} points · ${mbTxt}${timer}`;
+    return `${mode} · best of ${d.bestOf ?? 3} · target ${d.pointsTarget ?? 25} pts · ${mbTxt}${timer}`;
   });
 
   /**
@@ -651,7 +678,21 @@
     const r = roundFilter
       ? ` · ${report?.roundReports?.find((x) => x.roundKey === roundFilter)?.roundName ?? roundFilter}`
       : '';
-    const d = new Date().toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' });
+    // Use tournament startDate if set; otherwise fall back to earliest match endedAt
+    const rows = viewReport.rows;
+    const timestamps = rows.map((row) => row.endedAtRaw ?? 0).filter((ms) => ms > 0);
+    let d: string;
+    const opts: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'long', year: 'numeric' };
+    const overrideMs = currentTournamentRecord?.startDate
+      ? new Date(currentTournamentRecord.startDate).getTime()
+      : 0;
+    if (overrideMs > 0) {
+      d = new Date(overrideMs).toLocaleDateString(undefined, opts);
+    } else if (timestamps.length > 0) {
+      d = new Date(Math.min(...timestamps)).toLocaleDateString(undefined, opts);
+    } else {
+      d = new Date().toLocaleDateString(undefined, opts);
+    }
     return `${t}${r} — ${d}`;
   });
 
@@ -695,6 +736,13 @@
         mergedMap.set(label, { roundName: label, matches: [] });
       }
       mergedMap.get(label)!.matches.push(...r.matches);
+    }
+    // After merging multi-round stages (e.g. "QF Match 1" + "QF Match 2" → "Quarter Finals"),
+    // re-sort each merged bucket by matchOrder so slot positions align with connector lines.
+    for (const r of mergedMap.values()) {
+      r.matches.sort((a, b) =>
+        a.matchOrder != null && b.matchOrder != null ? a.matchOrder - b.matchOrder : 0
+      );
     }
     const merged = [...mergedMap.values()];
 
@@ -919,7 +967,11 @@
         <p class="rep-print-desc">{currentTournamentRecord.description}</p>
       {/if}
       {#if printConfigLine}
-        <p class="rep-print-config">{printConfigLine}</p>
+        <div class="rep-print-config">
+          {#each printConfigLine.split('\n') as line}
+            <p>{line}</p>
+          {/each}
+        </div>
       {/if}
     </div>
     {#if printLogoUrl}
@@ -1662,6 +1714,10 @@
       color: #666;
       letter-spacing: 0.02em;
     }
+    .rep-print-config p {
+      margin: 0;
+      line-height: 1.6;
+    }
     .rep-print-logo {
       display: block !important;
       max-height: 3.5rem;
@@ -1718,7 +1774,7 @@
       background: #fffbe6 !important;
     }
     .stat-tile-trophies {
-      flex: 3 1 320px !important;
+      flex: 3 1 480px !important;
       border-color: #b8990a !important;
       background: #fffbe6 !important;
     }
@@ -1728,16 +1784,33 @@
     .podium-name { color: #111 !important; }
     .podium-1 .podium-name { color: #b8990a !important; }
     .podium-wins { color: #555 !important; }
-    .trophy-flight { color: #666 !important; }
-    .trophy-row { grid-template-columns: 8rem 1fr 1fr !important; }
+    .stat-tile-trophies { align-items: stretch !important; }
+    .stat-tile-trophies .trophy-list { text-align: left !important; }
+    .trophy-list {
+      grid-template-columns: max-content 1fr 1fr !important;
+    }
+    .trophy-row { display: contents !important; }
+    .trophy-flight {
+      color: #666 !important;
+      padding: 0.3rem 0.8rem 0.3rem 0 !important;
+    }
+    .trophy-cell {
+      padding: 0.3rem 0.4rem 0.3rem 0 !important;
+      opacity: 1 !important;
+    }
+    .trophy-row:not(:last-child) .trophy-flight,
+    .trophy-row:not(:last-child) .trophy-cell {
+      border-bottom-color: #e0d8b0 !important;
+    }
     .trophy-name {
+      font-size: 0.82rem !important;
       white-space: normal !important;
       overflow: visible !important;
       text-overflow: unset !important;
       word-break: break-word !important;
     }
     .trophy-champion { color: #b8990a !important; }
-    .trophy-runner { opacity: 1 !important; color: #444 !important; }
+    .trophy-runner { color: #444 !important; opacity: 1 !important; }
 
     /* ── Section headings ── */
     .section-hdr {
@@ -1935,10 +2008,10 @@
   /* Wider viewport: 3 number tiles + podium spanning 2 = 5 cols. */
   @media (min-width: 720px) {
     .stat-row {
-      grid-template-columns: repeat(5, 1fr);
+      grid-template-columns: repeat(6, 1fr);
     }
     .stat-tile-podium {
-      grid-column: span 2;
+      grid-column: span 3;
     }
   }
   /* Mid-width tablet: 3 number tiles in a row, podium spans full width. */
@@ -2065,45 +2138,57 @@
 
   /* Trophy Winners tile (league format) */
   .stat-tile-trophies {
-    min-width: 0;
-    flex: 3 1 420px;
+    align-items: stretch;
   }
+  .stat-tile-trophies .trophy-list {
+    text-align: left;
+  }
+  /* Trophy list: CSS subgrid so every row shares the same 3 columns */
   .trophy-list {
-    display: flex;
-    flex-direction: column;
-    gap: 0.35rem;
-  }
-  .trophy-row {
     display: grid;
-    grid-template-columns: 8rem 1fr 1fr;
+    grid-template-columns: max-content 1fr 1fr;
     align-items: center;
-    justify-items: start;
-    column-gap: 1rem;
-    min-width: 0;
-    padding: 0.15rem 0;
+    gap: 0;
   }
+  /* Each row is transparent to the grid — its 3 children become grid items */
+  .trophy-row {
+    display: contents;
+  }
+  /* Row separator: applied to every cell of a non-last row via pseudo-element on the flight span */
   .trophy-flight {
-    font-size: 0.68rem;
+    grid-column: 1;
+    font-size: 0.62rem;
     font-weight: 700;
     color: var(--muted, #9aa0a6);
     text-transform: uppercase;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.07em;
     white-space: nowrap;
+    padding: 0.45rem 1rem 0.45rem 0.5rem;
+    border-bottom: 1px solid transparent;
   }
   .trophy-cell {
     display: flex;
     align-items: center;
-    gap: 0.35rem;
+    gap: 0.3rem;
     min-width: 0;
-    width: 100%;
+    padding: 0.45rem 0.5rem 0.45rem 0;
+    border-bottom: 1px solid transparent;
+  }
+  .trophy-cell:last-child {
+    padding-right: 0.5rem;
+  }
+  /* Row separator on all cells of non-last rows */
+  .trophy-row:not(:last-child) .trophy-flight,
+  .trophy-row:not(:last-child) .trophy-cell {
+    border-bottom-color: rgba(255,255,255,0.06);
   }
   .trophy-medal {
     flex-shrink: 0;
-    font-size: 1rem;
+    font-size: 0.95rem;
     line-height: 1;
   }
   .trophy-name {
-    font-size: 0.9rem;
+    font-size: 0.88rem;
     font-weight: 700;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -2116,6 +2201,16 @@
   .trophy-runner {
     color: var(--fg, #f5f5f5);
     opacity: 0.85;
+  }
+  @media (max-width: 559px) {
+    .trophy-list {
+      grid-template-columns: max-content 1fr 1fr;
+    }
+    .trophy-flight {
+      font-size: 0.58rem;
+      padding-right: 0.6rem;
+    }
+    .trophy-name { font-size: 0.82rem; }
   }
 
   /* Empty states */

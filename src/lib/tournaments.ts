@@ -20,6 +20,8 @@ export type Tournament = {
   name: string;            // canonical display name (what the user typed)
   createdAt: number;
   lastActive: number;      // touched on every match Start referencing it
+  /** ISO date string (YYYY-MM-DD) for the tournament start date — optional override shown on reports/prints instead of deriving from match timestamps. */
+  startDate?: string;
   /**
    * Firebase auth uid of the account that created this record. Absent
    * when the tournament was created anonymously (default v2.0 flow).
@@ -557,6 +559,7 @@ function mergeRemote(raw: Record<string, unknown>): void {
     const description = typeof v.description === 'string' && v.description.trim() ? v.description.trim() : undefined;
     const organizerName = typeof v.organizerName === 'string' && v.organizerName.trim() ? v.organizerName.trim() : undefined;
     const logoUrl = typeof v.logoUrl === 'string' && v.logoUrl.trim() ? v.logoUrl.trim() : undefined;
+    const startDate = typeof v.startDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v.startDate) ? v.startDate : undefined;
     const rounds = parseRounds(v.rounds);
     const defaults = parseDefaults(v.defaults);
     const format =
@@ -583,6 +586,8 @@ function mergeRemote(raw: Record<string, unknown>): void {
       else delete existing.organizerName;
       if (logoUrl) existing.logoUrl = logoUrl;
       else delete existing.logoUrl;
+      if (startDate) existing.startDate = startDate;
+      else delete existing.startDate;
       if (rounds !== undefined) existing.rounds = rounds;
       else delete existing.rounds;
       if (defaults !== undefined) existing.defaults = defaults;
@@ -607,6 +612,7 @@ function mergeRemote(raw: Record<string, unknown>): void {
         ...(description ? { description } : {}),
         ...(organizerName ? { organizerName } : {}),
         ...(logoUrl ? { logoUrl } : {}),
+        ...(startDate ? { startDate } : {}),
         ...(rounds !== undefined ? { rounds } : {}),
         ...(defaults !== undefined ? { defaults } : {}),
         ...(format ? { format } : {}),
@@ -787,6 +793,7 @@ export async function updateTournamentMeta(
     description?: string | null;
     organizerName?: string | null;
     logoUrl?: string | null;
+    startDate?: string | null; // YYYY-MM-DD
   },
 ): Promise<TournamentWriteOutcome> {
   if (!key) return { ok: false, error: 'Missing tournament key' };
@@ -802,6 +809,9 @@ export async function updateTournamentMeta(
   const nextDescription = resolveOptStr(patch.description ?? undefined, t.description);
   const nextOrganizerName = resolveOptStr(patch.organizerName ?? undefined, t.organizerName);
   const nextLogoUrl = resolveOptStr(patch.logoUrl ?? undefined, t.logoUrl);
+  const nextStartDate = patch.startDate !== undefined
+    ? (patch.startDate === null ? undefined : (patch.startDate.trim() || undefined))
+    : t.startDate;
   if (nextType === 'closed' && !nextCountry) {
     return { ok: false, error: 'Closed tournaments must have a country' };
   }
@@ -828,6 +838,7 @@ export async function updateTournamentMeta(
     applyField(payload, 'description', patch.description ?? undefined, nextDescription);
     applyField(payload, 'organizerName', patch.organizerName ?? undefined, nextOrganizerName);
     applyField(payload, 'logoUrl', patch.logoUrl ?? undefined, nextLogoUrl);
+    applyField(payload, 'startDate', patch.startDate ?? undefined, nextStartDate);
     await update(ref(db, '/'), payload);
     t.type = nextType;
     if (patch.country === null) delete t.country;
@@ -838,6 +849,8 @@ export async function updateTournamentMeta(
     else if (nextOrganizerName !== undefined) t.organizerName = nextOrganizerName;
     if (patch.logoUrl === null) delete t.logoUrl;
     else if (nextLogoUrl !== undefined) t.logoUrl = nextLogoUrl;
+    if (patch.startDate === null) delete t.startDate;
+    else if (nextStartDate !== undefined) t.startDate = nextStartDate;
     t.lastActive = Date.now();
     notify();
     void logAudit({

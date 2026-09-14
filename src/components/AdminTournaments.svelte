@@ -123,11 +123,13 @@
   let editingDefaultMaxBoards = $state<string>('');
   let editingDefaultTimerDuration = $state<string>('');
   let editingDescription = $state<string>('');
+  let editingStartDate = $state<string>('');
   let editingOriginal = $state<{
     name: string;
     type: 'open' | 'closed';
     country: string;
     description: string;
+    startDate: string;
     defaults: {
       mode: 'singles' | 'doubles';
       bestOf: string;
@@ -208,6 +210,7 @@
    *  Required in that case; blocks Save. */
   let addingCountry = $state('');
   let addingDescription = $state('');
+  let addingStartDate = $state('');
   let addingDefaultMode = $state<'singles' | 'doubles'>('singles');
   let addingDefaultBestOf = $state<string>(String(FALLBACK_TOURNAMENT_DEFAULTS.bestOf));
   let addingDefaultPointsTarget = $state<string>(String(FALLBACK_TOURNAMENT_DEFAULTS.pointsTarget));
@@ -613,11 +616,13 @@
     editingDefaultMaxBoards = String(t.defaults?.maxBoards ?? FALLBACK_TOURNAMENT_DEFAULTS.maxBoards);
     editingDefaultTimerDuration = String(t.defaults?.timerDuration ?? FALLBACK_TOURNAMENT_DEFAULTS.timerDuration);
     editingDescription = t.description ?? '';
+    editingStartDate = t.startDate ?? '';
     editingOriginal = {
       name: t.name,
       type: t.type ?? 'open',
       country: t.country ?? '',
       description: t.description ?? '',
+      startDate: t.startDate ?? '',
       defaults: {
         mode: editingDefaultMode,
         bestOf: editingDefaultBestOf,
@@ -634,6 +639,7 @@
     editingCountry = '';
     editingFormat = 'standard';
     editingDescription = '';
+    editingStartDate = '';
     editingDefaultMode = 'singles';
     editingDefaultBestOf = '';
     editingDefaultPointsTarget = '';
@@ -710,9 +716,10 @@
     const defaultsChanged = Object.keys(defaultsPatch).length > 0;
 
     const descriptionChanged = editingDescription !== editingOriginal.description;
+    const startDateChanged = editingStartDate !== editingOriginal.startDate;
     const editingTournamentForFormat = list().find((t) => t.key === editingKey);
     const formatChanged = editingFormat !== ((editingTournamentForFormat?.format ?? 'standard') as string);
-    const metaExtraChanged = descriptionChanged || formatChanged;
+    const metaExtraChanged = descriptionChanged || startDateChanged || formatChanged;
 
     if (!nameChanged && !typeChanged && !countryChanged && !defaultsChanged && !metaExtraChanged) {
       // No-op — close the dialog quietly. Prevents a bogus audit
@@ -738,13 +745,14 @@
         const nextRec = list().find((x) => x.name === norm);
         if (nextRec) editingKey = nextRec.key;
       }
-      if (typeChanged || countryChanged || descriptionChanged) {
+      if (typeChanged || countryChanged || descriptionChanged || startDateChanged) {
         const countryPatch =
           editingType === 'open' && !countryNext ? null : countryNext;
         const r = await updateTournamentMeta(editingKey, {
           type: editingType,
           country: countryPatch,
           ...(descriptionChanged ? { description: editingDescription || null } : {}),
+          ...(startDateChanged ? { startDate: editingStartDate.trim() || null } : {}),
         });
         if (!r.ok) {
           flash('err', r.error);
@@ -1033,6 +1041,7 @@
     addingPhantomScore = '';
     addingCountry = '';
     addingDescription = '';
+    addingStartDate = '';
     addingDefaultMode = FALLBACK_TOURNAMENT_DEFAULTS.mode;
     addingDefaultBestOf = String(FALLBACK_TOURNAMENT_DEFAULTS.bestOf);
     addingDefaultPointsTarget = String(FALLBACK_TOURNAMENT_DEFAULTS.pointsTarget);
@@ -1046,6 +1055,7 @@
     addingFormat = 'standard';
     addingCountry = '';
     addingDescription = '';
+    addingStartDate = '';
     addingDefaultMode = FALLBACK_TOURNAMENT_DEFAULTS.mode;
     addingDefaultBestOf = String(FALLBACK_TOURNAMENT_DEFAULTS.bestOf);
     addingDefaultPointsTarget = String(FALLBACK_TOURNAMENT_DEFAULTS.pointsTarget);
@@ -1071,8 +1081,12 @@
       return;
     }
     const desc = addingDescription.trim();
-    if (desc) {
-      await updateTournamentMeta(outcome.record.key, { description: desc });
+    const sd = addingStartDate.trim();
+    if (desc || sd) {
+      await updateTournamentMeta(outcome.record.key, {
+        ...(desc ? { description: desc } : {}),
+        ...(sd ? { startDate: sd } : {}),
+      });
     }
     if (addingFormat === 'league') {
       const total = Math.max(4, Number(addingTotalPlayers) || 48);
@@ -1655,6 +1669,29 @@
             disabled={saving}
           />
         </label>
+
+        <label class="edit-field">
+          <span>Description <em class="hint-inline">(optional, shown on print cover)</em></span>
+          <input
+            type="text"
+            bind:value={editingDescription}
+            placeholder="Venue, date range, short blurb…"
+            maxlength="300"
+            disabled={saving}
+            aria-label="Tournament description"
+          />
+        </label>
+
+        <label class="edit-field">
+          <span>Tournament date <em class="hint-inline">(optional)</em></span>
+          <input
+            type="date"
+            bind:value={editingStartDate}
+            disabled={saving}
+            aria-label="Tournament start date"
+          />
+        </label>
+
         <fieldset class="add-type">
           <legend>Access</legend>
           <label>
@@ -1700,18 +1737,6 @@
             <option value="roundrobin">Round Robin — everyone vs everyone, top N to knockout</option>
             <option value="league">League — groups stage + knockout flights</option>
           </select>
-        </label>
-
-        <label class="edit-field">
-          <span>Description <em class="hint-inline">(optional, shown on print cover)</em></span>
-          <textarea
-            bind:value={editingDescription}
-            placeholder="Venue, date range, short blurb…"
-            maxlength="300"
-            rows="2"
-            disabled={saving}
-            aria-label="Tournament description"
-          ></textarea>
         </label>
 
         <!--
@@ -1988,6 +2013,15 @@
               maxlength="300"
               disabled={saving}
               aria-label="Tournament description"
+            />
+          </label>
+          <label class="edit-field">
+            <span class="field-label-white">Tournament date <em class="hint-inline">(optional)</em></span>
+            <input
+              type="date"
+              bind:value={addingStartDate}
+              disabled={saving}
+              aria-label="Tournament start date"
             />
           </label>
           <div class="add-sub-section">
@@ -3224,7 +3258,8 @@
     text-transform: uppercase;
     letter-spacing: 0.06em;
   }
-  .edit-field input[type="text"] {
+  .edit-field input[type="text"],
+  .edit-field input[type="date"] {
     background: #0f0f0f;
     color: var(--fg);
     border: 1px solid rgba(255, 255, 255, 0.12);
@@ -3232,8 +3267,12 @@
     padding: 0.5rem 0.6rem;
     font: inherit;
     font-size: 0.9rem;
+    width: 100%;
+    box-sizing: border-box;
+    color-scheme: dark;
   }
   .edit-field input[type="text"]:focus-visible,
+  .edit-field input[type="date"]:focus-visible,
   .edit-field input[type="number"]:focus-visible,
   .edit-field select:focus-visible {
     outline: 2px solid var(--accent, #ffd54a);
@@ -3857,7 +3896,8 @@
     font-size: 0.85rem;
     line-height: 1.5;
   }
-  .dialog-card input[type="text"] {
+  .dialog-card input[type="text"],
+  .dialog-card input[type="date"] {
     width: 100%;
     background: #0f0f0f;
     color: var(--fg);
@@ -3867,6 +3907,8 @@
     font: inherit;
     font-size: 0.9rem;
     margin: 0.25rem 0 0.75rem;
+    box-sizing: border-box;
+    color-scheme: dark;
   }
   .dialog-actions {
     display: flex;
