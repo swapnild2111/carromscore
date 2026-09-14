@@ -293,7 +293,7 @@
       unsubPlanned = await subscribePlannedByTournament(tournament.key, (arr) => {
         plannedMatches = arr;
         // Detect if bracket already exists
-        const hasBracket = arr.some((m) => bracketRoundRx.test(m.round ?? ''));
+        const hasBracket = arr.some((m) => KO_BRACKET_ROUND_RX.test(m.round ?? ''));
         if (hasBracket) bracketLocked = true;
         // Detect if RR schedule exists
         const hasRR = arr.some((m) => m.round === 'Group RR');

@@ -32,6 +32,7 @@ export type AuditAction =
   | 'player.merge'
   | 'player.delete'
   | 'tournament.rename'
+  | 'tournament.update'
   | 'tournament.delete'
   | 'organiser.add'
   | 'organiser.remove'

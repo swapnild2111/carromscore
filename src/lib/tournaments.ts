@@ -1464,6 +1464,30 @@ export async function assignPlayer(
   }
 }
 
+/** Assign multiple players at once via a single multi-path RTDB update. */
+export async function bulkAssignPlayers(
+  key: string,
+  playerIds: string[],
+): Promise<TournamentWriteOutcome> {
+  if (!key) return { ok: false, error: 'Missing tournament key' };
+  const cleanIds = playerIds.map((id) => id.trim()).filter((id) => id.length >= 1 && id.length <= 64);
+  if (cleanIds.length === 0) return { ok: true };
+  try {
+    const [{ firebaseApp }, { getDatabase, ref, update }] = await Promise.all([
+      import('./firebase'),
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    const patch: Record<string, true> = {};
+    for (const id of cleanIds) patch[`tournaments/${key}/assignedPlayerIds/${id}`] = true;
+    await update(ref(db, '/'), patch);
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg || 'Bulk assign failed' };
+  }
+}
+
 /** Remove a player from a closed tournament's roster. Idempotent —
  *  removing a non-member is a no-op. */
 export async function unassignPlayer(

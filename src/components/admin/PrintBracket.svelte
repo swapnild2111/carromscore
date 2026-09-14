@@ -787,10 +787,13 @@
   }
 
   // Per-flight bracket SVGs — keyed by flight name. Uses history data when available.
+  // Skipped for standalone KO tournaments (standaloneKOBracketSVG handles those).
   const flightBracketSVGs = $derived.by<Map<string, string>>(() => {
     void tournamentTick;
     void playerTick;
     const out = new Map<string, string>();
+
+    if (tournament?.format === 'knockout') return out;
 
     if (historyBracketFlights.length > 0) {
       // Use history data (has boardLog → per-set scores, deduped rounds)
@@ -838,7 +841,7 @@
     const rounds = koRoundsFromMatches(koMatches);
     return buildKOBracketSVG(rounds, koMatches, (id) => {
       const p = loadAllPlayersFn().find((pl) => pl.id === id);
-      return p?.name ?? id;
+      return p?.canonicalName ?? id;
     });
   });
 
@@ -1189,8 +1192,8 @@
       {/each}
     {/if}
 
-    {#if boards.length > 0}
-    {#if qrMode === 'board'}
+    {#if boards.length > 0 || (qrMode === 'match' && plannedMatches.length > 0)}
+    {#if qrMode === 'board' && boards.length > 0}
       <!-- ─── BOARD STICKERS (permanent per-board QR, 2-column grid) ── -->
       <section class="page qr-grid-page">
         <div class="qr-grid-hdr">

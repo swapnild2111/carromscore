@@ -83,6 +83,7 @@
         "description":   { ".validate": "newData.isString() && newData.val().length <= 300" },
         "organizerName": { ".validate": "newData.isString() && newData.val().length <= 120" },
         "logoUrl":       { ".validate": "newData.isString() && newData.val().length <= 3000000" },
+        "startDate":     { ".validate": "newData.isString() && newData.val().length <= 10" },
         "organisers": {
           ".read": "auth != null",
           "$uid": {
@@ -124,6 +125,10 @@
           ".validate": "!newData.exists() || newData.hasChildren(['participantCount'])",
           "participantCount": { ".validate": "newData.isNumber() && newData.val() >= 2 && newData.val() <= 256" },
           "advanceCount":     { ".validate": "newData.isNumber() && newData.val() >= 2 && newData.val() <= 64" },
+          "boardsAvailable":  { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 99" },
+          "flightNames": {
+            "$idx": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 40" }
+          },
           "$other":           { ".validate": false }
         },
         "leagueCfg": {

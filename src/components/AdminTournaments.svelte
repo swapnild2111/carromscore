@@ -31,6 +31,7 @@
     loadOrganisers,
     assignPlayer,
     unassignPlayer,
+    bulkAssignPlayers,
     loadAssignedPlayers,
     loadRounds,
     addRound,
@@ -1325,6 +1326,40 @@
       .slice(0, 200);
   });
 
+  const allAssignCandidatesSelected = $derived(() => {
+    const candidates = assignCandidates();
+    return candidates.length > 0 && candidates.every((p) => assignedIds.has(p.id));
+  });
+
+  async function toggleAllAssignCandidates() {
+    if (!assignKey) return;
+    const candidates = assignCandidates();
+    if (candidates.length === 0) return;
+    if (allAssignCandidatesSelected()) {
+      // Deselect all visible — unassign each one individually (uses the safe cascade check path)
+      for (const p of candidates) {
+        if (assignedIds.has(p.id)) await togglePlayerAssignment(p.id);
+      }
+    } else {
+      // Select all visible — bulk assign unassigned ones
+      const toAdd = candidates.filter((p) => !assignedIds.has(p.id)).map((p) => p.id);
+      if (toAdd.length === 0) return;
+      assignSaving = true;
+      try {
+        const r = await bulkAssignPlayers(assignKey, toAdd);
+        if (r.ok) {
+          const next = new Set(assignedIds);
+          for (const id of toAdd) next.add(id);
+          assignedIds = next;
+        } else {
+          flash('err', r.error);
+        }
+      } finally {
+        assignSaving = false;
+      }
+    }
+  }
+
   // ─── Rounds modal (v3.2) ────────────────────────────────────────
 
   /** Rounds for the currently-open modal, live from the store. */
@@ -1769,17 +1804,19 @@
             </div>
           </div>
 
+          {#if editingType === 'closed'}
           <label class="add-country-label">
             <span class="field-label-white">
               Country
-              {#if editingType === 'closed'}<em class="hint-inline">(required)</em>{:else}<em class="hint-inline">(optional)</em>{/if}
+              <em class="hint-inline">(required)</em>
             </span>
             <CountrySelect
               bind:value={editingCountry}
-              required={editingType === 'closed'}
+              required={true}
               ariaLabel="Tournament country"
             />
           </label>
+          {/if}
 
           <div class="add-sub-section">
             <span class="field-label-white">Format</span>
@@ -2510,6 +2547,15 @@
             No matching players. Add players from the Players tab first.
           </p>
         {:else}
+          <label class="assign-select-all">
+            <input
+              type="checkbox"
+              checked={allAssignCandidatesSelected()}
+              disabled={assignSaving}
+              onchange={toggleAllAssignCandidates}
+            />
+            <span>Select all ({assignCandidates().length})</span>
+          </label>
           <ul class="assign-list">
             {#each assignCandidates() as p (p.id)}
               <li class="assign-row">
@@ -3700,6 +3746,21 @@
     gap: 0.35rem;
     color: var(--muted);
     font-size: 0.8rem;
+    cursor: pointer;
+  }
+  .assign-select-all {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.3rem 0.55rem;
+    font-size: 0.82rem;
+    color: var(--muted);
+    cursor: pointer;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    margin-bottom: 0.2rem;
+  }
+  .assign-select-all input[type="checkbox"] {
+    accent-color: var(--accent, #ffd54a);
     cursor: pointer;
   }
   .assign-list {
