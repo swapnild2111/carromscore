@@ -1312,6 +1312,16 @@
     // boardLog is missing (legacy records), the helper falls back to
     // the stored fields — no behaviour change for those.
     const rec = reconcileResultFromBoardLog(m);
+    // The BOARD digit in LiveScoreboardView is a per-set counter
+    // (resets to 0 at each set transition during live play). For a
+    // finished match we show the last set's board count, not the
+    // match total — otherwise a 3-set match shows "21" instead of
+    // "7", which both reads as wrong and causes visual adjacency
+    // issues with the POINTS digit.
+    const log = (m.boardLog ?? []).filter((e) => !!e && typeof e === 'object');
+    const lastSetIdx = log.reduce((max, e) => Math.max(max, e.set ?? 0), -1);
+    const lastSetBoards = log.filter((e) => (e.set ?? 0) === lastSetIdx).length;
+    const boardDisplay = lastSetBoards > 0 ? lastSetBoards : rec.boardCount;
     return {
       matchId: m.id,
       updatedAt: m.endedAt ?? 0,
@@ -1326,7 +1336,7 @@
       liveState: {
         sideA: { points: rec.finalPointsA, sets: rec.setsA },
         sideB: { points: rec.finalPointsB, sets: rec.setsB },
-        board: rec.boardCount,
+        board: boardDisplay,
         currentBreak: null,
         queenHolder: null,
         matchResult: rec.winner,
