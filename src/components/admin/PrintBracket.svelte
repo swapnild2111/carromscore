@@ -825,6 +825,81 @@
     }
     return '';
   });
+
+  // RR schedule SVG — shown for roundrobin tournaments that have Group RR matches
+  // but no knockout bracket yet.
+  function buildRRScheduleSVG(matches: PlannedMatch[]): string {
+    const sorted = [...matches].sort((a, b) => a.matchOrder - b.matchOrder);
+    if (sorted.length === 0) return '';
+
+    const ROW_H = 32;
+    const COL_NAME = 180;
+    const COL_VS = 24;
+    const COL_RESULT = 60;
+    const PAD_X = 16;
+    const PAD_Y = 24;
+    const HEADER_H = 28;
+    const TOTAL_W = COL_NAME + COL_VS + COL_NAME + COL_RESULT + PAD_X * 2;
+    const TOTAL_H = PAD_Y + HEADER_H + sorted.length * ROW_H + PAD_Y;
+    const NAME_MAX = 20;
+
+    function clip(s: string): string {
+      return s.length > NAME_MAX ? s.slice(0, NAME_MAX - 1) + '…' : s;
+    }
+
+    const lines: string[] = [
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${TOTAL_W}" height="${TOTAL_H}" viewBox="0 0 ${TOTAL_W} ${TOTAL_H}">`,
+      `<rect width="${TOTAL_W}" height="${TOTAL_H}" fill="#fff"/>`,
+      // Header row
+      `<rect x="0" y="${PAD_Y}" width="${TOTAL_W}" height="${HEADER_H}" fill="#f0f0f0"/>`,
+      `<text x="${PAD_X}" y="${PAD_Y + 18}" font-size="11" font-weight="700" font-family="sans-serif" fill="#555">#</text>`,
+      `<text x="${PAD_X + 28}" y="${PAD_Y + 18}" font-size="11" font-weight="700" font-family="sans-serif" fill="#555">Side A</text>`,
+      `<text x="${PAD_X + 28 + COL_NAME + COL_VS / 2}" y="${PAD_Y + 18}" text-anchor="middle" font-size="11" font-weight="700" font-family="sans-serif" fill="#555">vs</text>`,
+      `<text x="${PAD_X + 28 + COL_NAME + COL_VS}" y="${PAD_Y + 18}" font-size="11" font-weight="700" font-family="sans-serif" fill="#555">Side B</text>`,
+      `<text x="${TOTAL_W - PAD_X}" y="${PAD_Y + 18}" text-anchor="end" font-size="11" font-weight="700" font-family="sans-serif" fill="#555">Result</text>`,
+    ];
+
+    for (let i = 0; i < sorted.length; i++) {
+      const m = sorted[i];
+      const y = PAD_Y + HEADER_H + i * ROW_H;
+      const cy = y + ROW_H / 2 + 4;
+      const rowFill = i % 2 === 0 ? '#fff' : '#fafafa';
+      const isDone = !!m.completedAt;
+      const winnerA = isDone && m.result?.winner === 'a';
+      const winnerB = isDone && m.result?.winner === 'b';
+
+      lines.push(`<rect x="0" y="${y}" width="${TOTAL_W}" height="${ROW_H}" fill="${rowFill}"/>`);
+      // Match number
+      lines.push(`<text x="${PAD_X}" y="${cy}" font-size="10" font-family="sans-serif" fill="#999">${m.matchOrder}</text>`);
+      // Side A
+      const aFill = winnerA ? '#1a7f4b' : '#1a1a1a';
+      lines.push(`<text x="${PAD_X + 28}" y="${cy}" font-size="12" font-weight="${winnerA ? '700' : '400'}" font-family="sans-serif" fill="${aFill}">${clip(resolvedName(m.aResolvedId, m.aName))}</text>`);
+      // vs
+      lines.push(`<text x="${PAD_X + 28 + COL_NAME + COL_VS / 2}" y="${cy}" text-anchor="middle" font-size="10" font-family="sans-serif" fill="#bbb">vs</text>`);
+      // Side B
+      const bFill = winnerB ? '#1a7f4b' : '#1a1a1a';
+      lines.push(`<text x="${PAD_X + 28 + COL_NAME + COL_VS}" y="${cy}" font-size="12" font-weight="${winnerB ? '700' : '400'}" font-family="sans-serif" fill="${bFill}">${clip(resolvedName(m.bResolvedId, m.bName))}</text>`);
+      // Result
+      if (isDone && m.result) {
+        lines.push(`<text x="${TOTAL_W - PAD_X}" y="${cy}" text-anchor="end" font-size="11" font-family="sans-serif" fill="#444">${m.result.setsA}–${m.result.setsB}</text>`);
+      }
+      // Bottom divider
+      lines.push(`<line x1="0" y1="${y + ROW_H}" x2="${TOTAL_W}" y2="${y + ROW_H}" stroke="#e8e8e8" stroke-width="0.5"/>`);
+    }
+
+    lines.push('</svg>');
+    return lines.join('\n');
+  }
+
+  // RR schedule SVG: built from Group RR planned matches for roundrobin tournaments.
+  const rrScheduleSVG = $derived.by<string>(() => {
+    void tournamentTick;
+    void playerTick;
+    if (tournament?.format !== 'roundrobin') return '';
+    if (flightBracketSVGs.size > 0) return ''; // knockout bracket already exists — don't show RR grid
+    const rrMatches = plannedMatches.filter((m) => m.round === 'Group RR');
+    return buildRRScheduleSVG(rrMatches);
+  });
 </script>
 
 <div class="print-wrap">
@@ -999,6 +1074,36 @@
         <span class="page-footer-brand">carromscore.app</span>
       </div>
     </section>
+
+    {#if rrScheduleSVG}
+      <!-- ─── RR SCHEDULE PAGE (roundrobin, pre-knockout) ────────────── -->
+      <section class="page bracket-page">
+        <div class="bracket-hdr">
+          <div class="bracket-hdr-main">
+            <p class="brand">Carromscore</p>
+            <h2 class="bracket-title">{tournamentName} — Round Robin Schedule</h2>
+            {#if printOrganizerName}
+              <p class="bracket-organizer">Organised by {printOrganizerName}</p>
+            {/if}
+          </div>
+          {#if printLogoUrl}
+            <img src={printLogoUrl} alt="Organiser logo" class="bracket-logo" />
+          {/if}
+        </div>
+        <div class="bracket-svg-wrap">
+          {@html rrScheduleSVG}
+        </div>
+        <div class="page-footer">
+          {#if printLogoUrl}
+            <img src={printLogoUrl} alt="Organiser logo" class="page-footer-logo" />
+          {/if}
+          {#if printOrganizerName}
+            <span class="page-footer-org">Organised by {printOrganizerName}</span>
+          {/if}
+          <span class="page-footer-brand">carromscore.app</span>
+        </div>
+      </section>
+    {/if}
 
     {#if flightBracketSVGs.size >= 1}
       <!-- ─── BRACKET PAGE(S) ─────────────────────────────────────────

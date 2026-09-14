@@ -147,16 +147,20 @@
   type FlightGroup = ReturnType<typeof groupNonGroupRounds>[number];
   const flightGroups = $derived.by<FlightGroup[]>(() => {
     const r = report;
-    if (!r?.roundReports || r.roundReports.length <= 1) return [];
+    if (!r?.roundReports || r.roundReports.length === 0) return [];
     const fmt = currentTournamentRecord?.format;
     const isLeague = fmt === 'league';
     const isKnockout = fmt === 'knockout';
     const isRoundRobin = fmt === 'roundrobin';
+    // For non-roundrobin formats keep the original <= 1 guard (summary card already shows single-round data)
+    if (!isRoundRobin && r.roundReports.length <= 1) return [];
     const nonGroupRounds = isLeague
       ? r.roundReports.filter((rr) => !/^group /i.test(rr.roundName))
-      : (isKnockout || isRoundRobin)
-        ? r.roundReports.filter((rr) => BRACKET_ROUND_RX.test(rr.roundName))
-        : r.roundReports;
+      : isRoundRobin
+        ? r.roundReports.filter((rr) => rr.roundName === 'Group RR' || BRACKET_ROUND_RX.test(rr.roundName))
+        : isKnockout
+          ? r.roundReports.filter((rr) => BRACKET_ROUND_RX.test(rr.roundName))
+          : r.roundReports;
     if (nonGroupRounds.length === 0) return [];
     return groupNonGroupRounds(nonGroupRounds, buildSetScoresMap(matches));
   });

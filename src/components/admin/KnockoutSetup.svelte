@@ -564,15 +564,33 @@
               </div>
             </div>
           {:else}
-            <!-- Schedule locked — show progress -->
-            <div class="locked-hint">🔒 Schedule locked — {seedList.length} players</div>
-            <div class="rr-progress">
-              <span class="rr-progress-label">
-                Progress: <strong>{rrCompleted} / {rrTotal}</strong> matches complete
+            <!-- Schedule locked — show progress + match list -->
+            <div class="draw-controls">
+              <span class="draw-locked-hint">🔒 Schedule locked — {seedList.length} players</span>
+              <span class="group-match-status" class:group-match-done={rrAllDone}>
+                {rrCompleted} / {rrTotal} matches complete
               </span>
-              {#if rrAllDone}
-                <span class="rr-done-badge">All done — go to Knockout Matches</span>
-              {/if}
+            </div>
+            <div class="groups-grid" style="grid-template-columns: 1fr">
+              <div class="group-col" class:group-col-done={rrAllDone}>
+                <div class="group-col-header">
+                  <span>Round Robin</span>
+                  {#if rrAllDone}
+                    <span class="rr-done-badge">All done — go to Knockout Matches</span>
+                  {/if}
+                </div>
+                {#each rrMatches as m (m.mid)}
+                  <div class="bracket-match-chip" class:completed={!!m.completedAt}>
+                    <span class="bm-order">{m.matchOrder}</span>
+                    <span class="bm-player" class:winner={m.result?.winner === 'a'}>{m.aName}</span>
+                    <span class="bm-vs">vs</span>
+                    <span class="bm-player" class:winner={m.result?.winner === 'b'}>{m.bName}</span>
+                    {#if m.result}
+                      <span class="bm-result">{m.result.setsA}–{m.result.setsB}</span>
+                    {/if}
+                  </div>
+                {/each}
+              </div>
             </div>
             <p class="bracket-hint">Close this panel and click <strong>Bracket</strong> on the tournament row to play matches.</p>
           {/if}
@@ -813,12 +831,6 @@
   .draw-hint {
     font-size: 0.8rem;
     color: var(--muted, #9aa0a6);
-  }
-  .locked-hint {
-    font-size: 0.78rem;
-    color: rgba(255, 213, 74, 0.7);
-    font-style: italic;
-    margin-bottom: 0.75rem;
   }
   .draw-locked-hint {
     font-size: 0.78rem;
@@ -1061,15 +1073,6 @@
   .bm-vs { font-size: 0.68rem; color: var(--muted, #9aa0a6); flex-shrink: 0; }
   .bm-result { font-size: 0.72rem; color: var(--muted, #9aa0a6); flex-shrink: 0; }
 
-  /* RR progress */
-  .rr-progress {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-    margin: 0.75rem 0;
-    flex-wrap: wrap;
-  }
-  .rr-progress-label { font-size: 0.85rem; color: var(--muted, #9aa0a6); }
   .rr-done-badge {
     font-size: 0.78rem;
     background: rgba(86, 203, 130, 0.15);
