@@ -1740,6 +1740,24 @@
           </select>
         </label>
 
+        {#if editingFormat === 'knockout' || editingFormat === 'roundrobin'}
+          <fieldset class="league-cfg-grid">
+            <legend>{editingFormat === 'roundrobin' ? 'Round Robin' : 'Knockout'} setup</legend>
+            <label class="edit-field">
+              <span>Boards available</span>
+              <input
+                type="number"
+                min="1"
+                max="99"
+                step="1"
+                bind:value={editingDefaultMaxBoards}
+                disabled={saving}
+                aria-label="Boards available"
+              />
+            </label>
+          </fieldset>
+        {/if}
+
         <!--
           Match defaults (v3.6.1). Each field is optional — leaving it
           blank falls back to the app-wide defaults (singles / bo1 /
@@ -1789,18 +1807,20 @@
               aria-label="Default points target"
             />
           </label>
-          <label class="edit-field">
-            <span>Max boards <em class="hint-inline">(0 = unlimited)</em></span>
-            <input
-              type="number"
-              min="0"
-              max="50"
-              step="1"
-              bind:value={editingDefaultMaxBoards}
-              disabled={saving}
-              aria-label="Default max boards"
-            />
-          </label>
+          {#if editingFormat !== 'knockout' && editingFormat !== 'roundrobin'}
+            <label class="edit-field">
+              <span>Max boards <em class="hint-inline">(0 = unlimited)</em></span>
+              <input
+                type="number"
+                min="0"
+                max="50"
+                step="1"
+                bind:value={editingDefaultMaxBoards}
+                disabled={saving}
+                aria-label="Default max boards"
+              />
+            </label>
+          {/if}
           <label class="edit-field">
             <span>Timer <em class="hint-inline">(mins, 0 = off)</em></span>
             <input
@@ -2106,6 +2126,18 @@
                 aria-label="Total players"
               />
             </label>
+            <label class="edit-field">
+              <span>Boards available</span>
+              <input
+                type="number"
+                min="1"
+                max="99"
+                step="1"
+                bind:value={addingDefaultMaxBoards}
+                disabled={saving}
+                aria-label="Boards available"
+              />
+            </label>
             {#if addingFormat === 'roundrobin'}
               <label class="edit-field">
                 <span>Top N advance to knockout</span>
@@ -2273,18 +2305,20 @@
               aria-label="Default points target"
             />
           </label>
-          <label class="edit-field">
-            <span>Max boards <em class="hint-inline">(0 = unlimited)</em></span>
-            <input
-              type="number"
-              min="0"
-              max="50"
-              step="1"
-              bind:value={addingDefaultMaxBoards}
-              disabled={saving}
-              aria-label="Default max boards"
-            />
-          </label>
+          {#if addingFormat !== 'knockout' && addingFormat !== 'roundrobin'}
+            <label class="edit-field">
+              <span>Max boards <em class="hint-inline">(0 = unlimited)</em></span>
+              <input
+                type="number"
+                min="0"
+                max="50"
+                step="1"
+                bind:value={addingDefaultMaxBoards}
+                disabled={saving}
+                aria-label="Default max boards"
+              />
+            </label>
+          {/if}
           <label class="edit-field">
             <span>Timer <em class="hint-inline">(mins, 0 = off)</em></span>
             <input
