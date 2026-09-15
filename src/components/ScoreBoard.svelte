@@ -2715,15 +2715,23 @@
           <span class="chip-lbl">BREAK</span>
         </button>
       {/if}
-      <button
-        type="button"
-        class="coin-btn"
-        class:coin-red={queenHolder === 'a'}
-        onclick={() => tapCoin('a')}
-        aria-label={queenHolder === 'a' ? `${sideA.name} has the queen. Tap to return.` : `Tap when ${sideA.name} pockets the queen.`}
-      >
-        {@render coinSvg()}
-      </button>
+      <div class="coin-callout-anchor">
+        <button
+          type="button"
+          class="coin-btn"
+          class:coin-red={queenHolder === 'a'}
+          class:coin-pulse={queenRequiredToast}
+          onclick={() => tapCoin('a')}
+          aria-label={queenHolder === 'a' ? `${sideA.name} has the queen. Tap to return.` : `Tap when ${sideA.name} pockets the queen.`}
+        >
+          {@render coinSvg()}
+        </button>
+        {#if queenRequiredToast}
+          <div class="coin-callout" role="status" aria-live="polite">
+            Tap to mark queen
+          </div>
+        {/if}
+      </div>
     </div>
 
     <!-- Middle: set pips + board + optional centred BREAK? chip when unassigned -->
@@ -2756,15 +2764,23 @@
 
     <!-- Side B: [coin] [BREAK-chip?] [NAME PILL] -->
     <div class="head-side head-side-b">
-      <button
-        type="button"
-        class="coin-btn"
-        class:coin-red={queenHolder === 'b'}
-        onclick={() => tapCoin('b')}
-        aria-label={queenHolder === 'b' ? `${sideB.name} has the queen. Tap to return.` : `Tap when ${sideB.name} pockets the queen.`}
-      >
-        {@render coinSvg()}
-      </button>
+      <div class="coin-callout-anchor">
+        {#if queenRequiredToast}
+          <div class="coin-callout" role="status" aria-live="polite">
+            Tap to mark queen
+          </div>
+        {/if}
+        <button
+          type="button"
+          class="coin-btn"
+          class:coin-red={queenHolder === 'b'}
+          class:coin-pulse={queenRequiredToast}
+          onclick={() => tapCoin('b')}
+          aria-label={queenHolder === 'b' ? `${sideB.name} has the queen. Tap to return.` : `Tap when ${sideB.name} pockets the queen.`}
+        >
+          {@render coinSvg()}
+        </button>
+      </div>
       {#if currentBreak === 'b'}
         <button
           type="button"
@@ -2811,59 +2827,34 @@
     </div>
   </header>
 
-  {#if queenLockedA || queenLockedB}
-    <div class="queen-lock">
-      <span class="ql-line">
-        {#if queenLockedA && queenLockedB}
-          <!-- Both sides locked out: compact form -->
-          <span class="ql-name qa">{sideA.name}</span>
-          <span class="ql-num">{cfg.pointsTarget - sideA.points}</span>
-          <span class="ql-sep">·</span>
-          <span class="ql-name qb">{sideB.name}</span>
-          <span class="ql-num">{cfg.pointsTarget - sideB.points}</span>
-          <span class="ql-trail">to win</span>
-          <span class="ql-sep">·</span>
-          <span class="ql-noqueen">no queen</span>
-        {:else if queenLockedA}
-          <span class="ql-name qa">{sideA.name}</span>
-          needs
-          <span class="ql-num">{cfg.pointsTarget - sideA.points}</span>
-          {cfg.pointsTarget - sideA.points === 1 ? 'point' : 'points'} to win
-          <span class="ql-sep">·</span>
-          <span class="ql-noqueen">no queen</span>
-        {:else}
-          <span class="ql-name qb">{sideB.name}</span>
-          needs
-          <span class="ql-num">{cfg.pointsTarget - sideB.points}</span>
-          {cfg.pointsTarget - sideB.points === 1 ? 'point' : 'points'} to win
-          <span class="ql-sep">·</span>
-          <span class="ql-noqueen">no queen</span>
-        {/if}
-      </span>
+  <div class="grid-wrap">
+    {#if setDecidedToast}
+      <div class="set-callout" role="status" aria-live="polite">
+        Set decided — tap SET+1 or End
+      </div>
+    {/if}
+    <div class="grid">
+      <button type="button" class="col side-a tone-{colourA} set" use:swipeAdjust={{ onDelta: (d) => adjustSets('a', d) }} aria-label="{sideA.name} sets: tap or swipe left to add, swipe right to subtract">
+        <div class="digit">{setsFmt(sideA.sets)}</div>
+        <div class="label">SET</div>
+      </button>
+      <button type="button" class="col side-a tone-{colourA} pts" use:swipeAdjust={{ onDelta: (d) => adjustPoints('a', d) }} aria-label="{sideA.name} points: tap or swipe left to add, swipe right to subtract">
+        <div class="digit big">{pad2(sideA.points)}</div>
+        <div class="label">POINTS</div>
+      </button>
+      <button type="button" class="col mid brd" use:swipeAdjust={{ onDelta: (d) => adjustBoard(d) }} aria-label="Board: tap or swipe left to add, swipe right to subtract">
+        <div class="digit">{board}</div>
+        <div class="label">BOARD</div>
+      </button>
+      <button type="button" class="col side-b tone-{colourB} pts" use:swipeAdjust={{ onDelta: (d) => adjustPoints('b', d) }} aria-label="{sideB.name} points: tap or swipe left to add, swipe right to subtract">
+        <div class="digit big">{pad2(sideB.points)}</div>
+        <div class="label">POINTS</div>
+      </button>
+      <button type="button" class="col side-b tone-{colourB} set" use:swipeAdjust={{ onDelta: (d) => adjustSets('b', d) }} aria-label="{sideB.name} sets: tap or swipe left to add, swipe right to subtract">
+        <div class="digit">{setsFmt(sideB.sets)}</div>
+        <div class="label">SET</div>
+      </button>
     </div>
-  {/if}
-
-  <div class="grid">
-    <button type="button" class="col side-a tone-{colourA} set" use:swipeAdjust={{ onDelta: (d) => adjustSets('a', d) }} aria-label="{sideA.name} sets: tap or swipe left to add, swipe right to subtract">
-      <div class="digit">{setsFmt(sideA.sets)}</div>
-      <div class="label">SET</div>
-    </button>
-    <button type="button" class="col side-a tone-{colourA} pts" use:swipeAdjust={{ onDelta: (d) => adjustPoints('a', d) }} aria-label="{sideA.name} points: tap or swipe left to add, swipe right to subtract">
-      <div class="digit big">{pad2(sideA.points)}</div>
-      <div class="label">POINTS</div>
-    </button>
-    <button type="button" class="col mid brd" use:swipeAdjust={{ onDelta: (d) => adjustBoard(d) }} aria-label="Board: tap or swipe left to add, swipe right to subtract">
-      <div class="digit">{board}</div>
-      <div class="label">BOARD</div>
-    </button>
-    <button type="button" class="col side-b tone-{colourB} pts" use:swipeAdjust={{ onDelta: (d) => adjustPoints('b', d) }} aria-label="{sideB.name} points: tap or swipe left to add, swipe right to subtract">
-      <div class="digit big">{pad2(sideB.points)}</div>
-      <div class="label">POINTS</div>
-    </button>
-    <button type="button" class="col side-b tone-{colourB} set" use:swipeAdjust={{ onDelta: (d) => adjustSets('b', d) }} aria-label="{sideB.name} sets: tap or swipe left to add, swipe right to subtract">
-      <div class="digit">{setsFmt(sideB.sets)}</div>
-      <div class="label">SET</div>
-    </button>
   </div>
   {/if}
 
@@ -3242,29 +3233,8 @@
     </div>
   {/if}
 
-  {#if queenRequiredToast}
-    <!--
-      Small non-blocking toast that appears when the umpire taps
-      BOARD+1 without a queen holder marked. Real-carrom rule: every
-      board ends with the queen either pocketed or awarded. The toast
-      auto-dismisses after 2.5s.
-    -->
-    <div class="queen-toast" role="status" aria-live="polite">
-      Mark queen before ending board
-    </div>
-  {/if}
-
-  {#if setDecidedToast}
-    <!--
-      Surfaced when BOARD+1 is tapped after a side has reached
-      pointsTarget. Set is over — the next tap should be SET+1
-      (start next set) or End (finalise match). This prevents the
-      phantom-9th-board bug from Prem/Yash's 08-08 test.
-    -->
-    <div class="queen-toast" role="status" aria-live="polite">
-      Set decided — tap SET+1 or End
-    </div>
-  {/if}
+  <!-- queenRequiredToast is now an anchored callout on each coin button (see .coin-callout-anchor) -->
+  <!-- setDecidedToast is now an anchored callout inside .grid-set-callout-wrap (see below) -->
 
   {#if setLoserToast}
     <!--
@@ -3371,7 +3341,7 @@
     >
       <div class="swap-prompt-card">
         <p id="concession-prompt-title" class="swap-prompt-title">
-          Set not yet finished — is <strong>{loseName || 'the other side'}</strong> conceding this set to <strong>{winName || 'this side'}</strong>?
+          Set not yet finished — is <strong>{loseName || 'the other side'}</strong> giving this set to <strong>{winName || 'this side'}</strong>?
         </p>
         <div class="swap-prompt-actions">
           <button
@@ -3849,12 +3819,53 @@
     display: inline-flex;
     align-items: center;
     gap: 0.5rem;
+    position: relative;
     /* min-width:0 lets the child pill's text ellipsis-truncate when the
        row runs out of horizontal space, instead of pushing the coin
        and BREAK chip out of the grid cell into the middle column. */
     min-width: 0;
     /* max-width:100% keeps the whole row inside its grid cell. */
     max-width: 100%;
+  }
+
+  .coin-callout-anchor {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+  }
+  .coin-callout {
+    position: absolute;
+    bottom: calc(100% + 10px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: linear-gradient(135deg, #3a2a10, #2a1e0a);
+    border: 1px solid rgba(255, 213, 74, 0.7);
+    color: var(--accent);
+    font-weight: 700;
+    font-size: 0.75rem;
+    padding: 0.4rem 0.8rem;
+    border-radius: 0.5rem;
+    white-space: nowrap;
+    z-index: 200;
+    pointer-events: none;
+    animation: queenToastIn 0.2s ease-out;
+  }
+  .coin-callout::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 6px solid transparent;
+    border-top-color: rgba(255, 213, 74, 0.7);
+  }
+  @keyframes coinPulse {
+    0%, 100% { filter: drop-shadow(0 0 4px rgba(255, 213, 74, 0.3)); }
+    50%       { filter: drop-shadow(0 0 14px rgba(255, 213, 74, 0.85)); }
+  }
+  .coin-btn.coin-pulse {
+    animation: coinPulse 0.9s ease-in-out infinite;
   }
   /*
    * v3.4.4: reverted to the pre-v3.4.5 anchoring — each head-side
@@ -3887,12 +3898,12 @@
     flex-shrink: 0;
     /* Greyed / unowned default. Concrete tokens live here so the SVG
        stays a pure geometry ref. */
-    --coin-face:      #4a4a4a;
+    --coin-face:      #787878;
     --coin-outline:   #2a2a2a;
     --coin-ring:      rgba(255, 255, 255, 0.28);
     --coin-shadow:    rgba(0, 0, 0, 0.4);
-    --coin-highlight: #7a7a7a;
-    opacity: 0.55;
+    --coin-highlight: #a8a8a8;
+    opacity: 0.75;
     transition: opacity 0.15s, transform 0.08s;
   }
   .coin-btn:hover { opacity: 0.85; }
@@ -4119,8 +4130,8 @@
     color: #0b0b0b;
     transition: transform 0.15s, box-shadow 0.15s;
   }
-  .set-pip.pip-a { background: var(--side-a); border-color: var(--side-a); box-shadow: 0 0 8px rgba(79,195,247,0.4); }
-  .set-pip.pip-b { background: var(--side-b); border-color: var(--side-b); box-shadow: 0 0 8px rgba(255,138,101,0.4); }
+  .set-pip.pip-a { background: var(--side-a); border-color: var(--side-a); box-shadow: 0 0 8px rgba(0,180,255,0.4); }
+  .set-pip.pip-b { background: var(--side-b); border-color: var(--side-b); box-shadow: 0 0 8px rgba(255,107,53,0.4); }
   .set-pip.pip-current {
     background: transparent;
     border-color: var(--accent);
@@ -4176,56 +4187,45 @@
   }
   .board-total { color: var(--muted); font-size: 0.7em; margin-left: 0.1rem; }
 
-  .queen-lock {
-    flex-shrink: 0;
+  .grid-wrap {
+    position: relative;
+    flex: 1;
+    min-height: 0;
     display: flex;
     flex-direction: column;
-    align-items: center;
-    gap: 0.15rem;
-    text-align: center;
-    font-size: 0.8rem;
-    color: var(--fg);
-    background: linear-gradient(90deg,
-      rgba(255, 213, 74, 0.05),
-      rgba(255, 213, 74, 0.15) 50%,
-      rgba(255, 213, 74, 0.05));
-    border: 1px solid rgba(255, 213, 74, 0.35);
+  }
+  .set-callout {
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: linear-gradient(135deg, #3a2a10, #2a1e0a);
+    border: 1px solid rgba(255, 213, 74, 0.7);
+    color: var(--accent);
+    font-weight: 700;
+    font-size: 0.75rem;
+    padding: 0.4rem 0.9rem;
     border-radius: 0.5rem;
-    padding: 0.3rem 0.75rem;
-    letter-spacing: 0.02em;
+    white-space: nowrap;
+    z-index: 200;
+    pointer-events: none;
+    animation: queenToastIn 0.2s ease-out;
   }
-  .queen-lock .ql-line {
-    display: inline-flex;
-    align-items: baseline;
-    gap: 0.35rem;
-    flex-wrap: wrap;
-    justify-content: center;
-  }
-  .queen-lock .ql-name { font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; }
-  .queen-lock .qa { color: var(--side-a); }
-  .queen-lock .qb { color: var(--side-b); }
-  .queen-lock .ql-num {
-    font-family: 'DSEG7 Classic', 'Courier New', monospace;
-    font-weight: 700;
-    font-size: 1.05rem;
-    color: var(--accent);
-    text-shadow: 0 0 6px rgba(255, 213, 74, 0.5);
-    margin: 0 0.15rem;
-  }
-  .queen-lock .ql-sep { color: var(--muted); opacity: 0.6; }
-  .queen-lock .ql-trail { color: var(--muted); font-size: 0.75em; margin-left: 0.15rem; }
-  .queen-lock .ql-noqueen {
-    color: var(--accent);
-    font-weight: 700;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    font-size: 0.7rem;
+  .set-callout::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 6px solid transparent;
+    border-top-color: rgba(255, 213, 74, 0.7);
   }
 
   .grid {
     flex: 1;
     min-height: 0;
     display: grid;
+    /* .grid-wrap provides position:relative + flex:1 — grid itself stretches to fill */
     grid-template-columns: 1fr 2fr 1.2fr 2fr 1fr;
     gap: 0.4rem;
     background: #0f0f0f;
@@ -4281,8 +4281,8 @@
      the coloured pill on wide-short windows, while still filling
      the column on typical portrait phone windows. */
   .digit.big { font-size: min(38vh, 55cqi); }
-  .col.tone-a .digit { color: var(--side-a); text-shadow: 0 0 12px rgba(79,195,247,0.35); }
-  .col.tone-b .digit { color: var(--side-b); text-shadow: 0 0 12px rgba(255,138,101,0.35); }
+  .col.tone-a .digit { color: var(--side-a); text-shadow: 0 0 12px rgba(0,180,255,0.35); }
+  .col.tone-b .digit { color: var(--side-b); text-shadow: 0 0 12px rgba(255,107,53,0.35); }
   .mid .digit { color: var(--accent); text-shadow: 0 0 12px rgba(255,213,74,0.35); }
   .label {
     color: var(--muted);
@@ -4343,7 +4343,7 @@
     gap: 0.5rem;
     padding: 0.25rem 0.75rem 0.25rem 0.5rem;
     border-radius: 999px;
-    background: linear-gradient(90deg, rgba(79,195,247,0.18), rgba(255,138,101,0.18));
+    background: linear-gradient(90deg, rgba(0,180,255,0.18), rgba(255,107,53,0.18));
     color: var(--fg);
     font-size: 0.8rem;
     letter-spacing: 0.02em;
@@ -4427,7 +4427,7 @@
   .foot-lbl { letter-spacing: 0.04em; }
 
   .foot-btn.scores { border-color: rgba(255,213,74,0.4); color: var(--accent); }
-  .foot-btn.swap { border-color: rgba(79,195,247,0.4); color: var(--side-a); }
+  .foot-btn.swap { border-color: rgba(0,180,255,0.4); color: var(--side-a); }
   .foot-btn.reset { border-color: rgba(255,213,74,0.4); color: var(--accent); }
   .foot-btn.endm { border-color: rgba(76,175,80,0.5); color: #66bb6a; }
   .foot-btn.close { border-color: rgba(239,83,80,0.4); color: var(--danger); }
@@ -4771,11 +4771,11 @@
      differ but the palette stays tight. */
   .spark-0 { background: #ffd54a; box-shadow: 0 0 16px 4px rgba(255,213,74,0.7); }
   .spark-1 { background: #ff6b6b; box-shadow: 0 0 16px 4px rgba(255,107,107,0.7); }
-  .spark-2 { background: #4fc3f7; box-shadow: 0 0 16px 4px rgba(79,195,247,0.7); }
+  .spark-2 { background: #00b4ff; box-shadow: 0 0 16px 4px rgba(0,180,255,0.7); }
   .spark-3 { background: #66bb6a; box-shadow: 0 0 16px 4px rgba(102,187,106,0.7); }
   .spark-4 { background: #ba68c8; box-shadow: 0 0 16px 4px rgba(186,104,200,0.7); }
   .spark-5 { background: #ffb74d; box-shadow: 0 0 16px 4px rgba(255,183,77,0.7); }
-  .spark-6 { background: #ff8a65; box-shadow: 0 0 16px 4px rgba(255,138,101,0.7); }
+  .spark-6 { background: #ff6b35; box-shadow: 0 0 16px 4px rgba(255,107,53,0.7); }
   .spark-7 { background: #f06292; box-shadow: 0 0 16px 4px rgba(240,98,146,0.7); }
   /* Angles for the 20 particles, spread around a full circle. Distances
      mix short + long so the burst has depth. */
