@@ -2981,16 +2981,15 @@
       </button>
       -->
 
-      {#if runningBoardDirty && !isMatchDecided()}
-        <button
-          type="button"
-          class="foot-btn undo"
-          onclick={undoCurrentBoard}
-          aria-label="Undo current board scoring"
-        >
-          <span class="foot-ico" aria-hidden="true">↩</span><span class="foot-lbl">Undo</span>
-        </button>
-      {/if}
+      <button
+        type="button"
+        class="foot-btn undo"
+        onclick={undoCurrentBoard}
+        disabled={!runningBoardDirty || isMatchDecided()}
+        aria-label="Undo current board scoring"
+      >
+        <span class="foot-ico" aria-hidden="true">↩</span><span class="foot-lbl">Undo</span>
+      </button>
       <button type="button" class="foot-btn endm" onclick={() => endMatch()} disabled={endMatchInProgress} aria-label="End match">
         <span class="foot-ico" aria-hidden="true">🏁</span><span class="foot-lbl">End</span>
       </button>
