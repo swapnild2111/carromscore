@@ -37,6 +37,7 @@
   } from '../lib/tournaments';
   import {
     APP_VERSION,
+    RELEASE_NOTES,
     fetchLatestRelease,
     isNewerVersion,
     releaseUrl as buildReleaseUrl,
@@ -1864,16 +1865,35 @@
   {#if swJustUpdated}
     <!--
       Web-layer refresh detected via service-worker controllerchange.
-      Soft, non-blocking: the user can keep scoring; when they're ready
-      they tap Restart to pick up the freshest bundle.
+      Shown as a "What's new" popup with RELEASE_NOTES bullet points.
+      Tap Restart to reload, or dismiss to stay on the page.
     -->
-    <button type="button" class="sw-toast" onclick={restartApp}>
-      <span class="sw-toast-icon" aria-hidden="true">✨</span>
-      <span class="sw-toast-body">
-        <strong>Carromscore just updated.</strong>
-        Tap to restart and see the latest.
-      </span>
-    </button>
+    <div class="sw-update-backdrop" role="dialog" aria-modal="true" aria-label="App updated">
+      <div class="sw-update-card">
+        <div class="sw-update-header">
+          <span class="sw-update-icon" aria-hidden="true">✨</span>
+          <div>
+            <div class="sw-update-title">Carromscore updated</div>
+            <div class="sw-update-version">v{APP_VERSION}</div>
+          </div>
+        </div>
+        {#if RELEASE_NOTES.length > 0}
+          <ul class="sw-update-notes">
+            {#each RELEASE_NOTES as note}
+              <li>{note}</li>
+            {/each}
+          </ul>
+        {/if}
+        <div class="sw-update-actions">
+          <button type="button" class="sw-update-btn sw-update-restart" onclick={restartApp}>
+            Restart now
+          </button>
+          <button type="button" class="sw-update-btn sw-update-dismiss" onclick={() => { swJustUpdated = false; }}>
+            Later
+          </button>
+        </div>
+      </div>
+    </div>
   {/if}
 
   {#if installEvt}
@@ -2679,36 +2699,109 @@
    * enough from the APK banner that the user learns "gold pill = harmless
    * refresh, red banner = time to reinstall".
    */
-  .sw-toast {
+  /* ── "What's new" update popup ─────────────────────────────────── */
+  .sw-update-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 500;
     display: flex;
     align-items: center;
-    gap: 0.65rem;
-    padding: 0.6rem 0.9rem;
-    background: rgba(255, 213, 74, 0.1);
+    justify-content: center;
+    padding: 1rem;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+  }
+  .sw-update-card {
+    background: #141414;
     border: 1px solid rgba(255, 213, 74, 0.35);
-    border-radius: 0.65rem;
-    color: var(--fg);
-    text-align: left;
-    font-family: inherit;
-    font-size: 0.85rem;
-    cursor: pointer;
-    line-height: 1.35;
-    transition: background 0.15s, border-color 0.15s;
+    border-radius: 1rem;
+    padding: 1.25rem 1.25rem 1rem;
+    max-width: 340px;
+    width: 100%;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+    animation: swCardIn 0.2s ease-out;
   }
-  .sw-toast:hover {
-    background: rgba(255, 213, 74, 0.16);
-    border-color: rgba(255, 213, 74, 0.55);
+  @keyframes swCardIn {
+    from { opacity: 0; transform: translateY(12px) scale(0.97); }
+    to   { opacity: 1; transform: none; }
   }
-  .sw-toast-icon {
-    font-size: 1.1rem;
+  .sw-update-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.9rem;
+  }
+  .sw-update-icon {
+    font-size: 1.6rem;
     line-height: 1;
     flex-shrink: 0;
   }
-  .sw-toast-body { min-width: 0; }
-  .sw-toast-body strong {
+  .sw-update-title {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--accent);
+    line-height: 1.2;
+  }
+  .sw-update-version {
+    font-size: 0.72rem;
+    color: var(--muted);
+    margin-top: 0.1rem;
+  }
+  .sw-update-notes {
+    list-style: none;
+    margin: 0 0 1rem;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+  .sw-update-notes li {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+    color: var(--fg);
+    line-height: 1.4;
+  }
+  .sw-update-notes li::before {
+    content: '•';
     color: var(--accent);
     font-weight: 700;
-    margin-right: 0.25rem;
+    flex-shrink: 0;
+    margin-top: 0.05rem;
+  }
+  .sw-update-actions {
+    display: flex;
+    gap: 0.6rem;
+    justify-content: flex-end;
+  }
+  .sw-update-btn {
+    padding: 0.4rem 1rem;
+    font: inherit;
+    font-size: 0.88rem;
+    font-weight: 600;
+    border-radius: 0.5rem;
+    cursor: pointer;
+    transition: background 0.12s, border-color 0.12s;
+  }
+  .sw-update-restart {
+    background: rgba(255, 213, 74, 0.15);
+    border: 1px solid rgba(255, 213, 74, 0.6);
+    color: var(--accent);
+  }
+  .sw-update-restart:hover {
+    background: rgba(255, 213, 74, 0.25);
+    border-color: rgba(255, 213, 74, 0.85);
+  }
+  .sw-update-dismiss {
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: var(--muted);
+  }
+  .sw-update-dismiss:hover {
+    border-color: rgba(255, 255, 255, 0.3);
+    color: var(--fg);
   }
 
   /*

@@ -5,6 +5,19 @@
  */
 export const APP_VERSION = '4.0.10';
 
+/**
+ * Short bullet points shown in the "What's new" popup when a service-worker
+ * update fires. Update alongside APP_VERSION on every release.
+ */
+export const RELEASE_NOTES: string[] = [
+  'Edit scores mid-match from the footer',
+  'Queen coin now has a red glow ring',
+  'Footer buttons renamed for clarity',
+  'Offline banner no longer flashes on tab switch',
+  'Scoreboard auto-enters fullscreen on start',
+  'Player first name shown in header to prevent overflow',
+];
+
 const REPO = 'swapnild2111/carromscore';
 
 /**
