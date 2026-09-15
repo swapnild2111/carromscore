@@ -362,6 +362,12 @@
    * further down) so the grid tracks the URL config even after edits.
    */
   const isPractice = $derived(cfg.mode === 'practice');
+  // Trim to first word for display — prevents long last names overflowing the header pill.
+  // Doubles names ("A & B") are kept as-is since they don't contain a last name.
+  function firstName(name: string): string {
+    if (cfg.mode === 'doubles') return name;
+    return name.split(' ')[0] ?? name;
+  }
   /*
    * Country codes for the header flag chip. Only surface a flag in
    * singles mode where "the player" is a single person — doubles has
@@ -698,6 +704,11 @@
 
     updateOrientation();
     requestWakeLock();
+    // Attempt fullscreen + orientation lock on load. Most browsers
+    // grant this because the page was reached via a user gesture
+    // ("Start match" tap). Silently ignored on desktop or when the
+    // browser disallows it — the rotate-hint fallback covers that.
+    window.setTimeout(() => { void tryLockLandscape(); }, 300);
 
     window.addEventListener('resize', updateOrientation);
     window.addEventListener('orientationchange', updateOrientation);
@@ -803,6 +814,9 @@
   function onFullscreenChange() {
     if (!document.fullscreenElement && landscapeLocked) {
       landscapeLocked = false;
+      // Fullscreen was exited externally (OS notification, swipe-up).
+      // Re-request so the board stays full-screen.
+      window.setTimeout(() => { void tryLockLandscape(); }, 400);
     }
   }
 
@@ -981,7 +995,13 @@
   }
 
   function updateOrientation() {
+    const wasPortrait = isPortrait;
     isPortrait = window.innerHeight > window.innerWidth;
+    // Device just rotated to landscape — request fullscreen immediately
+    // so the scoreboard fills the screen even when auto-rotate is on.
+    if (wasPortrait && !isPortrait) {
+      void tryLockLandscape();
+    }
   }
 
   let landscapeLocked = false;
@@ -2584,7 +2604,7 @@
           {#if countryA && flagEmoji(countryA)}
             <span class="hn-flag" title={countryName(countryA)} aria-label={countryName(countryA)}>{flagEmoji(countryA)}</span>
           {/if}
-          <span class="hn-name">{sideA.name}</span>
+          <span class="hn-name">{firstName(sideA.name)}</span>
         </span>
         {#if sideA.note}<span class="hn-note">{sideA.note}</span>{/if}
       </div>
@@ -2725,7 +2745,7 @@
           {#if countryA && flagEmoji(countryA)}
             <span class="hn-flag" title={countryName(countryA)} aria-label={countryName(countryA)}>{flagEmoji(countryA)}</span>
           {/if}
-          <span class="hn-name">{sideA.name}</span>
+          <span class="hn-name">{firstName(sideA.name)}</span>
         </span>
         {#if sideA.note}<span class="hn-note">{sideA.note}</span>{/if}
       </div>
@@ -2829,7 +2849,7 @@
            class:silver={matchResult === 'a'}
            class:draw={matchResult === 'draw'}>
         <span class="hn-row">
-          <span class="hn-name">{sideB.name}</span>
+          <span class="hn-name">{firstName(sideB.name)}</span>
           {#if countryB && flagEmoji(countryB)}
             <span class="hn-flag" title={countryName(countryB)} aria-label={countryName(countryB)}>{flagEmoji(countryB)}</span>
           {/if}
