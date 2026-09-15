@@ -2399,6 +2399,23 @@
       : sideA.points > 0 || sideB.points > 0 || sideA.sets > 0 || sideB.sets > 0 || board > 0,
   );
 
+  /** True when the current in-progress board has any scoring delta or a queen marked. */
+  const runningBoardDirty = $derived(
+    !isPractice &&
+    (sideA.points !== pointsAtBoardStart.a ||
+     sideB.points !== pointsAtBoardStart.b ||
+     queenHolder !== null),
+  );
+
+  /** Reset the running board back to the state it was in at the start of this board. */
+  function undoCurrentBoard() {
+    if (!runningBoardDirty || isMatchDecided()) return;
+    lastSetPlusRollback = null;
+    sideA.points = pointsAtBoardStart.a;
+    sideB.points = pointsAtBoardStart.b;
+    queenHolder = null;
+  }
+
   function requestExit() {
     if (!hasProgress) return exit();
     confirmExit = true;
@@ -2944,6 +2961,16 @@
       </button>
       -->
 
+      {#if runningBoardDirty && !isMatchDecided()}
+        <button
+          type="button"
+          class="foot-btn undo"
+          onclick={undoCurrentBoard}
+          aria-label="Undo current board scoring"
+        >
+          <span class="foot-ico" aria-hidden="true">↩</span><span class="foot-lbl">Undo</span>
+        </button>
+      {/if}
       <button type="button" class="foot-btn endm" onclick={() => endMatch()} disabled={endMatchInProgress} aria-label="End match">
         <span class="foot-ico" aria-hidden="true">🏁</span><span class="foot-lbl">End</span>
       </button>
@@ -4440,6 +4467,7 @@
   .foot-btn.scores { border-color: rgba(255,213,74,0.4); color: var(--accent); }
   .foot-btn.swap { border-color: rgba(0,180,255,0.4); color: var(--side-a); }
   .foot-btn.reset { border-color: rgba(255,213,74,0.4); color: var(--accent); }
+  .foot-btn.undo { border-color: rgba(255,213,74,0.45); color: var(--accent); }
   .foot-btn.endm { border-color: rgba(76,175,80,0.5); color: #66bb6a; }
   .foot-btn.close { border-color: rgba(239,83,80,0.4); color: var(--danger); }
   .foot-btn.close.close-cta {
