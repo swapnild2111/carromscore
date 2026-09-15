@@ -1074,6 +1074,17 @@
       window.setTimeout(() => { matchDecidedToast = false; }, 2500);
       return;
     }
+    // Board-cap lockout: once all boards in the set are played, the
+    // set is at its natural end. Lock ALL point taps (positive and
+    // negative) so the umpire must use SET+1 or End to proceed.
+    // To correct board 8 scores, the umpire must tap BOARD-1 first.
+    const atBoardCap =
+      !isBoardsUnlimited(cfg) && board >= cfg.maxBoards && !isDecidingBoard && !isPractice;
+    if (atBoardCap) {
+      setDecidedToast = true;
+      window.setTimeout(() => { setDecidedToast = false; }, 3000);
+      return;
+    }
     const s = side === 'a' ? sideA : sideB;
     // Rule 4 (single-scorer-per-board): if the OTHER side has already
     // scored on this board, block the tap. Real carrom: only one side
