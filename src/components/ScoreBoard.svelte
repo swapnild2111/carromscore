@@ -4091,22 +4091,20 @@
     --coin-highlight: #a8a8a8;
     opacity: 0.75;
     transition: opacity 0.15s, transform 0.08s;
-    /* Permanent red ring — visible even on grey coin so players always
-       know where to tap for the queen. Subtle at rest, bright when active. */
-    box-shadow: 0 0 0 2px rgba(200, 30, 30, 0.55), 0 0 8px 2px rgba(200, 30, 30, 0.25);
+    /* Permanent red glow shadow that hugs the SVG coin shape. */
+    filter: drop-shadow(0 0 5px rgba(200, 30, 30, 0.6));
   }
   .coin-btn:hover { opacity: 0.85; }
   .coin-btn:active { transform: translateY(1px); }
   .coin-btn.coin-red {
-    /* Live queen: red wooden coin. Bright red ring + glow so it pops out. */
+    /* Live queen: red wooden coin. Brighter glow so it pops out. */
     --coin-face:      #b21818;
     --coin-outline:   #5a0808;
     --coin-ring:      rgba(255, 200, 200, 0.6);
     --coin-shadow:    rgba(0, 0, 0, 0.6);
     --coin-highlight: #f37070;
     opacity: 1;
-    box-shadow: 0 0 0 2px rgba(220, 40, 40, 0.9), 0 0 12px 4px rgba(220, 40, 40, 0.55);
-    filter: drop-shadow(0 0 6px rgba(220, 40, 40, 0.5));
+    filter: drop-shadow(0 0 8px rgba(220, 40, 40, 0.85));
   }
 
   /*
