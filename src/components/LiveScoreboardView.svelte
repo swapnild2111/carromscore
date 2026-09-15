@@ -418,9 +418,9 @@
                 {@const displayCoinsA = (queenA && coinsA === 0 && entry.pointsA > 0) ? entry.pointsA : coinsA}
                 {@const displayCoinsB = (queenB && coinsB === 0 && entry.pointsB > 0) ? entry.pointsB : coinsB}
                 {#if isEditing && editDraft}
-                  <!-- Inline edit row — same grid as a normal row + edit controls below -->
+                  <!-- Inline edit row: bare inputs sit in exactly the same cells as the read row -->
                   <div class="sc-row sc-row-editing" role="row">
-                    <span class="sc-cell sc-a-pts side-a" role="cell">
+                    <span class="sc-cell sc-a-pts" role="cell">
                       <input
                         type="number" min="0" max="12"
                         class="sc-edit-input sc-edit-a"
@@ -431,7 +431,7 @@
                     <span class="sc-cell sc-a-score" role="cell">
                       <button
                         type="button"
-                        class="sc-queen-btn"
+                        class="sc-queen-btn side-a"
                         class:sc-queen-active={editDraft.queen === 'a'}
                         onclick={() => { if (editDraft) editDraft.queen = 'a'; }}
                         aria-label="Queen to A"
@@ -441,13 +441,13 @@
                     <span class="sc-cell sc-b-score" role="cell">
                       <button
                         type="button"
-                        class="sc-queen-btn"
+                        class="sc-queen-btn side-b"
                         class:sc-queen-active={editDraft.queen === 'b'}
                         onclick={() => { if (editDraft) editDraft.queen = 'b'; }}
                         aria-label="Queen to B"
                       >+Q</button>
                     </span>
-                    <span class="sc-cell sc-b-pts side-b" role="cell">
+                    <span class="sc-cell sc-b-pts" role="cell">
                       <input
                         type="number" min="0" max="12"
                         class="sc-edit-input sc-edit-b"
@@ -458,7 +458,7 @@
                   </div>
                   <div class="sc-edit-actions">
                     <button type="button" class="sc-edit-save" onclick={onEditSave}>✓ Save</button>
-                    <button type="button" class="sc-edit-cancel" onclick={onEditCancel}>✗ Cancel</button>
+                    <button type="button" class="sc-edit-cancel" onclick={onEditCancel}>Cancel</button>
                   </div>
                 {:else}
                   <div
@@ -1091,74 +1091,64 @@
 
   /* ── Inline edit controls ───────────────────────────────────────── */
   .sc-row-editable { cursor: pointer; }
-  .sc-row-editable:hover { background: rgba(255, 213, 74, 0.07); }
+  .sc-row-editable:hover { background: rgba(255, 213, 74, 0.06); }
 
-  .sc-row-editing {
-    background: rgba(255, 213, 74, 0.06);
-    border-top: 1px solid rgba(255, 213, 74, 0.3);
-    border-bottom: none;
-  }
+  .sc-row-editing { background: rgba(255, 213, 74, 0.04); }
 
+  /* Bare inputs — no box, just an underline to signal editability.
+     Font/size/weight/color are set per-side via sc-edit-a/b so they
+     look exactly like the read cells they replace. */
   .sc-edit-input {
-    width: 3.2rem;
-    background: #111;
-    border: 1px solid rgba(255, 255, 255, 0.18);
-    border-radius: 0.3rem;
-    color: var(--fg, #f5f5f5);
+    width: 100%;
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.3);
+    color: inherit;
     font: inherit;
-    font-size: 1rem;
-    font-weight: 700;
+    font-size: inherit;
+    font-weight: inherit;
     text-align: center;
-    padding: 0.15rem 0.2rem;
+    padding: 0;
+    line-height: inherit;
   }
-  .sc-edit-input.sc-edit-a { border-color: rgba(0, 180, 255, 0.55); color: #00b4ff; }
-  .sc-edit-input.sc-edit-b { border-color: rgba(255, 107, 53, 0.55); color: #ff6b35; }
-  .sc-edit-input:focus { outline: none; }
+  .sc-edit-input.sc-edit-a { color: #00b4ff; border-bottom-color: rgba(0, 180, 255, 0.5); }
+  .sc-edit-input.sc-edit-b { color: #ff6b35; border-bottom-color: rgba(255, 107, 53, 0.5); }
+  .sc-edit-input:focus { outline: none; border-bottom-color: rgba(255, 213, 74, 0.8); }
   .sc-edit-input::-webkit-outer-spin-button,
   .sc-edit-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
   .sc-edit-input[type=number] { -moz-appearance: textfield; }
 
+  /* +Q toggle: looks like the read +Q tag, dim when inactive */
   .sc-queen-btn {
-    font-size: 0.72rem;
+    font-size: inherit;
     font-weight: 700;
-    padding: 0.2rem 0.4rem;
-    border-radius: 0.3rem;
-    border: 1px solid rgba(255, 255, 255, 0.15);
+    padding: 0;
+    border: none;
     background: transparent;
     color: var(--muted, #9aa0a6);
     cursor: pointer;
-    transition: border-color 0.1s, color 0.1s, background 0.1s;
+    font-family: inherit;
   }
-  .sc-queen-btn.sc-queen-active {
-    border-color: rgba(255, 213, 74, 0.7);
-    color: #ffd54a;
-    background: rgba(255, 213, 74, 0.12);
-  }
+  .sc-queen-btn.sc-queen-active.side-a { color: #00b4ff; }
+  .sc-queen-btn.sc-queen-active.side-b { color: #ff6b35; }
 
+  /* Save/Cancel row: compact, below the edit row */
   .sc-edit-actions {
     display: flex;
-    justify-content: center;
-    gap: 0.6rem;
-    padding: 0.4rem 0.5rem 0.5rem;
-    background: rgba(255, 213, 74, 0.06);
-    border-bottom: 1px solid rgba(255, 213, 74, 0.3);
+    gap: 0.5rem;
+    padding: 0.25rem 0.5rem 0.4rem;
+    background: rgba(255, 213, 74, 0.04);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   }
   .sc-edit-save, .sc-edit-cancel {
-    padding: 0.28rem 1rem;
+    padding: 0.15rem 0.7rem;
     font: inherit;
-    font-size: 0.85rem;
+    font-size: 0.78rem;
     font-weight: 600;
-    border-radius: 0.4rem;
+    border-radius: 0.3rem;
     cursor: pointer;
+    border: 1px solid transparent;
   }
-  .sc-edit-save {
-    background: rgba(255, 213, 74, 0.15);
-    border: 1px solid rgba(255, 213, 74, 0.6);
-    color: #ffd54a;
-  }
-  .sc-edit-cancel {
-    background: transparent;
-    border: 1px solid rgba(255, 255, 255, 0.18);
-    color: var(--muted, #9aa0a6);
-  }
+  .sc-edit-save { color: #ffd54a; border-color: rgba(255, 213, 74, 0.5); background: transparent; }
+  .sc-edit-cancel { color: var(--muted, #9aa0a6); background: transparent; }
 </style>
