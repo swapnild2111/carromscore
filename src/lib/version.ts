@@ -3,18 +3,18 @@
  * appVersionName. The update-check compares this string against the
  * `tag_name` on the latest GitHub Release.
  */
-export const APP_VERSION = '4.1.0';
+export const APP_VERSION = '4.0.10';
 
 /**
  * Short bullet points shown in the "What's new" popup when a service-worker
  * update fires. Update alongside APP_VERSION on every release.
  */
 export const RELEASE_NOTES: string[] = [
-  'Edit past board scores mid-match (coins + queen toggle)',
-  'Live score preview updates as you type',
-  'Queen coin has a red glow ring',
+  'Edit scores mid-match from the footer',
+  'Queen coin now has a red glow ring',
   'Footer buttons renamed for clarity',
   'Offline banner no longer flashes on tab switch',
+  'Scoreboard auto-enters fullscreen on start',
   'Player first name shown in header to prevent overflow',
 ];
 
