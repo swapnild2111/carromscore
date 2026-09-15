@@ -197,7 +197,12 @@ jobs:
           java-version: '17'
 
       - name: Setup Android SDK build-tools
-        uses: android-actions/setup-android@v3
+        run: |
+          # GitHub runners ship with $ANDROID_HOME and cmdline-tools.
+          # Install the specific build-tools + platform versions Bubblewrap needs.
+          # Avoid android-actions/setup-android which breaks on 'tools' package.
+          echo "y" | sdkmanager "build-tools;34.0.0" "platforms;android-34" --sdk_root="$ANDROID_HOME" || true
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
 
       - name: Install Node deps
         run: npm ci
