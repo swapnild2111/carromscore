@@ -203,13 +203,29 @@ const base = import.meta.env.BASE_URL;
         // guess so the first "→ online" transition (if any) doesn't
         // trigger a spurious flush.
         let prevOnline = !navSaysOffline;
+        // Debounce the offline banner: only show it if we're still offline
+        // after 3 s. This swallows the brief flash that occurs when Chrome
+        // wakes a background tab — the Firebase socket drops momentarily
+        // and the connectivity module briefly reports offline before
+        // re-establishing. Going online clears the banner immediately.
+        let offlineTimer = null;
+        function applyDebounced(online) {
+          if (online) {
+            if (offlineTimer !== null) { clearTimeout(offlineTimer); offlineTimer = null; }
+            apply(true);
+          } else {
+            if (offlineTimer === null) {
+              offlineTimer = setTimeout(() => { offlineTimer = null; apply(false); }, 3000);
+            }
+          }
+        }
         Promise.all([
           import('../lib/connectivity'),
           import('../lib/sync-queue'),
           import('../lib/live-sync'),
         ]).then(([conn, queue, live]) => {
           conn.subscribeConnectivity((state) => {
-            apply(state.online);
+            applyDebounced(state.online);
             if (!prevOnline && state.online) {
               // Offline → online: flush any queued writes now.
               // Fire-and-forget; flushQueue is idempotent and
