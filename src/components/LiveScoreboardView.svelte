@@ -418,54 +418,56 @@
                 {@const displayCoinsA = (queenA && coinsA === 0 && entry.pointsA > 0) ? entry.pointsA : coinsA}
                 {@const displayCoinsB = (queenB && coinsB === 0 && entry.pointsB > 0) ? entry.pointsB : coinsB}
                 {#if isEditing && editDraft}
-                  <!-- Inline edit row: bare inputs sit in exactly the same cells as the read row -->
+                  {@const draftA = Math.max(0, Math.min(12, Number(editDraft.pointsA) || 0)) + (editDraft.queen === 'a' ? 3 : 0)}
+                  {@const draftB = Math.max(0, Math.min(12, Number(editDraft.pointsB) || 0)) + (editDraft.queen === 'b' ? 3 : 0)}
+                  {@const previewCumA = (entry.cumA - entry.pointsA) + draftA}
+                  {@const previewCumB = (entry.cumB - entry.pointsB) + draftB}
+                  <!-- Inline edit row: Score = live-computed preview, Coins = editable input + +Q toggle -->
                   <div class="sc-row sc-row-editing" role="row">
-                    <span class="sc-cell sc-a-pts" role="cell">
-                      <input
-                        type="number" min="0" max="12"
-                        class="sc-edit-input sc-edit-a"
-                        bind:value={editDraft.pointsA}
-                        aria-label="Side A points"
-                      />
-                    </span>
+                    <span class="sc-cell sc-a-pts side-a sc-preview-pts" role="cell">{previewCumA}</span>
                     <span class="sc-cell sc-a-score" role="cell">
-                      <button
-                        type="button"
-                        class="sc-queen-btn side-a"
-                        class:sc-queen-active={editDraft.queen === 'a'}
-                        onclick={() => { if (editDraft) editDraft.queen = 'a'; }}
-                        aria-label="Queen to A"
-                      >+Q</button>
+                      <span class="sc-edit-coins-wrap">
+                        <input
+                          type="number" min="0" max="12"
+                          class="sc-edit-input sc-edit-a"
+                          bind:value={editDraft.pointsA}
+                          aria-label="Side A coins"
+                        />
+                        <button
+                          type="button"
+                          class="sc-queen-btn side-a"
+                          class:sc-queen-active={editDraft.queen === 'a'}
+                          onclick={() => { if (editDraft) editDraft.queen = 'a'; }}
+                          aria-label="Queen to A"
+                        >+Q</button>
+                      </span>
                     </span>
                     <span class="sc-cell sc-num" role="cell">{boardIdx + 1}</span>
                     <span class="sc-cell sc-b-score" role="cell">
-                      <button
-                        type="button"
-                        class="sc-queen-btn side-b"
-                        class:sc-queen-active={editDraft.queen === 'b'}
-                        onclick={() => { if (editDraft) editDraft.queen = 'b'; }}
-                        aria-label="Queen to B"
-                      >+Q</button>
+                      <span class="sc-edit-coins-wrap">
+                        <input
+                          type="number" min="0" max="12"
+                          class="sc-edit-input sc-edit-b"
+                          bind:value={editDraft.pointsB}
+                          aria-label="Side B coins"
+                        />
+                        <button
+                          type="button"
+                          class="sc-queen-btn side-b"
+                          class:sc-queen-active={editDraft.queen === 'b'}
+                          onclick={() => { if (editDraft) editDraft.queen = 'b'; }}
+                          aria-label="Queen to B"
+                        >+Q</button>
+                      </span>
                     </span>
-                    <span class="sc-cell sc-b-pts" role="cell">
-                      <input
-                        type="number" min="0" max="12"
-                        class="sc-edit-input sc-edit-b"
-                        bind:value={editDraft.pointsB}
-                        aria-label="Side B points"
-                      />
-                    </span>
-                  </div>
-                  <div class="sc-edit-actions">
-                    <button type="button" class="sc-edit-save" onclick={onEditSave}>✓ Save</button>
-                    <button type="button" class="sc-edit-cancel" onclick={onEditCancel}>Cancel</button>
+                    <span class="sc-cell sc-b-pts side-b sc-preview-pts" role="cell">{previewCumB}</span>
                   </div>
                 {:else}
                   <div
                     class="sc-row"
                     class:sc-row-editable={canEdit}
                     role="row"
-                    onclick={() => canEdit && onEditStart?.(rowKey, { pointsA: entry.pointsA, pointsB: entry.pointsB, queen: entry.queen })}
+                    onclick={() => canEdit && onEditStart?.(rowKey, { pointsA: displayCoinsA, pointsB: displayCoinsB, queen: entry.queen })}
                   >
                     <span class="sc-cell sc-a-pts side-a" role="cell">{entry.cumA}</span>
                     <span class="sc-cell sc-a-score side-a" role="cell">
@@ -1118,6 +1120,18 @@
   .sc-edit-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
   .sc-edit-input[type=number] { -moz-appearance: textfield; }
 
+  /* Coins cell edit: input + +Q toggle inline */
+  .sc-edit-coins-wrap {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    justify-content: flex-start;
+  }
+.sc-edit-coins-wrap .sc-edit-input {
+    width: 2.4rem;
+    flex-shrink: 0;
+  }
+
   /* +Q toggle: looks like the read +Q tag, dim when inactive */
   .sc-queen-btn {
     font-size: inherit;
@@ -1132,23 +1146,6 @@
   .sc-queen-btn.sc-queen-active.side-a { color: #00b4ff; }
   .sc-queen-btn.sc-queen-active.side-b { color: #ff6b35; }
 
-  /* Save/Cancel row: compact, below the edit row */
-  .sc-edit-actions {
-    display: flex;
-    gap: 0.5rem;
-    padding: 0.25rem 0.5rem 0.4rem;
-    background: rgba(255, 213, 74, 0.04);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  }
-  .sc-edit-save, .sc-edit-cancel {
-    padding: 0.15rem 0.7rem;
-    font: inherit;
-    font-size: 0.78rem;
-    font-weight: 600;
-    border-radius: 0.3rem;
-    cursor: pointer;
-    border: 1px solid transparent;
-  }
-  .sc-edit-save { color: #ffd54a; border-color: rgba(255, 213, 74, 0.5); background: transparent; }
-  .sc-edit-cancel { color: var(--muted, #9aa0a6); background: transparent; }
+  /* Live-preview score cells during editing: slightly dimmed to show they're computed */
+  .sc-preview-pts { opacity: 0.75; }
 </style>

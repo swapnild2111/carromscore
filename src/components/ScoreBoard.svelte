@@ -2447,8 +2447,12 @@
   function applyBoardEdit() {
     if (editingBoardKey === null || editDraft === null) return;
     const key = editingBoardKey;
-    const pA = Math.max(0, Math.min(12, Math.round(Number(editDraft.pointsA))));
-    const pB = Math.max(0, Math.min(12, Math.round(Number(editDraft.pointsB))));
+    // editDraft.pointsA/B are coin counts only (queen bonus stripped on edit start).
+    // Re-add the queen bonus here so boardLog stores the full delta.
+    const coinsA = Math.max(0, Math.min(12, Math.round(Number(editDraft.pointsA))));
+    const coinsB = Math.max(0, Math.min(12, Math.round(Number(editDraft.pointsB))));
+    const pA = Math.min(15, coinsA + (editDraft.queen === 'a' ? 3 : 0));
+    const pB = Math.min(15, coinsB + (editDraft.queen === 'b' ? 3 : 0));
     // Match by the same key format used in LiveScoreboardView: `set-board-endedAt`
     boardLog = boardLog.map((e) =>
       `${e.set}-${e.board}-${e.endedAt}` === key
@@ -3247,6 +3251,12 @@
           onEditSave={applyBoardEdit}
           onEditCancel={cancelBoardEdit}
         />
+        {#if editingBoardKey !== null}
+          <div class="scorecard-edit-footer">
+            <button type="button" class="scorecard-edit-save" onclick={applyBoardEdit}>✓ Save</button>
+            <button type="button" class="scorecard-edit-cancel" onclick={cancelBoardEdit}>Cancel</button>
+          </div>
+        {/if}
       </div>
     </div>
   {/if}
@@ -4603,6 +4613,39 @@
   /* Scorecard modal — wider than the confirmation dialogs so the
      recap table has room to breathe. Vertical scroll on tall
      content (multi-set matches). */
+  .scorecard-edit-footer {
+    display: flex;
+    gap: 0.75rem;
+    padding: 0.75rem 0.9rem 0.25rem;
+    border-top: 1px solid rgba(255, 213, 74, 0.2);
+    margin-top: 0.5rem;
+    position: sticky;
+    bottom: 0;
+    background: #0f0f0f;
+    z-index: 2;
+  }
+  .scorecard-edit-save, .scorecard-edit-cancel {
+    padding: 0.4rem 1.2rem;
+    font: inherit;
+    font-size: 0.85rem;
+    font-weight: 600;
+    border-radius: 0.35rem;
+    cursor: pointer;
+    border: 1px solid transparent;
+  }
+  .scorecard-edit-save {
+    color: #ffd54a;
+    border-color: rgba(255, 213, 74, 0.5);
+    background: transparent;
+  }
+  .scorecard-edit-save:hover { background: rgba(255, 213, 74, 0.08); }
+  .scorecard-edit-cancel {
+    color: var(--muted, #9aa0a6);
+    background: transparent;
+    border-color: rgba(255,255,255,0.1);
+  }
+  .scorecard-edit-cancel:hover { color: var(--fg); border-color: rgba(255,255,255,0.25); }
+
   .scorecard-dialog { padding: 0.75rem; }
   .scorecard-card {
     max-width: 42rem;
