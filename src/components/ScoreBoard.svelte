@@ -2960,7 +2960,7 @@
           disabled={endMatchInProgress || matchResult !== null}
           aria-label="Swap sides"
         >
-          <span class="foot-ico" aria-hidden="true">⇄</span><span class="foot-lbl">Swap</span>
+          <span class="foot-ico" aria-hidden="true">⇄</span><span class="foot-lbl">Swap sides</span>
         </button>
       {/if}
       <!--
@@ -2991,7 +2991,7 @@
         <span class="foot-ico" aria-hidden="true">↩</span><span class="foot-lbl">Undo</span>
       </button>
       <button type="button" class="foot-btn endm" onclick={() => endMatch()} disabled={endMatchInProgress} aria-label="End match">
-        <span class="foot-ico" aria-hidden="true">🏁</span><span class="foot-lbl">End</span>
+        <span class="foot-ico" aria-hidden="true">🏁</span><span class="foot-lbl">End match</span>
       </button>
       <button
         type="button"
