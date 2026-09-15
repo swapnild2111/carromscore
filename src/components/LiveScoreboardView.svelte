@@ -11,8 +11,25 @@
   import '@fontsource/dseg7-classic/700.css';
   import type { LiveRecord } from '../lib/live-sync';
 
-  type Props = { record: LiveRecord };
-  const { record }: Props = $props();
+  type EditDraft = { pointsA: number; pointsB: number; queen: 'a' | 'b' };
+  type Props = {
+    record: LiveRecord;
+    editingBoardKey?: string | null;
+    editDraft?: EditDraft | null;
+    onEditStart?: (key: string, draft: EditDraft) => void;
+    onEditSave?: () => void;
+    onEditCancel?: () => void;
+  };
+  const {
+    record,
+    editingBoardKey = null,
+    editDraft = null,
+    onEditStart,
+    onEditSave,
+    onEditCancel,
+  }: Props = $props();
+
+  const canEdit = $derived(!!onEditStart);
 
   const meta = $derived(record.meta);
   const state = $derived(record.liveState);
@@ -392,37 +409,75 @@
                 Popup used to fail to open entirely for those records.
               -->
               {#each g.boards as entry, boardIdx (`${entry.set}-${entry.board}-${entry.endedAt}`)}
-                {@const queenA = entry.queen === 'a'}
-                {@const queenB = entry.queen === 'b'}
-                <!--
-                  Column semantics (paper-scorecard convention):
-                    Score = cumulative running total across boards
-                    Coins = per-board COIN count only (excludes the 3
-                            queen points). When this side pocketed the
-                            queen, we subtract 3 from their board score
-                            to recover the coin count and render a
-                            small `+Q` suffix. Displayed as `coins`
-                            (or `coins+Q` when queen).
-                  Middle `#` is 1-based position within the set (not
-                  the raw entry.board, which was a global counter in
-                  records written before 2026-08-09 and would show
-                  7, 8 in Set 2 of a 6-board Set 1).
-                -->
+                {@const rowKey = `${entry.set}-${entry.board}-${entry.endedAt}`}
+                {@const isEditing = canEdit && editingBoardKey === rowKey && editDraft !== null}
+                {@const queenA = isEditing ? editDraft!.queen === 'a' : entry.queen === 'a'}
+                {@const queenB = isEditing ? editDraft!.queen === 'b' : entry.queen === 'b'}
                 {@const coinsA = queenA ? Math.max(0, entry.pointsA - 3) : entry.pointsA}
                 {@const coinsB = queenB ? Math.max(0, entry.pointsB - 3) : entry.pointsB}
                 {@const displayCoinsA = (queenA && coinsA === 0 && entry.pointsA > 0) ? entry.pointsA : coinsA}
                 {@const displayCoinsB = (queenB && coinsB === 0 && entry.pointsB > 0) ? entry.pointsB : coinsB}
-                <div class="sc-row" role="row">
-                  <span class="sc-cell sc-a-pts side-a" role="cell">{entry.cumA}</span>
-                  <span class="sc-cell sc-a-score side-a" role="cell">
-                    {displayCoinsA}{#if queenA}<span class="sc-q-tag" aria-label="Queen">+Q</span>{/if}
-                  </span>
-                  <span class="sc-cell sc-num" role="cell">{boardIdx + 1}</span>
-                  <span class="sc-cell sc-b-score side-b" role="cell">
-                    {displayCoinsB}{#if queenB}<span class="sc-q-tag" aria-label="Queen">+Q</span>{/if}
-                  </span>
-                  <span class="sc-cell sc-b-pts side-b" role="cell">{entry.cumB}</span>
-                </div>
+                {#if isEditing && editDraft}
+                  <!-- Inline edit row — same grid as a normal row + edit controls below -->
+                  <div class="sc-row sc-row-editing" role="row">
+                    <span class="sc-cell sc-a-pts side-a" role="cell">
+                      <input
+                        type="number" min="0" max="12"
+                        class="sc-edit-input sc-edit-a"
+                        bind:value={editDraft.pointsA}
+                        aria-label="Side A points"
+                      />
+                    </span>
+                    <span class="sc-cell sc-a-score" role="cell">
+                      <button
+                        type="button"
+                        class="sc-queen-btn"
+                        class:sc-queen-active={editDraft.queen === 'a'}
+                        onclick={() => { if (editDraft) editDraft.queen = 'a'; }}
+                        aria-label="Queen to A"
+                      >+Q</button>
+                    </span>
+                    <span class="sc-cell sc-num" role="cell">{boardIdx + 1}</span>
+                    <span class="sc-cell sc-b-score" role="cell">
+                      <button
+                        type="button"
+                        class="sc-queen-btn"
+                        class:sc-queen-active={editDraft.queen === 'b'}
+                        onclick={() => { if (editDraft) editDraft.queen = 'b'; }}
+                        aria-label="Queen to B"
+                      >+Q</button>
+                    </span>
+                    <span class="sc-cell sc-b-pts side-b" role="cell">
+                      <input
+                        type="number" min="0" max="12"
+                        class="sc-edit-input sc-edit-b"
+                        bind:value={editDraft.pointsB}
+                        aria-label="Side B points"
+                      />
+                    </span>
+                  </div>
+                  <div class="sc-edit-actions">
+                    <button type="button" class="sc-edit-save" onclick={onEditSave}>✓ Save</button>
+                    <button type="button" class="sc-edit-cancel" onclick={onEditCancel}>✗ Cancel</button>
+                  </div>
+                {:else}
+                  <div
+                    class="sc-row"
+                    class:sc-row-editable={canEdit}
+                    role="row"
+                    onclick={() => canEdit && onEditStart?.(rowKey, { pointsA: entry.pointsA, pointsB: entry.pointsB, queen: entry.queen })}
+                  >
+                    <span class="sc-cell sc-a-pts side-a" role="cell">{entry.cumA}</span>
+                    <span class="sc-cell sc-a-score side-a" role="cell">
+                      {displayCoinsA}{#if queenA}<span class="sc-q-tag" aria-label="Queen">+Q</span>{/if}
+                    </span>
+                    <span class="sc-cell sc-num" role="cell">{boardIdx + 1}</span>
+                    <span class="sc-cell sc-b-score side-b" role="cell">
+                      {displayCoinsB}{#if queenB}<span class="sc-q-tag" aria-label="Queen">+Q</span>{/if}
+                    </span>
+                    <span class="sc-cell sc-b-pts side-b" role="cell">{entry.cumB}</span>
+                  </div>
+                {/if}
               {/each}
               <div class="sc-row sc-total" role="row">
                 <span
@@ -1032,5 +1087,78 @@
   @media (orientation: landscape) and (min-height: 400px) {
     .board { min-height: 12rem; }
     .digit { font-size: clamp(3rem, 12vw, 5rem); }
+  }
+
+  /* ── Inline edit controls ───────────────────────────────────────── */
+  .sc-row-editable { cursor: pointer; }
+  .sc-row-editable:hover { background: rgba(255, 213, 74, 0.07); }
+
+  .sc-row-editing {
+    background: rgba(255, 213, 74, 0.06);
+    border-top: 1px solid rgba(255, 213, 74, 0.3);
+    border-bottom: none;
+  }
+
+  .sc-edit-input {
+    width: 3.2rem;
+    background: #111;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 0.3rem;
+    color: var(--fg, #f5f5f5);
+    font: inherit;
+    font-size: 1rem;
+    font-weight: 700;
+    text-align: center;
+    padding: 0.15rem 0.2rem;
+  }
+  .sc-edit-input.sc-edit-a { border-color: rgba(0, 180, 255, 0.55); color: #00b4ff; }
+  .sc-edit-input.sc-edit-b { border-color: rgba(255, 107, 53, 0.55); color: #ff6b35; }
+  .sc-edit-input:focus { outline: none; }
+  .sc-edit-input::-webkit-outer-spin-button,
+  .sc-edit-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  .sc-edit-input[type=number] { -moz-appearance: textfield; }
+
+  .sc-queen-btn {
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 0.2rem 0.4rem;
+    border-radius: 0.3rem;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: transparent;
+    color: var(--muted, #9aa0a6);
+    cursor: pointer;
+    transition: border-color 0.1s, color 0.1s, background 0.1s;
+  }
+  .sc-queen-btn.sc-queen-active {
+    border-color: rgba(255, 213, 74, 0.7);
+    color: #ffd54a;
+    background: rgba(255, 213, 74, 0.12);
+  }
+
+  .sc-edit-actions {
+    display: flex;
+    justify-content: center;
+    gap: 0.6rem;
+    padding: 0.4rem 0.5rem 0.5rem;
+    background: rgba(255, 213, 74, 0.06);
+    border-bottom: 1px solid rgba(255, 213, 74, 0.3);
+  }
+  .sc-edit-save, .sc-edit-cancel {
+    padding: 0.28rem 1rem;
+    font: inherit;
+    font-size: 0.85rem;
+    font-weight: 600;
+    border-radius: 0.4rem;
+    cursor: pointer;
+  }
+  .sc-edit-save {
+    background: rgba(255, 213, 74, 0.15);
+    border: 1px solid rgba(255, 213, 74, 0.6);
+    color: #ffd54a;
+  }
+  .sc-edit-cancel {
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    color: var(--muted, #9aa0a6);
   }
 </style>

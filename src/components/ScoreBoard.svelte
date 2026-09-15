@@ -257,7 +257,7 @@
    * without leaving the score screen.
    */
   let showRecapPopup = $state(false);
-  let editingBoardIdx = $state<number | null>(null);
+  let editingBoardKey = $state<string | null>(null);
   type EditDraft = { pointsA: number; pointsB: number; queen: SideId };
   let editDraft = $state<EditDraft | null>(null);
   /**
@@ -2439,25 +2439,21 @@
     queenHolder = null;
   }
 
-  function startBoardEdit(idx: number) {
-    const e = boardLog[idx];
-    if (!e) return;
-    editingBoardIdx = idx;
-    editDraft = { pointsA: e.pointsA, pointsB: e.pointsB, queen: e.queen };
-  }
-
   function cancelBoardEdit() {
-    editingBoardIdx = null;
+    editingBoardKey = null;
     editDraft = null;
   }
 
   function applyBoardEdit() {
-    if (editingBoardIdx === null || editDraft === null) return;
-    const idx = editingBoardIdx;
+    if (editingBoardKey === null || editDraft === null) return;
+    const key = editingBoardKey;
     const pA = Math.max(0, Math.min(12, Math.round(Number(editDraft.pointsA))));
     const pB = Math.max(0, Math.min(12, Math.round(Number(editDraft.pointsB))));
-    boardLog = boardLog.map((e, i) =>
-      i === idx ? { ...e, pointsA: pA, pointsB: pB, queen: editDraft!.queen } : e,
+    // Match by the same key format used in LiveScoreboardView: `set-board-endedAt`
+    boardLog = boardLog.map((e) =>
+      `${e.set}-${e.board}-${e.endedAt}` === key
+        ? { ...e, pointsA: pA, pointsB: pB, queen: editDraft!.queen }
+        : e,
     );
     // Recompute cumulative points for the current set so live digits stay accurate.
     const setIdx = sideA.sets + sideB.sets;
@@ -2470,7 +2466,7 @@
     pointsAtBoardStart = { a: sumA, b: sumB };
     sideA.points = Math.min(cfg.pointsTarget, sumA + Math.max(0, runningDeltaA));
     sideB.points = Math.min(cfg.pointsTarget, sumB + Math.max(0, runningDeltaB));
-    editingBoardIdx = null;
+    editingBoardKey = null;
     editDraft = null;
   }
 
@@ -3196,13 +3192,38 @@
 
   {#if showRecapPopup}
     <!--
-      Edit scores popup. Shows a board-by-board table with inline editing
-      for pointsA, pointsB, and queen on each completed board. Changes
-      mutate boardLog in place and recompute live cumulative totals.
-      Read-only when the match is decided (use the admin modal after End).
+      Edit scores popup (v3.5). Uses LiveScoreboardView with optional edit
+      props so board rows are tappable when the match is still in progress.
+      Tapping a row expands it inline with score inputs + queen toggle.
     -->
-    {@const canEdit = !isMatchDecided() && !isPractice}
-    {@const setCount = Math.max(1, sideA.sets + sideB.sets + 1)}
+    {@const recapRecord = {
+      matchId: '',
+      updatedAt: Date.now(),
+      meta: {
+        mode: cfg.mode,
+        playerA: cfg.playerA,
+        playerA2: cfg.playerA2,
+        playerB: cfg.playerB,
+        playerB2: cfg.playerB2,
+        noteA: cfg.noteA,
+        noteB: cfg.noteB,
+        bestOf: cfg.bestOf,
+        pointsTarget: cfg.pointsTarget,
+        maxBoards: cfg.maxBoards,
+        ...(cfg.tournament ? { tournament: cfg.tournament } : {}),
+      },
+      liveState: {
+        sideA: { points: sideA.points, sets: sideA.sets },
+        sideB: { points: sideB.points, sets: sideB.sets },
+        board,
+        currentBreak,
+        queenHolder,
+        matchResult,
+        ...(boardLog.length > 0 ? { boardLog } : {}),
+        ...(setWinners.length > 0 ? { setWinners } : {}),
+        ...(practiceBoards.length > 0 ? { practiceBoards } : {}),
+      },
+    } as LiveRecord}
     <div
       class="dialog scorecard-dialog"
       role="dialog"
@@ -3216,128 +3237,16 @@
           onclick={() => { showRecapPopup = false; cancelBoardEdit(); }}
           aria-label="Close scoreboard"
         >✕</button>
-        <div class="recap-header">
-          <span class="recap-name tone-{colourA}">{firstName(sideA.name)}</span>
-          <span class="recap-vs">vs</span>
-          <span class="recap-name tone-{colourB}">{firstName(sideB.name)}</span>
-        </div>
-        {#each { length: setCount } as _, si}
-          {@const setBoards = boardLog
-            .map((e, i) => ({ ...e, _idx: i }))
-            .filter((e) => e.set === si)}
-          {#if setBoards.length > 0 || si === sideA.sets + sideB.sets}
-            {#if cfg.bestOf > 1}
-              <div class="recap-set-label">Set {si + 1}</div>
-            {/if}
-            {#if setBoards.length === 0}
-              <div class="recap-empty">No boards completed yet</div>
-            {:else}
-              <!-- Column header -->
-              <div class="recap-table-head">
-                <span class="rth-a">Score</span>
-                <span class="rth-ac">Coins</span>
-                <span class="rth-num">#</span>
-                <span class="rth-bc">Coins</span>
-                <span class="rth-b">Score</span>
-                {#if canEdit}<span class="rth-edit"></span>{/if}
-              </div>
-              <!-- Board rows — cumulative totals pre-computed as a pure array -->
-              {@const cumRows = setBoards.reduce<{a:number;b:number}[]>((acc, e) => {
-                const prev = acc[acc.length - 1] ?? { a: 0, b: 0 };
-                return [...acc, { a: prev.a + e.pointsA, b: prev.b + e.pointsB }];
-              }, [])}
-              {#each setBoards as entry, rowIdx}
-                {@const cumA = cumRows[rowIdx]?.a ?? 0}
-                {@const cumB = cumRows[rowIdx]?.b ?? 0}
-                {@const isEditing = editingBoardIdx === entry._idx}
-                {#if isEditing && editDraft}
-                  <!-- Edit row -->
-                  <div class="recap-row recap-row-edit">
-                    <div class="edit-side edit-side-a">
-                      <label class="edit-field-label">Pts</label>
-                      <input
-                        type="number"
-                        class="edit-pts-input tone-{colourA}"
-                        min="0"
-                        max="12"
-                        bind:value={editDraft.pointsA}
-                        aria-label="{sideA.name} points board {rowIdx + 1}"
-                      />
-                    </div>
-                    <div class="edit-queen-wrap">
-                      <span class="edit-queen-label">Queen</span>
-                      <div class="edit-queen-toggle">
-                        <button
-                          type="button"
-                          class="eq-btn tone-{colourA}"
-                          class:eq-active={editDraft.queen === 'a'}
-                          onclick={() => { if (editDraft) editDraft.queen = 'a'; }}
-                          aria-label="{sideA.name} has queen"
-                        >{firstName(sideA.name)}</button>
-                        <button
-                          type="button"
-                          class="eq-btn tone-{colourB}"
-                          class:eq-active={editDraft.queen === 'b'}
-                          onclick={() => { if (editDraft) editDraft.queen = 'b'; }}
-                          aria-label="{sideB.name} has queen"
-                        >{firstName(sideB.name)}</button>
-                      </div>
-                    </div>
-                    <div class="edit-side edit-side-b">
-                      <label class="edit-field-label">Pts</label>
-                      <input
-                        type="number"
-                        class="edit-pts-input tone-{colourB}"
-                        min="0"
-                        max="12"
-                        bind:value={editDraft.pointsB}
-                        aria-label="{sideB.name} points board {rowIdx + 1}"
-                      />
-                    </div>
-                    <div class="edit-actions">
-                      <button type="button" class="edit-save" onclick={applyBoardEdit} aria-label="Save">✓</button>
-                      <button type="button" class="edit-cancel" onclick={cancelBoardEdit} aria-label="Cancel">✗</button>
-                    </div>
-                  </div>
-                {:else}
-                  <!-- Read row -->
-                  {@const queenA = entry.queen === 'a'}
-                  {@const queenB = entry.queen === 'b'}
-                  {@const coinsA = queenA ? Math.max(0, entry.pointsA - 3) : entry.pointsA}
-                  {@const coinsB = queenB ? Math.max(0, entry.pointsB - 3) : entry.pointsB}
-                  <div class="recap-row" class:recap-row-faded={editingBoardIdx !== null && !isEditing}>
-                    <span class="rr-a-pts tone-{colourA}">{cumA}</span>
-                    <span class="rr-a-coins">
-                      {coinsA}{#if queenA}<span class="rr-queen tone-{colourA}">+Q</span>{/if}
-                    </span>
-                    <span class="rr-num">{rowIdx + 1}</span>
-                    <span class="rr-b-coins">
-                      {coinsB}{#if queenB}<span class="rr-queen tone-{colourB}">+Q</span>{/if}
-                    </span>
-                    <span class="rr-b-pts tone-{colourB}">{cumB}</span>
-                    {#if canEdit}
-                      <button
-                        type="button"
-                        class="rr-edit-btn"
-                        onclick={() => startBoardEdit(entry._idx)}
-                        aria-label="Edit board {rowIdx + 1}"
-                        disabled={editingBoardIdx !== null}
-                      >✏</button>
-                    {/if}
-                  </div>
-                {/if}
-              {/each}
-              <!-- Set total row -->
-              {@const totalA = setBoards.reduce((s, e) => s + e.pointsA, 0)}
-              {@const totalB = setBoards.reduce((s, e) => s + e.pointsB, 0)}
-              <div class="recap-total-row">
-                <span class="rt-a tone-{colourA}">{totalA}</span>
-                <span class="rt-label">Total</span>
-                <span class="rt-b tone-{colourB}">{totalB}</span>
-              </div>
-            {/if}
-          {/if}
-        {/each}
+        <LiveScoreboardView
+          record={recapRecord}
+          editingBoardKey={editingBoardKey}
+          editDraft={editDraft}
+          onEditStart={!isMatchDecided() && !isPractice
+            ? (key, draft) => { editingBoardKey = key; editDraft = draft; }
+            : undefined}
+          onEditSave={applyBoardEdit}
+          onEditCancel={cancelBoardEdit}
+        />
       </div>
     </div>
   {/if}
@@ -4022,7 +3931,7 @@
   }
   .coin-callout {
     position: absolute;
-    bottom: calc(100% + 10px);
+    top: calc(100% + 10px);
     left: 50%;
     transform: translateX(-50%);
     background: linear-gradient(135deg, #3a2a10, #2a1e0a);
@@ -4040,11 +3949,11 @@
   .coin-callout::after {
     content: '';
     position: absolute;
-    top: 100%;
+    bottom: 100%;
     left: 50%;
     transform: translateX(-50%);
     border: 6px solid transparent;
-    border-top-color: rgba(255, 213, 74, 0.7);
+    border-bottom-color: rgba(255, 213, 74, 0.7);
   }
   @keyframes coinPulse {
     0%, 100% { filter: drop-shadow(0 0 4px rgba(255, 213, 74, 0.3)); }
@@ -4092,7 +4001,7 @@
     opacity: 0.75;
     transition: opacity 0.15s, transform 0.08s;
     /* Permanent red glow shadow that hugs the SVG coin shape. */
-    filter: drop-shadow(0 0 5px rgba(200, 30, 30, 0.6));
+    filter: drop-shadow(0 0 6px rgba(220, 30, 30, 1)) drop-shadow(0 0 12px rgba(200, 20, 20, 0.8));
   }
   .coin-btn:hover { opacity: 0.85; }
   .coin-btn:active { transform: translateY(1px); }
@@ -5282,218 +5191,4 @@
     color: var(--muted);
   }
 
-  /* ── Edit scores popup ──────────────────────────────────────────── */
-  .recap-header {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.5rem;
-    padding: 0.5rem 0 0.75rem;
-    font-size: 0.85rem;
-    font-weight: 700;
-  }
-  .recap-name { font-size: 0.85rem; font-weight: 700; }
-  .recap-name.tone-a { color: var(--side-a); }
-  .recap-name.tone-b { color: var(--side-b); }
-  .recap-vs { color: var(--muted); font-size: 0.75rem; font-weight: 400; }
-  .recap-set-label {
-    font-size: 0.7rem;
-    font-weight: 700;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: var(--muted);
-    text-align: center;
-    padding: 0.3rem 0 0.2rem;
-    border-top: 1px solid rgba(255,255,255,0.07);
-    margin-top: 0.4rem;
-  }
-  .recap-empty {
-    text-align: center;
-    color: var(--muted);
-    font-size: 0.8rem;
-    padding: 0.75rem 0;
-  }
-
-  /* Column header */
-  .recap-table-head {
-    display: grid;
-    grid-template-columns: 2.2rem 2.8rem 1.6rem 2.8rem 2.2rem auto;
-    align-items: center;
-    padding: 0.2rem 0.4rem;
-    border-bottom: 1px solid rgba(255,255,255,0.1);
-    margin-bottom: 0.1rem;
-  }
-  .recap-table-head span {
-    font-size: 0.62rem;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--muted);
-  }
-  .rth-a, .rth-ac { text-align: right; }
-  .rth-num { text-align: center; }
-  .rth-bc, .rth-b { text-align: left; }
-  .rth-edit { width: 1.8rem; }
-
-  /* Read board row */
-  .recap-row {
-    display: grid;
-    grid-template-columns: 2.2rem 2.8rem 1.6rem 2.8rem 2.2rem auto;
-    align-items: center;
-    padding: 0.28rem 0.4rem;
-    border-radius: 0.3rem;
-    transition: opacity 0.15s;
-  }
-  .recap-row:nth-child(even) { background: rgba(255,255,255,0.03); }
-  .recap-row-faded { opacity: 0.35; }
-  .rr-a-pts { text-align: right; font-size: 1rem; font-weight: 700; }
-  .rr-a-pts.tone-a { color: var(--side-a); }
-  .rr-a-coins { text-align: right; font-size: 0.78rem; color: var(--fg); padding-right: 0.3rem; }
-  .rr-num { text-align: center; font-size: 0.72rem; color: var(--muted); }
-  .rr-b-coins { text-align: left; font-size: 0.78rem; color: var(--fg); padding-left: 0.3rem; }
-  .rr-b-pts { text-align: left; font-size: 1rem; font-weight: 700; }
-  .rr-b-pts.tone-b { color: var(--side-b); }
-  .rr-queen { font-size: 0.62rem; font-weight: 700; margin-left: 0.15rem; }
-  .rr-queen.tone-a { color: var(--side-a); }
-  .rr-queen.tone-b { color: var(--side-b); }
-  .rr-edit-btn {
-    width: 1.8rem;
-    height: 1.8rem;
-    background: transparent;
-    border: 1px solid rgba(255,213,74,0.25);
-    border-radius: 0.3rem;
-    color: var(--muted);
-    font-size: 0.75rem;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-    transition: border-color 0.15s, color 0.15s;
-  }
-  .rr-edit-btn:hover:not(:disabled) {
-    border-color: rgba(255,213,74,0.65);
-    color: var(--accent);
-  }
-  .rr-edit-btn:disabled { opacity: 0.25; cursor: not-allowed; }
-
-  /* Edit row */
-  .recap-row-edit {
-    display: flex;
-    flex-direction: column;
-    gap: 0.55rem;
-    padding: 0.65rem 0.5rem;
-    background: rgba(255,213,74,0.06);
-    border: 1px solid rgba(255,213,74,0.3);
-    border-radius: 0.5rem;
-    margin: 0.2rem 0;
-  }
-  .edit-side {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-  }
-  .edit-side-a { justify-content: flex-start; }
-  .edit-side-b { justify-content: flex-end; }
-  .edit-field-label {
-    font-size: 0.7rem;
-    font-weight: 600;
-    color: var(--muted);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    min-width: 1.8rem;
-  }
-  .edit-pts-input {
-    width: 4rem;
-    background: #111;
-    border: 1px solid rgba(255,255,255,0.15);
-    border-radius: 0.35rem;
-    color: var(--fg);
-    font: inherit;
-    font-size: 1rem;
-    font-weight: 700;
-    text-align: center;
-    padding: 0.25rem 0.4rem;
-  }
-  .edit-pts-input.tone-a { border-color: rgba(0,180,255,0.5); color: var(--side-a); }
-  .edit-pts-input.tone-b { border-color: rgba(255,107,53,0.5); color: var(--side-b); }
-  .edit-pts-input:focus { outline: none; }
-  /* Hide spinner arrows */
-  .edit-pts-input::-webkit-outer-spin-button,
-  .edit-pts-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-  .edit-pts-input[type=number] { -moz-appearance: textfield; }
-
-  .edit-queen-wrap {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    justify-content: center;
-  }
-  .edit-queen-label {
-    font-size: 0.68rem;
-    font-weight: 600;
-    color: var(--muted);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-  }
-  .edit-queen-toggle {
-    display: flex;
-    gap: 0.25rem;
-  }
-  .eq-btn {
-    padding: 0.2rem 0.55rem;
-    font-size: 0.78rem;
-    font-weight: 700;
-    border-radius: 0.35rem;
-    border: 1px solid rgba(255,255,255,0.15);
-    background: transparent;
-    color: var(--muted);
-    cursor: pointer;
-    transition: border-color 0.12s, color 0.12s, background 0.12s;
-  }
-  .eq-btn.tone-a.eq-active { border-color: var(--side-a); color: var(--side-a); background: rgba(0,180,255,0.12); }
-  .eq-btn.tone-b.eq-active { border-color: var(--side-b); color: var(--side-b); background: rgba(255,107,53,0.12); }
-
-  .edit-actions {
-    display: flex;
-    justify-content: center;
-    gap: 0.75rem;
-  }
-  .edit-save, .edit-cancel {
-    padding: 0.3rem 1.1rem;
-    font-size: 0.95rem;
-    font-weight: 700;
-    border-radius: 0.4rem;
-    cursor: pointer;
-  }
-  .edit-save {
-    background: rgba(255,213,74,0.15);
-    border: 1px solid rgba(255,213,74,0.6);
-    color: var(--accent);
-  }
-  .edit-cancel {
-    background: transparent;
-    border: 1px solid rgba(255,255,255,0.2);
-    color: var(--muted);
-  }
-
-  /* Set total row */
-  .recap-total-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 0.3rem 0.5rem;
-    border-top: 1px solid rgba(255,255,255,0.1);
-    margin-top: 0.15rem;
-  }
-  .rt-label {
-    font-size: 0.68rem;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--muted);
-  }
-  .rt-a, .rt-b { font-size: 0.95rem; font-weight: 700; }
-  .rt-a.tone-a { color: var(--side-a); }
-  .rt-b.tone-b { color: var(--side-b); }
 </style>
