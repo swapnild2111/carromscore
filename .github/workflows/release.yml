@@ -198,13 +198,16 @@ jobs:
 
       - name: Setup Android SDK build-tools
         run: |
-          # android-actions/setup-android@v3 fails on current runners with
-          # "Failed to find package 'tools'". Set ANDROID_HOME manually and
-          # use the full sdkmanager path to install only what Bubblewrap needs.
+          # android-actions/setup-android@v3 breaks on current runners (no 'tools' package).
+          # Bubblewrap 1.25.0 requires build-tools;36.1.0 and validates that sdk/tools or
+          # sdk/bin exists. Create the tools dir to pass validation, then install the right
+          # build-tools version.
           SDK=/usr/local/lib/android/sdk
           echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
           SDKMANAGER="$SDK/cmdline-tools/latest/bin/sdkmanager"
-          echo "y" | "$SDKMANAGER" "build-tools;34.0.0" "platforms;android-34"
+          # Create tools/ dir so Bubblewrap's sdk path validation passes
+          mkdir -p "$SDK/tools/bin"
+          echo "y" | "$SDKMANAGER" "build-tools;36.1.0" "platforms;android-36"
 
       - name: Install Node deps
         run: npm ci
