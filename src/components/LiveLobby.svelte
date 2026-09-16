@@ -2166,8 +2166,8 @@
     grid-template-columns: 1fr 1fr 1fr;
     gap: 0.25rem;
     padding: 0.25rem;
-    background: #141414;
-    border: 1px solid #232323;
+    background: var(--surface, #111111);
+    border: 1px solid var(--border, #252525);
     border-radius: 0.75rem;
     margin: 0 0 1rem;
   }
@@ -2530,12 +2530,12 @@
     width: 100%;
     text-align: left;
     padding: 0.9rem 1rem;
-    background: #141414;
+    background: var(--surface, #111111);
     /* Slightly stronger card border so the cards feel like distinct
        objects on a dark page (previous #262626 washed into the bg
        almost invisibly). Still restrained — full-brightness borders
        compete with the winner-gold accent. */
-    border: 1px solid rgba(255, 255, 255, 0.09);
+    border: 1px solid var(--border, #252525);
     border-radius: 0.8rem;
     text-decoration: none;
     color: inherit;
@@ -2543,7 +2543,7 @@
     font: inherit;
     transition: border-color 0.15s, background 0.15s, transform 0.1s;
   }
-  .card:hover { border-color: #3a3a3a; background: #181818; }
+  .card:hover { border-color: var(--border2, #333333); background: var(--surface2, #181818); }
   .card:active { transform: scale(0.995); }
   .card-live { border-color: rgba(239, 83, 80, 0.35); }
   .card-live:hover { border-color: rgba(239, 83, 80, 0.6); }
@@ -2876,8 +2876,8 @@
     flex: 1 1 12rem;
     min-width: 8rem;
     padding: 0.4rem 0.6rem;
-    background: #141414;
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--surface, #111111);
+    border: 1px solid var(--border2, #333);
     border-radius: 0.45rem;
     color: var(--fg, #f5f5f5);
     font-size: 0.85rem;
@@ -2888,8 +2888,8 @@
   }
   .hist-select {
     padding: 0.4rem 0.6rem;
-    background: #141414;
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--surface, #111111);
+    border: 1px solid var(--border2, #333);
     border-radius: 0.45rem;
     color: var(--fg, #f5f5f5);
     font-size: 0.85rem;
@@ -2942,9 +2942,9 @@
     overflow-y: auto;
     max-height: 70vh;
     -webkit-overflow-scrolling: touch;
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--border, #252525);
     border-radius: 0.6rem;
-    background: #101010;
+    background: var(--surface, #111111);
   }
   .hist-tbl {
     width: 100%;
@@ -2961,7 +2961,7 @@
   }
   .hist-tbl tr:last-child td { border-bottom: 0; }
   .hist-th {
-    background: #1a1a1a;
+    background: var(--surface2, #181818);
     border-bottom: 1px solid rgba(255, 255, 255, 0.12);
     color: var(--muted, #9aa0a6);
     font-size: 0.7rem;
@@ -3114,7 +3114,7 @@
     -webkit-backdrop-filter: blur(8px);
   }
   .sheet-inner {
-    background: #0f0f0f;
+    background: var(--surface, #111111);
     border: 1px solid rgba(255, 213, 74, 0.55);
     border-radius: 1rem;
     padding: 0.85rem 1rem 1.1rem;
@@ -3154,8 +3154,8 @@
     margin: 0 -1rem 0.5rem;
     padding-left: 1rem;
     padding-right: 1rem;
-    border-bottom: 1px solid #1e1e1e;
-    background: #0f0f0f;
+    border-bottom: 1px solid var(--border, #252525);
+    background: var(--surface, #111111);
     position: sticky;
     top: -0.85rem; /* offset the sheet-inner top padding so the header sits flush */
     z-index: 3;
@@ -3197,7 +3197,7 @@
   .sheet-inner :global(.hdr),
   .sheet-inner :global(.board) {
     position: static;
-    background: #0f0f0f;
+    background: var(--surface, #111111);
   }
   /* Two-row title container. First row = LIVE/Ended + mode.
      Second row = tournament + round tags when present. min-width:0
@@ -3301,7 +3301,7 @@
     cursor: pointer;
     transition: background 0.15s, border-color 0.15s;
   }
-  .sheet-close:hover { background: #1a1a1a; border-color: #333; }
+  .sheet-close:hover { background: var(--surface2, #181818); border-color: var(--border2, #333); }
 
   /* Small attribution line above the self-delete area. Only visible
      when the record carries a createdBy uid. displayName is the write-
@@ -3369,8 +3369,8 @@
   .self-delete-input {
     flex: 1 1 8rem;
     min-width: 8rem;
-    background: #0f0f0f;
-    border: 1px solid #262626;
+    background: var(--surface, #111111);
+    border: 1px solid var(--border, #252525);
     color: var(--fg, #f5f5f5);
     padding: 0.45rem 0.7rem;
     border-radius: 6px;
@@ -3397,10 +3397,10 @@
   }
   .self-delete-cancel {
     background: transparent;
-    border-color: #262626;
+    border-color: var(--border, #252525);
     color: var(--fg, #f5f5f5);
   }
-  .self-delete-cancel:hover { background: #1a1a1a; }
+  .self-delete-cancel:hover { background: var(--surface2, #181818); }
   .self-delete-confirm {
     background: rgba(239, 83, 80, 0.9);
     border-color: rgba(239, 83, 80, 0.9);
