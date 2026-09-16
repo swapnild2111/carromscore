@@ -2170,6 +2170,15 @@
     border: 1px solid var(--border, #252525);
     border-radius: 0.75rem;
     margin: 0 0 1rem;
+    position: relative;
+    overflow: hidden;
+  }
+  .tabs::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, var(--accent, #ffd54a) 0%, rgba(255,143,0,0.4) 60%, transparent 100%);
   }
   .tab {
     display: inline-flex;
@@ -2542,7 +2551,18 @@
     cursor: pointer;
     font: inherit;
     transition: border-color 0.15s, background 0.15s, transform 0.1s;
+    position: relative;
+    overflow: hidden;
   }
+  .card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, var(--accent, #ffd54a) 0%, rgba(255,143,0,0.3) 50%, transparent 100%);
+    opacity: 0.5;
+  }
+  .card-live::before { opacity: 1; background: linear-gradient(90deg, var(--danger, #ef5350) 0%, rgba(255,100,80,0.3) 50%, transparent 100%); }
   .card:hover { border-color: var(--border2, #333333); background: var(--surface2, #181818); }
   .card:active { transform: scale(0.995); }
   .card-live { border-color: rgba(239, 83, 80, 0.35); }
