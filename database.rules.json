@@ -126,6 +126,9 @@
           "participantCount": { ".validate": "newData.isNumber() && newData.val() >= 2 && newData.val() <= 256" },
           "advanceCount":     { ".validate": "newData.isNumber() && newData.val() >= 2 && newData.val() <= 64" },
           "boardsAvailable":  { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 99" },
+          "venueBoards":      { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 99" },
+          "groupCount":       { ".validate": "newData.isNumber() && newData.val() >= 2 && newData.val() <= 16" },
+          "groupSize":        { ".validate": "newData.isNumber() && newData.val() >= 2 && newData.val() <= 64" },
           "flightNames": {
             "$idx": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 40" }
           },
