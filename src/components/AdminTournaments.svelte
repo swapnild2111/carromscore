@@ -44,11 +44,13 @@
     updateLeagueCfg,
     updateLeagueGroups,
     updateKnockoutCfg,
+
     updateTournamentFormat,
     type Round,
     type Tournament,
     type LeagueCfg,
     type KnockoutCfg,
+
   } from '../lib/tournaments';
   import { subscribeCurrentUserRole, type Role } from '../lib/roles';
   import { currentUser } from '../lib/auth';
@@ -65,6 +67,9 @@
   import TournamentBracket from './admin/TournamentBracket.svelte';
   import LeagueSetup from './admin/LeagueSetup.svelte';
   import KnockoutSetup from './admin/KnockoutSetup.svelte';
+  import GroupKnockoutSetup from './admin/GroupKnockoutSetup.svelte';
+  import { recommendGroups } from '../lib/groupknockout';
+
   import { loadPendingPlannedByTournament, deletePlannedMatch } from '../lib/planned';
 
   /**
@@ -381,14 +386,28 @@
   }
 
   let leagueSetupKey = $state<string | null>(null);
-  function startLeagueSetup(t: Tournament) {
-    leagueSetupKey = t.key;
-  }
   function stopLeagueSetup() {
     leagueSetupKey = null;
   }
 
   let knockoutSetupKey = $state<string | null>(null);
+
+  // Prompt shown when organizer clicks Setup before assigning players.
+  let setupNoPlayersKey = $state<string | null>(null);
+
+  async function startSetup(t: Tournament) {
+    setupNoPlayersKey = null;
+    const assigned = await loadAssignedPlayers(t.key);
+    if (assigned.size === 0) {
+      setupNoPlayersKey = t.key;
+      return;
+    }
+    if (t.format === 'league') {
+      leagueSetupKey = t.key;
+    } else {
+      knockoutSetupKey = t.key;
+    }
+  }
 
   // Per-tournament counts shown on the row action buttons (2026-08-31).
   // Populated by the /planned subscription below (once, at mount) and
@@ -1644,23 +1663,28 @@
                     <button
                       type="button"
                       class="btn btn-setup btn-league"
-                      onclick={() => startLeagueSetup(t)}
+                      onclick={() => startSetup(t)}
                       title="League draw and schedule"
                     >Setup</button>
                   {:else if t.format === 'knockout'}
                     <button
                       type="button"
                       class="btn btn-setup btn-knockout"
-                      onclick={() => { knockoutSetupKey = t.key; }}
-                      title="Knockout draw and bracket"
+                      onclick={() => startSetup(t)}
+                      title="Knockout groups and bracket"
                     >Setup</button>
                   {:else if t.format === 'roundrobin'}
                     <button
                       type="button"
                       class="btn btn-setup btn-roundrobin"
-                      onclick={() => { knockoutSetupKey = t.key; }}
+                      onclick={() => startSetup(t)}
                       title="Round Robin schedule and bracket"
                     >Setup</button>
+                  {/if}
+                  {#if setupNoPlayersKey === t.key}
+                    <span class="setup-no-players-warn">
+                      ⚠ No players assigned — use the Players button first
+                    </span>
                   {/if}
                 </div>
                 <div class="row-name-meta">
@@ -2872,11 +2896,19 @@
     {@const t = list().find((x) => x.key === knockoutSetupKey)}
     {#if t}
       {@const myUid = currentUser()?.uid ?? ''}
-      <KnockoutSetup
-        tournament={t}
-        myUid={myUid}
-        onClose={() => { knockoutSetupKey = null; }}
-      />
+      {#if t.format === 'knockout'}
+        <GroupKnockoutSetup
+          tournament={t}
+          myUid={myUid}
+          onClose={() => { knockoutSetupKey = null; }}
+        />
+      {:else}
+        <KnockoutSetup
+          tournament={t}
+          myUid={myUid}
+          onClose={() => { knockoutSetupKey = null; }}
+        />
+      {/if}
     {/if}
   {/if}
 
@@ -3234,6 +3266,12 @@
   .btn-setup.btn-roundrobin:hover {
     background: rgba(150, 100, 255, 0.16);
     border-color: rgba(150, 100, 255, 0.6);
+  }
+  .setup-no-players-warn {
+    font-size: 0.75rem;
+    color: #e5a623;
+    font-weight: 600;
+    white-space: nowrap;
   }
   /* Delete X button — red close icon */
   .btn-delete-x {

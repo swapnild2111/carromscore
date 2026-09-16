@@ -96,26 +96,33 @@ export type Tournament = {
    */
   leagueCfg?: LeagueCfg;
   /**
-   * Knockout / Round Robin configuration — only meaningful when
-   * `format === 'knockout'` or `format === 'roundrobin'`.
+   * Knockout configuration (groups + combined KO) — only meaningful when
+   * `format === 'knockout'`.
    */
   knockoutCfg?: KnockoutCfg;
   /**
-   * Group assignments for the league stage. Map from group key (e.g.
-   * "g1") to group metadata + player ID list. Written by the LeagueSetup
-   * admin screen after the organiser locks the draw.
+   * Group assignments for league or knockout stage. Map from group key
+   * (e.g. "g1") to group metadata + player ID list.
    */
   groups?: Record<string, LeagueGroup>;
 };
 
 /**
- * Configuration for a knockout or round-robin tournament (v5.0).
+ * Configuration for the Group Knockout format (v5.1).
+ */
+/**
+ * Configuration for a knockout or round-robin tournament.
+ * For 'knockout': groups + combined KO (venueBoards/groupCount/groupSize present).
+ * For 'roundrobin': participantCount + advanceCount present.
  */
 export type KnockoutCfg = {
-  participantCount: number;  // how many players enter the bracket
+  participantCount: number;  // how many players enter the bracket / round-robin
   advanceCount?: number;     // round-robin only: top N that advance to knockout
   flightNames?: string[];    // reward tiers e.g. ['Gold', 'Silver', 'Bronze']
-  boardsAvailable?: number;  // physical carrom boards at the venue (for schedule rotation)
+  boardsAvailable?: number;  // physical carrom boards at the venue
+  venueBoards?: number;      // knockout: boards at venue (drives group-size recommendation)
+  groupCount?: number;       // knockout: number of groups (2–4)
+  groupSize?: number;        // knockout: target players per group
 };
 
 /**
@@ -484,8 +491,17 @@ function parseKnockoutCfg(raw: unknown): KnockoutCfg | undefined {
   const result: KnockoutCfg = { participantCount: Math.floor(participantCount) };
   const advanceCount = Number(v.advanceCount);
   if (Number.isFinite(advanceCount) && advanceCount >= 2) result.advanceCount = Math.floor(advanceCount);
+  const boardsAvailable = Number(v.boardsAvailable);
+  if (Number.isFinite(boardsAvailable) && boardsAvailable >= 1) result.boardsAvailable = Math.floor(boardsAvailable);
+  const venueBoards = Number(v.venueBoards);
+  if (Number.isFinite(venueBoards) && venueBoards >= 1) result.venueBoards = Math.floor(venueBoards);
+  const groupCount = Number(v.groupCount);
+  if (Number.isFinite(groupCount) && groupCount >= 2) result.groupCount = Math.floor(groupCount);
+  const groupSize = Number(v.groupSize);
+  if (Number.isFinite(groupSize) && groupSize >= 2) result.groupSize = Math.floor(groupSize);
   return result;
 }
+
 
 function parseGroups(raw: unknown): Record<string, LeagueGroup> | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
@@ -1003,6 +1019,15 @@ export async function updateKnockoutCfg(
     if (cfg.flightNames !== undefined) {
       patch[`tournaments/${key}/knockoutCfg/flightNames`] = cfg.flightNames;
     }
+    if (cfg.venueBoards !== undefined) {
+      patch[`tournaments/${key}/knockoutCfg/venueBoards`] = cfg.venueBoards;
+    }
+    if (cfg.groupCount !== undefined) {
+      patch[`tournaments/${key}/knockoutCfg/groupCount`] = cfg.groupCount;
+    }
+    if (cfg.groupSize !== undefined) {
+      patch[`tournaments/${key}/knockoutCfg/groupSize`] = cfg.groupSize;
+    }
     await update(ref(db, '/'), patch);
     if (t) {
       t.format = format;
@@ -1016,6 +1041,7 @@ export async function updateKnockoutCfg(
     return { ok: false, error: msg || 'Knockout config update failed' };
   }
 }
+
 
 /**
  * Change only the format field of a tournament (standard / league).

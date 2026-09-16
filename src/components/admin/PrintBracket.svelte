@@ -844,6 +844,354 @@
     return '';
   });
 
+  // Build the Group KO Phase 1 draw diagram SVG for print.
+  //
+  // Uses the exact same slot visual style as buildFlightBracketSVG (league brackets):
+  //   - COL_W=240, SLOT_H=44, white rect rx=5, #bbb border, midline #ebebeb
+  //   - Winner: bold text; loser: opacity 0.38 on text
+  //   - Score pill: #f5f5f5 fill, #e0e0e0 border, centred at match midpoint
+  //   - Connectors: #bbb, stroke-width 1.25
+  //
+  // Groups are laid out in up to 2 columns (even indices left, odd indices right).
+  // SVG uses viewBox + width=100% to scale to fit any print page width.
+  function buildGroupKODiagramSVG(
+    groups: Array<{ name: string; players: string[]; matchMap: Map<string, {isDone: boolean; winner?: 'a'|'b'; setsA?: number; setsB?: number; pointsA?: number; pointsB?: number; aName: string; bName: string}[]> }>,
+  ): string {
+    if (groups.length === 0) return '';
+
+    // ── Same constants as buildFlightBracketSVG ──
+    const COL_W   = 240;
+    const COL_GAP = 48;
+    const SLOT_H  = 44;   // total height of one match slot (both players)
+    const NAME_MAX = 22;
+
+    function clip(s: string) { return s.length > NAME_MAX ? s.slice(0, NAME_MAX - 1) + '…' : s; }
+    function esc(s: string) {
+      return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    // ── Additional layout for groups ──
+    const GRP_GAP  = 24;  // vertical gap between groups in the same column
+    const LBL_H    = 20;  // height reserved above each group for its name label
+    const PAD      = 20;  // outer padding
+    const CTR_GAP  = 64;  // horizontal gap between left and right group columns
+    const MATCH_SP = 56;  // vertical spacing between match centres (same as buildFlightBracketSVG MATCH_H)
+
+    // ── Helpers ──
+    function makePairs(ids: string[]): [string, string][] {
+      const n = ids.length;
+      const pairs: [string, string][] = [];
+      for (let i = 0; i < Math.floor(n / 2); i++) pairs.push([ids[i]!, ids[n - 1 - i]!]);
+      return pairs;
+    }
+
+    // Map round index ri (0=first, totalRounds-1=Final) to the round key used in matchMap
+    function groupRoundKey(groupName: string, ri: number, totalRounds: number): string {
+      if (totalRounds === 1) return `${groupName} — Final`;
+      const fromEnd = totalRounds - 1 - ri;
+      const revLabels = ['Final', 'SF', 'QF', 'R16', 'R32'];
+      return `${groupName} — ${revLabels[fromEnd] ?? `R${fromEnd}`}`;
+    }
+
+    type MatchInfo = { isDone: boolean; winner?: 'a'|'b'; setsA?: number; setsB?: number; pointsA?: number; pointsB?: number; aName: string; bName: string };
+
+    // Same score display logic as buildFlightBracketSVG:
+    // single-set match → show total points (e.g. "25–14"); multi-set → show set count "2–1"
+    function groupScoreLines(res: MatchInfo | undefined): string[] {
+      if (!res?.isDone) return [];
+      const sA = res.setsA ?? 0;
+      const sB = res.setsB ?? 0;
+      const totalSets = sA + sB;
+      if (totalSets <= 1) {
+        const pA = res.pointsA ?? 0;
+        const pB = res.pointsB ?? 0;
+        if (pA > 0 || pB > 0) return [`${pA}–${pB}`];
+        return [`${sA}–${sB}`];
+      }
+      return [`${sA}–${sB}`];
+    }
+
+    type GroupMeta = {
+      gi: number;
+      name: string;
+      rounds: Array<Array<[string, string]>>;  // [aName, bName] per match per round
+      byePlayer: string | null;
+      x: number; y: number; h: number;
+      roundCols: number;
+    };
+
+    const groupMetas: GroupMeta[] = groups.map((g, gi) => {
+      const ps = g.players;
+      const hasBye = ps.length % 2 !== 0 && ps.length > 1;
+      const byePlayer = hasBye ? (ps[0] ?? null) : null;
+      const active = hasBye ? ps.slice(1) : [...ps];
+      const rounds: Array<Array<[string, string]>> = [];
+      if (ps.length <= 1) {
+        rounds.push([[ps[0] ?? 'TBD', '(bye)']]);
+      } else if (ps.length === 2) {
+        rounds.push([[ps[0]!, ps[1]!]]);
+      } else {
+        rounds.push(makePairs(active));
+        rounds.push([[byePlayer ? clip(esc(byePlayer)) : 'W R1', 'W Round 1']]);
+      }
+      return { gi, name: g.name, rounds, byePlayer, x: 0, y: 0, h: 0, roundCols: rounds.length };
+    });
+
+    // Height of one group block: determined by R1 match count × per-match vertical span
+    function groupH(meta: GroupMeta): number {
+      const r1Count = meta.rounds[0]!.length;
+      return r1Count * MATCH_SP;
+    }
+    // Width of one group block
+    function groupW(meta: GroupMeta): number {
+      return meta.roundCols * COL_W + (meta.roundCols - 1) * COL_GAP;
+    }
+
+    // slotCY: centre-y of match mi in a round with `count` matches, within block height h starting at y
+    function slotCY(y: number, h: number, mi: number, count: number): number {
+      const spacing = h / count;
+      return y + spacing * mi + spacing / 2;
+    }
+
+    // ── Split into left/right display columns ──
+    const leftGroups  = groupMetas.filter((_, i) => i % 2 === 0);
+    const rightGroups = groupMetas.filter((_, i) => i % 2 !== 0);
+
+    const leftColW  = leftGroups.length  > 0 ? Math.max(...leftGroups.map(groupW))  : 0;
+    const rightColW = rightGroups.length > 0 ? Math.max(...rightGroups.map(groupW)) : 0;
+
+    function colH(metas: GroupMeta[]): number {
+      if (metas.length === 0) return 0;
+      return metas.reduce((acc, m) => acc + groupH(m) + LBL_H, 0) + (metas.length - 1) * GRP_GAP;
+    }
+    const contentH = Math.max(colH(leftGroups), colH(rightGroups));
+    const totalW   = PAD + leftColW + (rightGroups.length > 0 ? CTR_GAP + rightColW : 0) + PAD;
+    const totalH   = PAD + contentH + PAD;
+
+    // ── Assign x/y to each group ──
+    {
+      let cy = PAD;
+      for (const m of leftGroups) {
+        m.h = groupH(m); m.x = PAD; m.y = cy + LBL_H;
+        cy += m.h + LBL_H + GRP_GAP;
+      }
+    }
+    {
+      let cy = PAD;
+      for (const m of rightGroups) {
+        m.h = groupH(m); m.x = PAD + leftColW + CTR_GAP; m.y = cy + LBL_H;
+        cy += m.h + LBL_H + GRP_GAP;
+      }
+    }
+
+    const lines: string[] = [];
+
+    // ── Draw each group ──
+    for (const meta of groupMetas) {
+      const gData = groups[meta.gi]!;
+      const totalRounds = meta.roundCols;
+      const hasBye = meta.byePlayer !== null;
+
+      // Group name label (same style as stage column label in buildFlightBracketSVG)
+      lines.push(`<text x="${meta.x + groupW(meta) / 2}" y="${meta.y - 7}" text-anchor="middle" font-size="10" font-weight="700" font-family="sans-serif" fill="#888" letter-spacing="0.06em">${esc(meta.name.toUpperCase())}</text>`);
+
+      for (let ri = 0; ri < totalRounds; ri++) {
+        const rMatches = meta.rounds[ri]!;
+        const rx = meta.x + ri * (COL_W + COL_GAP);
+        const roundKey = groupRoundKey(meta.name, ri, totalRounds);
+        const roundResults: MatchInfo[] = gData.matchMap.get(roundKey) ?? [];
+
+        // ── Connector lines between round columns (same style as buildFlightBracketSVG) ──
+        if (ri < totalRounds - 1) {
+          const nextMatches = meta.rounds[ri + 1]!;
+          const x1 = rx + COL_W;
+          const x2 = meta.x + (ri + 1) * (COL_W + COL_GAP);
+          const xMid = x1 + COL_GAP / 2;
+          for (let ni = 0; ni < nextMatches.length; ni++) {
+            const cy2 = slotCY(meta.y, meta.h, ni, nextMatches.length);
+            const srcA = ni * 2, srcB = ni * 2 + 1;
+            if (srcA < rMatches.length) {
+              const cy1 = slotCY(meta.y, meta.h, srcA, rMatches.length);
+              lines.push(`<line x1="${x1}" y1="${cy1}" x2="${xMid}" y2="${cy1}" stroke="#bbb" stroke-width="1.25"/>`);
+              lines.push(`<line x1="${xMid}" y1="${cy1}" x2="${xMid}" y2="${cy2}" stroke="#bbb" stroke-width="1.25"/>`);
+            }
+            if (srcB < rMatches.length) {
+              const cy1 = slotCY(meta.y, meta.h, srcB, rMatches.length);
+              lines.push(`<line x1="${x1}" y1="${cy1}" x2="${xMid}" y2="${cy1}" stroke="#bbb" stroke-width="1.25"/>`);
+              lines.push(`<line x1="${xMid}" y1="${cy1}" x2="${xMid}" y2="${cy2}" stroke="#bbb" stroke-width="1.25"/>`);
+            }
+            lines.push(`<line x1="${xMid}" y1="${cy2}" x2="${x2}" y2="${cy2}" stroke="#bbb" stroke-width="1.25"/>`);
+          }
+        }
+
+        // ── Match slots (identical to buildFlightBracketSVG slot drawing) ──
+        for (let mi = 0; mi < rMatches.length; mi++) {
+          const [aN, bN] = rMatches[mi]!;
+          const cy  = slotCY(meta.y, meta.h, mi, rMatches.length);
+          const sh  = SLOT_H;
+          const sy  = cy - sh / 2;
+
+          const isFinalWithBye = ri === totalRounds - 1 && hasBye && totalRounds > 1;
+          const aLabel = isFinalWithBye ? clip(esc(meta.byePlayer ?? aN)) : clip(esc(aN));
+          const bLabel = isFinalWithBye ? 'W Round 1' : clip(esc(bN));
+
+          const res: MatchInfo | undefined = roundResults[mi];
+          const isDone   = res?.isDone ?? false;
+          const winnerA  = isDone && res?.winner === 'a';
+          const winnerB  = isDone && res?.winner === 'b';
+
+          // Use resolved names when available
+          const aName = isDone && res?.aName ? clip(esc(res.aName)) : aLabel;
+          const bName = isDone && res?.bName ? clip(esc(res.bName)) : bLabel;
+
+          // Exact same text style as buildFlightBracketSVG
+          const aFill    = winnerA ? '#000' : '#333';
+          const bFill    = winnerB ? '#000' : '#333';
+          const aWeight  = winnerA ? '700' : '400';
+          const bWeight  = winnerB ? '700' : '400';
+          const aOpacity = isDone && !winnerA ? '0.38' : '1';
+          const bOpacity = isDone && !winnerB ? '0.38' : '1';
+
+          // Score pill — same logic as buildFlightBracketSVG
+          const sLines = groupScoreLines(res);
+          const scoreText = sLines[0] ?? '';
+          const pillW = scoreText ? Math.max(36, Math.min(scoreText.length * 6.5 + 10, COL_W - 90)) : 0;
+
+          // Slot rect + midline + names (exactly as buildFlightBracketSVG)
+          lines.push(`<rect x="${rx}" y="${sy}" width="${COL_W}" height="${sh}" rx="5" fill="#fff" stroke="#bbb" stroke-width="1"/>`);
+          lines.push(`<line x1="${rx + 1}" y1="${sy + sh / 2}" x2="${rx + COL_W - 1}" y2="${sy + sh / 2}" stroke="#ebebeb" stroke-width="0.75"/>`);
+          lines.push(`<text x="${rx + 8}" y="${sy + 16}" font-size="11" font-weight="${aWeight}" opacity="${aOpacity}" font-family="sans-serif" fill="${aFill}">${aName || 'TBD'}</text>`);
+          lines.push(`<text x="${rx + 8}" y="${sy + sh - 8}" font-size="11" font-weight="${bWeight}" opacity="${bOpacity}" font-family="sans-serif" fill="${bFill}">${bName || 'TBD'}</text>`);
+
+          if (isFinalWithBye) {
+            const bpx = rx + COL_W - 36;
+            lines.push(`<rect x="${bpx}" y="${sy + 3}" width="32" height="14" rx="3" fill="#fef3c7"/>`);
+            lines.push(`<text x="${bpx + 16}" y="${sy + 13}" text-anchor="middle" font-size="7.5" font-weight="700" font-family="sans-serif" fill="#d97706">BYE</text>`);
+          }
+
+          if (scoreText) {
+            const px = rx + COL_W - pillW - 4;
+            const pillH = 17;
+            const py = cy - pillH / 2;
+            lines.push(`<rect x="${px}" y="${py}" width="${pillW}" height="${pillH}" rx="8" fill="#f5f5f5" stroke="#e0e0e0" stroke-width="0.75"/>`);
+            lines.push(`<text x="${px + pillW / 2}" y="${py + 12}" text-anchor="middle" font-size="9.5" font-family="sans-serif" fill="#444" font-weight="600">${scoreText}</text>`);
+          }
+        }
+      }
+    }
+
+    const svgH = Math.max(totalH, 120);
+    const svgPadT = 20;
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-8 -${svgPadT} ${totalW + 16} ${svgH + svgPadT + 8}"
+      width="${totalW + 16}" height="${svgH + svgPadT + 8}" style="max-width:100%;height:auto;display:block">
+      <rect x="-8" y="-${svgPadT}" width="${totalW + 16}" height="${svgH + svgPadT + 8}" fill="#fff"/>
+      ${lines.join('\n')}
+    </svg>`;
+  }
+
+  // Group-phase data for the Group KO draw diagram (Phase 1 only).
+  // Includes per-match results so the diagram can show scores and highlight winners.
+  const groupDrawData = $derived.by(() => {
+    void playerTick;
+    void tournamentTick;
+    if (tournament?.format !== 'knockout') return null;
+    const groups = tournament.groups;
+    if (!groups || Object.keys(groups).length === 0) return null;
+    const allPlayers = loadAllPlayersFn();
+    const byId = new Map(allPlayers.map((p) => [p.id, p.canonicalName]));
+    const sorted = Object.values(groups).sort((a, b) => a.order - b.order);
+    // Build a lookup: roundName → match result (with points from history where available)
+    type MatchResult = { winner?: 'a' | 'b'; setsA?: number; setsB?: number; pointsA?: number; pointsB?: number; isDone: boolean; aName: string; bName: string };
+    // Index history by round name for point lookup
+    const histByRound = new Map<string, { finalPointsA?: number; finalPointsB?: number }[]>();
+    for (const rec of historyMatches) {
+      const r = rec.round ?? '';
+      if (!r) continue;
+      const arr = histByRound.get(r) ?? [];
+      arr.push({ finalPointsA: rec.result?.finalPointsA, finalPointsB: rec.result?.finalPointsB });
+      histByRound.set(r, arr);
+    }
+    const matchMap = new Map<string, MatchResult[]>();
+    for (const m of plannedMatches) {
+      if (!m.round || !/— (R\d+|QF|SF|Final)/.test(m.round)) continue;
+      const arr = matchMap.get(m.round) ?? [];
+      const histIdx = arr.length;
+      const histRec = histByRound.get(m.round)?.[histIdx];
+      arr.push({
+        isDone: !!m.completedAt,
+        winner: m.result?.winner === 'a' ? 'a' : m.result?.winner === 'b' ? 'b' : undefined,
+        setsA: m.result?.setsA,
+        setsB: m.result?.setsB,
+        pointsA: histRec?.finalPointsA,
+        pointsB: histRec?.finalPointsB,
+        aName: m.aResolvedId ? (byId.get(m.aResolvedId) ?? m.aName) : m.aName,
+        bName: m.bResolvedId ? (byId.get(m.bResolvedId) ?? m.bName) : m.bName,
+      });
+      matchMap.set(m.round, arr);
+    }
+    return sorted.map((g) => ({
+      name: g.name,
+      players: (g.playerIds ?? []).map((id) => byId.get(id) ?? id),
+      matchMap,
+    }));
+  });
+
+  const groupKODiagramSVG = $derived.by(() => {
+    if (!groupDrawData) return '';
+    return buildGroupKODiagramSVG(groupDrawData);
+  });
+
+  // Phase 2 KO bracket for Group KO tournaments — uses the same buildFlightBracketSVG
+  // as the standalone KO bracket, but filtered to "KO — *" rounds instead.
+  const groupKOPhase2SVG = $derived.by<string>(() => {
+    void tournamentTick;
+    void playerTick;
+    if (tournament?.format !== 'knockout') return '';
+    if (!tournament.groups || Object.keys(tournament.groups).length === 0) return '';
+    const koMatches = plannedMatches
+      .filter((m) => /^KO — /.test(m.round ?? ''))
+      .sort((a, b) => (a.matchOrder ?? 0) - (b.matchOrder ?? 0));
+    if (koMatches.length === 0) return '';
+    // Build history lookup by round for points
+    const histKOByRound = new Map<string, { finalPointsA?: number; finalPointsB?: number }[]>();
+    for (const rec of historyMatches) {
+      const r = rec.round ?? '';
+      if (!r || !/^KO — /.test(r)) continue;
+      const arr = histKOByRound.get(r) ?? [];
+      arr.push({ finalPointsA: rec.result?.finalPointsA, finalPointsB: rec.result?.finalPointsB });
+      histKOByRound.set(r, arr);
+    }
+    // Group by round label, preserving order
+    const roundOrder: string[] = [];
+    const roundMap = new Map<string, PlannedMatch[]>();
+    for (const m of koMatches) {
+      const r = m.round!;
+      if (!roundMap.has(r)) { roundMap.set(r, []); roundOrder.push(r); }
+      roundMap.get(r)!.push(m);
+    }
+    const cols = roundOrder.map((r) => ({
+      label: r.replace(/^KO — /, ''),
+      slots: (roundMap.get(r) ?? []).map((m, idx): BracketSlot => {
+        const histRec = histKOByRound.get(r)?.[idx];
+        return {
+          aId: m.aResolvedId,
+          aName: m.aName,
+          bId: m.bResolvedId,
+          bName: m.bName,
+          isDone: !!m.completedAt,
+          winner: m.result?.winner === 'a' ? 'a' : m.result?.winner === 'b' ? 'b' : undefined,
+          setsA: m.result?.setsA,
+          setsB: m.result?.setsB,
+          pointsA: histRec?.finalPointsA,
+          pointsB: histRec?.finalPointsB,
+        };
+      }),
+    }));
+    if (cols.length < 1) return '';
+    if (cols.length === 1) return '';
+    return buildFlightBracketSVG(cols);
+  });
+
   // Standalone KO bracket SVG — for format='knockout' tournaments.
   // Uses buildFlightBracketSVG (light/print theme) built from planned matches.
   const standaloneKOBracketSVG = $derived.by<string>(() => {
@@ -854,21 +1202,35 @@
     if (koMatches.length === 0) return '';
     const rounds = koRoundsFromMatches(koMatches);
     if (rounds.length === 0) return '';
+    // Build history lookup by round for points
+    const histKOByRound = new Map<string, { finalPointsA?: number; finalPointsB?: number }[]>();
+    for (const rec of historyMatches) {
+      const r = rec.round ?? '';
+      if (!r || !KO_BRACKET_ROUND_RX.test(r)) continue;
+      const arr = histKOByRound.get(r) ?? [];
+      arr.push({ finalPointsA: rec.result?.finalPointsA, finalPointsB: rec.result?.finalPointsB });
+      histKOByRound.set(r, arr);
+    }
     const cols = rounds.map((r) => ({
       label: stageLabel(r),
       slots: koMatches
         .filter((m) => m.round === r)
         .sort((a, b) => (a.matchOrder ?? 0) - (b.matchOrder ?? 0))
-        .map((m): BracketSlot => ({
-          aId: m.aResolvedId,
-          aName: m.aName,
-          bId: m.bResolvedId,
-          bName: m.bName,
-          isDone: !!m.completedAt,
-          winner: m.result?.winner === 'a' ? 'a' : m.result?.winner === 'b' ? 'b' : undefined,
-          setsA: m.result?.setsA,
-          setsB: m.result?.setsB,
-        })),
+        .map((m, idx): BracketSlot => {
+          const histRec = histKOByRound.get(r)?.[idx];
+          return {
+            aId: m.aResolvedId,
+            aName: m.aName,
+            bId: m.bResolvedId,
+            bName: m.bName,
+            isDone: !!m.completedAt,
+            winner: m.result?.winner === 'a' ? 'a' : m.result?.winner === 'b' ? 'b' : undefined,
+            setsA: m.result?.setsA,
+            setsB: m.result?.setsB,
+            pointsA: histRec?.finalPointsA,
+            pointsB: histRec?.finalPointsB,
+          };
+        }),
     }));
     return buildFlightBracketSVG(cols);
   });
@@ -1139,6 +1501,66 @@
         </div>
         <div class="bracket-svg-wrap">
           {@html rrScheduleSVG}
+        </div>
+        <div class="page-footer">
+          {#if printLogoUrl}
+            <img src={printLogoUrl} alt="Organiser logo" class="page-footer-logo" />
+          {/if}
+          {#if printOrganizerName}
+            <span class="page-footer-org">Organised by {printOrganizerName}</span>
+          {/if}
+          <span class="page-footer-brand">carromscore.app</span>
+        </div>
+      </section>
+    {/if}
+
+    {#if groupKODiagramSVG}
+      <!-- ─── GROUP KNOCKOUT PHASE 1 PAGE ──────────────────────────── -->
+      <section class="page bracket-page">
+        <div class="bracket-hdr">
+          <div class="bracket-hdr-main">
+            <p class="brand">Carromscore</p>
+            <h2 class="bracket-title">{tournamentName} — Phase 1: Group Brackets</h2>
+            {#if printOrganizerName}
+              <p class="bracket-organizer">Organised by {printOrganizerName}</p>
+            {/if}
+          </div>
+          {#if printLogoUrl}
+            <img src={printLogoUrl} alt="Organiser logo" class="bracket-logo" />
+          {/if}
+        </div>
+        <div class="bracket-svg-wrap">
+          {@html groupKODiagramSVG}
+        </div>
+        <div class="page-footer">
+          {#if printLogoUrl}
+            <img src={printLogoUrl} alt="Organiser logo" class="page-footer-logo" />
+          {/if}
+          {#if printOrganizerName}
+            <span class="page-footer-org">Organised by {printOrganizerName}</span>
+          {/if}
+          <span class="page-footer-brand">carromscore.app</span>
+        </div>
+      </section>
+    {/if}
+
+    {#if groupKOPhase2SVG}
+      <!-- ─── GROUP KNOCKOUT PHASE 2 PAGE ──────────────────────────── -->
+      <section class="page bracket-page">
+        <div class="bracket-hdr">
+          <div class="bracket-hdr-main">
+            <p class="brand">Carromscore</p>
+            <h2 class="bracket-title">{tournamentName} — Phase 2: Knockout</h2>
+            {#if printOrganizerName}
+              <p class="bracket-organizer">Organised by {printOrganizerName}</p>
+            {/if}
+          </div>
+          {#if printLogoUrl}
+            <img src={printLogoUrl} alt="Organiser logo" class="bracket-logo" />
+          {/if}
+        </div>
+        <div class="bracket-svg-wrap">
+          {@html groupKOPhase2SVG}
         </div>
         <div class="page-footer">
           {#if printLogoUrl}
@@ -1899,4 +2321,5 @@
       overflow: visible;
     }
   }
+
 </style>
