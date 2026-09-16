@@ -2101,12 +2101,23 @@
      No big badge column — was clutter. Selected state uses only the border
      + subtle background lift; radio bullet supplies the "picked" affordance. */
   legend {
-    padding: 0;
+    padding: 0 0 0 0.6rem;
     margin-bottom: 0.5rem;
     color: var(--fg);
     text-transform: uppercase;
     letter-spacing: 0.08em;
     font-size: 0.75rem;
+    position: relative;
+  }
+  legend::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0.1em;
+    bottom: 0.1em;
+    width: 3px;
+    border-radius: 3px;
+    background: linear-gradient(180deg, #ffd54a 0%, #ff8f00 100%);
   }
   fieldset label {
     display: flex;
@@ -2114,17 +2125,18 @@
     justify-content: center;
     gap: 0.15rem;
     padding: 0.6rem 0.85rem;
-    background: #141414;
-    border: 1.5px solid #232323;
+    background: var(--surface, #111111);
+    border: 1.5px solid var(--border, #252525);
     border-radius: 0.6rem;
     cursor: pointer;
     min-height: 3.25rem;
-    transition: border-color 0.15s, background 0.15s;
+    transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
   }
-  fieldset label:hover { border-color: #333; }
+  fieldset label:hover { border-color: var(--border2, #333); }
   fieldset label.selected {
     border-color: var(--accent);
     background: #1a1613;
+    box-shadow: var(--accent-glow, 0 0 20px rgba(255,179,0,0.22));
   }
   fieldset input[type='radio'] {
     position: absolute;
@@ -2192,8 +2204,8 @@
     flex-direction: column;
     align-items: center;
     gap: 0.2rem;
-    background: #141414;
-    border: 1.5px solid #232323;
+    background: var(--surface, #111111);
+    border: 1.5px solid var(--border, #252525);
     border-radius: 0.6rem;
     padding: 0.55rem 0.75rem 0.5rem;
     cursor: default;
@@ -2336,8 +2348,8 @@
   }
 
   .team-block {
-    background: #0f0f0f;
-    border: 1px solid #222;
+    background: var(--surface, #111111);
+    border: 1px solid var(--border, #252525);
     border-radius: 0.75rem;
     padding: 0.75rem;
     display: flex;
@@ -2376,8 +2388,8 @@
   }
   /* Event group card: wraps Tournament + Round fields */
   .event-block {
-    background: rgba(255, 255, 255, 0.02);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: var(--surface, #111111);
+    border: 1px solid var(--border, #252525);
     border-radius: 0.75rem;
     padding: 0.85rem 0.9rem;
     display: flex;
@@ -2437,9 +2449,9 @@
     letter-spacing: 0.08em;
   }
   input[type='text'], input[type='number'] {
-    background: #141414;
+    background: var(--surface, #111111);
     color: var(--fg);
-    border: 1px solid #333;
+    border: 1px solid var(--border2, #333);
     border-radius: 0.6rem;
     padding: 0.7rem 0.85rem;
     font-size: 1rem;
@@ -2455,9 +2467,9 @@
      keeps mobile ergonomics — iOS/Android render their own wheel
      picker with big touch targets. */
   .round-select {
-    background: #141414;
+    background: var(--surface, #111111);
     color: var(--fg);
-    border: 1px solid #333;
+    border: 1px solid var(--border2, #333);
     border-radius: 0.6rem;
     padding: 0.7rem 0.85rem;
     font-size: 1rem;
@@ -2477,7 +2489,7 @@
     cursor: pointer;
   }
   .round-select:focus { border-color: var(--accent); }
-  .round-select option { background: #141414; color: var(--fg); }
+  .round-select option { background: var(--surface, #111111); color: var(--fg); }
 
   .suggest {
     position: absolute;
@@ -2487,8 +2499,8 @@
     margin: 0.25rem 0 0;
     padding: 0;
     list-style: none;
-    background: #141414;
-    border: 1px solid #262626;
+    background: var(--surface2, #181818);
+    border: 1px solid var(--border, #252525);
     border-radius: 0.6rem;
     max-height: 14rem;
     overflow: auto;
@@ -2509,7 +2521,7 @@
     font: inherit;
   }
   .suggest button:hover,
-  .suggest button.suggest-highlighted { background: #1c1c1c; outline: 2px solid rgba(255, 213, 74, 0.5); outline-offset: -2px; }
+  .suggest button.suggest-highlighted { background: var(--surface3, #202020); outline: 2px solid rgba(255, 213, 74, 0.5); outline-offset: -2px; }
   .pname { font-size: 0.95rem; }
   .pmeta { color: var(--muted); font-size: 0.75rem; }
   /* Country pill in the picker dropdown — muted so it doesn't compete
@@ -2561,7 +2573,7 @@
     border: 1px solid rgba(255, 183, 77, 0.35);
   }
   .start {
-    background: var(--accent);
+    background: linear-gradient(90deg, #ffd040 0%, #ff8c00 100%);
     color: #0b0b0b;
     font-weight: 800;
     font-size: 1.1rem;
@@ -2569,8 +2581,12 @@
     border: none;
     border-radius: 999px;
     cursor: pointer;
+    box-shadow: 0 4px 20px rgba(255, 170, 0, 0.32);
+    transition: filter 0.15s, box-shadow 0.15s, transform 0.1s;
   }
-  .start:disabled { opacity: 0.4; cursor: not-allowed; }
+  .start:hover:not(:disabled) { filter: brightness(1.06); box-shadow: 0 6px 24px rgba(255, 170, 0, 0.44); }
+  .start:active:not(:disabled) { transform: scale(0.98); }
+  .start:disabled { opacity: 0.4; cursor: not-allowed; box-shadow: none; }
 
   .hint { color: var(--muted); text-align: center; margin: 0; font-size: 0.85rem; }
 
