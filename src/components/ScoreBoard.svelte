@@ -3770,12 +3770,12 @@
     transition: background 0.12s, border-color 0.12s;
   }
   .swap-prompt-no {
-    background: #1a1a1a;
+    background: var(--surface2, #181818);
     color: #ccc;
-    border-color: #333;
+    border-color: var(--border2, #333);
   }
   .swap-prompt-no:hover, .swap-prompt-no:active {
-    background: #222;
+    background: var(--surface3, #202020);
     border-color: #444;
   }
   .swap-prompt-yes {
@@ -4335,10 +4335,10 @@
     /* .grid-wrap provides position:relative + flex:1 — grid itself stretches to fill */
     grid-template-columns: 1fr 2fr 1.2fr 2fr 1fr;
     gap: 0.4rem;
-    background: #0f0f0f;
+    background: var(--surface, #111111);
     padding: 0.5rem 0.4rem;
     border-radius: 0.75rem;
-    border: 1px solid #222;
+    border: 1px solid var(--border, #252525);
   }
   .col {
     position: relative;
@@ -4518,9 +4518,9 @@
     display: inline-flex;
     align-items: center;
     gap: 0.35rem;
-    background: #141414;
+    background: var(--surface, #111111);
     color: var(--fg);
-    border: 1px solid #2a2a2a;
+    border: 1px solid var(--border, #252525);
     border-radius: 999px;
     padding: 0.35rem 0.85rem;
     font-size: 0.8rem;
@@ -4528,7 +4528,7 @@
     cursor: pointer;
     transition: background 0.1s, transform 0.06s, border-color 0.15s;
   }
-  .foot-btn:active { transform: translateY(1px); background: #1c1c1c; }
+  .foot-btn:active { transform: translateY(1px); background: var(--surface2, #181818); }
   .foot-btn:disabled { opacity: 0.35; cursor: not-allowed; }
   .foot-ico { font-size: 0.95rem; line-height: 1; }
   .foot-lbl { letter-spacing: 0.04em; }
@@ -4572,7 +4572,7 @@
     padding: 1rem;
   }
   .dialog-card {
-    background: #141414;
+    background: var(--surface, #111111);
     border: 2px solid var(--accent);
     border-radius: 1rem;
     padding: 1.25rem;
@@ -4621,7 +4621,7 @@
     margin-top: 0.5rem;
     position: sticky;
     bottom: 0;
-    background: #0f0f0f;
+    background: var(--surface, #111111);
     z-index: 2;
   }
   .scorecard-edit-save, .scorecard-edit-cancel {
@@ -4664,7 +4664,7 @@
   .scorecard-card :global(.board) {
     position: sticky;
     z-index: 2;
-    background: #0f0f0f;
+    background: var(--surface, #111111);
   }
   .scorecard-card :global(.hdr) {
     top: 0;
@@ -4673,7 +4673,7 @@
   .scorecard-card :global(.board) {
     top: 3rem;
     padding-bottom: 0.5rem;
-    border-bottom: 1px solid #1e1e1e;
+    border-bottom: 1px solid var(--border, #252525);
     margin-bottom: 0.25rem;
   }
   /* Close ✕ button sits absolute in scorecard-card top-right; make
@@ -4729,7 +4729,7 @@
     border: none;
     font-size: 0.95rem;
   }
-  .dialog-actions .cancel { background: #1f1f1f; color: var(--fg); border: 1px solid #333; }
+  .dialog-actions .cancel { background: var(--surface2, #181818); color: var(--fg); border: 1px solid var(--border2, #333); }
   .dialog-actions .danger { background: var(--danger); color: #0b0b0b; }
 
   /*
@@ -5026,9 +5026,9 @@
     padding: 0.25rem 0;
   }
   .pchip {
-    background: #141414;
+    background: var(--surface, #111111);
     color: var(--fg);
-    border: 1px solid #2a2a2a;
+    border: 1px solid var(--border, #252525);
     border-radius: 999px;
     padding: 0.3rem 0.85rem;
     font-size: 0.8rem;
@@ -5037,8 +5037,8 @@
     cursor: pointer;
     transition: background 0.1s, color 0.15s, border-color 0.15s;
   }
-  .pchip:hover { border-color: #3a3a3a; }
-  .pchip:active { background: #1c1c1c; }
+  .pchip:hover { border-color: var(--border2, #333); }
+  .pchip:active { background: var(--surface2, #181818); }
   .pchip-current {
     background: rgba(255, 213, 74, 0.14);
     color: var(--accent);
@@ -5070,10 +5070,10 @@
     display: grid;
     grid-template-columns: 4rem 1fr 5rem;
     gap: 0.4rem;
-    background: #0f0f0f;
+    background: var(--surface, #111111);
     padding: 0.5rem;
     border-radius: 0.75rem;
-    border: 1px solid #222;
+    border: 1px solid var(--border, #252525);
   }
   .pflank {
     display: grid;
