@@ -758,7 +758,7 @@
   }
   .bracket-card {
     position: relative;
-    background: #0f0f0f;
+    background: var(--surface, #111111);
     border: 1px solid rgba(255, 213, 74, 0.5);
     border-radius: 0.8rem;
     padding: 1.25rem 1.25rem 1rem;
@@ -900,7 +900,7 @@
   }
   .add-grid input {
     padding: 0.4rem 0.55rem;
-    background: #141414;
+    background: var(--surface, #111111);
     border: 1px solid rgba(255, 255, 255, 0.15);
     border-radius: 0.35rem;
     color: var(--fg, #f5f5f5);
@@ -946,7 +946,7 @@
   .board-picker input {
     width: 4rem;
     padding: 0.3rem 0.4rem;
-    background: #141414;
+    background: var(--surface, #111111);
     border: 1px solid rgba(255, 255, 255, 0.15);
     border-radius: 0.35rem;
     color: var(--fg, #f5f5f5);
@@ -1002,7 +1002,7 @@
 
   .picker input {
     padding: 0.4rem 0.55rem;
-    background: #141414;
+    background: var(--surface, #111111);
     border: 1px solid rgba(255, 255, 255, 0.15);
     border-radius: 0.35rem;
     color: var(--fg, #f5f5f5);
@@ -1026,7 +1026,7 @@
     list-style: none;
     margin: 0.2rem 0 0;
     padding: 0.2rem 0;
-    background: #141414;
+    background: var(--surface, #111111);
     border: 1px solid rgba(255, 213, 74, 0.35);
     border-radius: 0.4rem;
     max-height: 14rem;

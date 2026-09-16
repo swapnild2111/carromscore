@@ -1586,7 +1586,7 @@
     flex: 1 1 12rem;
     min-width: 8rem;
     padding: 0.4rem 0.6rem;
-    background: #141414;
+    background: var(--surface, #111111);
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 0.45rem;
     color: var(--fg, #f5f5f5);
@@ -1599,7 +1599,7 @@
   }
   .rep-select {
     padding: 0.4rem 0.6rem;
-    background: #141414;
+    background: var(--surface, #111111);
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 0.45rem;
     color: var(--fg, #f5f5f5);
@@ -2353,7 +2353,7 @@
     min-width: 8rem;
     max-width: 20rem;
     padding: 0.4rem 0.6rem;
-    background: #141414;
+    background: var(--surface, #111111);
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 0.45rem;
     color: var(--fg, #f5f5f5);
@@ -2591,7 +2591,7 @@
     .group-grid { grid-template-columns: repeat(4, 1fr); }
   }
   .group-card {
-    background: #141414;
+    background: var(--surface, #111111);
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 0.6rem;
     overflow: hidden;
@@ -2631,7 +2631,7 @@
 
   /* Flight-level collapsible (outer wrapper for Gold/Silver/Bronze) */
   .flight-section {
-    background: #141414;
+    background: var(--surface, #111111);
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 0.7rem;
     overflow: hidden;

@@ -152,7 +152,7 @@
   .bulk-confirm input {
     flex: 1;
     min-width: 8rem;
-    background: #0f0f0f;
+    background: var(--surface, #111111);
     color: var(--fg);
     border: 1px solid var(--danger, #ef5350);
     border-radius: 0.4rem;

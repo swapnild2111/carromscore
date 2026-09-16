@@ -216,7 +216,7 @@
     justify-content: space-between;
     width: 100%;
     padding: 0.5rem 0.65rem;
-    background: #0f0f0f;
+    background: var(--surface, #111111);
     color: var(--fg, #f5f5f5);
     border: 1px solid #2a2a2a;
     border-radius: 0.45rem;

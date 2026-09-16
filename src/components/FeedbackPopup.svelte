@@ -177,7 +177,7 @@
     padding: 1rem;
   }
   .dialog-card {
-    background: #141414;
+    background: var(--surface, #111111);
     border: 2px solid var(--accent);
     border-radius: 1rem;
     padding: 1.25rem;

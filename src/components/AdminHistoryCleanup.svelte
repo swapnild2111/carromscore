@@ -402,7 +402,7 @@
   .controls input {
     flex: 1;
     min-width: 8rem;
-    background: #0f0f0f;
+    background: var(--surface, #111111);
     color: var(--fg);
     border: 1px solid #2a2a2a;
     border-radius: 0.45rem;
@@ -415,7 +415,7 @@
     border-color: var(--accent);
   }
   .filter-select {
-    background: #0f0f0f;
+    background: var(--surface, #111111);
     color: var(--fg);
     border: 1px solid #2a2a2a;
     border-radius: 0.45rem;
@@ -620,7 +620,7 @@
     padding: 1rem;
   }
   .dialog-card {
-    background: #141414;
+    background: var(--surface, #111111);
     border: 1px solid rgba(239, 83, 80, 0.4);
     border-radius: 0.75rem;
     padding: 1rem;

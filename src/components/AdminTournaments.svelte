@@ -2987,7 +2987,7 @@
   .controls input {
     flex: 1;
     min-width: 8rem;
-    background: #0f0f0f;
+    background: var(--surface, #111111);
     color: var(--fg);
     border: 1px solid #2a2a2a;
     border-radius: 0.45rem;
@@ -3000,7 +3000,7 @@
     border-color: var(--accent);
   }
   .filter-select {
-    background: #0f0f0f;
+    background: var(--surface, #111111);
     color: var(--fg);
     border: 1px solid #2a2a2a;
     border-radius: 0.45rem;
@@ -3096,7 +3096,7 @@
     font-size: 0.88rem;
   }
   .tbl thead tr {
-    background: #1a1a1a;
+    background: var(--surface2, #181818);
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
   }
   .tbl thead {
@@ -3114,7 +3114,7 @@
     letter-spacing: 0.05em;
     white-space: nowrap;
     user-select: none;
-    background: #1a1a1a;
+    background: var(--surface2, #181818);
   }
   .th-sortable {
     cursor: pointer;
@@ -3451,7 +3451,7 @@
     justify-content: center;
     gap: 0.15rem;
     padding: 0.6rem 0.75rem;
-    background: #141414;
+    background: var(--surface, #111111);
     border: 1.5px solid #232323;
     border-radius: 0.6rem;
     cursor: pointer;
@@ -3495,7 +3495,7 @@
   }
   .edit-field input[type="text"],
   .edit-field input[type="date"] {
-    background: #0f0f0f;
+    background: var(--surface, #111111);
     color: var(--fg);
     border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: 0.4rem;
@@ -3516,7 +3516,7 @@
   }
   .edit-field input[type="number"],
   .edit-field select {
-    background: #0f0f0f;
+    background: var(--surface, #111111);
     color: var(--fg);
     border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: 0.4rem;
@@ -3527,7 +3527,7 @@
   }
 
   .edit-field textarea {
-    background: #0f0f0f;
+    background: var(--surface, #111111);
     color: var(--fg);
     border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: 0.4rem;
@@ -3568,7 +3568,7 @@
     border-radius: 0.35rem;
     border: 1px solid rgba(255,255,255,0.1);
     object-fit: contain;
-    background: #1a1a1a;
+    background: var(--surface2, #181818);
   }
   .logo-remove { flex-shrink: 0; }
   .logo-upload-btn {
@@ -3577,7 +3577,7 @@
     padding: 0.4rem 0.85rem;
     border-radius: 0.45rem;
     border: 1px solid rgba(255,255,255,0.18);
-    background: #1a1a1a;
+    background: var(--surface2, #181818);
     color: var(--fg);
     font-size: 0.82rem;
     font-weight: 600;
@@ -3770,7 +3770,7 @@
   .assign-search {
     flex: 1;
     min-width: 12rem;
-    background: #0f0f0f;
+    background: var(--surface, #111111);
     color: var(--fg);
     border: 1px solid #2a2a2a;
     border-radius: 0.4rem;
@@ -3989,7 +3989,7 @@
   }
   .row-edit input {
     flex: 1;
-    background: #0f0f0f;
+    background: var(--surface, #111111);
     color: var(--fg);
     border: 1px solid var(--accent);
     border-radius: 0.4rem;
@@ -4134,7 +4134,7 @@
     overflow-y: auto;
   }
   .dialog-card {
-    background: #141414;
+    background: var(--surface, #111111);
     border: 1px solid rgba(239, 83, 80, 0.4);
     border-radius: 0.75rem;
     padding: 1rem;
@@ -4163,7 +4163,7 @@
   .dialog-card input[type="text"],
   .dialog-card input[type="date"] {
     width: 100%;
-    background: #0f0f0f;
+    background: var(--surface, #111111);
     color: var(--fg);
     border: 1px solid #2a2a2a;
     border-radius: 0.4rem;
@@ -4264,7 +4264,7 @@
     min-width: 0;
     max-width: 100%;
     width: 0;   /* let flex-1 alone drive width, ignoring intrinsic content */
-    background: #0f0f0f;
+    background: var(--surface, #111111);
     color: var(--fg);
     border: 1px solid #2a2a2a;
     border-radius: 0.4rem;

@@ -2743,7 +2743,7 @@
     -webkit-backdrop-filter: blur(4px);
   }
   .sw-update-card {
-    background: #141414;
+    background: var(--surface, #111111);
     border: 1px solid rgba(255, 213, 74, 0.35);
     border-radius: 1rem;
     padding: 1.25rem 1.25rem 1rem;

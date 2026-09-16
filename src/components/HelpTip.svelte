@@ -138,7 +138,7 @@
     min-width: 12rem;
     max-width: min(20rem, calc(100vw - 2rem));
     padding: 0.55rem 0.7rem;
-    background: #1a1a1a;
+    background: var(--surface2, #181818);
     border: 1px solid rgba(255, 213, 74, 0.35);
     border-radius: 0.5rem;
     color: var(--fg, #f5f5f5);
@@ -160,7 +160,7 @@
     left: 0.5rem;
     width: 10px;
     height: 10px;
-    background: #1a1a1a;
+    background: var(--surface2, #181818);
     border-top: 1px solid rgba(255, 213, 74, 0.35);
     border-left: 1px solid rgba(255, 213, 74, 0.35);
     transform: rotate(45deg);

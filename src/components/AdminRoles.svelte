@@ -502,7 +502,7 @@
     letter-spacing: 0.06em;
   }
   .add-uid input {
-    background: #0f0f0f;
+    background: var(--surface, #111111);
     color: var(--fg);
     border: 1px solid #2a2a2a;
     border-radius: 0.4rem;

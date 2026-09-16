@@ -159,7 +159,7 @@
   .warn { margin: 0 0 1.2rem; font-size: 0.82rem; color: #e05c5c; }
   .btn-run { padding: 0.6rem 1.4rem; background: #e05c5c; color: #fff; border: none; border-radius: 0.5rem; font: inherit; font-size: 0.95rem; font-weight: 700; cursor: pointer; }
   .btn-run:disabled { opacity: 0.5; cursor: not-allowed; }
-  .log { margin-top: 1rem; background: #0e0e0e; border: 1px solid rgba(255,255,255,0.1); border-radius: 0.5rem; padding: 0.75rem 1rem; font-family: monospace; font-size: 0.78rem; line-height: 1.7; max-height: 40vh; overflow-y: auto; color: rgba(255,255,255,0.7); }
+  .log { margin-top: 1rem; background: var(--surface, #111111); border: 1px solid rgba(255,255,255,0.1); border-radius: 0.5rem; padding: 0.75rem 1rem; font-family: monospace; font-size: 0.78rem; line-height: 1.7; max-height: 40vh; overflow-y: auto; color: rgba(255,255,255,0.7); }
   .err { color: #e05c5c; }
   .spin { color: var(--accent, #ffd54a); }
   .success { margin-top: 1rem; color: #9be0a8; font-weight: 700; font-size: 0.9rem; }

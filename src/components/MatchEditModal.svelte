@@ -642,7 +642,7 @@
   }
   .modal-card {
     position: relative;
-    background: #141414;
+    background: var(--surface, #111111);
     border: 1px solid rgba(255, 213, 74, 0.35);
     border-radius: 0.9rem;
     padding: 1rem 1rem 1.25rem;
@@ -754,7 +754,7 @@
     margin-left: 0.25rem;
   }
   input, select {
-    background: #0f0f0f;
+    background: var(--surface, #111111);
     color: var(--fg, #f5f5f5);
     border: 1px solid #2a2a2a;
     border-radius: 0.45rem;

@@ -1206,7 +1206,7 @@
   }
   .controls input {
     flex: 1;
-    background: #0f0f0f;
+    background: var(--surface, #111111);
     color: var(--fg);
     border: 1px solid #2a2a2a;
     border-radius: 0.45rem;
@@ -1265,7 +1265,7 @@
     cursor: pointer;
   }
   .filter-select {
-    background: #0f0f0f;
+    background: var(--surface, #111111);
     color: var(--fg);
     border: 1px solid #2a2a2a;
     border-radius: 0.45rem;
@@ -1423,7 +1423,7 @@
     padding: 1rem;
   }
   .dialog-card {
-    background: #141414;
+    background: var(--surface, #111111);
     border: 1px solid rgba(239, 83, 80, 0.4);
     border-radius: 0.75rem;
     padding: 1rem;
@@ -1446,7 +1446,7 @@
   }
   .dialog-card input[type="text"] {
     width: 100%;
-    background: #0f0f0f;
+    background: var(--surface, #111111);
     color: var(--fg);
     border: 1px solid #2a2a2a;
     border-radius: 0.4rem;
@@ -1469,7 +1469,7 @@
     font-weight: 700;
   }
   .merge-picker select {
-    background: #0f0f0f;
+    background: var(--surface, #111111);
     color: var(--fg);
     border: 1px solid #2a2a2a;
     border-radius: 0.4rem;
@@ -1514,7 +1514,7 @@
   .edit-field input,
   .edit-field select {
     width: 100%;
-    background: #0f0f0f;
+    background: var(--surface, #111111);
     color: var(--fg);
     border: 1px solid #2a2a2a;
     border-radius: 0.4rem;
@@ -1523,7 +1523,7 @@
     font-size: 0.9rem;
   }
   .edit-field select option {
-    background: #1a1a1a;
+    background: var(--surface2, #181818);
   }
   .edit-row {
     display: flex;
@@ -1534,7 +1534,7 @@
   .edit-row input {
     flex: 1;
     min-width: 0;
-    background: #0f0f0f;
+    background: var(--surface, #111111);
     color: var(--fg);
     border: 1px solid #2a2a2a;
     border-radius: 0.4rem;
@@ -1620,7 +1620,7 @@
   .add-textarea {
     width: 100%;
     box-sizing: border-box;
-    background: #0f0f0f;
+    background: var(--surface, #111111);
     color: var(--fg);
     border: 1px solid #2a2a2a;
     border-radius: 0.45rem;
@@ -1723,7 +1723,7 @@
     cursor: pointer;
   }
   .conflict-target {
-    background: #0f0f0f;
+    background: var(--surface, #111111);
     color: var(--fg);
     border: 1px solid #2a2a2a;
     border-radius: 0.35rem;

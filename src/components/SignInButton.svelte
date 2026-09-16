@@ -360,7 +360,7 @@
     z-index: 250;
     min-width: 12rem;
     max-width: 18rem;
-    background: #141414;
+    background: var(--surface, #111111);
     border: 1px solid rgba(255, 213, 74, 0.35);
     border-radius: 0.65rem;
     padding: 0.5rem;

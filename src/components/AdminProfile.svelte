@@ -289,7 +289,7 @@
     flex-direction: column;
     gap: 0.75rem;
     padding: 1rem;
-    background: #141414;
+    background: var(--surface, #111111);
     border: 1px solid rgba(255,255,255,0.08);
     border-radius: 0.6rem;
   }
