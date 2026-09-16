@@ -594,6 +594,10 @@
   let tournamentHighlight = $state<number>(-1);
   let suppressTournamentBlur = false;
 
+  let showRoundPicker = $state(false);
+  let roundHighlight = $state<number>(-1);
+  let suppressRoundBlur = false;
+
   function pickTournament(name: string): void {
     cfg.tournament = name;
     showTournamentPicker = false;
@@ -1359,38 +1363,65 @@
   {@const suggestions = suggest(typed)}
   {@const dropdownVisible = !disabled && openPicker === key && suggestions.length > 0}
   {@const hit = topHit(typed)}
-  <label class="picker" class:picker-locked={disabled}>
-    <span>{label}</span>
-    <input
-      type="text"
-      autocomplete="off"
-      placeholder="Type a name…"
-      value={typed}
-      role="combobox"
-      aria-expanded={dropdownVisible}
-      aria-autocomplete="list"
-      {disabled}
-      oninput={(e) => { pickerHighlight = 0; onNameInput(key, (e.currentTarget as HTMLInputElement).value); }}
-      onfocus={() => { openPicker = key; pickerHighlight = -1; }}
-      onblur={() => setTimeout(() => { if (!suppressPickerBlur && openPicker === key) { openPicker = null; pickerHighlight = -1; } suppressPickerBlur = false; }, 200)}
-      onkeydown={(e) => onPickerKeydown(key, e, suggestions)}
-    />
+  {@const resolvedCountry = resolvedPlayerCountries[key as string] ?? ''}
+  {@const hasPick = typed.trim().length > 0}
+  <div class="picker-wrap" class:picker-locked={disabled}>
+    <label class="picker" style="display:contents">
+      <span class="sr-only">{label}</span>
+      <input
+        type="text"
+        autocomplete="off"
+        placeholder="Type a name…"
+        value={typed}
+        role="combobox"
+        aria-expanded={dropdownVisible}
+        aria-autocomplete="list"
+        {disabled}
+        oninput={(e) => { pickerHighlight = 0; onNameInput(key, (e.currentTarget as HTMLInputElement).value); }}
+        onfocus={() => { openPicker = key; pickerHighlight = -1; }}
+        onblur={() => setTimeout(() => { if (!suppressPickerBlur && openPicker === key) { openPicker = null; pickerHighlight = -1; } suppressPickerBlur = false; }, 200)}
+        onkeydown={(e) => onPickerKeydown(key, e, suggestions)}
+      />
+    </label>
+    {#if hasPick && resolvedCountry && resolvedCountry !== 'Unknown'}
+      <span class="player-flag" aria-hidden="true">{flagEmoji(resolvedCountry) || ''}</span>
+      <span class="player-country">{countryName(resolvedCountry)}</span>
+    {/if}
+    {#if hasPick && !disabled}
+      <button
+        type="button"
+        class="player-clear"
+        aria-label="Clear {label}"
+        onmousedown={(e) => e.preventDefault()}
+        onclick={() => { (cfg[key] as string) = ''; resolvedPlayerCountries[key as string] = ''; resolvedPlayerIds[key as string] = null; }}
+      >✕</button>
+    {/if}
     {#if dropdownVisible}
       <ul class="suggest">
+        {#if typed.trim()}
+          <li class="suggest-search-row">
+            <span class="suggest-search-icon">🔍</span>
+            <span class="suggest-search-text">{typed}</span>
+          </li>
+        {/if}
+        {#if suggestions.length > 0}
+          <li class="suggest-heading">Players</li>
+        {/if}
         {#each suggestions as p, i (p.name + '|' + p.source + '|' + (p.country ?? ''))}
           <li>
             <button
               type="button"
+              class="suggest-item"
               class:suggest-highlighted={i === pickerHighlight}
               onmouseenter={() => (pickerHighlight = i)}
               onmousedown={(e) => e.preventDefault()}
               onclick={() => { pick(key, p); pickerHighlight = -1; }}
             >
-              <span class="pname">{p.name}</span>
+              <span class="suggest-name">{p.name}</span>
               {#if p.country && p.country !== 'Unknown'}
-                <span class="pcountry" title={countryName(p.country)} aria-hidden="true">
-                  {#if flagEmoji(p.country)}{flagEmoji(p.country)}{/if}
-                  {countryName(p.country)}
+                <span class="suggest-right">
+                  {#if flagEmoji(p.country)}<span class="suggest-flag-sm">{flagEmoji(p.country)}</span>{/if}
+                  <span class="suggest-country">{countryName(p.country)}</span>
                 </span>
               {/if}
             </button>
@@ -1425,7 +1456,7 @@
         </span>
       {/if}
     {/if}
-  </label>
+  </div>
 {/snippet}
 
 {#snippet noteInput(label: string, key: 'noteA' | 'noteB', disabled = false)}
@@ -1579,73 +1610,71 @@
     that already reflect the mode — no back-and-forth. Reordered
     2026-08-15.
   -->
-  <div class="section-card">
-  <fieldset class="fmt fmt-mode" class:rules-locked={rulesLocked}>
-    <legend>
-      Mode{#if rulesLocked}<span class="rules-lock-badge" title="Mode set by tournament">🔒</span>{/if}
-      {#if !rulesLocked}
-      <HelpTip label="Help: match mode">
-        <strong>Singles</strong> — one player per side.<br/>
-        <strong>Doubles</strong> — two players per side (2v2).<br/>
-        <strong>Practice</strong> — solo drill; tracks boards + misses only, no opponent.
-      </HelpTip>
-      {/if}
-    </legend>
-    <label class:selected={cfg.mode === 'singles'} class:mode-locked={rulesLocked}>
-      <input type="radio" name="mode" value="singles" checked={cfg.mode === 'singles'} onchange={() => setMode('singles')} disabled={rulesLocked} />
-      <span class="opt-title">Singles</span>
-      <span class="opt-meta">1 vs 1</span>
-    </label>
-    <label class:selected={cfg.mode === 'doubles'} class:mode-locked={rulesLocked}>
-      <input type="radio" name="mode" value="doubles" checked={cfg.mode === 'doubles'} onchange={() => setMode('doubles')} disabled={rulesLocked} />
-      <span class="opt-title">Doubles</span>
-      <span class="opt-meta">2 vs 2</span>
-    </label>
-    <label class:selected={cfg.mode === 'practice'} class:mode-locked={rulesLocked}>
-      <input type="radio" name="mode" value="practice" checked={cfg.mode === 'practice'} onchange={() => setMode('practice')} disabled={rulesLocked} />
-      <span class="opt-title">Practice</span>
-      <span class="opt-meta">Solo drill</span>
-    </label>
-  </fieldset>
-  </div>
-
-  <div class="section-card">
-  <fieldset class="rules" class:rules-practice={cfg.mode === 'practice'} class:rules-locked={rulesLocked}>
-    <legend>Match rules{#if rulesLocked}<span class="rules-lock-badge" title="Rules set by tournament">🔒</span>{/if}</legend>
-    <label>
-      <span>Sets</span>
-      <input type="number" min="1" max="9" step="1" bind:value={cfg.bestOf} disabled={rulesLocked} />
-    </label>
-    {#if cfg.mode !== 'practice'}
-      <label>
-        <span>Points</span>
-        <input type="number" min="1" step="1" bind:value={cfg.pointsTarget} disabled={rulesLocked} />
-      </label>
-    {/if}
-    <label>
-      <span>{cfg.mode === 'practice' ? 'Boards per set' : 'Boards'}</span>
-      <div class="rules-val-row">
-        <input type="number" min={cfg.mode === 'practice' ? 1 : 0} step="1" bind:value={cfg.maxBoards} disabled={rulesLocked} />
-      </div>
-    </label>
-    <label>
-      <span>Timer <em class="rules-label-hint">(mins)</em></span>
-      <div class="rules-val-row">
-        <input
-          type="number"
-          min="0"
-          max="300"
-          step="1"
-          bind:value={cfg.timerDuration}
-          disabled={rulesLocked}
-          onblur={(e) => {
-            const v = (e.currentTarget as HTMLInputElement).value;
-            if (v === '' || v === null) cfg.timerDuration = 0;
-          }}
-        />
-      </div>
-    </label>
-  </fieldset>
+  <!-- Mode + Rules merged into one card, divided by a section-row border -->
+  <div class="section-card mode-rules-card">
+    <div class="section-row">
+      <fieldset class="fmt fmt-mode" class:rules-locked={rulesLocked}>
+        <legend>
+          Mode{#if rulesLocked}<span class="rules-lock-badge" title="Mode set by tournament">🔒</span>{/if}
+          {#if !rulesLocked}
+          <HelpTip label="Help: match mode">
+            <strong>Singles</strong> — one player per side.<br/>
+            <strong>Doubles</strong> — two players per side (2v2).<br/>
+            <strong>Practice</strong> — solo drill; tracks boards + misses only, no opponent.
+          </HelpTip>
+          {/if}
+        </legend>
+        <label class:selected={cfg.mode === 'singles'} class:mode-locked={rulesLocked}>
+          <input type="radio" name="mode" value="singles" checked={cfg.mode === 'singles'} onchange={() => setMode('singles')} disabled={rulesLocked} />
+          <span class="opt-icon mode-vs-icon" aria-hidden="true">👤<span class="vs-sep">vs</span>👤</span>
+          <span class="opt-title">Singles</span>
+        </label>
+        <label class:selected={cfg.mode === 'doubles'} class:mode-locked={rulesLocked}>
+          <input type="radio" name="mode" value="doubles" checked={cfg.mode === 'doubles'} onchange={() => setMode('doubles')} disabled={rulesLocked} />
+          <span class="opt-icon mode-vs-icon" aria-hidden="true">👥<span class="vs-sep">vs</span>👥</span>
+          <span class="opt-title">Doubles</span>
+        </label>
+        <label class:selected={cfg.mode === 'practice'} class:mode-locked={rulesLocked}>
+          <input type="radio" name="mode" value="practice" checked={cfg.mode === 'practice'} onchange={() => setMode('practice')} disabled={rulesLocked} />
+          <span class="opt-icon" aria-hidden="true">🎯</span>
+          <span class="opt-title">Practice</span>
+        </label>
+      </fieldset>
+    </div>
+    <div class="section-row section-row-rules">
+      <fieldset class="rules" class:rules-practice={cfg.mode === 'practice'} class:rules-locked={rulesLocked}>
+        <legend>Match rules{#if rulesLocked}<span class="rules-lock-badge" title="Rules set by tournament">🔒</span>{/if}</legend>
+        <label>
+          <span>Sets</span>
+          <input type="number" min="1" max="9" step="1" bind:value={cfg.bestOf} disabled={rulesLocked} />
+        </label>
+        {#if cfg.mode !== 'practice'}
+          <label>
+            <span>Points</span>
+            <input type="number" min="1" step="1" bind:value={cfg.pointsTarget} disabled={rulesLocked} />
+          </label>
+        {/if}
+        <label>
+          <span>{cfg.mode === 'practice' ? 'Boards per set' : 'Boards'}</span>
+          <input type="number" min={cfg.mode === 'practice' ? 1 : 0} step="1" bind:value={cfg.maxBoards} disabled={rulesLocked} />
+        </label>
+        <label>
+          <span>Timer <em class="rules-label-hint">(mins)</em></span>
+          <input
+            type="number"
+            min="0"
+            max="300"
+            step="1"
+            bind:value={cfg.timerDuration}
+            disabled={rulesLocked}
+            onblur={(e) => {
+              const v = (e.currentTarget as HTMLInputElement).value;
+              if (v === '' || v === null) cfg.timerDuration = 0;
+            }}
+          />
+        </label>
+      </fieldset>
+    </div>
   </div>
 
   <!--
@@ -1657,158 +1686,229 @@
     tournament in any meaningful way.
   -->
   {#if cfg.mode !== 'practice'}
-  <div class="section-card">
-  <div class="event-block event-block-inner">
-  <label class="tournament-input" class:picker-locked={tournamentLocked}>
-    <span>
-      Tournament{#if !tournamentLocked} <em class="hint-inline">(optional)</em>{/if}
-      {#if !tournamentLocked}
-      <HelpTip label="Help: tournament">
-        Groups this match with others of the same event name in the Lobby. Leave blank for casual play (matches show under <strong>Default</strong>). Type an existing tournament name to reuse it, or type a new one to create it.
-      </HelpTip>
-      {/if}
-    </span>
-    <input
-      type="text"
-      autocomplete="off"
-      placeholder="Event name — Silver Cup 2026, Sunday Club Night, …"
-      value={cfg.tournament}
-      role="combobox"
-      aria-expanded={tourDropdownVisible}
-      aria-autocomplete="list"
-      disabled={tournamentLocked}
-      oninput={(e) => {
-        const nextValue = (e.currentTarget as HTMLInputElement).value;
-        const prevKey = normalizeKey(cfg.tournament.trim());
-        const nextKey = normalizeKey(nextValue.trim());
-        if (prevKey !== nextKey) cfg.round = '';
-        cfg.tournament = nextValue;
-        tournamentHighlight = 0;
-      }}
-      onfocus={() => { showTournamentPicker = true; tournamentHighlight = -1; }}
-      onblur={() => setTimeout(() => { if (!suppressTournamentBlur) { showTournamentPicker = false; tournamentHighlight = -1; } suppressTournamentBlur = false; }, 200)}
-      onkeydown={(e) => onTournamentKeydown(e, tourSuggestions)}
-      maxlength="60"
-    />
-    {#if tourDropdownVisible}
-      <ul class="suggest">
-        {#each tourSuggestions as t, ti (t.key)}
-          <li>
-            <button
-              type="button"
-              class:suggest-highlighted={ti === tournamentHighlight}
-              onmouseenter={() => (tournamentHighlight = ti)}
-              onmousedown={(e) => e.preventDefault()}
-              onclick={() => pickTournament(t.name)}
-            >
-              <span class="pname">{t.name}</span>
-            </button>
-          </li>
-        {/each}
-      </ul>
+  <div class="event-card">
+    <!-- Tournament row -->
+    <div class="event-row" class:event-row-locked={tournamentLocked}>
+      <span class="event-icon" aria-hidden="true">🏆</span>
+      <div class="event-body">
+        <span class="event-lbl">
+          Tournament{#if !tournamentLocked}
+          <HelpTip label="Help: tournament">
+            Groups this match with others of the same event name in the Lobby. Leave blank for casual play (matches show under <strong>Default</strong>). Type an existing tournament name to reuse it, or type a new one to create it.
+          </HelpTip>
+          {/if}
+        </span>
+        <input
+          class="event-input"
+          type="text"
+          autocomplete="off"
+          placeholder="Event name — Silver Cup 2026, …"
+          value={cfg.tournament}
+          role="combobox"
+          aria-expanded={tourDropdownVisible}
+          aria-autocomplete="list"
+          disabled={tournamentLocked}
+          oninput={(e) => {
+            const nextValue = (e.currentTarget as HTMLInputElement).value;
+            const prevKey = normalizeKey(cfg.tournament.trim());
+            const nextKey = normalizeKey(nextValue.trim());
+            if (prevKey !== nextKey) cfg.round = '';
+            cfg.tournament = nextValue;
+            tournamentHighlight = 0;
+          }}
+          onfocus={() => { showTournamentPicker = true; tournamentHighlight = -1; }}
+          onblur={() => setTimeout(() => { if (!suppressTournamentBlur) { showTournamentPicker = false; tournamentHighlight = -1; } suppressTournamentBlur = false; }, 200)}
+          onkeydown={(e) => onTournamentKeydown(e, tourSuggestions)}
+          maxlength="60"
+        />
+        {#if tourDropdownVisible}
+          <ul class="suggest">
+            {#if cfg.tournament.trim()}
+              <li class="suggest-search-row">
+                <span class="suggest-search-icon">🔍</span>
+                <span class="suggest-search-text">{cfg.tournament}</span>
+              </li>
+            {/if}
+            {#if tourSuggestions.length > 0}
+              <li class="suggest-heading">Tournaments</li>
+            {/if}
+            {#each tourSuggestions as t, ti (t.key)}
+              <li>
+                <button
+                  type="button"
+                  class="suggest-item"
+                  class:suggest-highlighted={ti === tournamentHighlight}
+                  onmouseenter={() => (tournamentHighlight = ti)}
+                  onmousedown={(e) => e.preventDefault()}
+                  onclick={() => pickTournament(t.name)}
+                >
+                  <span class="suggest-flag">🏆</span>
+                  <span class="suggest-info">
+                    <span class="suggest-name">{t.name}</span>
+                  </span>
+                  {#if cfg.tournament === t.name}<span class="suggest-check">✓</span>{/if}
+                </button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </div>
+      <span class="event-arrow" aria-hidden="true">›</span>
+    </div>
+
+    {#if currentTournamentRounds().length > 0}
+    <!-- Round row — custom dropdown matching tournament suggest style -->
+    {@const roundOptions = currentTournamentOpenRounds()}
+    {@const roundDropdownVisible = !tournamentLocked && showRoundPicker}
+    <div class="event-row event-row-round" class:event-row-locked={tournamentLocked} style="position:relative;overflow:visible;">
+      <span class="event-icon" aria-hidden="true">📋</span>
+      <div class="event-body" style="position:static;">
+        <span class="event-lbl">
+          Round{#if !tournamentLocked}
+          <HelpTip label="Help: round">
+            Which stage of the tournament this match belongs to — Round of 16, Quarter-finals, Semi-finals, Final, etc. This tournament has rounds set up, so pick one before starting the match.
+          </HelpTip>
+          {/if}
+        </span>
+        <input
+          class="event-input round-input"
+          type="text"
+          autocomplete="off"
+          placeholder="Pick a round…"
+          value={cfg.round}
+          disabled={tournamentLocked}
+          role="combobox"
+          aria-expanded={roundDropdownVisible}
+          aria-autocomplete="list"
+          oninput={(e) => { cfg.round = (e.currentTarget as HTMLInputElement).value; showRoundPicker = true; roundHighlight = 0; }}
+          onfocus={() => { showRoundPicker = true; roundHighlight = -1; }}
+          onblur={() => setTimeout(() => { if (!suppressRoundBlur) { showRoundPicker = false; roundHighlight = -1; } suppressRoundBlur = false; }, 200)}
+          onkeydown={(e) => {
+            const filtered = roundOptions.filter(r => !cfg.round.trim() || r.name.toLowerCase().includes(cfg.round.toLowerCase()));
+            if (e.key === 'ArrowDown') { suppressRoundBlur = true; if (!roundDropdownVisible) { showRoundPicker = true; roundHighlight = 0; } else roundHighlight = Math.min(roundHighlight + 1, filtered.length - 1); e.preventDefault(); }
+            else if (e.key === 'ArrowUp') { suppressRoundBlur = true; roundHighlight = Math.max(roundHighlight - 1, 0); e.preventDefault(); }
+            else if (e.key === 'Enter' && roundDropdownVisible && roundHighlight >= 0) { e.preventDefault(); const r = filtered[roundHighlight]; if (r) { cfg.round = r.name; suppressRoundBlur = false; showRoundPicker = false; roundHighlight = -1; } }
+            else if (e.key === 'Escape') { suppressRoundBlur = false; showRoundPicker = false; roundHighlight = -1; }
+          }}
+        />
+        {#if roundDropdownVisible}
+          {@const filteredRounds = roundOptions.filter(r => !cfg.round.trim() || r.name.toLowerCase().includes(cfg.round.toLowerCase()))}
+          <ul class="suggest round-suggest" role="listbox" aria-label="Round">
+            {#if cfg.round.trim()}
+              <li class="suggest-search-row">
+                <span class="suggest-search-icon">🔍</span>
+                <span class="suggest-search-text">{cfg.round}</span>
+              </li>
+            {/if}
+            {#if filteredRounds.length > 0}
+              <li class="suggest-heading">Rounds</li>
+            {/if}
+            {#each filteredRounds as r, ri (r.key)}
+              <li role="option" aria-selected={cfg.round === r.name}>
+                <button
+                  type="button"
+                  class="suggest-item"
+                  class:suggest-highlighted={ri === roundHighlight}
+                  onmouseenter={() => (roundHighlight = ri)}
+                  onmousedown={(e) => e.preventDefault()}
+                  onclick={() => { cfg.round = r.name; suppressRoundBlur = false; showRoundPicker = false; roundHighlight = -1; }}
+                >
+                  <span class="suggest-name">{r.name}</span>
+                  {#if cfg.round === r.name}<span class="suggest-check">✓</span>{/if}
+                </button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </div>
+      <span class="event-arrow" aria-hidden="true">›</span>
+    </div>
     {/if}
-  </label>
-
-  <!--
-    Round picker (v3.3.6 restyled from v3.2). Native <select>
-    dropdown listing every OPEN round attached to the picked
-    tournament. Closed rounds are filtered out by rankRounds so
-    an organiser can retire a stage without deleting it. Legacy
-    tournaments without any rounds hide the whole field.
-
-    Rationale for switching from free-text-with-autocomplete to a
-    strict <select>: reported 2026-08-19 — umpires didn't know
-    what round names existed until they typed a substring. Native
-    select is instantly discoverable, and the round field is
-    tournament-scoped so a strict list is fine (unlike the
-    tournament input, which stays free-text for casual events).
-  -->
-  {#if currentTournamentRounds().length > 0}
-  <label class="tournament-input" class:picker-locked={tournamentLocked}>
-    <span>
-      Round{#if !tournamentLocked} <em class="hint-inline">(required)</em>{/if}
-      {#if !tournamentLocked}
-      <HelpTip label="Help: round">
-        Which stage of the tournament this match belongs to — Round of 16, Quarter-finals, Semi-finals, Final, etc. This tournament has rounds set up, so pick one before starting the match. History and Reports group matches by round.
-      </HelpTip>
-      {/if}
-    </span>
-    <select
-      class="round-select"
-      bind:value={cfg.round}
-      aria-label="Round"
-      disabled={tournamentLocked}
-    >
-      <option value="" disabled>Pick a round…</option>
-      {#each currentTournamentOpenRounds() as r (r.key)}
-        <option value={r.name}>{r.name}</option>
-      {/each}
-    </select>
-  </label>
-  {/if}
-  </div>
   </div>
   {/if}
 
   {#if cfg.mode === 'singles'}
-    <div class="players-block">
-      <div class="player-card player-card-a">
-        <span class="player-card-label">Player A</span>
-        {@render picker('Name', 'playerA', playersLocked)}
-        <details class="represents-details" open={!!cfg.noteA}>
-          <summary class="represents-summary">Additional details</summary>
-          {@render noteInput('Represents', 'noteA', rulesLocked)}
-        </details>
+    <div class="players-card">
+      <div class="player-row player-row-a">
+        <span class="player-row-label">Player A</span>
+        <div class="player-row-body">
+          {@render picker('Player A', 'playerA', playersLocked)}
+          <details class="represents-details" open={!!cfg.noteA}>
+            <summary class="represents-summary">Additional details</summary>
+            {@render noteInput('Represents', 'noteA', rulesLocked)}
+          </details>
+        </div>
       </div>
-      <div class="player-card player-card-b">
-        <span class="player-card-label">Player B</span>
-        {@render picker('Name', 'playerB', playersLocked)}
-        <details class="represents-details" open={!!cfg.noteB}>
-          <summary class="represents-summary">Additional details</summary>
-          {@render noteInput('Represents', 'noteB', rulesLocked)}
-        </details>
+      <div class="player-row player-row-b">
+        <span class="player-row-label">Player B</span>
+        <div class="player-row-body">
+          {@render picker('Player B', 'playerB', playersLocked)}
+          <details class="represents-details" open={!!cfg.noteB}>
+            <summary class="represents-summary">Additional details</summary>
+            {@render noteInput('Represents', 'noteB', rulesLocked)}
+          </details>
+        </div>
       </div>
     </div>
   {:else if cfg.mode === 'practice'}
-    <div class="players-block">
-      <div class="player-card player-card-a">
-        <span class="player-card-label">Player</span>
-        {@render picker('Name', 'playerA', playersLocked)}
-        <details class="represents-details" open={!!cfg.noteA}>
-          <summary class="represents-summary">Additional details</summary>
-          {@render noteInput('Represents', 'noteA', rulesLocked)}
-        </details>
+    <div class="players-card">
+      <div class="player-row player-row-a">
+        <span class="player-row-label">Player</span>
+        <div class="player-row-body">
+          {@render picker('Player', 'playerA', playersLocked)}
+          <details class="represents-details" open={!!cfg.noteA}>
+            <summary class="represents-summary">Additional details</summary>
+            {@render noteInput('Represents', 'noteA', rulesLocked)}
+          </details>
+        </div>
       </div>
     </div>
   {:else}
-    <!--
-      Doubles: two team blocks tinted with the same side-A blue and
-      side-B coral used by the scoreboard pills. Makes the setup
-      screen preview the on-scoreboard identity — the reader can
-      already tell which team is which colour before the match
-      starts.
-    -->
-    <div class="team-block team-block-a">
-      <h3>Team A</h3>
-      <div class="row2">
-        {@render picker('Player 1', 'playerA', playersLocked)}
-        {@render picker('Player 2', 'playerA2', playersLocked)}
+    <div class="players-card">
+      <!-- Team A header -->
+      <div class="team-header team-header-a">
+        <span class="team-header-label">Team A</span>
+        <details class="represents-details" open={!!cfg.noteA}>
+          <summary class="represents-summary">Represents…</summary>
+          {@render noteInput('Team A represents', 'noteA', rulesLocked)}
+        </details>
       </div>
-      <details class="represents-details" open={!!cfg.noteA}>
-        <summary class="represents-summary">Additional details</summary>
-        {@render noteInput('Team A represents', 'noteA', rulesLocked)}
-      </details>
-    </div>
-    <div class="team-block team-block-b">
-      <h3>Team B</h3>
-      <div class="row2">
-        {@render picker('Player 1', 'playerB', playersLocked)}
-        {@render picker('Player 2', 'playerB2', playersLocked)}
+      <!-- Team A player 1 -->
+      <div class="player-row player-row-a player-row-sub">
+        <span class="player-row-label">Player 1</span>
+        <div class="player-row-body">
+          {@render picker('Player 1', 'playerA', playersLocked)}
+        </div>
       </div>
-      <details class="represents-details" open={!!cfg.noteB}>
-        <summary class="represents-summary">Additional details</summary>
-        {@render noteInput('Team B represents', 'noteB', rulesLocked)}
-      </details>
+      <!-- Team A player 2 -->
+      <div class="player-row player-row-a player-row-sub">
+        <span class="player-row-label">Player 2</span>
+        <div class="player-row-body">
+          {@render picker('Player 2', 'playerA2', playersLocked)}
+        </div>
+      </div>
+      <!-- Team B header -->
+      <div class="team-header team-header-b">
+        <span class="team-header-label">Team B</span>
+        <details class="represents-details" open={!!cfg.noteB}>
+          <summary class="represents-summary">Represents…</summary>
+          {@render noteInput('Team B represents', 'noteB', rulesLocked)}
+        </details>
+      </div>
+      <!-- Team B player 1 -->
+      <div class="player-row player-row-b player-row-sub">
+        <span class="player-row-label">Player 1</span>
+        <div class="player-row-body">
+          {@render picker('Player 1', 'playerB', playersLocked)}
+        </div>
+      </div>
+      <!-- Team B player 2 -->
+      <div class="player-row player-row-b player-row-sub">
+        <span class="player-row-label">Player 2</span>
+        <div class="player-row-body">
+          {@render picker('Player 2', 'playerB2', playersLocked)}
+        </div>
+      </div>
     </div>
   {/if}
 
@@ -1836,7 +1936,7 @@
     disabled={!canStart()}
     title={roundMatchesLoading ? 'Loading bracket…' : (!canStart() ? (rosterError ?? bracketError ?? roundError ?? undefined) : undefined)}
   >
-    {roundMatchesLoading ? 'Loading…' : 'Start match →'}
+    {roundMatchesLoading ? '⏳ Loading…' : '▶ Start match'}
   </button>
 
   {#if loadingPlayers}
@@ -1995,10 +2095,10 @@
   .setup {
     display: flex;
     flex-direction: column;
-    gap: 1.5rem;
+    gap: 14px;
     max-width: 640px;
     margin: 0 auto;
-    padding: 1.5rem 1rem 3rem;
+    padding: 0.5rem 1.25rem 3rem;
   }
   .resume-chip {
     max-width: 640px;
@@ -2088,20 +2188,8 @@
     margin: 0;
     display: grid;
     grid-template-columns: 1fr;
-    gap: 0.5rem;
+    gap: 6px;
     background: transparent;
-  }
-  @media (min-width: 480px) {
-    fieldset { grid-template-columns: 1fr 1fr; }
-  }
-  @media (min-width: 720px) {
-    fieldset { grid-template-columns: repeat(4, 1fr); }
-  }
-  fieldset.fmt-mode {
-    grid-template-columns: 1fr 1fr 1fr;
-  }
-  @media (min-width: 720px) {
-    fieldset.fmt-mode { grid-template-columns: 1fr 1fr 1fr; }
   }
   /* Compact chip-style option: title on one line, meta line beneath.
      No big badge column — was clutter. Selected state uses only the border
@@ -2109,47 +2197,94 @@
   .section-card {
     background: var(--surface, #111111);
     border: 1px solid var(--border, #252525);
-    border-radius: 0.75rem;
+    border-radius: 10px;
     overflow: hidden;
     position: relative;
   }
-  .section-card::before {
+  /* Amber top stripe — only on the Mode/Rules merged card, not players or event */
+  .section-card.mode-rules-card::before {
     content: '';
     position: absolute;
     top: 0; left: 0; right: 0;
     height: 2px;
     background: linear-gradient(90deg, var(--accent, #ffd54a) 0%, rgba(255,143,0,0.4) 60%, transparent 100%);
+    pointer-events: none;
   }
-  .section-card > fieldset,
+  /* Section rows inside a merged card — horizontal divider between sections */
+  .section-row {
+    padding: 12px 14px;
+  }
+  .section-row + .section-row {
+    border-top: 1px solid var(--border, #252525);
+  }
+  /* Players card — plain dark card, no amber stripe */
+  .players-card {
+    background: var(--surface, #111111);
+    border: 1px solid var(--border, #252525);
+    border-radius: 10px;
+    overflow: visible;
+    position: relative;
+  }
+  /* Event card — plain dark card, no amber stripe */
+  .event-card {
+    background: var(--surface, #111111);
+    border: 1px solid var(--border, #252525);
+    border-radius: 10px;
+    overflow: visible;
+    position: relative;
+  }
+  /* Legacy direct-child fieldset padding (tournament card) */
   .section-card > .event-block-inner {
-    padding: 0.85rem 0.9rem;
+    padding: 0;
   }
   legend {
-    padding: 0;
-    margin-bottom: 0.5rem;
+    padding: 0 0 0 8px;
+    margin-bottom: 10px;
     color: var(--muted);
     text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-size: 0.75rem;
+    letter-spacing: 0.18em;
+    font-size: 9px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    position: relative;
   }
-  fieldset label {
+  legend::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 2px;
+    border-radius: 0 2px 2px 0;
+    background: var(--accent, #ffd54a);
+    opacity: 0.65;
+  }
+  /* Mode cards — icon + title + sub stacked, 3-col grid */
+  fieldset.fmt-mode {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+    align-items: start;
+  }
+  fieldset.fmt-mode label {
     display: flex;
     flex-direction: column;
+    align-items: center;
     justify-content: center;
-    gap: 0.15rem;
-    padding: 0.6rem 0.85rem;
-    background: var(--surface, #111111);
+    gap: 0;
+    padding: 10px 6px 9px;
+    background: var(--surface2, #181818);
     border: 1.5px solid var(--border, #252525);
-    border-radius: 0.6rem;
+    border-radius: 8px;
     cursor: pointer;
-    min-height: 3.25rem;
-    transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+    text-align: center;
+    transition: border-color 0.12s, background 0.12s, box-shadow 0.12s;
   }
-  fieldset label:hover { border-color: var(--border2, #333); }
-  fieldset label.selected {
+  fieldset.fmt-mode label:hover { border-color: var(--border2, #333); }
+  fieldset.fmt-mode label.selected {
     border-color: var(--accent);
-    background: #1a1613;
-    box-shadow: var(--accent-glow, 0 0 20px rgba(255,179,0,0.22));
+    background: rgba(255,213,74,0.06);
+    box-shadow: 0 0 16px rgba(255,179,0,0.18);
   }
   fieldset input[type='radio'] {
     position: absolute;
@@ -2159,77 +2294,168 @@
     margin: 0;
     pointer-events: none;
   }
-  fieldset input[type='radio']:focus-visible + .opt-title {
+  fieldset input[type='radio']:focus-visible + .opt-icon {
     outline: 2px solid var(--accent);
     outline-offset: 2px;
     border-radius: 0.2rem;
   }
+  .opt-icon {
+    font-size: 16px;
+    line-height: 1.4;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 4px;
+  }
+  .mode-vs-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    font-size: 14px;
+  }
+  .vs-sep {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    text-transform: uppercase;
+    font-family: inherit;
+  }
   .opt-title {
     font-weight: 700;
-    font-size: 0.95rem;
+    font-size: 13px;
     color: var(--fg);
-    letter-spacing: 0.01em;
+    display: block;
   }
-  fieldset label.selected .opt-title { color: var(--accent); }
+  fieldset.fmt-mode label.selected .opt-title { color: var(--accent); }
   .opt-meta {
+    font-size: 10px;
     color: var(--muted);
-    font-size: 0.7rem;
-    letter-spacing: 0.02em;
+    display: block;
+    margin-top: 1px;
   }
 
-  /* Very narrow phones (≤ 360px): trim padding + text so the three-
-     column Mode / Match-rules grids fit without spilling out of the
-     container. Label text still wraps if needed. */
-  @media (max-width: 480px) {
-    /* 4 cols is too tight on phones — collapse to 2×2 */
-    fieldset.rules { grid-template-columns: 1fr 1fr; }
-    fieldset.rules-practice { grid-template-columns: 1fr 1fr; }
+  @media (max-width: 400px) {
+    fieldset.rules { grid-template-columns: repeat(2, 1fr); }
+    fieldset.rules-practice { grid-template-columns: repeat(2, 1fr); }
   }
-  @media (max-width: 380px) {
-    fieldset label {
-      padding: 0.5rem 0.4rem;
-      min-height: 3rem;
-    }
-    .opt-title { font-size: 0.82rem; }
-    .opt-meta { font-size: 0.62rem; }
-    fieldset.rules label { padding: 0.5rem 0.4rem; }
-    fieldset.rules label > span { font-size: 0.62rem; }
-    fieldset.rules input[type='number'] { font-size: 0.95rem; }
-    legend { font-size: 0.7rem; }
+
+  /* Event / tournament card — icon rows */
+  .event-row {
+    padding: 10px 14px 10px 18px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    position: relative;
+  }
+  .event-row::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 8px; bottom: 8px;
+    width: 2px;
+    border-radius: 0 2px 2px 0;
+    background: var(--accent, #ffd54a);
+    opacity: 0.5;
+  }
+  .event-row + .event-row {
+    border-top: 1px solid var(--border, #252525);
+  }
+  .event-row-locked { opacity: 0.65; }
+  .event-icon {
+    font-size: 14px;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+  .event-body {
+    flex: 1;
+    min-width: 0;
+    position: relative;
+  }
+  .event-lbl {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 1px;
+    position: relative;
+    padding-left: 0;
+  }
+  .event-input {
+    background: transparent;
+    border: none;
+    color: var(--fg);
+    font-size: 13px;
+    font-weight: 500;
+    font-family: inherit;
+    outline: none;
+    width: 100%;
+    padding: 0;
+  }
+  .event-input::placeholder { color: var(--muted); opacity: 0.6; }
+  .event-input:disabled { color: var(--fg); -webkit-text-fill-color: var(--fg); cursor: default; }
+  .event-select {
+    background: transparent;
+    border: none;
+    color: var(--fg);
+    font-size: 13px;
+    font-weight: 500;
+    font-family: inherit;
+    outline: none;
+    width: 100%;
+    padding: 0;
+    appearance: none;
+    -webkit-appearance: none;
+    cursor: pointer;
+  }
+  .event-select option { background: var(--surface2, #181818); color: var(--fg); }
+  .event-select:disabled { color: var(--fg); -webkit-text-fill-color: var(--fg); cursor: default; }
+  .event-arrow {
+    color: var(--border2, #333);
+    font-size: 18px;
+    flex-shrink: 0;
+    line-height: 1;
   }
 
   .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
   .row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.75rem; }
 
-  /* Match-rules row: 3 number inputs side by side. Same grid on all screen
-     sizes since they're compact numeric fields. */
+  /* Match-rules grid — 4 cells, matches prototype .rules-grid */
   fieldset.rules {
     display: grid;
-    grid-template-columns: 1fr 1fr 1fr 1fr;
-    gap: 0.6rem;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+    align-items: start;
   }
-  /* Practice hides Points, so 3 cells → 3-col keeps them wide */
   fieldset.rules-practice {
-    grid-template-columns: 1fr 1fr 1fr;
+    grid-template-columns: repeat(3, 1fr);
   }
   fieldset.rules label {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 0.2rem;
-    background: var(--surface, #111111);
-    border: 1.5px solid var(--border, #252525);
-    border-radius: 0.6rem;
-    padding: 0.55rem 0.75rem 0.5rem;
+    gap: 2px;
+    background: var(--surface2, #181818);
+    border: 1px solid var(--border, #252525);
+    border-radius: 8px;
+    padding: 8px 6px 7px;
     cursor: default;
     text-align: center;
+    min-height: unset;
+    transition: border-color 0.12s;
   }
   fieldset.rules label:focus-within { border-color: var(--accent); }
   fieldset.rules label > span {
-    color: var(--fg);
-    font-size: 0.7rem;
+    color: var(--muted);
+    font-size: 8.5px;
+    font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.14em;
     line-height: 1.2;
     white-space: nowrap;
   }
@@ -2244,22 +2470,58 @@
   .rules-val-row {
     display: flex;
     align-items: baseline;
-    gap: 0.35rem;
+    gap: 4px;
     justify-content: center;
     width: 100%;
+    margin-top: 2px;
   }
-  fieldset.rules input[type='number'] {
+  /* Stepper row: − value + */
+  .rules-stepper {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 2px;
+  }
+  .step-btn {
+    width: 22px;
+    height: 22px;
+    border-radius: 5px;
+    background: var(--surface3, #202020);
+    border: 1px solid var(--border2, #333333);
+    color: var(--muted);
+    font-size: 15px;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+    padding: 0;
+    transition: border-color 0.1s, color 0.1s;
+  }
+  .step-btn:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); }
+  .step-btn:disabled { opacity: 0.3; cursor: default; }
+  fieldset.rules label input[type='number'] {
     background: transparent;
     border: none;
     color: var(--fg);
     padding: 0;
-    font-size: 1.15rem;
-    font-weight: 700;
+    font-size: 20px !important;
+    font-weight: 600 !important;
     font-family: inherit;
+    font-variant-numeric: tabular-nums;
     outline: none;
     width: 100%;
     text-align: center;
-    line-height: 1.2;
+    line-height: 1;
+    /* Hide browser spinner arrows */
+    -moz-appearance: textfield;
+    appearance: textfield;
+  }
+  fieldset.rules label input[type='number']::-webkit-outer-spin-button,
+  fieldset.rules label input[type='number']::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
   }
   fieldset.rules.rules-locked label {
     border-color: #2a2a2a;
@@ -2272,8 +2534,8 @@
     -webkit-text-fill-color: var(--muted);
   }
   .rules-lock-badge {
-    margin-left: 0.4rem;
-    font-size: 0.75rem;
+    margin-left: 4px;
+    font-size: 9px;
     opacity: 0.8;
   }
 
@@ -2286,7 +2548,7 @@
   fieldset.fmt-mode.rules-locked label:hover { border-color: #2a2a2a; }
   fieldset.fmt-mode.rules-locked label.selected {
     border-color: rgba(255, 213, 74, 0.3);
-    background: #1a1613;
+    background: rgba(255,213,74,0.05);
     opacity: 0.75;
   }
 
@@ -2332,26 +2594,35 @@
     margin-left: 0.2rem;
   }
 
+  /* Hide "Additional details" toggle when there's no note — only show when already open */
+  .represents-details:not([open]) {
+    display: none;
+  }
   .represents-details {
-    margin-top: 0.35rem;
+    margin-top: 2px;
   }
   .represents-summary {
     cursor: pointer;
-    font-size: 0.8rem;
+    font-size: 10px;
     color: var(--muted);
+    opacity: 0.5;
     user-select: none;
     list-style: none;
     display: flex;
     align-items: center;
-    gap: 0.35rem;
+    gap: 3px;
     width: fit-content;
-    padding: 0.2rem 0;
+    padding: 1px 0;
+    letter-spacing: 0.03em;
   }
+  .represents-summary:hover { opacity: 0.8; }
   .represents-summary::-webkit-details-marker { display: none; }
   .represents-summary::before {
     content: '▸';
-    font-size: 0.8rem;
-    transition: transform 0.15s;
+    font-size: 9px;
+  }
+  details[open] > .represents-summary {
+    opacity: 0.7;
   }
   details[open] > .represents-summary::before {
     content: '▾';
@@ -2399,6 +2670,41 @@
     gap: 0.35rem;
     position: relative;
   }
+  /* picker-wrap: flat inline row — input + flag + country + clear all on one line */
+  .picker-wrap {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+    position: relative;
+    min-width: 0;
+  }
+  .picker-wrap input[type='text'] {
+    flex: 1;
+    min-width: 0;
+    font-size: 14px;
+    font-weight: 500;
+    background: transparent;
+    border: none;
+    color: var(--fg);
+    padding: 0;
+    outline: none;
+    font-family: inherit;
+  }
+  .picker-wrap input[type='text']::placeholder { color: var(--muted); opacity: 0.5; }
+  .picker-wrap .suggest {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    right: 0;
+    z-index: 20;
+  }
+  /* sr-only for accessibility */
+  .sr-only {
+    position: absolute; width: 1px; height: 1px;
+    padding: 0; margin: -1px; overflow: hidden;
+    clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+  }
   /* Event group card inner: background/border/radius now on .section-card wrapper */
   .event-block {
     display: flex;
@@ -2406,36 +2712,122 @@
     gap: 0.75rem;
   }
 
-  /* Players group: two side-coloured cards stacked */
-  .players-block {
+  .player-row {
+    padding: 11px 14px;
     display: flex;
-    flex-direction: column;
-    gap: 0.6rem;
-    margin-top: 0.5rem;
+    align-items: center;
+    gap: 10px;
+    position: relative;
   }
-  .player-card {
-    border-radius: 0.75rem;
-    padding: 0.75rem 0.9rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.55rem;
+  .player-row + .player-row {
+    border-top: 1px solid var(--border, #252525);
   }
-  .player-card-label {
-    font-size: 0.72rem;
+  .player-row::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 9px;
+    bottom: 9px;
+    width: 3px;
+    border-radius: 0 2px 2px 0;
+  }
+  .player-row-a::before { background: var(--side-a, #00b4ff); }
+  .player-row-b::before { background: var(--side-b, #ff6b35); }
+  .player-row-label {
+    font-size: 9px;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.07em;
+    letter-spacing: 0.08em;
+    flex-shrink: 0;
+    min-width: 44px;
+    text-align: left;
+    line-height: 1;
+    white-space: nowrap;
   }
-  .player-card-a {
-    background: rgba(79, 195, 247, 0.06);
-    border: 1px solid rgba(79, 195, 247, 0.3);
+  .player-row-a .player-row-label { color: var(--side-a, #00b4ff); }
+  .player-row-b .player-row-label { color: var(--side-b, #ff6b35); }
+
+  /* Doubles: team section header — coloured stripe + team name + optional represents */
+  .team-header {
+    padding: 10px 14px 9px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+    position: relative;
   }
-  .player-card-a .player-card-label { color: var(--side-a, #4fc3f7); }
-  .player-card-b {
-    background: rgba(255, 138, 101, 0.06);
-    border: 1px solid rgba(255, 138, 101, 0.3);
+  .team-header .represents-details {
+    flex-basis: 100%;
+    margin-top: 0;
   }
-  .player-card-b .player-card-label { color: var(--side-b, #ff8a65); }
+  .team-header .represents-details .note-input {
+    margin-top: 0.25rem;
+  }
+  .team-header + .player-row { border-top: 1px solid var(--border, #252525); }
+  .team-header::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 6px; bottom: 6px;
+    width: 3px;
+    border-radius: 0 2px 2px 0;
+  }
+  .team-header-a::before { background: var(--side-a, #00b4ff); }
+  .team-header-b::before { background: var(--side-b, #ff6b35); }
+  .team-header-b { border-top: 1px solid var(--border, #252525); }
+  .team-header-label {
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    flex-shrink: 0;
+  }
+  .team-header-a .team-header-label { color: var(--side-a, #00b4ff); }
+  .team-header-b .team-header-label { color: var(--side-b, #ff6b35); }
+  /* Sub-rows inside a team block — no side stripe (team header has it), relaxed padding */
+  .player-row-sub {
+    padding: 13px 14px 13px 20px;
+  }
+  .player-row-sub::before { display: none; }
+  .player-row-sub .player-row-label {
+    font-size: 8.5px;
+    color: var(--muted);
+    min-width: 52px;
+  }
+
+  .player-row-body {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+  .player-flag {
+    font-size: 18px;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+  .player-country {
+    font-size: 10px;
+    color: var(--muted);
+    flex-shrink: 0;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    white-space: nowrap;
+  }
+  .player-clear {
+    font-size: 13px;
+    color: var(--muted);
+    cursor: pointer;
+    background: none;
+    border: none;
+    padding: 2px 4px;
+    border-radius: 4px;
+    flex-shrink: 0;
+    opacity: 0.5;
+    line-height: 1;
+    font-family: inherit;
+  }
+  .player-clear:hover { opacity: 1; color: var(--danger); }
 
   /* Tournament input keeps its own spacing so it feels like a
      high-level context row, distinct from the player rows below. */
@@ -2451,70 +2843,137 @@
     margin-left: 0.3rem;
   }
   label > span {
-    color: var(--fg);
+    color: var(--muted);
     font-size: 0.75rem;
     text-transform: uppercase;
     letter-spacing: 0.08em;
   }
   input[type='text'], input[type='number'] {
-    background: var(--surface, #111111);
+    background: transparent;
     color: var(--fg);
-    border: 1px solid var(--border2, #333);
-    border-radius: 0.6rem;
-    padding: 0.7rem 0.85rem;
-    font-size: 1rem;
+    border: none;
+    border-radius: 0;
+    padding: 0;
+    font-size: 14px;
+    font-weight: 500;
     font-family: inherit;
     outline: none;
     width: 100%;
     min-width: 0;
   }
-  input[type='text']:focus, input[type='number']:focus { border-color: var(--accent); }
+  input[type='text']::placeholder { color: var(--muted); opacity: 0.6; }
+  input[type='text']:focus, input[type='number']:focus { outline: none; }
 
-  /* Round <select> (v3.3.6). Matches the tournament input's field
-     styling so the two rows read as a matched pair. Native select
-     keeps mobile ergonomics — iOS/Android render their own wheel
-     picker with big touch targets. */
-  .round-select {
-    background: var(--surface, #111111);
+  /* Custom round picker button — looks like plain text, acts like a button */
+  .round-picker-btn {
+    background: transparent;
+    border: none;
     color: var(--fg);
-    border: 1px solid var(--border2, #333);
-    border-radius: 0.6rem;
-    padding: 0.7rem 0.85rem;
-    font-size: 1rem;
+    font-size: 13px;
+    font-weight: 500;
     font-family: inherit;
-    outline: none;
-    width: 100%;
-    min-width: 0;
-    appearance: none;
-    -webkit-appearance: none;
-    /* Chevron drawn via inline SVG data URI so no external asset
-       and works in both dark backdrops. */
-    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='M2 4 L6 8 L10 4' fill='none' stroke='%239aa0a6' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>");
-    background-repeat: no-repeat;
-    background-position: right 0.85rem center;
-    background-size: 0.7rem;
-    padding-right: 2rem;
+    padding: 0;
     cursor: pointer;
+    text-align: left;
+    width: 100%;
+    outline: none;
+    opacity: 1;
   }
-  .round-select:focus { border-color: var(--accent); }
-  .round-select option { background: var(--surface, #111111); color: var(--fg); }
+  .round-picker-btn:disabled { cursor: default; }
+  /* Placeholder style when nothing picked */
+  .round-picker-btn:not(:disabled)[aria-expanded="false"]:not(:focus) {
+    color: var(--fg);
+  }
+  /* Round dropdown — anchors to the event-row, full card width */
+  .round-suggest {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: calc(100% + 4px);
+    z-index: 30;
+  }
+  .suggest-check {
+    color: var(--accent);
+    font-size: 12px;
+    flex-shrink: 0;
+    margin-left: auto;
+  }
 
   .suggest {
     position: absolute;
-    top: 100%;
     left: 0;
     right: 0;
-    margin: 0.25rem 0 0;
+    top: calc(100% + 7px);
+    margin: 0;
     padding: 0;
     list-style: none;
     background: var(--surface2, #181818);
-    border: 1px solid var(--border, #252525);
-    border-radius: 0.6rem;
+    border: 1px solid var(--border2, #333333);
+    border-radius: 10px;
     max-height: 14rem;
     overflow: auto;
-    z-index: 10;
+    z-index: 20;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.6);
   }
-  .suggest button {
+  /* Search preview row at top */
+  .suggest-search-row {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border, #252525);
+  }
+  .suggest-search-icon { font-size: 12px; color: var(--muted); opacity: 0.7; }
+  .suggest-search-text { font-size: 13px; color: var(--accent); font-weight: 500; }
+  /* Section heading */
+  .suggest-heading {
+    padding: 6px 12px 3px;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    opacity: 0.7;
+  }
+  /* Each player row */
+  .suggest-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 12px;
+    width: 100%;
+    background: transparent;
+    border: 0;
+    border-bottom: 1px solid var(--border, #252525);
+    color: var(--fg);
+    text-align: left;
+    cursor: pointer;
+    font: inherit;
+  }
+  .suggest-item:last-child { border-bottom: none; }
+  .suggest-item:hover,
+  .suggest-item.suggest-highlighted { background: rgba(255,213,74,0.06); }
+  .suggest-item.suggest-highlighted .suggest-name { color: var(--accent); font-weight: 600; }
+  .suggest-flag { font-size: 16px; line-height: 1; flex-shrink: 0; }
+  .suggest-info { flex: 1; min-width: 0; }
+  .suggest-name { font-size: 13px; color: var(--fg); font-weight: 500; flex: 1; min-width: 0; }
+  /* Right-aligned flag+country in player dropdown */
+  .suggest-right {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-shrink: 0;
+    margin-left: auto;
+  }
+  .suggest-flag-sm { font-size: 15px; line-height: 1; }
+  .suggest-country { font-size: 10.5px; color: var(--muted); white-space: nowrap; }
+  .suggest-rank { font-size: 10px; font-weight: 600; color: var(--muted); opacity: 0.7; flex-shrink: 0; }
+  /* Legacy selectors kept for tournament suggest which still uses old markup */
+  .pname { font-size: 0.95rem; }
+  .pmeta { color: var(--muted); font-size: 0.75rem; }
+  .pcountry { margin-left: auto; color: var(--muted); font-size: 0.7rem; opacity: 0.85; }
+  /* Tournament suggest button (old structure) */
+  .suggest button:not(.suggest-item) {
     display: flex;
     flex-direction: row;
     align-items: center;
@@ -2528,19 +2987,8 @@
     cursor: pointer;
     font: inherit;
   }
-  .suggest button:hover,
-  .suggest button.suggest-highlighted { background: var(--surface3, #202020); outline: 2px solid rgba(255, 213, 74, 0.5); outline-offset: -2px; }
-  .pname { font-size: 0.95rem; }
-  .pmeta { color: var(--muted); font-size: 0.75rem; }
-  /* Country pill in the picker dropdown — muted so it doesn't compete
-     with the name. Shown only when the PlayerRow carries a country
-     (seed + local rosters do; identity-store hits don't yet). */
-  .pcountry {
-    margin-left: auto;
-    color: var(--muted);
-    font-size: 0.7rem;
-    opacity: 0.85;
-  }
+  .suggest button:not(.suggest-item):hover,
+  .suggest button:not(.suggest-item).suggest-highlighted { background: rgba(255,213,74,0.06); }
 
   /* "Same as X? Tap to link" chip below a name input, shown only when
      the ranker finds a fuzzy match the user should confirm. */
@@ -2581,19 +3029,25 @@
     border: 1px solid rgba(255, 183, 77, 0.35);
   }
   .start {
-    background: linear-gradient(90deg, #ffe566 0%, #ffc107 100%);
-    color: #1a1000;
-    font-weight: 800;
-    font-size: 1.1rem;
-    padding: 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    background: linear-gradient(90deg, #ffd040 0%, #ff8c00 100%);
+    color: #0b0b0b;
+    font-weight: 700;
+    font-size: 15px;
+    letter-spacing: 0.04em;
+    padding: 14px;
     border: none;
-    border-radius: 999px;
+    border-radius: 10px;
     cursor: pointer;
-    box-shadow: 0 4px 20px rgba(255, 179, 0, 0.4);
-    transition: filter 0.15s, box-shadow 0.15s, transform 0.1s;
+    box-shadow: 0 4px 20px rgba(255, 170, 0, 0.32);
+    transition: transform 0.1s, box-shadow 0.1s;
   }
-  .start:hover:not(:disabled) { filter: brightness(1.06); box-shadow: 0 6px 24px rgba(255, 179, 0, 0.55); }
-  .start:active:not(:disabled) { transform: scale(0.98); }
+  .start:hover:not(:disabled) { filter: brightness(1.06); }
+  .start:active:not(:disabled) { transform: scale(0.98); box-shadow: 0 2px 10px rgba(255, 170, 0, 0.20); }
   .start:disabled { opacity: 0.4; cursor: not-allowed; box-shadow: none; }
 
   .hint { color: var(--muted); text-align: center; margin: 0; font-size: 0.85rem; }
