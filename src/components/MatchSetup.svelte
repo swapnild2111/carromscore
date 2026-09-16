@@ -1579,6 +1579,7 @@
     that already reflect the mode — no back-and-forth. Reordered
     2026-08-15.
   -->
+  <div class="section-card">
   <fieldset class="fmt fmt-mode" class:rules-locked={rulesLocked}>
     <legend>
       Mode{#if rulesLocked}<span class="rules-lock-badge" title="Mode set by tournament">🔒</span>{/if}
@@ -1606,7 +1607,9 @@
       <span class="opt-meta">Solo drill</span>
     </label>
   </fieldset>
+  </div>
 
+  <div class="section-card">
   <fieldset class="rules" class:rules-practice={cfg.mode === 'practice'} class:rules-locked={rulesLocked}>
     <legend>Match rules{#if rulesLocked}<span class="rules-lock-badge" title="Rules set by tournament">🔒</span>{/if}</legend>
     <label>
@@ -1643,7 +1646,7 @@
       </div>
     </label>
   </fieldset>
-
+  </div>
 
   <!--
     Tournament / event input. Free-text; auto-suggested from the
@@ -1654,7 +1657,8 @@
     tournament in any meaningful way.
   -->
   {#if cfg.mode !== 'practice'}
-  <div class="event-block">
+  <div class="section-card">
+  <div class="event-block event-block-inner">
   <label class="tournament-input" class:picker-locked={tournamentLocked}>
     <span>
       Tournament{#if !tournamentLocked} <em class="hint-inline">(optional)</em>{/if}
@@ -1742,6 +1746,7 @@
     </select>
   </label>
   {/if}
+  </div>
   </div>
   {/if}
 
@@ -2084,6 +2089,7 @@
     display: grid;
     grid-template-columns: 1fr;
     gap: 0.5rem;
+    background: transparent;
   }
   @media (min-width: 480px) {
     fieldset { grid-template-columns: 1fr 1fr; }
@@ -2100,24 +2106,31 @@
   /* Compact chip-style option: title on one line, meta line beneath.
      No big badge column — was clutter. Selected state uses only the border
      + subtle background lift; radio bullet supplies the "picked" affordance. */
+  .section-card {
+    background: var(--surface, #111111);
+    border: 1px solid var(--border, #252525);
+    border-radius: 0.75rem;
+    overflow: hidden;
+    position: relative;
+  }
+  .section-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, var(--accent, #ffd54a) 0%, rgba(255,143,0,0.4) 60%, transparent 100%);
+  }
+  .section-card > fieldset,
+  .section-card > .event-block-inner {
+    padding: 0.85rem 0.9rem;
+  }
   legend {
-    padding: 0 0 0 0.6rem;
+    padding: 0;
     margin-bottom: 0.5rem;
-    color: var(--fg);
+    color: var(--muted);
     text-transform: uppercase;
     letter-spacing: 0.08em;
     font-size: 0.75rem;
-    position: relative;
-  }
-  legend::before {
-    content: '';
-    position: absolute;
-    left: 0;
-    top: 0.1em;
-    bottom: 0.1em;
-    width: 3px;
-    border-radius: 3px;
-    background: linear-gradient(180deg, #ffd54a 0%, #ff8f00 100%);
   }
   fieldset label {
     display: flex;
@@ -2386,30 +2399,11 @@
     gap: 0.35rem;
     position: relative;
   }
-  /* Event group card: wraps Tournament + Round fields */
+  /* Event group card inner: background/border/radius now on .section-card wrapper */
   .event-block {
-    background: var(--surface, #111111);
-    border: 1px solid var(--border, #252525);
-    border-radius: 0.75rem;
-    padding: 0.85rem 0.9rem;
     display: flex;
     flex-direction: column;
     gap: 0.75rem;
-    margin: 0.5rem 0 0;
-  }
-  .event-block > label > span:first-child {
-    padding-left: 0.6rem;
-    position: relative;
-  }
-  .event-block > label > span:first-child::before {
-    content: '';
-    position: absolute;
-    left: 0;
-    top: 0.1em;
-    bottom: 0.1em;
-    width: 3px;
-    border-radius: 3px;
-    background: linear-gradient(180deg, #ffd54a 0%, #ff8f00 100%);
   }
 
   /* Players group: two side-coloured cards stacked */
