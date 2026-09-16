@@ -2397,6 +2397,20 @@
     gap: 0.75rem;
     margin: 0.5rem 0 0;
   }
+  .event-block > label > span:first-child {
+    padding-left: 0.6rem;
+    position: relative;
+  }
+  .event-block > label > span:first-child::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0.1em;
+    bottom: 0.1em;
+    width: 3px;
+    border-radius: 3px;
+    background: linear-gradient(180deg, #ffd54a 0%, #ff8f00 100%);
+  }
 
   /* Players group: two side-coloured cards stacked */
   .players-block {
@@ -2573,18 +2587,18 @@
     border: 1px solid rgba(255, 183, 77, 0.35);
   }
   .start {
-    background: linear-gradient(90deg, #ffd040 0%, #ff8c00 100%);
-    color: #0b0b0b;
+    background: linear-gradient(90deg, #ffe566 0%, #ffc107 100%);
+    color: #1a1000;
     font-weight: 800;
     font-size: 1.1rem;
     padding: 1rem;
     border: none;
     border-radius: 999px;
     cursor: pointer;
-    box-shadow: 0 4px 20px rgba(255, 170, 0, 0.32);
+    box-shadow: 0 4px 20px rgba(255, 179, 0, 0.4);
     transition: filter 0.15s, box-shadow 0.15s, transform 0.1s;
   }
-  .start:hover:not(:disabled) { filter: brightness(1.06); box-shadow: 0 6px 24px rgba(255, 170, 0, 0.44); }
+  .start:hover:not(:disabled) { filter: brightness(1.06); box-shadow: 0 6px 24px rgba(255, 179, 0, 0.55); }
   .start:active:not(:disabled) { transform: scale(0.98); }
   .start:disabled { opacity: 0.4; cursor: not-allowed; box-shadow: none; }
 
