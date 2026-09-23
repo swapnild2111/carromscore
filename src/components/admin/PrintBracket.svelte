@@ -597,24 +597,23 @@
             font-family="sans-serif" fill="#888" letter-spacing="0.06em">${cols[ci].label.toUpperCase()}</text>`);
     }
 
-    // Connector lines
+    // Connector lines — each next-slot is fed by currCount/nextCount source slots.
+    // Handles any ratio (2→1, 4→1, 4→2, 3→1, etc.) rather than hard-coding pairs.
     for (let ci = 0; ci < cols.length - 1; ci++) {
       const currCount = cols[ci].slots.length;
       const nextCount = cols[ci + 1].slots.length;
       const x1 = colX(ci) + COL_W;
       const x2 = colX(ci + 1);
       const xMid = x1 + COL_GAP / 2;
+      // How many sources feed each next-slot (may be fractional for uneven brackets)
+      const feedRatio = currCount / nextCount;
       for (let ni = 0; ni < nextCount; ni++) {
         const cy2 = slotCY(ni, nextCount);
-        const srcA = ni * 2;
-        const srcB = ni * 2 + 1;
-        if (srcA < currCount) {
-          const cy1 = slotCY(srcA, currCount);
-          lines.push(`<line x1="${x1}" y1="${cy1}" x2="${xMid}" y2="${cy1}" stroke="#bbb" stroke-width="1.25"/>`);
-          lines.push(`<line x1="${xMid}" y1="${cy1}" x2="${xMid}" y2="${cy2}" stroke="#bbb" stroke-width="1.25"/>`);
-        }
-        if (srcB < currCount) {
-          const cy1 = slotCY(srcB, currCount);
+        // Source range: [firstSrc, lastSrc]
+        const firstSrc = Math.round(ni * feedRatio);
+        const lastSrc = Math.round((ni + 1) * feedRatio) - 1;
+        for (let si = firstSrc; si <= lastSrc && si < currCount; si++) {
+          const cy1 = slotCY(si, currCount);
           lines.push(`<line x1="${x1}" y1="${cy1}" x2="${xMid}" y2="${cy1}" stroke="#bbb" stroke-width="1.25"/>`);
           lines.push(`<line x1="${xMid}" y1="${cy1}" x2="${xMid}" y2="${cy2}" stroke="#bbb" stroke-width="1.25"/>`);
         }
@@ -931,8 +930,27 @@
       } else if (ps.length === 2) {
         rounds.push([[ps[0]!, ps[1]!]]);
       } else {
+        // R1: pair up active players (seeded top vs bottom)
         rounds.push(makePairs(active));
-        rounds.push([[byePlayer ? clip(esc(byePlayer)) : 'W R1', 'W Round 1']]);
+        // Build subsequent rounds until we reach the final (1 match)
+        // First subsequent round may include the bye player as a pre-seeded winner
+        let prevCount = rounds[0]!.length;
+        let firstSubRound = true;
+        while (prevCount > 1) {
+          const nextCount = Math.ceil(prevCount / 2);
+          const slots: [string, string][] = [];
+          for (let i = 0; i < nextCount; i++) {
+            // First slot of first sub-round: bye player (if any) seeds in here
+            const aLabel = firstSubRound && i === 0 && byePlayer
+              ? clip(esc(byePlayer))
+              : 'W R' + (rounds.length);
+            const bLabel = 'W Round ' + rounds.length;
+            slots.push([aLabel, bLabel]);
+          }
+          rounds.push(slots);
+          prevCount = nextCount;
+          firstSubRound = false;
+        }
       }
       return { gi, name: g.name, rounds, byePlayer, x: 0, y: 0, h: 0, roundCols: rounds.length };
     });
@@ -1001,22 +1019,19 @@
         const roundKey = groupRoundKey(meta.name, ri, totalRounds);
         const roundResults: MatchInfo[] = gData.matchMap.get(roundKey) ?? [];
 
-        // ── Connector lines between round columns (same style as buildFlightBracketSVG) ──
+        // ── Connector lines between round columns — handles any feed ratio ──
         if (ri < totalRounds - 1) {
           const nextMatches = meta.rounds[ri + 1]!;
           const x1 = rx + COL_W;
           const x2 = meta.x + (ri + 1) * (COL_W + COL_GAP);
           const xMid = x1 + COL_GAP / 2;
+          const feedRatio = rMatches.length / nextMatches.length;
           for (let ni = 0; ni < nextMatches.length; ni++) {
             const cy2 = slotCY(meta.y, meta.h, ni, nextMatches.length);
-            const srcA = ni * 2, srcB = ni * 2 + 1;
-            if (srcA < rMatches.length) {
-              const cy1 = slotCY(meta.y, meta.h, srcA, rMatches.length);
-              lines.push(`<line x1="${x1}" y1="${cy1}" x2="${xMid}" y2="${cy1}" stroke="#bbb" stroke-width="1.25"/>`);
-              lines.push(`<line x1="${xMid}" y1="${cy1}" x2="${xMid}" y2="${cy2}" stroke="#bbb" stroke-width="1.25"/>`);
-            }
-            if (srcB < rMatches.length) {
-              const cy1 = slotCY(meta.y, meta.h, srcB, rMatches.length);
+            const firstSrc = Math.round(ni * feedRatio);
+            const lastSrc = Math.round((ni + 1) * feedRatio) - 1;
+            for (let si = firstSrc; si <= lastSrc && si < rMatches.length; si++) {
+              const cy1 = slotCY(meta.y, meta.h, si, rMatches.length);
               lines.push(`<line x1="${x1}" y1="${cy1}" x2="${xMid}" y2="${cy1}" stroke="#bbb" stroke-width="1.25"/>`);
               lines.push(`<line x1="${xMid}" y1="${cy1}" x2="${xMid}" y2="${cy2}" stroke="#bbb" stroke-width="1.25"/>`);
             }
@@ -1411,7 +1426,7 @@
         </div>
         <div class="meta-row">
           <span class="meta-label">Boards</span>
-          <span class="meta-value">{boards.length}</span>
+          <span class="meta-value">{tournament?.knockoutCfg?.venueBoards ?? tournament?.knockoutCfg?.boardsAvailable ?? boards.length}</span>
         </div>
         <div class="meta-row">
           <span class="meta-label">Matches</span>

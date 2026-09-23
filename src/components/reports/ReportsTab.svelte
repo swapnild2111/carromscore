@@ -773,21 +773,22 @@
 
     const lines: string[] = [];
 
-    // Connector lines between rounds
+    // Connector lines between rounds — handles any feed ratio (2→1, 4→1, 4→2, 3→1, etc.)
     for (let ci = 0; ci < merged.length - 1; ci++) {
       const currCount = merged[ci].matches.length;
       const nextCount = merged[ci + 1].matches.length;
       const x1 = colX(ci) + COL_W;
       const x2 = colX(ci + 1);
       const xMid = x1 + COL_GAP / 2;
+      const feedRatio = currCount / nextCount;
       for (let ni = 0; ni < nextCount; ni++) {
         const cy2 = slotCY(ni, nextCount);
-        for (const srcIdx of [ni * 2, ni * 2 + 1]) {
-          if (srcIdx < currCount) {
-            const cy1 = slotCY(srcIdx, currCount);
-            lines.push(`<line x1="${x1}" y1="${cy1}" x2="${xMid}" y2="${cy1}" stroke="var(--bracket-conn, rgba(255,255,255,0.15))" stroke-width="1.5"/>`);
-            lines.push(`<line x1="${xMid}" y1="${cy1}" x2="${xMid}" y2="${cy2}" stroke="var(--bracket-conn, rgba(255,255,255,0.15))" stroke-width="1.5"/>`);
-          }
+        const firstSrc = Math.round(ni * feedRatio);
+        const lastSrc = Math.round((ni + 1) * feedRatio) - 1;
+        for (let si = firstSrc; si <= lastSrc && si < currCount; si++) {
+          const cy1 = slotCY(si, currCount);
+          lines.push(`<line x1="${x1}" y1="${cy1}" x2="${xMid}" y2="${cy1}" stroke="var(--bracket-conn, rgba(255,255,255,0.15))" stroke-width="1.5"/>`);
+          lines.push(`<line x1="${xMid}" y1="${cy1}" x2="${xMid}" y2="${cy2}" stroke="var(--bracket-conn, rgba(255,255,255,0.15))" stroke-width="1.5"/>`);
         }
         lines.push(`<line x1="${xMid}" y1="${cy2}" x2="${x2}" y2="${cy2}" stroke="var(--bracket-conn, rgba(255,255,255,0.15))" stroke-width="1.5"/>`);
       }

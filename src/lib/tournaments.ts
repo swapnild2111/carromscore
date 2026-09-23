@@ -496,9 +496,9 @@ function parseKnockoutCfg(raw: unknown): KnockoutCfg | undefined {
   const venueBoards = Number(v.venueBoards);
   if (Number.isFinite(venueBoards) && venueBoards >= 1) result.venueBoards = Math.floor(venueBoards);
   const groupCount = Number(v.groupCount);
-  if (Number.isFinite(groupCount) && groupCount >= 2) result.groupCount = Math.floor(groupCount);
+  if (Number.isFinite(groupCount) && groupCount >= 1) result.groupCount = Math.floor(groupCount);
   const groupSize = Number(v.groupSize);
-  if (Number.isFinite(groupSize) && groupSize >= 2) result.groupSize = Math.floor(groupSize);
+  if (Number.isFinite(groupSize) && groupSize >= 1) result.groupSize = Math.floor(groupSize);
   return result;
 }
 
@@ -1963,6 +1963,51 @@ export async function deleteRound(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return { ok: false, error: msg || 'Delete round failed' };
+  }
+}
+
+/**
+ * Bulk-delete all rounds and their planned matches for a tournament.
+ * Reads directly from Firebase (bypasses memoryStore) so it works
+ * even if the local round list is stale. Used by the re-generate
+ * flow in GroupKnockoutSetup to ensure a clean slate.
+ */
+export async function clearAllRoundsAndPlanned(
+  tournamentKey: string,
+): Promise<TournamentWriteOutcome> {
+  if (!tournamentKey) return { ok: false, error: 'Missing tournament key' };
+  try {
+    const [{ firebaseApp }, { getDatabase, ref, get, remove }] = await Promise.all([
+      import('./firebase'),
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    const [roundsSnap, plannedSnap] = await Promise.all([
+      get(ref(db, `tournaments/${tournamentKey}/rounds`)),
+      get(ref(db, 'planned')),
+    ]);
+    const roundsRaw = roundsSnap.val() as Record<string, unknown> | null;
+    const roundKeys = roundsRaw ? Object.keys(roundsRaw) : [];
+    const plannedRaw = plannedSnap.val() as Record<string, { tournamentKey?: string }> | null;
+    const plannedDeletes = plannedRaw
+      ? Object.entries(plannedRaw)
+          .filter(([, v]) => v?.tournamentKey === tournamentKey)
+          .map(([mid]) => remove(ref(db, `planned/${mid}`)))
+      : [];
+    const roundDeletes = roundKeys.map((rk) =>
+      remove(ref(db, `tournaments/${tournamentKey}/rounds/${rk}`))
+    );
+    await Promise.all([...roundDeletes, ...plannedDeletes]);
+    // Update local mirror
+    const local = memoryStore.find((t) => t.key === tournamentKey);
+    if (local) {
+      local.rounds = [];
+      notify();
+    }
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg || 'Clear rounds failed' };
   }
 }
 
