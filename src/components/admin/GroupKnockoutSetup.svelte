@@ -445,7 +445,7 @@
                   type="button"
                   class="stepper-btn"
                   aria-label="Fewer groups"
-                  disabled={manualGroupCount <= 1 || groupsLocked}
+                  disabled={manualGroupCount <= 1 || redrawing || generating}
                   onclick={() => { groupCountManuallySet = true; manualGroupCount = Math.max(1, manualGroupCount - 1); doRandomDraw(); }}
                 >−</button>
                 <span class="stepper-value">{manualGroupCount}</span>
@@ -453,7 +453,7 @@
                   type="button"
                   class="stepper-btn"
                   aria-label="More groups"
-                  disabled={manualGroupCount >= 4 || manualGroupCount >= Math.floor(assignedPlayerIds.length / 2) || groupsLocked}
+                  disabled={manualGroupCount >= 4 || manualGroupCount >= Math.floor(assignedPlayerIds.length / 2) || redrawing || generating}
                   onclick={() => { groupCountManuallySet = true; manualGroupCount = Math.min(4, manualGroupCount + 1); doRandomDraw(); }}
                 >+</button>
               </div>

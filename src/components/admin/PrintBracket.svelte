@@ -1426,7 +1426,7 @@
         </div>
         <div class="meta-row">
           <span class="meta-label">Boards</span>
-          <span class="meta-value">{boards.length}</span>
+          <span class="meta-value">{tournament?.knockoutCfg?.venueBoards ?? tournament?.knockoutCfg?.boardsAvailable ?? boards.length}</span>
         </div>
         <div class="meta-row">
           <span class="meta-label">Matches</span>
