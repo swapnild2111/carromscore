@@ -511,7 +511,7 @@
               type="button"
               class="btn btn-secondary"
               onclick={doRedraw}
-            >↺ Re-draw groups</button>
+            >↺ Re-generate brackets</button>
           {:else if !groupsLocked && sortedGroups.length > 0}
             <button
               type="button"
