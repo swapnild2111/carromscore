@@ -11,6 +11,7 @@
     updateLeagueGroups,
     updateKnockoutCfg,
     startRound,
+    clearAllRoundsAndPlanned,
     loadAssignedPlayers,
   } from '../../lib/tournaments';
   import { loadAll as loadAllPlayers, subscribeStore as subscribePlayerStore } from '../../lib/players';
@@ -44,6 +45,38 @@
   const koCfg = $derived(tournament.knockoutCfg);
 
   const venueBoards = $derived(Math.max(1, koCfg?.venueBoards ?? koCfg?.boardsAvailable ?? 4));
+
+  // ─── Group count (configurable) ──────────────────────────────────────────────
+
+  const recommendedGroupCount = $derived(
+    recommendGroups(assignedPlayerIds.length, venueBoards).groupCount
+  );
+
+  // Read knockoutCfg directly (not via $derived) so it's available at $state init time.
+  const initKoCfg = tournament.knockoutCfg;
+  const initBoards = Math.max(1, initKoCfg?.venueBoards ?? initKoCfg?.boardsAvailable ?? 4);
+
+  // Organizer can override; prefer explicit saved groupCount, else recommendation.
+  // Note: assignedPlayerIds isn't populated yet at init, so use groups as proxy for player count.
+  let manualGroupCount = $state<number>(
+    initKoCfg?.groupCount ?? recommendGroups(
+      Object.values(tournament.groups ?? {}).flatMap((g) => g.playerIds).length || 0,
+      initBoards
+    ).groupCount
+  );
+
+  // Track whether the organizer has manually touched the stepper this session.
+  let groupCountManuallySet = $state(initKoCfg?.groupCount != null);
+
+  // When no groups are saved yet AND organizer hasn't manually set a count, follow recommendation
+  // once player list loads. Never clobber a manual choice.
+  const hasExistingGroupsSaved = $derived(Object.keys(tournament.groups ?? {}).length > 0);
+
+  $effect(() => {
+    if (!hasExistingGroupsSaved && !groupCountManuallySet) {
+      manualGroupCount = recommendedGroupCount;
+    }
+  });
 
   // ─── Group draw state ────────────────────────────────────────────────────────
   let localGroups = $state<Record<string, LeagueGroup>>(
@@ -122,20 +155,20 @@
   // ─── Random draw ─────────────────────────────────────────────────────────────
 
   function doRandomDraw() {
-    // If groups have never been saved, always use the board-based recommendation.
-    // Saved groupCount is only trusted once real groups exist in Firebase.
-    const hasExistingGroups = Object.keys(tournament.groups ?? {}).length > 0;
-    const gc = hasExistingGroups
-      ? (koCfg?.groupCount ?? recommendGroups(assignedPlayerIds.length, venueBoards).groupCount)
-      : recommendGroups(assignedPlayerIds.length, venueBoards).groupCount;
     const playerName = (id: string) => players.find((p) => p.id === id)?.canonicalName ?? id;
     const playerNames = new Map(assignedPlayerIds.map((id) => [id, playerName(id)]));
     const potScores = new Map<string, number>();
-    localGroups = potSeeding(assignedPlayerIds, playerNames, potScores, gc);
+    localGroups = potSeeding(assignedPlayerIds, playerNames, potScores, manualGroupCount);
     groupsDirty = false;
   }
 
   async function doRedraw() {
+    // Bulk-delete ALL rounds + planned matches directly from Firebase —
+    // bypasses memoryStore so no stale-snapshot duplicates.
+    await clearAllRoundsAndPlanned(tournament.key);
+
+    // Keep the current stepper count — don't reset to recommendation on re-generate.
+    groupCountManuallySet = true;
     doRandomDraw();
     generateResult = null;
     groupsLocked = false;
@@ -153,6 +186,15 @@
 
   const roundsStarted = $derived(
     (tournament.rounds ?? []).some((r) => /^Group /i.test(r.name) && r.startedAt)
+  );
+
+  // Stale-config: groups are locked but tournament boards changed → recommendation shifted.
+  const savedGroupCount = $derived(koCfg?.groupCount ?? 0);
+  const configStale = $derived(
+    groupsLocked &&
+    !roundsStarted &&
+    savedGroupCount > 0 &&
+    recommendedGroupCount !== savedGroupCount
   );
 
   async function lockAndGenerate() {
@@ -224,6 +266,9 @@
     generateResult = { matchesCreated: result.matchesCreated, errors: result.errors };
     groupsDirty = false;
     generating = false;
+    // Freeze stepper to the count we just saved so the $effect doesn't clobber it.
+    manualGroupCount = sortedGroups.length;
+    groupCountManuallySet = true;
   }
 
   // ─── Start all group rounds ───────────────────────────────────────────────────
@@ -384,6 +429,33 @@
     {#if activeTab === 'draw'}
       <div class="ls-body">
         <div class="draw-controls">
+          {#if !roundsStarted}
+            <div class="group-count-row">
+              <span class="group-count-label">Groups</span>
+              <div class="group-count-stepper">
+                <button
+                  type="button"
+                  class="stepper-btn"
+                  aria-label="Fewer groups"
+                  disabled={manualGroupCount <= 1 || groupsLocked}
+                  onclick={() => { groupCountManuallySet = true; manualGroupCount = Math.max(1, manualGroupCount - 1); doRandomDraw(); }}
+                >−</button>
+                <span class="stepper-value">{manualGroupCount}</span>
+                <button
+                  type="button"
+                  class="stepper-btn"
+                  aria-label="More groups"
+                  disabled={manualGroupCount >= 4 || manualGroupCount >= Math.floor(assignedPlayerIds.length / 2) || groupsLocked}
+                  onclick={() => { groupCountManuallySet = true; manualGroupCount = Math.min(4, manualGroupCount + 1); doRandomDraw(); }}
+                >+</button>
+              </div>
+              {#if recommendedGroupCount !== manualGroupCount}
+                <span class="group-count-hint">recommended: {recommendedGroupCount}</span>
+              {:else}
+                <span class="group-count-hint">recommended</span>
+              {/if}
+            </div>
+          {/if}
           {#if roundsStarted}
             <span class="draw-locked-hint">🔒 Groups locked — rounds in progress</span>
           {:else if groupsLocked && !groupsDirty}
@@ -393,6 +465,14 @@
             <span class="draw-warn">⚠ {unassignedPlayers.length} player{unassignedPlayers.length !== 1 ? 's' : ''} unassigned</span>
           {/if}
         </div>
+
+        {#if configStale}
+          <div class="config-stale-banner">
+            <span class="stale-icon">⚠</span>
+            <span class="stale-msg">Tournament config changed — recommendation is now <strong>{recommendedGroupCount} group{recommendedGroupCount !== 1 ? 's' : ''}</strong> (was {savedGroupCount}). Re-generate brackets to apply.</span>
+            <button type="button" class="btn btn-primary btn-sm" onclick={doRedraw}>↺ Re-generate</button>
+          </div>
+        {/if}
 
         <!-- Unassigned pool -->
         {#if unassignedPlayers.length > 0}
@@ -692,9 +772,79 @@
     display: flex;
     align-items: center;
     gap: 0.75rem;
+    margin-bottom: 0.5rem;
+    flex-wrap: wrap;
+  }
+
+  /* Group count stepper */
+  .group-count-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    padding: 4px 10px 4px 10px;
+  }
+  .group-count-label {
+    font-size: 0.75rem;
+    color: var(--muted, #9aa0a6);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-weight: 600;
+  }
+  .group-count-stepper {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+  }
+  .stepper-btn {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: inherit;
+    border-radius: 4px;
+    width: 24px;
+    height: 24px;
+    font-size: 1rem;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0;
+    transition: background 0.15s;
+  }
+  .stepper-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.14); }
+  .stepper-btn:disabled { opacity: 0.35; cursor: default; }
+  .stepper-value {
+    font-size: 1rem;
+    font-weight: 700;
+    min-width: 1.4rem;
+    text-align: center;
+    color: #f0c040;
+  }
+  .group-count-hint {
+    font-size: 0.7rem;
+    color: var(--muted, #9aa0a6);
+    font-style: italic;
+  }
+
+  /* Stale-config warning banner */
+  .config-stale-banner {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    background: rgba(229, 166, 35, 0.12);
+    border: 1px solid rgba(229, 166, 35, 0.4);
+    border-radius: 6px;
+    padding: 10px 14px;
     margin-bottom: 1rem;
     flex-wrap: wrap;
   }
+  .stale-icon { font-size: 1rem; color: #e5a623; flex-shrink: 0; }
+  .stale-msg { font-size: 0.82rem; color: var(--fg, #e8eaf0); flex: 1; min-width: 180px; }
+  .btn-sm { padding: 4px 12px; font-size: 0.8rem; }
+
   .draw-hint {
     font-size: 0.8rem;
     color: var(--muted, #9aa0a6);
@@ -974,6 +1124,11 @@
     :root:not([data-theme="dark"]) .seeding-tbl td { border-bottom-color: rgba(0, 0, 0, 0.07); }
     :root:not([data-theme="dark"]) .draw-locked-hint { color: rgba(160, 100, 0, 0.8); }
     :root:not([data-theme="dark"]) .bye-note { color: rgba(160, 100, 0, 0.7); }
+    :root:not([data-theme="dark"]) .group-count-row { background: rgba(0, 0, 0, 0.04); border-color: rgba(0, 0, 0, 0.12); }
+    :root:not([data-theme="dark"]) .stepper-btn { background: rgba(0, 0, 0, 0.06); border-color: rgba(0, 0, 0, 0.15); color: #111; }
+    :root:not([data-theme="dark"]) .stepper-btn:hover:not(:disabled) { background: rgba(0, 0, 0, 0.12); }
+    :root:not([data-theme="dark"]) .config-stale-banner { background: rgba(200, 130, 0, 0.1); border-color: rgba(200, 130, 0, 0.4); }
+    :root:not([data-theme="dark"]) .stale-msg { color: #111; }
   }
   :root[data-theme="light"] .gko-card { background: #fff; border-color: rgba(0, 0, 0, 0.1); color: #111; }
   :root[data-theme="light"] .ls-header { border-bottom-color: rgba(0, 0, 0, 0.08); }
@@ -995,4 +1150,9 @@
   :root[data-theme="light"] .seeding-tbl td { border-bottom-color: rgba(0, 0, 0, 0.07); }
   :root[data-theme="light"] .draw-locked-hint { color: rgba(160, 100, 0, 0.8); }
   :root[data-theme="light"] .bye-note { color: rgba(160, 100, 0, 0.7); }
+  :root[data-theme="light"] .group-count-row { background: rgba(0, 0, 0, 0.04); border-color: rgba(0, 0, 0, 0.12); }
+  :root[data-theme="light"] .stepper-btn { background: rgba(0, 0, 0, 0.06); border-color: rgba(0, 0, 0, 0.15); color: #111; }
+  :root[data-theme="light"] .stepper-btn:hover:not(:disabled) { background: rgba(0, 0, 0, 0.12); }
+  :root[data-theme="light"] .config-stale-banner { background: rgba(200, 130, 0, 0.1); border-color: rgba(200, 130, 0, 0.4); }
+  :root[data-theme="light"] .stale-msg { color: #111; }
 </style>

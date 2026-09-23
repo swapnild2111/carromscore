@@ -1967,6 +1967,51 @@ export async function deleteRound(
 }
 
 /**
+ * Bulk-delete all rounds and their planned matches for a tournament.
+ * Reads directly from Firebase (bypasses memoryStore) so it works
+ * even if the local round list is stale. Used by the re-generate
+ * flow in GroupKnockoutSetup to ensure a clean slate.
+ */
+export async function clearAllRoundsAndPlanned(
+  tournamentKey: string,
+): Promise<TournamentWriteOutcome> {
+  if (!tournamentKey) return { ok: false, error: 'Missing tournament key' };
+  try {
+    const [{ firebaseApp }, { getDatabase, ref, get, remove }] = await Promise.all([
+      import('./firebase'),
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    const [roundsSnap, plannedSnap] = await Promise.all([
+      get(ref(db, `tournaments/${tournamentKey}/rounds`)),
+      get(ref(db, 'planned')),
+    ]);
+    const roundsRaw = roundsSnap.val() as Record<string, unknown> | null;
+    const roundKeys = roundsRaw ? Object.keys(roundsRaw) : [];
+    const plannedRaw = plannedSnap.val() as Record<string, { tournamentKey?: string }> | null;
+    const plannedDeletes = plannedRaw
+      ? Object.entries(plannedRaw)
+          .filter(([, v]) => v?.tournamentKey === tournamentKey)
+          .map(([mid]) => remove(ref(db, `planned/${mid}`)))
+      : [];
+    const roundDeletes = roundKeys.map((rk) =>
+      remove(ref(db, `tournaments/${tournamentKey}/rounds/${rk}`))
+    );
+    await Promise.all([...roundDeletes, ...plannedDeletes]);
+    // Update local mirror
+    const local = memoryStore.find((t) => t.key === tournamentKey);
+    if (local) {
+      local.rounds = [];
+      notify();
+    }
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg || 'Clear rounds failed' };
+  }
+}
+
+/**
  * Persist a new display order for a tournament's rounds. Takes the
  * round keys in the desired order (index 0 = order 1) and writes
  * the updated `order` values to RTDB in a single multi-path update.

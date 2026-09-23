@@ -930,8 +930,27 @@
       } else if (ps.length === 2) {
         rounds.push([[ps[0]!, ps[1]!]]);
       } else {
+        // R1: pair up active players (seeded top vs bottom)
         rounds.push(makePairs(active));
-        rounds.push([[byePlayer ? clip(esc(byePlayer)) : 'W R1', 'W Round 1']]);
+        // Build subsequent rounds until we reach the final (1 match)
+        // First subsequent round may include the bye player as a pre-seeded winner
+        let prevCount = rounds[0]!.length;
+        let firstSubRound = true;
+        while (prevCount > 1) {
+          const nextCount = Math.ceil(prevCount / 2);
+          const slots: [string, string][] = [];
+          for (let i = 0; i < nextCount; i++) {
+            // First slot of first sub-round: bye player (if any) seeds in here
+            const aLabel = firstSubRound && i === 0 && byePlayer
+              ? clip(esc(byePlayer))
+              : 'W R' + (rounds.length);
+            const bLabel = 'W Round ' + rounds.length;
+            slots.push([aLabel, bLabel]);
+          }
+          rounds.push(slots);
+          prevCount = nextCount;
+          firstSubRound = false;
+        }
       }
       return { gi, name: g.name, rounds, byePlayer, x: 0, y: 0, h: 0, roundCols: rounds.length };
     });

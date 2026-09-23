@@ -136,6 +136,7 @@
   let editingAdvanceCount = $state<number>(4);
   let editingKnockoutRewards = $state<string[]>(['Gold', 'Silver', 'Bronze']);
   let editingBoardsAvailable = $state<string>('2');
+  let editingGroupCount = $state<number>(0); // 0 = "auto" (let GKO setup decide)
   let editingOriginal = $state<{
     name: string;
     type: 'open' | 'closed';
@@ -154,6 +155,7 @@
       advanceCount: number;
       rewards: string[];
       boardsAvailable: string;
+      groupCount: number;
     } | null;
   } | null>(null);
   let deleteConfirmKey = $state<string | null>(null);
@@ -219,6 +221,7 @@
   let addingTotalPlayers = $state('48');
   let addingKnockoutPlayers = $state('8');
   let addingAdvanceCount = $state<number>(4);
+  let addingGroupCount = $state<number>(0); // 0 = auto (derive from boards)
   let addingWantedFlights = $state<1 | 2 | 3>(3);
   let addingKnockoutRewards = $state<string[]>(['Gold', 'Silver', 'Bronze']);
   let addingBoardsAvailable = $state<number>(2);
@@ -653,7 +656,8 @@
     editingKnockoutPlayers = String(t.knockoutCfg?.participantCount ?? 8);
     editingAdvanceCount = t.knockoutCfg?.advanceCount ?? 4;
     editingKnockoutRewards = t.knockoutCfg?.flightNames ?? ['Gold', 'Silver', 'Bronze'];
-    editingBoardsAvailable = String(t.knockoutCfg?.boardsAvailable ?? 2);
+    editingBoardsAvailable = String(t.knockoutCfg?.boardsAvailable ?? t.knockoutCfg?.venueBoards ?? 2);
+    editingGroupCount = t.knockoutCfg?.groupCount ?? 0;
     const isKoRr = (t.format === 'knockout' || t.format === 'roundrobin');
     editingOriginal = {
       name: t.name,
@@ -673,6 +677,7 @@
         advanceCount: editingAdvanceCount,
         rewards: [...editingKnockoutRewards],
         boardsAvailable: editingBoardsAvailable,
+        groupCount: editingGroupCount,
       } : null,
     };
   }
@@ -688,6 +693,7 @@
     editingAdvanceCount = 4;
     editingKnockoutRewards = ['Gold', 'Silver', 'Bronze'];
     editingBoardsAvailable = '2';
+    editingGroupCount = 0;
     editingDefaultMode = 'singles';
     editingDefaultBestOf = '';
     editingDefaultPointsTarget = '';
@@ -773,6 +779,7 @@
       editingKnockoutPlayers !== (origKO?.knockoutPlayers ?? '8') ||
       editingBoardsAvailable !== (origKO?.boardsAvailable ?? '2') ||
       editingAdvanceCount !== (origKO?.advanceCount ?? 4) ||
+      editingGroupCount !== (origKO?.groupCount ?? 0) ||
       JSON.stringify(editingKnockoutRewards) !== JSON.stringify(origKO?.rewards ?? ['Gold', 'Silver', 'Bronze'])
     );
     const metaExtraChanged = descriptionChanged || startDateChanged || formatChanged || knockoutCfgChanged;
@@ -824,7 +831,9 @@
           const cfg: KnockoutCfg = {
             participantCount: parsedPlayers,
             boardsAvailable: parsedBoards,
+            venueBoards: parsedBoards,
             ...(editingFormat === 'roundrobin' ? { advanceCount: editingAdvanceCount } : {}),
+            ...(editingFormat === 'knockout' && editingGroupCount > 0 ? { groupCount: editingGroupCount } : {}),
             ...(editingKnockoutRewards.length > 0 ? { flightNames: editingKnockoutRewards } : {}),
           };
           const r = await updateKnockoutCfg(editingKey, cfg, editingFormat as 'knockout' | 'roundrobin');
@@ -1103,6 +1112,7 @@
     addingWantedFlights = 3;
     addingKnockoutRewards = ['Gold', 'Silver', 'Bronze'];
     addingBoardsAvailable = 2;
+    addingGroupCount = 0;
     addingBoardCount = '16';
     addingUsePhantom = false;
     addingPhantomScore = '';
@@ -1173,7 +1183,13 @@
       const participantCount = Math.max(2, Number(addingKnockoutPlayers) || 8);
       const flightNames = addingKnockoutRewards.length > 0 ? addingKnockoutRewards : undefined;
       const boardsAvailable = Math.max(1, addingBoardsAvailable);
-      await updateKnockoutCfg(outcome.record.key, { participantCount, flightNames, boardsAvailable }, 'knockout');
+      await updateKnockoutCfg(outcome.record.key, {
+        participantCount,
+        flightNames,
+        boardsAvailable,
+        venueBoards: boardsAvailable,
+        ...(addingGroupCount > 0 ? { groupCount: addingGroupCount } : {}),
+      }, 'knockout');
     } else if (addingFormat === 'roundrobin') {
       const participantCount = Math.max(2, Number(addingKnockoutPlayers) || 8);
       const boardsAvailable = Math.max(1, addingBoardsAvailable);
@@ -3486,6 +3502,40 @@
     flex-direction: column;
     gap: 0.35rem;
     margin: 0.35rem 0;
+  }
+  .group-count-stepper-row {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+  .stepper-btn {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: var(--fg, #e8eaf0);
+    border-radius: 4px;
+    width: 28px;
+    height: 28px;
+    font-size: 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0;
+    transition: background 0.15s;
+  }
+  .stepper-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.14); }
+  .stepper-btn:disabled { opacity: 0.35; cursor: default; }
+  .stepper-value {
+    font-size: 0.95rem;
+    font-weight: 700;
+    min-width: 2.5rem;
+    text-align: center;
+    color: var(--accent, #ffd54a);
+  }
+  .stepper-hint {
+    font-size: 0.72rem;
+    color: var(--muted, #9aa0a6);
+    font-style: italic;
   }
   .edit-field > span {
     color: var(--muted);
