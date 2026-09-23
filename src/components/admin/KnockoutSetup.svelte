@@ -1222,13 +1222,17 @@
     :root:not([data-theme="dark"]) .seed-row { background: rgba(0, 0, 0, 0.03); border-color: rgba(0, 0, 0, 0.08); }
     :root:not([data-theme="dark"]) .bracket-round-block { border-bottom-color: rgba(0, 0, 0, 0.08); }
     :root:not([data-theme="dark"]) .seed-row-btn { border-bottom-color: rgba(0, 0, 0, 0.06); color: #111; }
-    :root:not([data-theme="dark"]) .btn { background: rgba(0, 0, 0, 0.06); color: #111; }
+    :root:not([data-theme="dark"]) .ks-card { color: #111; }
+    :root:not([data-theme="dark"]) .btn { background: rgba(0, 0, 0, 0.06); color: #111; border-color: rgba(0, 0, 0, 0.15); }
     :root:not([data-theme="dark"]) .btn:hover:not(:disabled) { background: rgba(0, 0, 0, 0.12); }
     :root:not([data-theme="dark"]) .btn-secondary { background: rgba(0, 0, 0, 0.06); }
+    :root:not([data-theme="dark"]) .generate-result { background: rgba(0, 0, 0, 0.03); border-color: rgba(0, 0, 0, 0.1); }
+    :root:not([data-theme="dark"]) .pool-row { color: #111; }
+    :root:not([data-theme="dark"]) .seed-row-btn { color: #111; }
     :root:not([data-theme="dark"]) .advance-select { background: rgba(0,0,0,0.04); color: #111; }
     :root:not([data-theme="dark"]) .draw-locked-hint { color: rgba(160, 100, 0, 0.8); }
   }
-  :root[data-theme="light"] .ks-card { background: #fff; border-color: rgba(0, 0, 0, 0.1); }
+  :root[data-theme="light"] .ks-card { background: #fff; border-color: rgba(0, 0, 0, 0.1); color: #111; }
   :root[data-theme="light"] .ks-header { border-bottom-color: rgba(0, 0, 0, 0.08); }
   :root[data-theme="light"] .ks-close:hover { color: #111; }
   :root[data-theme="light"] .ks-tabs { border-bottom-color: rgba(0, 0, 0, 0.08); }
@@ -1245,9 +1249,12 @@
   :root[data-theme="light"] .seed-row { background: rgba(0, 0, 0, 0.03); border-color: rgba(0, 0, 0, 0.08); }
   :root[data-theme="light"] .bracket-round-block { border-bottom-color: rgba(0, 0, 0, 0.08); }
   :root[data-theme="light"] .seed-row-btn { border-bottom-color: rgba(0, 0, 0, 0.06); color: #111; }
-  :root[data-theme="light"] .btn { background: rgba(0, 0, 0, 0.06); color: #111; }
+  :root[data-theme="light"] .btn { background: rgba(0, 0, 0, 0.06); color: #111; border-color: rgba(0, 0, 0, 0.15); }
   :root[data-theme="light"] .btn:hover:not(:disabled) { background: rgba(0, 0, 0, 0.12); }
   :root[data-theme="light"] .btn-secondary { background: rgba(0, 0, 0, 0.06); }
+  :root[data-theme="light"] .generate-result { background: rgba(0, 0, 0, 0.03); border-color: rgba(0, 0, 0, 0.1); }
+  :root[data-theme="light"] .pool-row { color: #111; }
+  :root[data-theme="light"] .seed-row-btn { color: #111; }
   :root[data-theme="light"] .advance-select { background: rgba(0,0,0,0.04); color: #111; }
   :root[data-theme="light"] .draw-locked-hint { color: rgba(160, 100, 0, 0.8); }
 </style>
