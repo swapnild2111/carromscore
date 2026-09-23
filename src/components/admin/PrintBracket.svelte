@@ -1000,22 +1000,19 @@
         const roundKey = groupRoundKey(meta.name, ri, totalRounds);
         const roundResults: MatchInfo[] = gData.matchMap.get(roundKey) ?? [];
 
-        // ── Connector lines between round columns (same style as buildFlightBracketSVG) ──
+        // ── Connector lines between round columns — handles any feed ratio ──
         if (ri < totalRounds - 1) {
           const nextMatches = meta.rounds[ri + 1]!;
           const x1 = rx + COL_W;
           const x2 = meta.x + (ri + 1) * (COL_W + COL_GAP);
           const xMid = x1 + COL_GAP / 2;
+          const feedRatio = rMatches.length / nextMatches.length;
           for (let ni = 0; ni < nextMatches.length; ni++) {
             const cy2 = slotCY(meta.y, meta.h, ni, nextMatches.length);
-            const srcA = ni * 2, srcB = ni * 2 + 1;
-            if (srcA < rMatches.length) {
-              const cy1 = slotCY(meta.y, meta.h, srcA, rMatches.length);
-              lines.push(`<line x1="${x1}" y1="${cy1}" x2="${xMid}" y2="${cy1}" stroke="#bbb" stroke-width="1.25"/>`);
-              lines.push(`<line x1="${xMid}" y1="${cy1}" x2="${xMid}" y2="${cy2}" stroke="#bbb" stroke-width="1.25"/>`);
-            }
-            if (srcB < rMatches.length) {
-              const cy1 = slotCY(meta.y, meta.h, srcB, rMatches.length);
+            const firstSrc = Math.round(ni * feedRatio);
+            const lastSrc = Math.round((ni + 1) * feedRatio) - 1;
+            for (let si = firstSrc; si <= lastSrc && si < rMatches.length; si++) {
+              const cy1 = slotCY(meta.y, meta.h, si, rMatches.length);
               lines.push(`<line x1="${x1}" y1="${cy1}" x2="${xMid}" y2="${cy1}" stroke="#bbb" stroke-width="1.25"/>`);
               lines.push(`<line x1="${xMid}" y1="${cy1}" x2="${xMid}" y2="${cy2}" stroke="#bbb" stroke-width="1.25"/>`);
             }
