@@ -951,25 +951,39 @@
   .btn-primary:hover:not(:disabled) { background: #ffe07a; }
   .btn-secondary { background: rgba(255, 255, 255, 0.07); }
 
-  /* Light theme */
+  /* Light theme — covers system light AND explicit [data-theme="light"] */
   @media (prefers-color-scheme: light) {
-    :root:not([data-theme="dark"]) .gko-card {
-      background: #fff;
-      border-color: rgba(0, 0, 0, 0.1);
-    }
-    :root:not([data-theme="dark"]) .group-col {
-      background: rgba(0, 0, 0, 0.02);
-      border-color: rgba(0, 0, 0, 0.1);
-    }
-    :root:not([data-theme="dark"]) .player-chip {
-      background: rgba(0, 0, 0, 0.04);
-      border-color: rgba(0, 0, 0, 0.1);
-    }
+    :root:not([data-theme="dark"]) .gko-card { background: #fff; border-color: rgba(0, 0, 0, 0.1); }
+    :root:not([data-theme="dark"]) .ls-header { border-bottom-color: rgba(0, 0, 0, 0.08); }
+    :root:not([data-theme="dark"]) .ls-close:hover { color: #111; }
+    :root:not([data-theme="dark"]) .ls-tabs { border-bottom-color: rgba(0, 0, 0, 0.08); }
+    :root:not([data-theme="dark"]) .ls-tab:hover { color: #111; }
+    :root:not([data-theme="dark"]) .group-col { background: rgba(0, 0, 0, 0.02); border-color: rgba(0, 0, 0, 0.1); }
+    :root:not([data-theme="dark"]) .group-col-header { border-bottom-color: rgba(0, 0, 0, 0.08); }
+    :root:not([data-theme="dark"]) .group-count { background: rgba(0, 0, 0, 0.06); }
+    :root:not([data-theme="dark"]) .player-chip { background: rgba(0, 0, 0, 0.04); border-color: rgba(0, 0, 0, 0.1); color: #111; }
     :root:not([data-theme="dark"]) .player-chip:hover { background: rgba(0, 0, 0, 0.08); }
+    :root:not([data-theme="dark"]) .player-chip-locked:hover { background: rgba(0, 0, 0, 0.04); }
     :root:not([data-theme="dark"]) .btn { background: rgba(0, 0, 0, 0.06); color: #111; }
     :root:not([data-theme="dark"]) .btn:hover:not(:disabled) { background: rgba(0, 0, 0, 0.12); }
+    :root:not([data-theme="dark"]) .btn-secondary { background: rgba(0, 0, 0, 0.06); }
+    :root:not([data-theme="dark"]) .draw-locked-hint { color: rgba(160, 100, 0, 0.8); }
+    :root:not([data-theme="dark"]) .bye-note { color: rgba(160, 100, 0, 0.7); }
   }
   :root[data-theme="light"] .gko-card { background: #fff; border-color: rgba(0, 0, 0, 0.1); }
+  :root[data-theme="light"] .ls-header { border-bottom-color: rgba(0, 0, 0, 0.08); }
+  :root[data-theme="light"] .ls-close:hover { color: #111; }
+  :root[data-theme="light"] .ls-tabs { border-bottom-color: rgba(0, 0, 0, 0.08); }
+  :root[data-theme="light"] .ls-tab:hover { color: #111; }
   :root[data-theme="light"] .group-col { background: rgba(0, 0, 0, 0.02); border-color: rgba(0, 0, 0, 0.1); }
-  :root[data-theme="light"] .player-chip { background: rgba(0, 0, 0, 0.04); border-color: rgba(0, 0, 0, 0.1); }
+  :root[data-theme="light"] .group-col-header { border-bottom-color: rgba(0, 0, 0, 0.08); }
+  :root[data-theme="light"] .group-count { background: rgba(0, 0, 0, 0.06); }
+  :root[data-theme="light"] .player-chip { background: rgba(0, 0, 0, 0.04); border-color: rgba(0, 0, 0, 0.1); color: #111; }
+  :root[data-theme="light"] .player-chip:hover { background: rgba(0, 0, 0, 0.08); }
+  :root[data-theme="light"] .player-chip-locked:hover { background: rgba(0, 0, 0, 0.04); }
+  :root[data-theme="light"] .btn { background: rgba(0, 0, 0, 0.06); color: #111; }
+  :root[data-theme="light"] .btn:hover:not(:disabled) { background: rgba(0, 0, 0, 0.12); }
+  :root[data-theme="light"] .btn-secondary { background: rgba(0, 0, 0, 0.06); }
+  :root[data-theme="light"] .draw-locked-hint { color: rgba(160, 100, 0, 0.8); }
+  :root[data-theme="light"] .bye-note { color: rgba(160, 100, 0, 0.7); }
 </style>

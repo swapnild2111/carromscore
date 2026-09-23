@@ -1205,20 +1205,49 @@
 
   /* Light theme */
   @media (prefers-color-scheme: light) {
-    :root:not([data-theme="dark"]) .ks-card {
-      background: #fff;
-      border-color: rgba(0, 0, 0, 0.1);
-    }
-    :root:not([data-theme="dark"]) .seed-row {
-      background: rgba(0, 0, 0, 0.03);
-      border-color: rgba(0, 0, 0, 0.08);
-    }
+    :root:not([data-theme="dark"]) .ks-card { background: #fff; border-color: rgba(0, 0, 0, 0.1); }
+    :root:not([data-theme="dark"]) .ks-header { border-bottom-color: rgba(0, 0, 0, 0.08); }
+    :root:not([data-theme="dark"]) .ks-close:hover { color: #111; }
+    :root:not([data-theme="dark"]) .ks-tabs { border-bottom-color: rgba(0, 0, 0, 0.08); }
+    :root:not([data-theme="dark"]) .ks-tab:hover { color: #111; }
+    :root:not([data-theme="dark"]) .group-col { background: rgba(0, 0, 0, 0.02); border-color: rgba(0, 0, 0, 0.1); }
+    :root:not([data-theme="dark"]) .group-col-header { border-bottom-color: rgba(0, 0, 0, 0.08); }
+    :root:not([data-theme="dark"]) .bracket-match-chip { background: rgba(0, 0, 0, 0.03); border-color: rgba(0, 0, 0, 0.1); }
+    :root:not([data-theme="dark"]) .picker-pane,
+    :root:not([data-theme="dark"]) .seed-pane { background: rgba(0, 0, 0, 0.02); border-color: rgba(0, 0, 0, 0.1); }
+    :root:not([data-theme="dark"]) .picker-header { border-bottom-color: rgba(0, 0, 0, 0.08); }
+    :root:not([data-theme="dark"]) .picker-search { background: rgba(0, 0, 0, 0.04); border-color: rgba(0, 0, 0, 0.1); color: #111; }
+    :root:not([data-theme="dark"]) .pool-row { border-bottom-color: rgba(0, 0, 0, 0.06); color: #111; }
+    :root:not([data-theme="dark"]) .pool-row:hover { background: rgba(0, 0, 0, 0.04); }
+    :root:not([data-theme="dark"]) .seed-row { background: rgba(0, 0, 0, 0.03); border-color: rgba(0, 0, 0, 0.08); }
+    :root:not([data-theme="dark"]) .bracket-round-block { border-bottom-color: rgba(0, 0, 0, 0.08); }
+    :root:not([data-theme="dark"]) .seed-row-btn { border-bottom-color: rgba(0, 0, 0, 0.06); color: #111; }
     :root:not([data-theme="dark"]) .btn { background: rgba(0, 0, 0, 0.06); color: #111; }
     :root:not([data-theme="dark"]) .btn:hover:not(:disabled) { background: rgba(0, 0, 0, 0.12); }
+    :root:not([data-theme="dark"]) .btn-secondary { background: rgba(0, 0, 0, 0.06); }
     :root:not([data-theme="dark"]) .advance-select { background: rgba(0,0,0,0.04); color: #111; }
+    :root:not([data-theme="dark"]) .draw-locked-hint { color: rgba(160, 100, 0, 0.8); }
   }
   :root[data-theme="light"] .ks-card { background: #fff; border-color: rgba(0, 0, 0, 0.1); }
+  :root[data-theme="light"] .ks-header { border-bottom-color: rgba(0, 0, 0, 0.08); }
+  :root[data-theme="light"] .ks-close:hover { color: #111; }
+  :root[data-theme="light"] .ks-tabs { border-bottom-color: rgba(0, 0, 0, 0.08); }
+  :root[data-theme="light"] .ks-tab:hover { color: #111; }
+  :root[data-theme="light"] .group-col { background: rgba(0, 0, 0, 0.02); border-color: rgba(0, 0, 0, 0.1); }
+  :root[data-theme="light"] .group-col-header { border-bottom-color: rgba(0, 0, 0, 0.08); }
+  :root[data-theme="light"] .bracket-match-chip { background: rgba(0, 0, 0, 0.03); border-color: rgba(0, 0, 0, 0.1); }
+  :root[data-theme="light"] .picker-pane,
+  :root[data-theme="light"] .seed-pane { background: rgba(0, 0, 0, 0.02); border-color: rgba(0, 0, 0, 0.1); }
+  :root[data-theme="light"] .picker-header { border-bottom-color: rgba(0, 0, 0, 0.08); }
+  :root[data-theme="light"] .picker-search { background: rgba(0, 0, 0, 0.04); border-color: rgba(0, 0, 0, 0.1); color: #111; }
+  :root[data-theme="light"] .pool-row { border-bottom-color: rgba(0, 0, 0, 0.06); color: #111; }
+  :root[data-theme="light"] .pool-row:hover { background: rgba(0, 0, 0, 0.04); }
   :root[data-theme="light"] .seed-row { background: rgba(0, 0, 0, 0.03); border-color: rgba(0, 0, 0, 0.08); }
+  :root[data-theme="light"] .bracket-round-block { border-bottom-color: rgba(0, 0, 0, 0.08); }
+  :root[data-theme="light"] .seed-row-btn { border-bottom-color: rgba(0, 0, 0, 0.06); color: #111; }
   :root[data-theme="light"] .btn { background: rgba(0, 0, 0, 0.06); color: #111; }
+  :root[data-theme="light"] .btn:hover:not(:disabled) { background: rgba(0, 0, 0, 0.12); }
+  :root[data-theme="light"] .btn-secondary { background: rgba(0, 0, 0, 0.06); }
   :root[data-theme="light"] .advance-select { background: rgba(0,0,0,0.04); color: #111; }
+  :root[data-theme="light"] .draw-locked-hint { color: rgba(160, 100, 0, 0.8); }
 </style>
