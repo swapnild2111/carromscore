@@ -12,6 +12,7 @@
     updateKnockoutCfg,
     startRound,
     clearAllRoundsAndPlanned,
+    loadRounds,
     loadAssignedPlayers,
   } from '../../lib/tournaments';
   import { loadAll as loadAllPlayers, subscribeStore as subscribePlayerStore } from '../../lib/players';
@@ -162,7 +163,11 @@
     groupsDirty = false;
   }
 
+  let redrawing = $state(false);
+
   async function doRedraw() {
+    if (redrawing || generating) return;
+    redrawing = true;
     // Bulk-delete ALL rounds + planned matches directly from Firebase —
     // bypasses memoryStore so no stale-snapshot duplicates.
     await clearAllRoundsAndPlanned(tournament.key);
@@ -174,6 +179,7 @@
     groupsLocked = false;
     await lockAndGenerate();
     await startAllGroupRounds();
+    redrawing = false;
   }
 
   // ─── Phase 1 generation ──────────────────────────────────────────────────────
@@ -277,7 +283,9 @@
 
   async function startAllGroupRounds() {
     startingRounds = true;
-    const rounds = tournament.rounds ?? [];
+    // Read directly from memoryStore (not tournament prop) so freshly-created
+    // rounds are included without waiting for a Svelte re-render cycle.
+    const rounds = loadRounds(tournament.key);
     const groupRounds = rounds.filter((r) => /^Group /i.test(r.name) && !r.startedAt);
     for (const r of groupRounds) {
       await startRound(tournament.key, r.key);
@@ -470,7 +478,7 @@
           <div class="config-stale-banner">
             <span class="stale-icon">⚠</span>
             <span class="stale-msg">Tournament config changed — recommendation is now <strong>{recommendedGroupCount} group{recommendedGroupCount !== 1 ? 's' : ''}</strong> (was {savedGroupCount}). Re-generate brackets to apply.</span>
-            <button type="button" class="btn btn-primary btn-sm" onclick={doRedraw}>↺ Re-generate</button>
+            <button type="button" class="btn btn-primary btn-sm" onclick={doRedraw} disabled={redrawing || generating}>{redrawing ? 'Re-generating…' : '↺ Re-generate'}</button>
           </div>
         {/if}
 
@@ -591,7 +599,8 @@
               type="button"
               class="btn btn-secondary"
               onclick={doRedraw}
-            >↺ Re-generate brackets</button>
+              disabled={redrawing || generating}
+            >{redrawing ? 'Re-generating…' : '↺ Re-generate brackets'}</button>
           {:else if !groupsLocked && sortedGroups.length > 0}
             <button
               type="button"

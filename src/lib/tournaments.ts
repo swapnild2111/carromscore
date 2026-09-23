@@ -496,9 +496,9 @@ function parseKnockoutCfg(raw: unknown): KnockoutCfg | undefined {
   const venueBoards = Number(v.venueBoards);
   if (Number.isFinite(venueBoards) && venueBoards >= 1) result.venueBoards = Math.floor(venueBoards);
   const groupCount = Number(v.groupCount);
-  if (Number.isFinite(groupCount) && groupCount >= 2) result.groupCount = Math.floor(groupCount);
+  if (Number.isFinite(groupCount) && groupCount >= 1) result.groupCount = Math.floor(groupCount);
   const groupSize = Number(v.groupSize);
-  if (Number.isFinite(groupSize) && groupSize >= 2) result.groupSize = Math.floor(groupSize);
+  if (Number.isFinite(groupSize) && groupSize >= 1) result.groupSize = Math.floor(groupSize);
   return result;
 }
 
