@@ -591,3 +591,49 @@ export async function propagateBracketWinner(
     // silent — bracket still works without propagation
   }
 }
+
+/**
+ * Same as propagateBracketWinner but for matches started manually
+ * (no ?planned= URL). Looks up the planned slot by name-matching
+ * within the given tournament+round, then delegates to the same
+ * propagation logic.
+ *
+ * Silent-on-failure.
+ */
+export async function propagateBracketWinnerByNames(
+  tournamentKey: string,
+  roundKey: string,
+  aName: string,
+  bName: string,
+  winner: 'a' | 'b' | 'draw',
+): Promise<void> {
+  if (!tournamentKey || !roundKey || winner === 'draw') return;
+  try {
+    const { getDatabase, ref, get } = await import('firebase/database');
+    const { query, orderByChild, equalTo } = await import('firebase/database');
+    const db = getDatabase(firebaseApp());
+
+    // Find the planned slot matching these names in this round
+    const allSnap = await get(query(ref(db, 'planned'), orderByChild('tournamentKey'), equalTo(tournamentKey)));
+    const all = allSnap.val() as Record<string, Omit<PlannedMatch, 'mid'>> | null;
+    if (!all) return;
+    const aN = aName.trim().toLowerCase();
+    const bN = bName.trim().toLowerCase();
+    const entry = Object.entries(all).find(([, v]) => {
+      if (v?.roundKey !== roundKey) return false;
+      const vA = (v.aName ?? '').trim().toLowerCase();
+      const vB = (v.bName ?? '').trim().toLowerCase();
+      return (vA === aN && vB === bN) || (vA === bN && vB === aN);
+    });
+    if (!entry) return;
+
+    // Determine winner relative to the planned slot's side ordering
+    const [mid, slot] = entry;
+    const slotA = (slot.aName ?? '').trim().toLowerCase();
+    const slotWinner: 'a' | 'b' = slotA === aN ? winner : (winner === 'a' ? 'b' : 'a');
+
+    await propagateBracketWinner(mid, slotWinner);
+  } catch {
+    // silent
+  }
+}
