@@ -56,6 +56,7 @@
   let plannedMatches = $state<PlannedMatch[]>([]);
   let historyMatches = $state<MatchRecord[]>([]);
   let unsub: (() => void) | null = null;
+  let unsubMatches: (() => void) | null = null;
   // Error surface when the RTDB fetch stalls or the tournament key
   // can't be found. Prevents the print page from hanging on the
   // 'Loading…' text forever if something upstream is wrong.
@@ -151,6 +152,22 @@
         }
         historyMatches = matchesOut;
         historyReady = true;
+
+        // Live subscription for match results — scores update as matches complete.
+        const { onValue: onVal, query: q2, orderByChild: obc2, equalTo: eq2 } = await import('firebase/database');
+        const matchesQ = q2(ref(db, 'matches'), obc2('tournamentKey'), eq2(tournamentKey));
+        const unsubFn = onVal(matchesQ, (snap) => {
+          const raw = snap.val() as Record<string, Omit<MatchRecord, 'id'>> | null;
+          const out: MatchRecord[] = [];
+          if (raw) {
+            for (const [id, v] of Object.entries(raw)) {
+              if (!v || typeof v !== 'object') continue;
+              out.push({ id, ...v } as MatchRecord);
+            }
+          }
+          historyMatches = out;
+        });
+        unsubMatches = () => unsubFn();
       } catch (err) {
         loadError = err instanceof Error ? err.message : String(err);
         plannedReady = true;
@@ -176,6 +193,7 @@
     }, 8000);
     return () => {
       unsub?.();
+      unsubMatches?.();
       unsubT();
       unsubP();
       window.clearTimeout(timeoutId);
@@ -2145,7 +2163,7 @@
   /* ─── Per-match QR grid ─────────────────────────────────────── */
   .match-qr-grid {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 16rem), 1fr));
     gap: 1.2rem 1.5rem;
     margin-top: 1rem;
   }
@@ -2196,13 +2214,13 @@
     flex-shrink: 0;
   }
   .mqr-qr-holder {
-    width: 180px;
-    height: 180px;
+    width: min(180px, 100%);
+    aspect-ratio: 1;
     display: flex;
     align-items: center;
     justify-content: center;
   }
-  .mqr-qr-holder :global(svg) { width: 180px !important; height: 180px !important; }
+  .mqr-qr-holder :global(svg) { width: 100% !important; height: 100% !important; max-width: 180px; max-height: 180px; }
 
   @media print {
     :global(body) { background: #fff; margin: 0; padding: 0; }
