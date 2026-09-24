@@ -20,6 +20,8 @@
     saveMatchIdentity,
     saveMatchStart,
     clearMatchIdentity,
+    reconcileResultFromBoardLog,
+    type MatchRecord,
   } from '../lib/history';
   import { newMid, subscribeLive, deleteLive, type LiveRecord } from '../lib/live-sync';
   import { saveResume, loadResume, clearResume, type ResumeRecord } from '../lib/resume';
@@ -160,7 +162,7 @@
         plannedState = { kind: 'not-found', mid };
         return;
       }
-      const match = outcome.match;
+      let match = outcome.match;
       if (!match) {
         plannedState = { kind: 'not-found', mid };
         return;
@@ -181,6 +183,16 @@
         };
         return;
       }
+      // Resolve placeholder names (e.g. "G1 Winner 3") to actual player
+      // names from previous-round history before prefilling the form.
+      if (match.tournamentKey && match.round) {
+        const [resolvedA, resolvedB] = await Promise.all([
+          resolvePlaceholderName(match.aName ?? '', match.tournamentKey, match.round),
+          resolvePlaceholderName(match.bName ?? '', match.tournamentKey, match.round),
+        ]);
+        if (resolvedA !== match.aName) match = { ...match, aName: resolvedA };
+        if (resolvedB !== match.bName) match = { ...match, bName: resolvedB };
+      }
       applyPlannedToCfg(match);
       // Claim happens at start() — not here. Loading the setup screen
       // should not flip the bracket row to "scoring"; only actually
@@ -188,6 +200,67 @@
       plannedState = { kind: 'loaded', mid };
     })();
   });
+
+  /**
+   * Resolve a placeholder name like "G1 Winner 3" or "KO Winner 5" to
+   * the actual player name by looking up the previous round's history.
+   * Returns the original name unchanged if resolution fails or isn't needed.
+   */
+  async function resolvePlaceholderName(
+    name: string,
+    tournamentKey: string,
+    currentRoundName: string,
+  ): Promise<string> {
+    const m = name.match(/^(.+)\s+(?:Winner|Finalist)\s+(\d+)$/i);
+    if (!m) return name;
+    const slotN = parseInt(m[2]!, 10);
+    try {
+      // Load rounds to find the previous round
+      const rounds = await loadRounds(tournamentKey);
+      const currentIdx = rounds.findIndex((r) => r.name === currentRoundName);
+      if (currentIdx <= 0) return name;
+      const prevRound = rounds[currentIdx - 1]!;
+      // Load planned matches for the previous round to get the match at slotN
+      const prevPlanned = await loadAllPlannedByRound(tournamentKey, prevRound.key);
+      const srcMatch = prevPlanned.find((p) => p.matchOrder === slotN);
+      if (!srcMatch) return name;
+      // Look up history for this match
+      const { getDatabase, ref, query, orderByChild, equalTo, get } = await import('firebase/database');
+      const { firebaseApp } = await import('../lib/firebase');
+      const db = getDatabase(firebaseApp());
+      const snap = await get(
+        query(ref(db, 'matches'), orderByChild('tournamentKey'), equalTo(tournamentKey)),
+      );
+      const raw = snap.val() as Record<string, Omit<MatchRecord, 'id'>> | null;
+      if (!raw) return name;
+      const aN = srcMatch.aName?.trim().toLowerCase() ?? '';
+      const bN = srcMatch.bName?.trim().toLowerCase() ?? '';
+      for (const [id, v] of Object.entries(raw)) {
+        if (!v || typeof v !== 'object') continue;
+        const hA = (v.aName ?? '').trim().toLowerCase();
+        const hB = (v.bName ?? '').trim().toLowerCase();
+        const matches = (hA === aN && hB === bN) || (hA === bN && hB === aN);
+        if (!matches) continue;
+        const rec = reconcileResultFromBoardLog({ id, ...v } as MatchRecord);
+        const swapped = hA === bN;
+        const effectiveWinner = swapped
+          ? (rec.winner === 'a' ? 'b' : rec.winner === 'b' ? 'a' : rec.winner)
+          : rec.winner;
+        if (effectiveWinner === 'a') return srcMatch.aName ?? name;
+        if (effectiveWinner === 'b') return srcMatch.bName ?? name;
+        return name;
+      }
+      // No history found — fall back to planned result if present
+      if (srcMatch.completedAt && srcMatch.result) {
+        const r = srcMatch.result;
+        if (r.winner === 'a') return srcMatch.aName ?? name;
+        if (r.winner === 'b') return srcMatch.bName ?? name;
+      }
+    } catch {
+      // Swallow errors — placeholder is better than a broken screen
+    }
+    return name;
+  }
 
   /**
    * Populate cfg from a fetched PlannedMatch. Falls back to the
