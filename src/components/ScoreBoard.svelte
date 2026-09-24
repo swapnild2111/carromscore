@@ -1991,11 +1991,14 @@
       return;
     } else if (sideA.sets > sideB.sets) {
       // Set-lead but not clinched, and current set isn't tied-at-cap.
-      // Umpire ended early (e.g. below points/board cap). Award to
-      // the current set-leader.
+      // Umpire ended early without tapping SET+1 — the current set is
+      // awarded to the leader as a deciding set and must be credited in
+      // setWinners so the archive has a complete per-set log.
       winner = 'a';
+      awardExtraSet = true;
     } else if (sideB.sets > sideA.sets) {
       winner = 'b';
+      awardExtraSet = true;
     } else if (sideA.points > sideB.points) {
       // Sets tied — winner decided by current-set POINTS. The winning side
       // also gets credited with that decider set so the footer reads

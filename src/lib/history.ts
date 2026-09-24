@@ -605,22 +605,31 @@ export function reconcileResultFromBoardLog(record: MatchRecord): {
   // Include 'draw' slots so setWinners is trusted-and-preferred even
   // for multi-set records that include a drawn set. Only 'a' / 'b'
   // are tallied into setsA / setsB — a drawn set counts for neither.
+  //
+  // Safety valve: if boardLog shows more distinct sets than setWinners
+  // accounts for, setWinners is incomplete (missed SET+1 tap before End).
+  // In that case fall back to boardLog-derived set counts so the tally
+  // isn't silently understated. This heals legacy matches archived before
+  // the awardExtraSet→setWinners push fix (v4.2.2+).
   const storedSetWinners = Array.isArray(record.setWinners)
     ? record.setWinners.filter((w): w is 'a' | 'b' | 'draw' =>
         w === 'a' || w === 'b' || w === 'draw',
       )
     : [];
+  const setKeys = Array.from(bySet.keys()).sort((a, b) => a - b);
+  const lastKey = setKeys[setKeys.length - 1];
+  const boardLogSetCount = setKeys.length;
+  const setWinnersConsistent =
+    storedSetWinners.length > 0 && storedSetWinners.length >= boardLogSetCount;
   let setsA = 0;
   let setsB = 0;
-  if (storedSetWinners.length > 0) {
+  if (setWinnersConsistent) {
     for (const w of storedSetWinners) {
       if (w === 'a') setsA += 1;
       else if (w === 'b') setsB += 1;
     }
-  }
-  const setKeys = Array.from(bySet.keys()).sort((a, b) => a - b);
-  const lastKey = setKeys[setKeys.length - 1];
-  if (storedSetWinners.length === 0) {
+  } else {
+    // setWinners absent or shorter than boardLog set count — derive from scores
     for (const s of setKeys) {
       const g = bySet.get(s)!;
       if (g.a > g.b) setsA += 1;
