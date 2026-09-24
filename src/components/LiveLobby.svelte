@@ -32,6 +32,7 @@
   import { subscribePlayers, subscribeStore } from '../lib/players';
   import { APP_VERSION, releaseUrl } from '../lib/version';
   import LiveScoreboardView from './LiveScoreboardView.svelte';
+  import MatchPopup from './MatchPopup.svelte';
   import OverlayBoard from './OverlayBoard.svelte';
   import SignInButton from './SignInButton.svelte';
   // FeedbackPopup removed — v3.4.8 merged the lobby footer's
@@ -312,7 +313,7 @@
   // live view. Fixed 2026-08-11.
   type PopupKind = { source: 'live'; mid: string } | { source: 'match'; matchId: string };
   let openPopup = $state<PopupKind | null>(null);
-  let dialog: HTMLDialogElement | null = $state(null);
+  // dialog element managed by MatchPopup component via open prop
   // Deep-link support: /live/?mid=xxx auto-opens the popup for that
   // match. Cleared once the popup opens (or when the user manually
   // closes it) so subsequent updates to `entries` don't re-open it.
@@ -698,17 +699,11 @@
   });
 
   $effect(() => {
-    if (!dialog) return;
     if (openPopup) {
-      if (!dialog.open) {
-        dialog.showModal();
-        // Push a history entry so the mobile back button closes the
-        // popup instead of navigating away from /live/ and landing on
-        // a blank page (Svelte remounting with only the header visible).
-        window.history.pushState({ popupOpen: true }, '');
-      }
-    } else {
-      if (dialog.open) dialog.close();
+      // Push a history entry so the mobile back button closes the
+      // popup instead of navigating away from /live/ and landing on
+      // a blank page (Svelte remounting with only the header visible).
+      window.history.pushState({ popupOpen: true }, '');
     }
   });
 
@@ -866,17 +861,6 @@
   function closePopup() {
     openPopup = null;
     resetSelfDeleteState();
-  }
-
-  function onDialogClick(e: MouseEvent) {
-    if (!dialog) return;
-    const rect = dialog.getBoundingClientRect();
-    const outside =
-      e.clientX < rect.left ||
-      e.clientX > rect.right ||
-      e.clientY < rect.top ||
-      e.clientY > rect.bottom;
-    if (outside) closePopup();
   }
 
   // Live cards (ongoing matches). Filters out records that haven't
@@ -1929,131 +1913,112 @@
   </div>
 </main>
 
-<dialog bind:this={dialog} class="sheet" onclick={onDialogClick} onclose={closePopup}>
-  {#if popupRecord}
-    <div class="sheet-inner" role="document">
-      <header class="sheet-hdr">
-        <!--
-          Header title stacks on two rows when there's a tournament
-          or round tag: top row = LIVE/Ended + mode (always short);
-          bottom row = tournament + round tags. Prevents the long
-          single-line title from pushing the Share/OBS action
-          buttons off the right edge on phones (reported 2026-08-20:
-          OBS button hidden behind viewport clip when the popup
-          opened for a live match under a tournament with rounds).
-        -->
-        <div class="sheet-title-wrap">
-          <span class="sheet-title">
-            {#if popupIsEnded}Ended · {:else}<span class="sheet-live"><span class="dot" aria-hidden="true"></span>LIVE · </span>{/if}{popupMode}
-          </span>
-          {#if popupTournament || popupRound}
-            <span class="sheet-subtitle">
-              {#if popupTournament}<span class="sheet-tour">{popupTournament}</span>{/if}{#if popupTournament && popupRound} · {/if}{#if popupRound}<span class="sheet-round">{popupRound}</span>{/if}
-            </span>
-          {/if}
-        </div>
-        <div class="sheet-actions">
-          {#if openPopup?.source === 'live'}
-            <button
-              type="button"
-              class="sheet-share"
-              onclick={copyShareUrl}
-              aria-label="Copy match URL"
-              title="Copy the match URL to share with viewers"
-            >
-              {#if copiedKind === 'share'}<span aria-hidden="true">✓</span> Copied{:else}<span aria-hidden="true">⧉</span> Share{/if}
-            </button>
-            <button
-              type="button"
-              class="sheet-share sheet-obs"
-              onclick={copyObsUrl}
-              aria-label="Copy OBS overlay URL"
-              title="Copy the transparent-overlay URL for OBS or Prism Browser Source"
-            >
-              {#if copiedKind === 'obs'}<span aria-hidden="true">✓</span> Copied{:else}<span aria-hidden="true">📺</span> OBS{/if}
-            </button>
-          {:else if openPopup?.source === 'match'}
-            <!--
-              History-match popup Share button (v3.4.12). Copies a
-              deep-link URL that opens the same popup for anyone who
-              clicks it. Reported 2026-08-30: after History switched
-              to table layout the per-card 🔗 button disappeared, so
-              there was no way to share a specific archived match.
-              This puts a Share affordance back in the popup header.
-            -->
-            <button
-              type="button"
-              class="sheet-share"
-              onclick={copyMatchShareUrl}
-              aria-label="Copy match URL"
-              title="Copy the match URL to share"
-            >
-              {#if copiedKind === 'share'}<span aria-hidden="true">✓</span> Copied{:else}<span aria-hidden="true">⧉</span> Share{/if}
-            </button>
-          {/if}
-          <button type="button" class="sheet-close" onclick={closePopup} aria-label="Close">✕</button>
-        </div>
-      </header>
-      <div class="sheet-body">
-        <LiveScoreboardView record={popupRecord} />
-        {#if openPopup?.source === 'match'}
-          {@const rec = openMatchRecord}
-          {#if rec}
-            {@const owns = !!myUid && rec.createdBy === myUid}
-            {#if rec.createdBy}
-              <p class="recorded-by">
-                Recorded by <strong>{rec.createdByName || 'Anonymous'}</strong>
-              </p>
-            {/if}
-            {#if owns}
-            <div class="self-delete-zone">
-              {#if !selfDeleteConfirm}
-                <button
-                  type="button"
-                  class="self-delete-btn"
-                  onclick={() => (selfDeleteConfirm = true)}
-                >
-                  <span aria-hidden="true">🗑</span> Delete this match
-                </button>
-                <p class="self-delete-hint">You recorded this match. Removing it takes it out of History for everyone.</p>
-              {:else}
-                <p class="self-delete-prompt">Type <strong>DELETE</strong> to confirm removal. This can't be undone.</p>
-                <div class="self-delete-form">
-                  <input
-                    type="text"
-                    class="self-delete-input"
-                    bind:value={selfDeleteInput}
-                    placeholder="DELETE"
-                    aria-label="Type DELETE to confirm"
-                    autocomplete="off"
-                    autocapitalize="characters"
-                    disabled={selfDeleteBusy}
-                  />
-                  <button
-                    type="button"
-                    class="self-delete-cancel"
-                    onclick={resetSelfDeleteState}
-                    disabled={selfDeleteBusy}
-                  >Cancel</button>
-                  <button
-                    type="button"
-                    class="self-delete-confirm"
-                    onclick={() => commitSelfDelete(rec.id)}
-                    disabled={selfDeleteBusy || selfDeleteInput.trim().toUpperCase() !== 'DELETE'}
-                  >{selfDeleteBusy ? 'Deleting…' : 'Delete'}</button>
-                </div>
-                {#if selfDeleteError}
-                  <p class="self-delete-error">{selfDeleteError}</p>
-                {/if}
-              {/if}
-            </div>
-            {/if}
-          {/if}
+<MatchPopup
+  record={popupRecord}
+  open={openPopup !== null}
+  isEnded={popupIsEnded}
+  modeLabel={popupMode}
+  tournament={popupTournament}
+  round={popupRound}
+  onrequestclose={closePopup}
+>
+  {#snippet actions()}
+    {#if openPopup?.source === 'live'}
+      <button
+        type="button"
+        class="sheet-share"
+        onclick={copyShareUrl}
+        aria-label="Copy match URL"
+        title="Copy the match URL to share with viewers"
+      >
+        {#if copiedKind === 'share'}<span aria-hidden="true">✓</span> Copied{:else}<span aria-hidden="true">⧉</span> Share{/if}
+      </button>
+      <button
+        type="button"
+        class="sheet-share sheet-obs"
+        onclick={copyObsUrl}
+        aria-label="Copy OBS overlay URL"
+        title="Copy the transparent-overlay URL for OBS or Prism Browser Source"
+      >
+        {#if copiedKind === 'obs'}<span aria-hidden="true">✓</span> Copied{:else}<span aria-hidden="true">📺</span> OBS{/if}
+      </button>
+    {:else if openPopup?.source === 'match'}
+      <!--
+        History-match popup Share button (v3.4.12). Copies a
+        deep-link URL that opens the same popup for anyone who
+        clicks it. Reported 2026-08-30: after History switched
+        to table layout the per-card 🔗 button disappeared, so
+        there was no way to share a specific archived match.
+        This puts a Share affordance back in the popup header.
+      -->
+      <button
+        type="button"
+        class="sheet-share"
+        onclick={copyMatchShareUrl}
+        aria-label="Copy match URL"
+        title="Copy the match URL to share"
+      >
+        {#if copiedKind === 'share'}<span aria-hidden="true">✓</span> Copied{:else}<span aria-hidden="true">⧉</span> Share{/if}
+      </button>
+    {/if}
+  {/snippet}
+  {#snippet children()}
+    {#if openPopup?.source === 'match'}
+      {@const rec = openMatchRecord}
+      {#if rec}
+        {@const owns = !!myUid && rec.createdBy === myUid}
+        {#if rec.createdBy}
+          <p class="recorded-by">
+            Recorded by <strong>{rec.createdByName || 'Anonymous'}</strong>
+          </p>
         {/if}
-      </div>
-    </div>
-  {/if}
-</dialog>
+        {#if owns}
+        <div class="self-delete-zone">
+          {#if !selfDeleteConfirm}
+            <button
+              type="button"
+              class="self-delete-btn"
+              onclick={() => (selfDeleteConfirm = true)}
+            >
+              <span aria-hidden="true">🗑</span> Delete this match
+            </button>
+            <p class="self-delete-hint">You recorded this match. Removing it takes it out of History for everyone.</p>
+          {:else}
+            <p class="self-delete-prompt">Type <strong>DELETE</strong> to confirm removal. This can't be undone.</p>
+            <div class="self-delete-form">
+              <input
+                type="text"
+                class="self-delete-input"
+                bind:value={selfDeleteInput}
+                placeholder="DELETE"
+                aria-label="Type DELETE to confirm"
+                autocomplete="off"
+                autocapitalize="characters"
+                disabled={selfDeleteBusy}
+              />
+              <button
+                type="button"
+                class="self-delete-cancel"
+                onclick={resetSelfDeleteState}
+                disabled={selfDeleteBusy}
+              >Cancel</button>
+              <button
+                type="button"
+                class="self-delete-confirm"
+                onclick={() => commitSelfDelete(rec.id)}
+                disabled={selfDeleteBusy || selfDeleteInput.trim().toUpperCase() !== 'DELETE'}
+              >{selfDeleteBusy ? 'Deleting…' : 'Delete'}</button>
+            </div>
+            {#if selfDeleteError}
+              <p class="self-delete-error">{selfDeleteError}</p>
+            {/if}
+          {/if}
+        </div>
+        {/if}
+      {/if}
+    {/if}
+  {/snippet}
+</MatchPopup>
 
 {#if editing}
   <!--
@@ -3084,189 +3049,9 @@
   .card-ended.winner-b .digit-a { color: var(--fg, #f5f5f5); }
   .card-ended.winner-b .digit-b { color: var(--accent, #ffd54a); }
 
-  /* Centred popup. Sits at viewport centre with a mild margin from
-     each edge. Constrained by explicit max-width AND max-height so
-     it never reaches the screen edge on any device. On landscape or
-     wide screens the max-width caps it at 560px; on portrait phones
-     the calc respects safe-area insets so the popup stays inside
-     the notch / rounded corners. */
-  dialog.sheet {
-    padding: 0;
-    border: none;
-    margin: auto;
-    background: transparent;
-    color: inherit;
-    box-sizing: border-box;
-    width: min(560px, calc(100vw - 2rem - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px)));
-    max-width: 100%;
-    max-height: min(90dvh, 44rem);
-    position: fixed;
-    inset: 0;
-  }
-  dialog.sheet::backdrop {
-    /* Higher opacity than the earlier 0.65 (reported 2026-08-29:
-       history-card numbers behind the popup were still legible on
-       mobile Chrome, mixing visually with the popup content as the
-       user scrolled). Combined with a stronger blur, the lobby is
-       now clearly a secondary surface. */
-    background: rgba(0, 0, 0, 0.88);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-  }
-  .sheet-inner {
-    background: #0f0f0f;
-    border: 1px solid rgba(255, 213, 74, 0.55);
-    border-radius: 1rem;
-    padding: 0.85rem 1rem 1.1rem;
-    max-height: min(90dvh, 44rem);
-    overflow-y: auto;
-    /* Explicit overflow-x: hidden so the box-shadow horizontal-
-       spread applied to sticky bands (`.hdr`, `.board`) is clipped
-       by sheet-inner's border-radius. Without this, the shadow bg
-       leaked past the rounded gold border on scroll (reported
-       2026-08-30) because overflow-y: auto only clips the Y axis. */
-    overflow-x: hidden;
-    /* sheet-inner is the scroll container. Names pill and top-row
-       summary inside LiveScoreboardView are made position: sticky so
-       they pin to the top while per-set tables scroll under them.
-       sheet-hdr uses sticky too so the "Ended · Singles" line + close
-       button stay pinned. */
-    position: relative;
-    /* Gold glow ring + hard drop shadow so the popup pops off the
-       dimmed lobby behind. Two shadows: the inner amber halo carries
-       the "match spotlight" feel; the outer black shadow anchors the
-       popup on darker surfaces. */
-    box-shadow:
-      0 0 0 1px rgba(255, 213, 74, 0.35),
-      0 0 32px rgba(255, 213, 74, 0.22),
-      0 18px 60px rgba(0, 0, 0, 0.75);
-    animation: fadeIn 0.18s ease-out;
-  }
-  @keyframes fadeIn {
-    from { transform: scale(0.96); opacity: 0; }
-    to   { transform: scale(1);    opacity: 1; }
-  }
-  .sheet-hdr {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0.5rem 0 0.75rem;
-    margin: 0 -1rem 0.5rem;
-    padding-left: 1rem;
-    padding-right: 1rem;
-    border-bottom: 1px solid #1e1e1e;
-    background: #0f0f0f;
-    position: sticky;
-    top: -0.85rem; /* offset the sheet-inner top padding so the header sits flush */
-    z-index: 3;
-  }
-  /*
-   * Sticky-band bridge (v3.4.12). The header, names pill, and
-   * score summary each pin at slightly different rem offsets while
-   * scrolling. Any mismatch between one band's rendered bottom edge
-   * and the next band's sticky `top` produces a thin horizontal gap
-   * where the per-set table's numbers slide through visibly
-   * (reported 2026-08-30). Two fixes stacked:
-   *   1) Names pill and summary pin ABUTTING the previous band with
-   *      a small negative-overlap so no gap can appear on any device.
-   *   2) The sheet-inner itself gets a ::before pseudo-element that
-   *      layers behind the sticky bands, painting a solid strip
-   *      between sheet-hdr and .board so even a browser-side
-   *      subpixel rounding can't leak the content behind.
-   * Names pill (.hdr) and top-row summary (.board) inside
-   * LiveScoreboardView pinned so long per-set tables scroll behind.
-   */
-  /*
-   * Sticky policy in the recap popup (v3.4.12 rewrite).
-   *
-   * Prior versions tried to keep BOTH the names pill (.hdr) and the
-   * DSEG7 score panel (.board) sticky at two different top offsets.
-   * That approach broke on long names — .hdr's rendered height
-   * exceeded the gap between the two top values (2.5rem), so on
-   * scroll the two bands visually overlapped inside the popup
-   * (reported 2026-08-30).
-   *
-   * New policy: only the sheet-hdr ("Ended · Singles / ✕" row)
-   * stays sticky. The names pill and score panel scroll away as one
-   * unit with the per-set tables below them. If the umpire wants to
-   * see names + score again, they scroll back up. This eliminates
-   * the overlap class of bug entirely by removing sticky pinning
-   * on .hdr / .board, and matches how spectator popups on most
-   * sports apps behave.
-   */
-  .sheet-inner :global(.hdr),
-  .sheet-inner :global(.board) {
-    position: static;
-    background: #0f0f0f;
-  }
-  /* Two-row title container. First row = LIVE/Ended + mode.
-     Second row = tournament + round tags when present. min-width:0
-     lets the title area shrink instead of pushing the actions
-     off-screen when the tournament name is long. */
-  .sheet-title-wrap {
-    display: flex;
-    flex-direction: column;
-    gap: 0.15rem;
-    min-width: 0;
-    flex: 1 1 auto;
-  }
-  .sheet-title {
-    color: var(--muted, #9aa0a6);
-    font-size: 0.75rem;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    display: flex;
-    align-items: center;
-    gap: 0.25rem;
-  }
-  /* Second-row tags (tournament + round). Wraps within its own row,
-     never crowds the actions strip. Softer weight so mode stays the
-     primary read. */
-  .sheet-subtitle {
-    color: var(--muted, #9aa0a6);
-    font-size: 0.75rem;
-    line-height: 1.25;
-    display: block;
-    overflow-wrap: anywhere;
-  }
-  .sheet-live {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-    color: #ef5350;
-  }
-  .sheet-live .dot {
-    display: inline-block;
-    width: 0.5rem;
-    height: 0.5rem;
-    border-radius: 50%;
-    background: #ef5350;
-    animation: pulse 1.6s ease-in-out infinite;
-  }
-  .sheet-tour {
-    color: var(--gold, #ffd54f);
-    letter-spacing: 0.02em;
-    text-transform: none;
-    font-weight: 600;
-  }
-  /* Round tag renders after the tournament, softer weight so the
-     tournament stays primary. Reported 2026-08-19: the popup header
-     showed only the tournament; the round tag was missing. */
-  .sheet-round {
-    color: rgba(255, 213, 74, 0.75);
-    letter-spacing: 0.02em;
-    text-transform: none;
-    font-weight: 500;
-  }
-  .sheet-actions {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    /* Never shrink — the Share / OBS / Close buttons must stay
-       reachable no matter how long the tournament / round tags are. */
-    flex-shrink: 0;
-  }
+  /* Share / OBS action buttons inside the popup header.
+     Styled here so LiveLobby's scoped CSS applies to the snippets
+     it passes to MatchPopup via the `actions` slot. */
   .sheet-share {
     background: transparent;
     border: 1px solid rgba(255, 213, 74, 0.4);
@@ -3287,22 +3072,6 @@
     background: rgba(255, 213, 74, 0.08);
     border-color: rgba(255, 213, 74, 0.7);
   }
-  .sheet-close {
-    background: transparent;
-    border: 1px solid #262626;
-    color: var(--fg, #f5f5f5);
-    width: 2rem;
-    height: 2rem;
-    border-radius: 50%;
-    font-size: 1rem;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    transition: background 0.15s, border-color 0.15s;
-  }
-  .sheet-close:hover { background: #1a1a1a; border-color: #333; }
-
   /* Small attribution line above the self-delete area. Only visible
      when the record carries a createdBy uid. displayName is the write-
      time Google profile name (denormalised onto the match record),

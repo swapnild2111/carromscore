@@ -32,8 +32,7 @@
     normalizeKey,
   } from '../../lib/tournaments';
   import { BRACKET_ROUND_RX } from '../../lib/bracket';
-  import LiveScoreboardView from '../LiveScoreboardView.svelte';
-  import { reconcileResultFromBoardLog } from '../../lib/history';
+  import MatchPopup from '../MatchPopup.svelte';
   // BarChart removed v3.4.12 — the two horizontal bar rows above the
   // Leaderboard were redundant with the Leaderboard table itself.
   // Reports now leans on sortable + filterable tables mirroring the
@@ -564,39 +563,15 @@
   let rrMSortKey = $state<MSortKey>('endedAt');
   let rrMSortDir = $state<'asc' | 'desc'>('desc');
 
-  // Match detail popup — reuses the same LiveScoreboardView as the history tab
+  // Match detail popup — delegates to MatchPopup component
   let detailMatchRecord = $state<MatchRecord | null>(null);
 
   function openMatchDetail(r: ReportRow): void {
     detailMatchRecord = matches.find((m) => m.id === r._matchId) ?? null;
   }
 
-  function matchAsLiveRecord(m: MatchRecord): import('../../lib/live-sync').LiveRecord {
-    const rec = reconcileResultFromBoardLog(m);
-    const log = (m.boardLog ?? []).filter((e) => !!e && typeof e === 'object');
-    const lastSetIdx = log.reduce((max, e) => Math.max(max, e.set ?? 0), -1);
-    const lastSetBoards = log.filter((e) => (e.set ?? 0) === lastSetIdx).length;
-    const boardDisplay = lastSetBoards > 0 ? lastSetBoards : rec.boardCount;
-    return {
-      matchId: m.id,
-      updatedAt: m.endedAt ?? 0,
-      meta: {
-        mode: m.mode,
-        playerA: m.mode === 'doubles' ? `${m.aName ?? ''} & ${m.a2Name ?? ''}` : (m.aName ?? ''),
-        playerB: m.mode === 'doubles' ? `${m.bName ?? ''} & ${m.b2Name ?? ''}` : (m.bName ?? ''),
-        bestOf: m.cfg?.bestOf ?? 1,
-        pointsTarget: m.cfg?.pointsTarget ?? 25,
-        maxBoards: m.cfg?.maxBoards ?? 8,
-      },
-      liveState: {
-        sideA: { points: rec.finalPointsA, sets: rec.setsA },
-        sideB: { points: rec.finalPointsB, sets: rec.setsB },
-        board: boardDisplay,
-        winner: rec.winner === 'a' ? 'a' : rec.winner === 'b' ? 'b' : null,
-        currentBreak: null,
-        queenHolder: null,
-      },
-    };
+  function closeDetail(): void {
+    detailMatchRecord = null;
   }
   function toggleRRLBSort(k: LBSortKey): void {
     if (rrLBSortKey === k) {
@@ -1581,21 +1556,11 @@
   </div>
 </section>
 
-{#if detailMatchRecord}
-  {@const popupRecord = matchAsLiveRecord(detailMatchRecord)}
-  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-  <div class="match-detail-backdrop" onclick={() => (detailMatchRecord = null)}>
-    <div class="match-detail-sheet" onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Match detail">
-      <header class="match-detail-sheet-hdr">
-        <span class="match-detail-sheet-title">Match detail</span>
-        <button class="sheet-close" onclick={() => (detailMatchRecord = null)} aria-label="Close">✕</button>
-      </header>
-      <div class="match-detail-sheet-body">
-        <LiveScoreboardView record={popupRecord} />
-      </div>
-    </div>
-  </div>
-{/if}
+<MatchPopup
+  matchRecord={detailMatchRecord}
+  open={detailMatchRecord !== null}
+  onrequestclose={closeDetail}
+/>
 
 <style>
   .reports {
@@ -2512,57 +2477,6 @@
     background: rgba(245, 166, 35, 0.07);
   }
 
-  /* Match detail popup — sheet over backdrop */
-  .match-detail-backdrop {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.6);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1000;
-    padding: 1rem;
-  }
-  .match-detail-sheet {
-    background: var(--surface, #1a1d2e);
-    border: 1px solid var(--border, #2d3344);
-    border-radius: 12px;
-    max-width: 520px;
-    width: 100%;
-    display: flex;
-    flex-direction: column;
-    max-height: 90vh;
-    overflow: hidden;
-  }
-  .match-detail-sheet-hdr {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0.75rem 1rem;
-    border-bottom: 1px solid var(--border, #2d3344);
-    flex-shrink: 0;
-  }
-  .match-detail-sheet-title {
-    font-size: 0.8rem;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    opacity: 0.5;
-  }
-  .match-detail-sheet-body {
-    overflow-y: auto;
-    padding: 0.5rem 0;
-  }
-  .sheet-close {
-    background: transparent;
-    border: none;
-    font-size: 1rem;
-    cursor: pointer;
-    color: inherit;
-    opacity: 0.6;
-    padding: 0.25rem 0.5rem;
-    line-height: 1;
-  }
-  .sheet-close:hover { opacity: 1; }
   .winner-cell { padding: 0.3rem !important; }
   .winner-tag {
     display: inline-block;
