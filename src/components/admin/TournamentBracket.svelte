@@ -469,6 +469,59 @@
     else flash('Slot reset to ready');
   }
 
+  // Build a map from roundKey → matchOrder → winner name, combining
+  // planned results and history. Used to resolve placeholder names.
+  const winnerByRoundOrder = $derived.by(() => {
+    const map = new Map<string, Map<number, string>>();
+    // From planned records (QR-scanned matches have completedAt + result)
+    for (const m of plannedMatches) {
+      if (!m.completedAt || !m.result || !m.roundKey) continue;
+      const order = m.matchOrder ?? 0;
+      const winner = m.result.winner === 'a' ? m.aName : m.result.winner === 'b' ? m.bName : null;
+      if (!winner) continue;
+      if (!map.has(m.roundKey)) map.set(m.roundKey, new Map());
+      map.get(m.roundKey)!.set(order, winner);
+    }
+    // From history matches (matches played without QR scan)
+    for (const h of historyMatches) {
+      const round = rounds.find((r) => r.name === h.round);
+      if (!round) continue;
+      const planned = plannedMatches.find(
+        (p) => p.roundKey === round.key &&
+          ((p.aName?.trim().toLowerCase() === h.aName?.trim().toLowerCase() &&
+            p.bName?.trim().toLowerCase() === h.bName?.trim().toLowerCase()) ||
+           (p.aName?.trim().toLowerCase() === h.bName?.trim().toLowerCase() &&
+            p.bName?.trim().toLowerCase() === h.aName?.trim().toLowerCase()))
+      );
+      if (!planned || planned.matchOrder == null) continue;
+      if (map.get(round.key)?.has(planned.matchOrder)) continue; // planned result takes precedence
+      const rec = reconcileResultFromBoardLog(h);
+      const swapped = h.aName?.trim().toLowerCase() === planned.bName?.trim().toLowerCase();
+      const effectiveWinner = swapped
+        ? (rec.winner === 'a' ? 'b' : rec.winner === 'b' ? 'a' : rec.winner)
+        : rec.winner;
+      const winnerName = effectiveWinner === 'a' ? planned.aName : effectiveWinner === 'b' ? planned.bName : null;
+      if (!winnerName) continue;
+      if (!map.has(round.key)) map.set(round.key, new Map());
+      map.get(round.key)!.set(planned.matchOrder, winnerName);
+    }
+    return map;
+  });
+
+  // Resolve a placeholder name like "G1 Finalist 3" to the actual winner.
+  // Falls back to the placeholder if the previous round isn't done yet.
+  function resolveSlotName(name: string, currentRoundKey: string): string {
+    const m = name.match(/^(.+)\s+Finalist\s+(\d+)$/i);
+    if (!m) return name;
+    const finalistN = parseInt(m[2]!, 10);
+    // Find the previous round (the one before currentRoundKey in rounds order)
+    const currentIdx = rounds.findIndex((r) => r.key === currentRoundKey);
+    if (currentIdx <= 0) return name;
+    const prevRound = rounds[currentIdx - 1]!;
+    const winner = winnerByRoundOrder.get(prevRound.key)?.get(finalistN);
+    return winner ?? name;
+  }
+
   // Find a history match for a planned slot by name-matching within
   // the same round. Handles matches played without a QR scan (no
   // completedAt on the planned record).
@@ -712,10 +765,10 @@
                       {/if}
                     </td>
                     <td>
-                      {resolvedName(m.aResolvedId, m.aName)}{#if m.a2Name} + {resolvedName(m.a2ResolvedId, m.a2Name)}{/if}
+                      {resolveSlotName(resolvedName(m.aResolvedId, m.aName), m.roundKey ?? '')}{#if m.a2Name} + {resolveSlotName(resolvedName(m.a2ResolvedId, m.a2Name), m.roundKey ?? '')}{/if}
                     </td>
                     <td>
-                      {resolvedName(m.bResolvedId, m.bName)}{#if m.b2Name} + {resolvedName(m.b2ResolvedId, m.b2Name)}{/if}
+                      {resolveSlotName(resolvedName(m.bResolvedId, m.bName), m.roundKey ?? '')}{#if m.b2Name} + {resolveSlotName(resolvedName(m.b2ResolvedId, m.b2Name), m.roundKey ?? '')}{/if}
                     </td>
                     <td class="col-status">
                       {#if statusOf(m) === 'complete'}
