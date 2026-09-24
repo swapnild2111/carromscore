@@ -71,7 +71,7 @@
       });
       const { getDatabase, ref, query, orderByChild, equalTo, onValue } = await import('firebase/database');
       const { firebaseApp } = await import('../../lib/firebase');
-      const db = getDatabase(firebaseApp);
+      const db = getDatabase(firebaseApp());
       const matchesQ = query(ref(db, 'matches'), orderByChild('tournamentKey'), equalTo(tournament.key));
       const unsubFn = onValue(matchesQ, (snap) => {
         const raw = snap.val() as Record<string, Omit<MatchRecord, 'id'>> | null;
