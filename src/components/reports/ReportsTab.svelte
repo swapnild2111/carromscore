@@ -32,6 +32,7 @@
     normalizeKey,
   } from '../../lib/tournaments';
   import { BRACKET_ROUND_RX } from '../../lib/bracket';
+  import MatchPopup from '../MatchPopup.svelte';
   // BarChart removed v3.4.12 — the two horizontal bar rows above the
   // Leaderboard were redundant with the Leaderboard table itself.
   // Reports now leans on sortable + filterable tables mirroring the
@@ -561,6 +562,17 @@
   let rrLBSortDir = $state<'asc' | 'desc'>('asc');
   let rrMSortKey = $state<MSortKey>('endedAt');
   let rrMSortDir = $state<'asc' | 'desc'>('desc');
+
+  // Match detail popup — delegates to MatchPopup component
+  let detailMatchRecord = $state<MatchRecord | null>(null);
+
+  function openMatchDetail(r: ReportRow): void {
+    detailMatchRecord = matches.find((m) => m.id === r._matchId) ?? null;
+  }
+
+  function closeDetail(): void {
+    detailMatchRecord = null;
+  }
   function toggleRRLBSort(k: LBSortKey): void {
     if (rrLBSortKey === k) {
       rrLBSortDir = rrLBSortDir === 'asc' ? 'desc' : 'asc';
@@ -1295,7 +1307,7 @@
         </thead>
         <tbody>
           {#each sortedMatches as r (r._matchId)}
-            <tr>
+            <tr class="match-row-clickable" onclick={() => openMatchDetail(r)} title="Tap to see set-by-set breakdown">
               <td>{r.endedAt}</td>
               <td>{r.mode}</td>
               <td class="col-name">{r.sideA}</td>
@@ -1497,7 +1509,7 @@
                                   </thead>
                                   <tbody>
                                     {#each rrMatchesSorted as r (r._matchId)}
-                                      <tr>
+                                      <tr class="match-row-clickable" onclick={() => openMatchDetail(r)} title="Tap to see set-by-set breakdown">
                                         <td>{r.endedAt}</td>
                                         <td>{r.mode}</td>
                                         <td class="col-name">{r.sideA}</td>
@@ -1543,6 +1555,12 @@
     <span class="rep-print-footer-brand">carromscore.app</span>
   </div>
 </section>
+
+<MatchPopup
+  matchRecord={detailMatchRecord}
+  open={detailMatchRecord !== null}
+  onrequestclose={closeDetail}
+/>
 
 <style>
   .reports {
@@ -2452,6 +2470,13 @@
   .matches-tbl {
     min-width: 620px;
   }
+  .match-row-clickable {
+    cursor: pointer;
+  }
+  .match-row-clickable:hover td {
+    background: rgba(245, 166, 35, 0.07);
+  }
+
   .winner-cell { padding: 0.3rem !important; }
   .winner-tag {
     display: inline-block;
