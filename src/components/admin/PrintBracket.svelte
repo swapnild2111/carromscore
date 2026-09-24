@@ -1075,6 +1075,25 @@
           }
         }
 
+        // Resolve who should appear in a not-yet-played slot by looking up the
+        // winner of the preceding round match that feeds into this slot position.
+        // feedSide: 'a' = top feeder into this slot, 'b' = bottom feeder.
+        function resolveAdvancer(roundIdx: number, matchIdx: number, feedSide: 'a' | 'b'): string | null {
+          if (roundIdx === 0) return null;
+          const prevRound = meta.rounds[roundIdx - 1]!;
+          const prevKey   = groupRoundKey(meta.name, roundIdx - 1, totalRounds);
+          const prevResults: MatchInfo[] = gData.matchMap.get(prevKey) ?? [];
+          const feedRatio = prevRound.length / rMatches.length;
+          const firstSrc  = Math.round(matchIdx * feedRatio);
+          const lastSrc   = Math.round((matchIdx + 1) * feedRatio) - 1;
+          // top feeder → firstSrc slot; bottom feeder → lastSrc slot
+          const srcIdx = feedSide === 'a' ? firstSrc : lastSrc;
+          const src = prevResults[srcIdx];
+          if (!src?.isDone || !src.winner) return null;
+          const name = src.winner === 'a' ? src.aName : src.bName;
+          return name ? clip(esc(name)) : null;
+        }
+
         // ── Match slots (identical to buildFlightBracketSVG slot drawing) ──
         for (let mi = 0; mi < rMatches.length; mi++) {
           const [aN, bN] = rMatches[mi]!;
@@ -1091,9 +1110,14 @@
           const winnerA  = isDone && res?.winner === 'a';
           const winnerB  = isDone && res?.winner === 'b';
 
-          // Use resolved names when available
-          const aName = isDone && res?.aName ? clip(esc(res.aName)) : aLabel;
-          const bName = isDone && res?.bName ? clip(esc(res.bName)) : bLabel;
+          // Use resolved names when available: actual match names when done,
+          // or winner name propagated from the previous round when not yet played.
+          const aName = isDone && res?.aName
+            ? clip(esc(res.aName))
+            : (resolveAdvancer(ri, mi, 'a') ?? aLabel);
+          const bName = isDone && res?.bName
+            ? clip(esc(res.bName))
+            : (resolveAdvancer(ri, mi, 'b') ?? bLabel);
 
           // Exact same text style as buildFlightBracketSVG
           const aFill    = winnerA ? '#000' : '#333';
