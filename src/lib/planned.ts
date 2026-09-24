@@ -535,7 +535,6 @@ export async function propagateBracketWinner(
   if (!completedMid || winner === 'draw') return;
   try {
     const { getDatabase, ref, get, update } = await import('firebase/database');
-    const { loadRounds } = await import('./tournaments');
     const db = getDatabase(firebaseApp());
 
     // 1. Load the completed slot
@@ -549,12 +548,17 @@ export async function propagateBracketWinner(
     const winnerName    = winner === 'a' ? slot.aName    : slot.bName;
     const winnerResolved = winner === 'a' ? slot.aResolvedId : slot.bResolvedId;
 
-    // 3. Find the next round by order
-    const rounds = loadRounds(tournamentKey);
-    const thisRound = rounds.find((r) => r.key === roundKey);
+    // 3. Find the next round by order — fetch directly from Firebase because
+    //    the in-memory tournament store is not loaded in the ScoreBoard context.
+    const roundsSnap = await get(ref(db, `tournaments/${tournamentKey}/rounds`));
+    const roundsRaw = roundsSnap.val() as Record<string, { order?: number; name?: string }> | null;
+    if (!roundsRaw) return;
+    const thisRound = Object.entries(roundsRaw).find(([k]) => k === roundKey);
     if (!thisRound) return;
-    const nextRound = rounds.find((r) => r.order === thisRound.order + 1);
-    if (!nextRound) return; // Final has no next round
+    const thisOrder = thisRound[1].order ?? 0;
+    const nextEntry = Object.entries(roundsRaw).find(([, v]) => v.order === thisOrder + 1);
+    if (!nextEntry) return; // Final has no next round
+    const nextRoundKey = nextEntry[0];
 
     // 4. Target slot: ceil(matchOrder / 2), side A if matchOrder odd, B if even
     const targetOrder = Math.ceil(matchOrder / 2);
@@ -567,7 +571,7 @@ export async function propagateBracketWinner(
     if (!all) return;
     const entry = Object.entries(all).find(
       ([, v]) =>
-        v?.roundKey === nextRound.key &&
+        v?.roundKey === nextRoundKey &&
         v?.matchOrder === targetOrder,
     );
     if (!entry) return;

@@ -422,6 +422,11 @@
   let plannedCountByRound = $state<Record<string, number>>({});
   let assignedCountByKey = $state<Record<string, number>>({});
   let unsubPlannedGlobal: (() => void) | null = null;
+  // Raw planned records (needed to cross-check against history matches)
+  let plannedRaw = $state<Record<string, { tournamentKey?: string; roundKey?: string; round?: string; completedAt?: number; aName?: string; bName?: string }>>({});
+  // Set of played name-pairs per tournament+round: key = `${tKey}/${round}/${nameA}|${nameB}`
+  let playedPairs = $state<Set<string>>(new Set());
+  let unsubMatchesGlobal: (() => void) | null = null;
 
   onMount(() => {
     void subscribeTournaments();
@@ -450,24 +455,26 @@
         orgProfilesMap = map;
       });
       unsubPlannedGlobal = onValue(ref(db, 'planned'), (snap) => {
-        const raw = snap.val() as Record<string, { tournamentKey?: string; roundKey?: string; completedAt?: number }> | null;
-        const counts: Record<string, number> = {};
-        // Key: `${tournamentKey}/${roundKey}` to avoid collisions across
-        // tournaments that share the same roundKey (e.g. both have "round-1").
-        const roundCounts: Record<string, number> = {};
+        const raw = snap.val() as Record<string, { tournamentKey?: string; roundKey?: string; round?: string; completedAt?: number; aName?: string; bName?: string }> | null;
+        plannedRaw = raw ?? {};
+        recomputePlannedCounts();
+      });
+      unsubMatchesGlobal = onValue(ref(db, 'matches'), (snap) => {
+        const raw = snap.val() as Record<string, { tournamentKey?: string; round?: string; aName?: string; bName?: string }> | null;
+        const pairs = new Set<string>();
         if (raw) {
           for (const v of Object.values(raw)) {
-            if (!v || typeof v !== 'object') continue;
-            // Completed slots don't count toward pending bracket totals.
-            if (v.completedAt) continue;
-            const k = v.tournamentKey;
-            if (k) counts[k] = (counts[k] ?? 0) + 1;
-            const rk = v.roundKey;
-            if (k && rk) roundCounts[`${k}/${rk}`] = (roundCounts[`${k}/${rk}`] ?? 0) + 1;
+            if (!v?.tournamentKey || !v.round || !v.aName || !v.bName) continue;
+            const a = v.aName.trim().toLowerCase();
+            const b = v.bName.trim().toLowerCase();
+            const tRound = `${v.tournamentKey}/${v.round}`;
+            // Store both orderings so lookup is O(1)
+            pairs.add(`${tRound}/${a}|${b}`);
+            pairs.add(`${tRound}/${b}|${a}`);
           }
         }
-        plannedCountByKey = counts;
-        plannedCountByRound = roundCounts;
+        playedPairs = pairs;
+        recomputePlannedCounts();
       });
     })();
     return () => {
@@ -475,8 +482,31 @@
       unsubRole();
       unsubPlayers();
       unsubPlannedGlobal?.();
+      unsubMatchesGlobal?.();
     };
   });
+
+  function recomputePlannedCounts() {
+    const counts: Record<string, number> = {};
+    const roundCounts: Record<string, number> = {};
+    for (const v of Object.values(plannedRaw)) {
+      if (!v || typeof v !== 'object') continue;
+      if (v.completedAt) continue;
+      // Also treat as complete if a history match exists with matching names+round
+      if (v.tournamentKey && v.round && v.aName && v.bName) {
+        const a = v.aName.trim().toLowerCase();
+        const b = v.bName.trim().toLowerCase();
+        const key = `${v.tournamentKey}/${v.round}/${a}|${b}`;
+        if (playedPairs.has(key)) continue;
+      }
+      const k = v.tournamentKey;
+      if (k) counts[k] = (counts[k] ?? 0) + 1;
+      const rk = v.roundKey;
+      if (k && rk) roundCounts[`${k}/${rk}`] = (roundCounts[`${k}/${rk}`] ?? 0) + 1;
+    }
+    plannedCountByKey = counts;
+    plannedCountByRound = roundCounts;
+  }
 
   /**
    * Live assigned-player counts (v3.6.3). Previously the effect
