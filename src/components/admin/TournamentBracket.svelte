@@ -62,6 +62,7 @@
   // Live subscription to /matches for this tournament — used to show
   // scores for matches played without a QR scan (no completedAt on planned).
   let historyMatches = $state<MatchRecord[]>([]);
+  let historyReady = $state(false);
   let unsubMatches: (() => void) | null = null;
 
   onMount(() => {
@@ -83,6 +84,7 @@
           }
         }
         historyMatches = out;
+        historyReady = true;
       });
       unsubMatches = () => unsubFn();
     })();
@@ -508,10 +510,10 @@
     return map;
   });
 
-  // Resolve a placeholder name like "G1 Finalist 3" to the actual winner.
+  // Resolve a placeholder name like "G1 Winner 3" to the actual winner.
   // Falls back to the placeholder if the previous round isn't done yet.
   function resolveSlotName(name: string, currentRoundKey: string): string {
-    const m = name.match(/^(.+)\s+Finalist\s+(\d+)$/i);
+    const m = name.match(/^(.+)\s+(?:Winner|Finalist)\s+(\d+)$/i);
     if (!m) return name;
     const finalistN = parseInt(m[2]!, 10);
     // Find the previous round (the one before currentRoundKey in rounds order)
@@ -540,8 +542,9 @@
     });
   }
 
-  function statusOf(m: PlannedMatch): 'awaiting' | 'planned' | 'claimed' | 'complete' {
+  function statusOf(m: PlannedMatch): 'awaiting' | 'planned' | 'claimed' | 'complete' | 'loading' {
     if (m.completedAt) return 'complete';
+    if (!historyReady) return 'loading';
     if (findHistMatch(m)) return 'complete';
     if (m.claimedBy) return 'claimed';
     const round = rounds.find((r) => r.key === m.roundKey);
@@ -789,6 +792,8 @@
                         </span>
                       {:else if statusOf(m) === 'awaiting'}
                         <span class="pill pill-awaiting" title="Round not started yet">awaiting round</span>
+                      {:else if statusOf(m) === 'loading'}
+                        <span class="pill pill-loading">…</span>
                       {:else}
                         <span class="pill pill-planned">ready</span>
                       {/if}
@@ -1257,6 +1262,12 @@
     letter-spacing: 0;
   }
 
+  .pill-loading {
+    background: transparent;
+    border: none;
+    color: #555;
+    letter-spacing: 0;
+  }
 
   .row-reset {
     background: transparent;

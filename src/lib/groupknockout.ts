@@ -195,7 +195,7 @@ export async function generateGroupPhase(
           matchOrder: 1,
           aName: playerNames.get(byeSeedId) ?? byeSeedId,
           aResolvedId: byeSeedId,
-          bName: `${groupName} Finalist`,
+          bName: `${groupName} Winner`,
           cfg,
           createdBy: myUid,
         });
@@ -208,8 +208,8 @@ export async function generateGroupPhase(
             round: rd.label,
             roundKey: rKey,
             matchOrder: i + 1,
-            aName: `${groupName} Finalist ${i * 2 + 1}`,
-            bName: `${groupName} Finalist ${i * 2 + 2}`,
+            aName: `${groupName} Winner ${i * 2 + 1}`,
+            bName: `${groupName} Winner ${i * 2 + 2}`,
             cfg,
             createdBy: myUid,
           });
@@ -373,8 +373,8 @@ export async function generateCombinedKnockout(
           round: rd.label,
           roundKey: rKey,
           matchOrder: i + 1,
-          aName: `KO Finalist ${i * 2 + 1}`,
-          bName: `KO Finalist ${i * 2 + 2}`,
+          aName: `KO Winner ${i * 2 + 1}`,
+          bName: `KO Winner ${i * 2 + 2}`,
           cfg,
           createdBy: myUid,
         });
@@ -415,8 +415,8 @@ export async function generateCombinedKnockout(
           round: rd.label,
           roundKey: rKey,
           matchOrder: i + 1,
-          aName: `KO Finalist ${i * 2 + 1}`,
-          bName: `KO Finalist ${i * 2 + 2}`,
+          aName: `KO Winner ${i * 2 + 1}`,
+          bName: `KO Winner ${i * 2 + 2}`,
           cfg,
           createdBy: myUid,
         });

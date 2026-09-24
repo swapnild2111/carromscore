@@ -499,8 +499,8 @@ export async function generateFlightTournaments(
             round: rd.fullName,
             roundKey: rKey,
             matchOrder: i + 1,
-            aName: `Finalist ${i * 2 + 1}`,
-            bName: `Finalist ${i * 2 + 2}`,
+            aName: `Winner ${i * 2 + 1}`,
+            bName: `Winner ${i * 2 + 2}`,
             cfg: flightCfgEntry,
             createdBy: myUid,
           });
@@ -685,8 +685,8 @@ export async function generateKnockoutBracket(
         round: rd.label,
         roundKey: rKey,
         matchOrder: i + 1,
-        aName: `Finalist ${i * 2 + 1}`,
-        bName: `Finalist ${i * 2 + 2}`,
+        aName: `Winner ${i * 2 + 1}`,
+        bName: `Winner ${i * 2 + 2}`,
         cfg,
         createdBy: myUid,
       });
