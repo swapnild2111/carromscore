@@ -32,7 +32,7 @@
   import { subscribeCurrentUserRole, type Role } from '../lib/roles';
   import { subscribeAuth, currentUser } from '../lib/auth';
   import { clearResume } from '../lib/resume';
-  import { markPlannedComplete, propagateBracketWinner } from '../lib/planned';
+  import { markPlannedComplete, propagateBracketWinner, propagateBracketWinnerByNames } from '../lib/planned';
   import { normalizeKey, findByKey } from '../lib/tournaments';
   import type { MatchRecord } from '../lib/history';
   import { subscribeConnectivity, getConnectivity } from '../lib/connectivity';
@@ -2293,9 +2293,9 @@
         // disk (bracket admin can clean up manually) — the RTDB
         // rule permits the umpire (claimedBy) to delete their own
         // claim, so this should succeed in the common path.
+        const result = matchResult ?? 'draw';
         if (plannedMid) {
           const uid = currentUser()?.uid ?? '';
-          const result = matchResult ?? 'draw';
           void markPlannedComplete(
             plannedMid,
             { setsA: sideA.sets, setsB: sideB.sets, winner: result },
@@ -2303,6 +2303,16 @@
           ).then(() => {
             void propagateBracketWinner(plannedMid, result);
           });
+        } else if (cfg.tournament && cfg.round && result !== 'draw') {
+          // Match started manually (no QR scan) — still propagate winner
+          // into the next-round planned slot so bracket names stay current.
+          const tKey = normalizeKey(cfg.tournament);
+          const rKey = normalizeKey(cfg.round);
+          void propagateBracketWinnerByNames(
+            tKey, rKey,
+            cfg.playerA ?? '', cfg.playerB ?? '',
+            result,
+          );
         }
       });
       // Clear the handoff so a "same names again" match after this one
