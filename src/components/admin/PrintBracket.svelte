@@ -673,9 +673,9 @@
           <line x1="${x + 1}" y1="${sy + sh / 2}" x2="${x + COL_W - 1}" y2="${sy + sh / 2}"
                 stroke="#ebebeb" stroke-width="0.75"/>
           <text x="${x + 8}" y="${sy + 16}" font-size="11" font-weight="${aWeight}"
-                opacity="${aOpacity}" font-family="sans-serif" fill="${aFill}">${aName || 'TBD'}</text>
+                opacity="${aOpacity}" font-family="sans-serif" fill="${aFill}">${aName}</text>
           <text x="${x + 8}" y="${sy + sh - 8}" font-size="11" font-weight="${bWeight}"
-                opacity="${bOpacity}" font-family="sans-serif" fill="${bFill}">${bName || 'TBD'}</text>
+                opacity="${bOpacity}" font-family="sans-serif" fill="${bFill}">${bName}</text>
         `);
 
         if (sLines.length > 0) {
@@ -1114,10 +1114,10 @@
           // or winner name propagated from the previous round when not yet played.
           const aName = isDone && res?.aName
             ? clip(esc(res.aName))
-            : (resolveAdvancer(ri, mi, 'a') ?? aLabel);
+            : (resolveAdvancer(ri, mi, 'a') ?? '');
           const bName = isDone && res?.bName
             ? clip(esc(res.bName))
-            : (resolveAdvancer(ri, mi, 'b') ?? bLabel);
+            : (resolveAdvancer(ri, mi, 'b') ?? '');
 
           // Exact same text style as buildFlightBracketSVG
           const aFill    = winnerA ? '#000' : '#333';
@@ -1135,8 +1135,8 @@
           // Slot rect + midline + names (exactly as buildFlightBracketSVG)
           lines.push(`<rect x="${rx}" y="${sy}" width="${COL_W}" height="${sh}" rx="5" fill="#fff" stroke="#bbb" stroke-width="1"/>`);
           lines.push(`<line x1="${rx + 1}" y1="${sy + sh / 2}" x2="${rx + COL_W - 1}" y2="${sy + sh / 2}" stroke="#ebebeb" stroke-width="0.75"/>`);
-          lines.push(`<text x="${rx + 8}" y="${sy + 16}" font-size="11" font-weight="${aWeight}" opacity="${aOpacity}" font-family="sans-serif" fill="${aFill}">${aName || 'TBD'}</text>`);
-          lines.push(`<text x="${rx + 8}" y="${sy + sh - 8}" font-size="11" font-weight="${bWeight}" opacity="${bOpacity}" font-family="sans-serif" fill="${bFill}">${bName || 'TBD'}</text>`);
+          lines.push(`<text x="${rx + 8}" y="${sy + 16}" font-size="11" font-weight="${aWeight}" opacity="${aOpacity}" font-family="sans-serif" fill="${aFill}">${aName}</text>`);
+          lines.push(`<text x="${rx + 8}" y="${sy + sh - 8}" font-size="11" font-weight="${bWeight}" opacity="${bOpacity}" font-family="sans-serif" fill="${bFill}">${bName}</text>`);
 
           if (isFinalWithBye) {
             const bpx = rx + COL_W - 36;
