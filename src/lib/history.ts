@@ -634,16 +634,27 @@ export function reconcileResultFromBoardLog(record: MatchRecord): {
   let boardCount = 0;
   let boardsWonA = 0;
   let boardsWonB = 0;
+  let totalPointsA = 0;
+  let totalPointsB = 0;
   for (const s of bySet.values()) {
     boardCount += s.boards;
     boardsWonA += s.wonA;
     boardsWonB += s.wonB;
+    totalPointsA += s.a;
+    totalPointsB += s.b;
   }
 
   let winner: 'a' | 'b' | 'draw' | null = null;
   if (setsA > setsB) winner = 'a';
   else if (setsB > setsA) winner = 'b';
-  else if (setsA === setsB && setsA > 0) winner = 'draw';
+  else if (setsA === setsB && setsA > 0) {
+    // Sets tied — use total points across all sets as tiebreaker before
+    // calling draw. Handles matches ended early between sets (points reset
+    // to 0 between sets means current-set tie, but total boards tell the truth).
+    if (totalPointsA > totalPointsB) winner = 'a';
+    else if (totalPointsB > totalPointsA) winner = 'b';
+    else winner = 'draw';
+  }
 
   const divergedFromStored =
     setsA !== storedSetsA ||

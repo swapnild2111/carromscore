@@ -13,7 +13,7 @@
  */
 
 import type { MatchRecord } from './history';
-import { playerName } from './history';
+import { playerName, reconcileResultFromBoardLog } from './history';
 
 /**
  * One row of the per-match table. The Firebase push id is retained
@@ -176,7 +176,16 @@ export function buildReportRows(matches: MatchRecord[]): ReportRow[] {
     if (!m || typeof m !== 'object') continue;
     if (m.mode !== 'singles' && m.mode !== 'doubles') continue;
     const { boardsWonA, boardsWonB } = countBoardsWon(m);
-    const winnerRaw = m.result?.winner ?? null;
+    let winnerRaw = m.result?.winner ?? null;
+    // Reconcile stored 'draw' from boardLog: a match stored as draw when
+    // sets are equal may have a clear winner by total points (e.g. umpire
+    // ended between sets with points reset to 0, but total boards show an
+    // unequal score). reconcileResultFromBoardLog uses total points as a
+    // tiebreaker which corrects those cases.
+    if (winnerRaw === 'draw' && Array.isArray(m.boardLog) && m.boardLog.length > 0) {
+      const rec = reconcileResultFromBoardLog(m);
+      if (rec.winner !== 'draw') winnerRaw = rec.winner;
+    }
     const winner: ReportRow['winner'] = winnerRaw ? WINNER_LABEL[winnerRaw] : '';
     rows.push({
       _matchId: m.id,
@@ -274,7 +283,11 @@ export function buildPlayerSummary(matches: MatchRecord[]): PlayerSummary[] {
     if (!m || typeof m !== 'object') continue;
     if (m.mode !== 'singles' && m.mode !== 'doubles') continue;
     const { boardsWonA, boardsWonB } = countBoardsWon(m);
-    const winner = m.result?.winner ?? null;
+    let winner = m.result?.winner ?? null;
+    if (winner === 'draw' && Array.isArray(m.boardLog) && m.boardLog.length > 0) {
+      const rec = reconcileResultFromBoardLog(m);
+      if (rec.winner !== 'draw') winner = rec.winner;
+    }
     const pointsA = m.result?.finalPointsA ?? 0;
     const pointsB = m.result?.finalPointsB ?? 0;
 

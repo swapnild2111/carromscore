@@ -195,7 +195,7 @@ export async function generateGroupPhase(
           matchOrder: 1,
           aName: playerNames.get(byeSeedId) ?? byeSeedId,
           aResolvedId: byeSeedId,
-          bName: 'Group Finalist',
+          bName: `${groupName} Finalist`,
           cfg,
           createdBy: myUid,
         });
@@ -208,8 +208,8 @@ export async function generateGroupPhase(
             round: rd.label,
             roundKey: rKey,
             matchOrder: i + 1,
-            aName: `Group ${groupName} Finalist ${i * 2 + 1}`,
-            bName: `Group ${groupName} Finalist ${i * 2 + 2}`,
+            aName: `${groupName} Finalist ${i * 2 + 1}`,
+            bName: `${groupName} Finalist ${i * 2 + 2}`,
             cfg,
             createdBy: myUid,
           });

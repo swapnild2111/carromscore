@@ -2007,17 +2007,29 @@
       awardExtraSet = true;
     } else {
       // Fully tied — sets AND points equal, but below cap (the at-cap
-      // path was handled above). Auto-commit as draw: umpire chose
-      // to End early on an equal position.
-      //
-      // Consistent rule: **SETS only ticks up when a side wins the
-      // set**. A tied set has no winner, so neither sideA.sets nor
-      // sideB.sets moves.
+      // path was handled above). If the match format still has sets
+      // remaining, offer the deciding-board prompt rather than committing
+      // a draw — umpire may have tapped End between sets (points = 0:0)
+      // when a decider should still be played. Only auto-commit as draw
+      // when no further sets are possible.
+      const totalPlayedSets = sideA.sets + sideB.sets;
+      const moreSetsPossible = totalPlayedSets + 1 < cfg.bestOf && !clinched;
+      if (moreSetsPossible) {
+        matchResult = 'draw';
+        pendingDrawChoice = true;
+        showWinnerPopup = true;
+        endMatchInProgress = false;
+        return;
+      }
       winner = 'draw';
     }
     if (awardExtraSet && (winner === 'a' || winner === 'b')) {
       const s = winner === 'a' ? sideA : sideB;
       s.sets = Math.min(cfg.bestOf, s.sets + 1);
+      // Credit the deciding set in setWinners so the archive has a
+      // complete per-set log. Without this, End-on-final-board (without
+      // a SET+1 tap) leaves setWinners one entry short.
+      if (!isPractice) setWinners = [...setWinners, winner];
     }
     matchResult = winner;
     showWinnerPopup = true;

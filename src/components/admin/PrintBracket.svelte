@@ -56,6 +56,7 @@
   let plannedMatches = $state<PlannedMatch[]>([]);
   let historyMatches = $state<MatchRecord[]>([]);
   let unsub: (() => void) | null = null;
+  let unsubMatches: (() => void) | null = null;
   // Error surface when the RTDB fetch stalls or the tournament key
   // can't be found. Prevents the print page from hanging on the
   // 'Loading…' text forever if something upstream is wrong.
@@ -151,6 +152,22 @@
         }
         historyMatches = matchesOut;
         historyReady = true;
+
+        // Live subscription for match results — scores update as matches complete.
+        const { onValue: onVal, query: q2, orderByChild: obc2, equalTo: eq2 } = await import('firebase/database');
+        const matchesQ = q2(ref(db, 'matches'), obc2('tournamentKey'), eq2(tournamentKey));
+        const unsubFn = onVal(matchesQ, (snap) => {
+          const raw = snap.val() as Record<string, Omit<MatchRecord, 'id'>> | null;
+          const out: MatchRecord[] = [];
+          if (raw) {
+            for (const [id, v] of Object.entries(raw)) {
+              if (!v || typeof v !== 'object') continue;
+              out.push({ id, ...v } as MatchRecord);
+            }
+          }
+          historyMatches = out;
+        });
+        unsubMatches = () => unsubFn();
       } catch (err) {
         loadError = err instanceof Error ? err.message : String(err);
         plannedReady = true;
@@ -176,6 +193,7 @@
     }, 8000);
     return () => {
       unsub?.();
+      unsubMatches?.();
       unsubT();
       unsubP();
       window.clearTimeout(timeoutId);
@@ -533,6 +551,58 @@
     pointsA?: number; pointsB?: number; // total match points fallback
   };
 
+  // History entry type used by the name-based match lookup below.
+  type HistMatchEntry = {
+    aName: string; bName: string;
+    winner?: 'a' | 'b' | 'draw';
+    setsA?: number; setsB?: number;
+    finalPointsA?: number; finalPointsB?: number;
+  };
+
+  // Build a round → history-entry map, keyed by normalised player names so
+  // matches played without a board QR scan (no completedAt on /planned) still
+  // get scores and winner. Used by every planned-based bracket builder.
+  function buildHistByRound(
+    matches: MatchRecord[],
+    roundFilter: (r: string) => boolean,
+  ): Map<string, HistMatchEntry[]> {
+    const map = new Map<string, HistMatchEntry[]>();
+    for (const rec of matches) {
+      const r = rec.round ?? '';
+      if (!r || !roundFilter(r)) continue;
+      const arr = map.get(r) ?? [];
+      arr.push({
+        aName: (rec.aName ?? '').trim().toLowerCase(),
+        bName: (rec.bName ?? '').trim().toLowerCase(),
+        winner: rec.result?.winner ?? undefined,
+        setsA: rec.result?.setsA,
+        setsB: rec.result?.setsB,
+        finalPointsA: rec.result?.finalPointsA,
+        finalPointsB: rec.result?.finalPointsB,
+      });
+      map.set(r, arr);
+    }
+    return map;
+  }
+
+  // Look up the history entry for a planned match: exact name match first,
+  // swapped-sides fallback, then position index.
+  function findHistEntry(
+    map: Map<string, HistMatchEntry[]>,
+    round: string,
+    aName: string,
+    bName: string,
+    fallbackIdx: number,
+  ): HistMatchEntry | undefined {
+    const bucket = map.get(round);
+    if (!bucket) return undefined;
+    const an = aName.trim().toLowerCase();
+    const bn = bName.trim().toLowerCase();
+    return bucket.find((h) => h.aName === an && h.bName === bn)
+      ?? bucket.find((h) => h.aName === bn && h.bName === an)
+      ?? bucket[fallbackIdx];
+  }
+
   // Build an inline SVG bracket matching the reports-tab style.
   // Stages are merged (all QF matches → one column) and per-set scores shown.
   // Light theme for print.
@@ -655,9 +725,9 @@
           <line x1="${x + 1}" y1="${sy + sh / 2}" x2="${x + COL_W - 1}" y2="${sy + sh / 2}"
                 stroke="#ebebeb" stroke-width="0.75"/>
           <text x="${x + 8}" y="${sy + 16}" font-size="11" font-weight="${aWeight}"
-                opacity="${aOpacity}" font-family="sans-serif" fill="${aFill}">${aName || 'TBD'}</text>
+                opacity="${aOpacity}" font-family="sans-serif" fill="${aFill}">${aName}</text>
           <text x="${x + 8}" y="${sy + sh - 8}" font-size="11" font-weight="${bWeight}"
-                opacity="${bOpacity}" font-family="sans-serif" fill="${bFill}">${bName || 'TBD'}</text>
+                opacity="${bOpacity}" font-family="sans-serif" fill="${bFill}">${bName}</text>
         `);
 
         if (sLines.length > 0) {
@@ -779,20 +849,28 @@
       const bi = STAGE_ORDER.indexOf(stageLabel(b.roundName));
       return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
     });
+    const allRoundNames = new Set(sorted.map((r) => r.roundName));
+    const histMap = buildHistByRound(historyMatches, (r) => allRoundNames.has(r));
     const mergedMap = new Map<string, { label: string; slots: BracketSlot[] }>();
     for (const r of sorted) {
       const lbl = stageLabel(r.roundName);
       if (!mergedMap.has(lbl)) mergedMap.set(lbl, { label: lbl, slots: [] });
+      const arr = mergedMap.get(lbl)!.slots;
       for (const m of r.matches) {
-        mergedMap.get(lbl)!.slots.push({
+        const h = findHistEntry(histMap, r.roundName, m.aName, m.bName, arr.length);
+        const isDone = !!m.completedAt || !!h;
+        arr.push({
           aId: m.aResolvedId,
           aName: m.aName,
           bId: m.bResolvedId,
           bName: m.bName,
-          isDone: !!m.completedAt,
-          winner: m.result?.winner === 'a' ? 'a' : m.result?.winner === 'b' ? 'b' : undefined,
-          setsA: m.result?.setsA,
-          setsB: m.result?.setsB,
+          isDone,
+          winner: m.result?.winner === 'a' ? 'a' : m.result?.winner === 'b' ? 'b'
+            : h?.winner === 'a' ? 'a' : h?.winner === 'b' ? 'b' : undefined,
+          setsA: m.result?.setsA ?? h?.setsA,
+          setsB: m.result?.setsB ?? h?.setsB,
+          pointsA: h?.finalPointsA,
+          pointsB: h?.finalPointsB,
         });
       }
     }
@@ -1010,8 +1088,26 @@
       const totalRounds = meta.roundCols;
       const hasBye = meta.byePlayer !== null;
 
-      // Group name label (same style as stage column label in buildFlightBracketSVG)
-      lines.push(`<text x="${meta.x + groupW(meta) / 2}" y="${meta.y - 7}" text-anchor="middle" font-size="10" font-weight="700" font-family="sans-serif" fill="#888" letter-spacing="0.06em">${esc(meta.name.toUpperCase())}</text>`);
+      // Per-round column headers (same style as buildFlightBracketSVG stage labels).
+      // When there are multiple groups, prefix the group name on the first column only.
+      const multiGroup = groups.length > 1;
+      for (let ri = 0; ri < totalRounds; ri++) {
+        const rx = meta.x + ri * (COL_W + COL_GAP);
+        const roundKey = groupRoundKey(meta.name, ri, totalRounds);
+        // Strip the "G1 — " prefix to get just "R16", "QF", "SF", "Final"
+        const roundShort = roundKey.replace(/^.*?—\s*/, '');
+        // Human-friendly label: expand abbreviations to full words
+        const ROUND_LABELS: Record<string, string> = {
+          'Final': 'FINAL', 'SF': 'SEMI FINALS', 'QF': 'QUARTER FINALS',
+          'R16': 'ROUNDS', 'R32': 'ROUNDS', 'R64': 'ROUNDS',
+        };
+        const colLabel = ROUND_LABELS[roundShort] ?? (/^R\d+$/.test(roundShort) ? 'ROUNDS' : roundShort.toUpperCase());
+        // First column of a multi-group layout: show "G1  ROUNDS" together
+        const displayLabel = multiGroup && ri === 0
+          ? `${esc(meta.name.toUpperCase())}  ${colLabel}`
+          : colLabel;
+        lines.push(`<text x="${rx + COL_W / 2}" y="${meta.y - 7}" text-anchor="middle" font-size="10" font-weight="700" font-family="sans-serif" fill="#888" letter-spacing="0.06em">${displayLabel}</text>`);
+      }
 
       for (let ri = 0; ri < totalRounds; ri++) {
         const rMatches = meta.rounds[ri]!;
@@ -1039,6 +1135,25 @@
           }
         }
 
+        // Resolve who should appear in a not-yet-played slot by looking up the
+        // winner of the preceding round match that feeds into this slot position.
+        // feedSide: 'a' = top feeder into this slot, 'b' = bottom feeder.
+        function resolveAdvancer(roundIdx: number, matchIdx: number, feedSide: 'a' | 'b'): string | null {
+          if (roundIdx === 0) return null;
+          const prevRound = meta.rounds[roundIdx - 1]!;
+          const prevKey   = groupRoundKey(meta.name, roundIdx - 1, totalRounds);
+          const prevResults: MatchInfo[] = gData.matchMap.get(prevKey) ?? [];
+          const feedRatio = prevRound.length / rMatches.length;
+          const firstSrc  = Math.round(matchIdx * feedRatio);
+          const lastSrc   = Math.round((matchIdx + 1) * feedRatio) - 1;
+          // top feeder → firstSrc slot; bottom feeder → lastSrc slot
+          const srcIdx = feedSide === 'a' ? firstSrc : lastSrc;
+          const src = prevResults[srcIdx];
+          if (!src?.isDone || !src.winner) return null;
+          const name = src.winner === 'a' ? src.aName : src.bName;
+          return name ? clip(esc(name)) : null;
+        }
+
         // ── Match slots (identical to buildFlightBracketSVG slot drawing) ──
         for (let mi = 0; mi < rMatches.length; mi++) {
           const [aN, bN] = rMatches[mi]!;
@@ -1055,9 +1170,14 @@
           const winnerA  = isDone && res?.winner === 'a';
           const winnerB  = isDone && res?.winner === 'b';
 
-          // Use resolved names when available
-          const aName = isDone && res?.aName ? clip(esc(res.aName)) : aLabel;
-          const bName = isDone && res?.bName ? clip(esc(res.bName)) : bLabel;
+          // Use resolved names when available: actual match names when done,
+          // or winner name propagated from the previous round when not yet played.
+          const aName = isDone && res?.aName
+            ? clip(esc(res.aName))
+            : (resolveAdvancer(ri, mi, 'a') ?? '');
+          const bName = isDone && res?.bName
+            ? clip(esc(res.bName))
+            : (resolveAdvancer(ri, mi, 'b') ?? '');
 
           // Exact same text style as buildFlightBracketSVG
           const aFill    = winnerA ? '#000' : '#333';
@@ -1075,8 +1195,8 @@
           // Slot rect + midline + names (exactly as buildFlightBracketSVG)
           lines.push(`<rect x="${rx}" y="${sy}" width="${COL_W}" height="${sh}" rx="5" fill="#fff" stroke="#bbb" stroke-width="1"/>`);
           lines.push(`<line x1="${rx + 1}" y1="${sy + sh / 2}" x2="${rx + COL_W - 1}" y2="${sy + sh / 2}" stroke="#ebebeb" stroke-width="0.75"/>`);
-          lines.push(`<text x="${rx + 8}" y="${sy + 16}" font-size="11" font-weight="${aWeight}" opacity="${aOpacity}" font-family="sans-serif" fill="${aFill}">${aName || 'TBD'}</text>`);
-          lines.push(`<text x="${rx + 8}" y="${sy + sh - 8}" font-size="11" font-weight="${bWeight}" opacity="${bOpacity}" font-family="sans-serif" fill="${bFill}">${bName || 'TBD'}</text>`);
+          lines.push(`<text x="${rx + 8}" y="${sy + 16}" font-size="11" font-weight="${aWeight}" opacity="${aOpacity}" font-family="sans-serif" fill="${aFill}">${aName}</text>`);
+          lines.push(`<text x="${rx + 8}" y="${sy + sh - 8}" font-size="11" font-weight="${bWeight}" opacity="${bOpacity}" font-family="sans-serif" fill="${bFill}">${bName}</text>`);
 
           if (isFinalWithBye) {
             const bpx = rx + COL_W - 36;
@@ -1115,32 +1235,58 @@
     const allPlayers = loadAllPlayersFn();
     const byId = new Map(allPlayers.map((p) => [p.id, p.canonicalName]));
     const sorted = Object.values(groups).sort((a, b) => a.order - b.order);
-    // Build a lookup: roundName → match result (with points from history where available)
+    // Build a lookup: roundName → history records, keyed by normalised player name pair
+    // so matches played without QR scan (no completedAt on /planned) still get scores.
     type MatchResult = { winner?: 'a' | 'b'; setsA?: number; setsB?: number; pointsA?: number; pointsB?: number; isDone: boolean; aName: string; bName: string };
-    // Index history by round name for point lookup
-    const histByRound = new Map<string, { finalPointsA?: number; finalPointsB?: number }[]>();
+    type HistEntry = { finalPointsA?: number; finalPointsB?: number; winner?: 'a'|'b'|'draw'; setsA?: number; setsB?: number; aName: string; bName: string };
+    const histByRound = new Map<string, HistEntry[]>();
     for (const rec of historyMatches) {
       const r = rec.round ?? '';
       if (!r) continue;
       const arr = histByRound.get(r) ?? [];
-      arr.push({ finalPointsA: rec.result?.finalPointsA, finalPointsB: rec.result?.finalPointsB });
+      arr.push({
+        finalPointsA: rec.result?.finalPointsA,
+        finalPointsB: rec.result?.finalPointsB,
+        winner: rec.result?.winner ?? undefined,
+        setsA: rec.result?.setsA,
+        setsB: rec.result?.setsB,
+        aName: (rec.aName ?? '').trim().toLowerCase(),
+        bName: (rec.bName ?? '').trim().toLowerCase(),
+      });
       histByRound.set(r, arr);
+    }
+    // Match a planned record to a history entry: prefer exact player-name match,
+    // fall back to position index (for doubles or name mismatches).
+    function findHistRec(round: string, aName: string, bName: string, fallbackIdx: number): HistEntry | undefined {
+      const bucket = histByRound.get(round);
+      if (!bucket) return undefined;
+      const an = aName.trim().toLowerCase();
+      const bn = bName.trim().toLowerCase();
+      const exact = bucket.find((h) => h.aName === an && h.bName === bn);
+      if (exact) return exact;
+      const swapped = bucket.find((h) => h.aName === bn && h.bName === an);
+      if (swapped) return swapped;
+      return bucket[fallbackIdx];
     }
     const matchMap = new Map<string, MatchResult[]>();
     for (const m of plannedMatches) {
       if (!m.round || !/— (R\d+|QF|SF|Final)/.test(m.round)) continue;
       const arr = matchMap.get(m.round) ?? [];
-      const histIdx = arr.length;
-      const histRec = histByRound.get(m.round)?.[histIdx];
+      const aName = m.aResolvedId ? (byId.get(m.aResolvedId) ?? m.aName) : m.aName;
+      const bName = m.bResolvedId ? (byId.get(m.bResolvedId) ?? m.bName) : m.bName;
+      const histRec = findHistRec(m.round, aName, bName, arr.length);
+      // isDone: prefer planned.completedAt, fall back to history record existing
+      const isDone = !!m.completedAt || !!histRec;
       arr.push({
-        isDone: !!m.completedAt,
-        winner: m.result?.winner === 'a' ? 'a' : m.result?.winner === 'b' ? 'b' : undefined,
-        setsA: m.result?.setsA,
-        setsB: m.result?.setsB,
+        isDone,
+        winner: m.result?.winner === 'a' ? 'a' : m.result?.winner === 'b' ? 'b'
+          : histRec?.winner === 'a' ? 'a' : histRec?.winner === 'b' ? 'b' : undefined,
+        setsA: m.result?.setsA ?? histRec?.setsA,
+        setsB: m.result?.setsB ?? histRec?.setsB,
         pointsA: histRec?.finalPointsA,
         pointsB: histRec?.finalPointsB,
-        aName: m.aResolvedId ? (byId.get(m.aResolvedId) ?? m.aName) : m.aName,
-        bName: m.bResolvedId ? (byId.get(m.bResolvedId) ?? m.bName) : m.bName,
+        aName,
+        bName,
       });
       matchMap.set(m.round, arr);
     }
@@ -1167,15 +1313,7 @@
       .filter((m) => /^KO — /.test(m.round ?? ''))
       .sort((a, b) => (a.matchOrder ?? 0) - (b.matchOrder ?? 0));
     if (koMatches.length === 0) return '';
-    // Build history lookup by round for points
-    const histKOByRound = new Map<string, { finalPointsA?: number; finalPointsB?: number }[]>();
-    for (const rec of historyMatches) {
-      const r = rec.round ?? '';
-      if (!r || !/^KO — /.test(r)) continue;
-      const arr = histKOByRound.get(r) ?? [];
-      arr.push({ finalPointsA: rec.result?.finalPointsA, finalPointsB: rec.result?.finalPointsB });
-      histKOByRound.set(r, arr);
-    }
+    const histKOMap = buildHistByRound(historyMatches, (r) => /^KO — /.test(r));
     // Group by round label, preserving order
     const roundOrder: string[] = [];
     const roundMap = new Map<string, PlannedMatch[]>();
@@ -1184,24 +1322,27 @@
       if (!roundMap.has(r)) { roundMap.set(r, []); roundOrder.push(r); }
       roundMap.get(r)!.push(m);
     }
-    const cols = roundOrder.map((r) => ({
-      label: r.replace(/^KO — /, ''),
-      slots: (roundMap.get(r) ?? []).map((m, idx): BracketSlot => {
-        const histRec = histKOByRound.get(r)?.[idx];
-        return {
+    const cols = roundOrder.map((r) => {
+      const slots: BracketSlot[] = [];
+      for (const m of (roundMap.get(r) ?? [])) {
+        const h = findHistEntry(histKOMap, r, m.aName, m.bName, slots.length);
+        const isDone = !!m.completedAt || !!h;
+        slots.push({
           aId: m.aResolvedId,
           aName: m.aName,
           bId: m.bResolvedId,
           bName: m.bName,
-          isDone: !!m.completedAt,
-          winner: m.result?.winner === 'a' ? 'a' : m.result?.winner === 'b' ? 'b' : undefined,
-          setsA: m.result?.setsA,
-          setsB: m.result?.setsB,
-          pointsA: histRec?.finalPointsA,
-          pointsB: histRec?.finalPointsB,
-        };
-      }),
-    }));
+          isDone,
+          winner: m.result?.winner === 'a' ? 'a' : m.result?.winner === 'b' ? 'b'
+            : h?.winner === 'a' ? 'a' : h?.winner === 'b' ? 'b' : undefined,
+          setsA: m.result?.setsA ?? h?.setsA,
+          setsB: m.result?.setsB ?? h?.setsB,
+          pointsA: h?.finalPointsA,
+          pointsB: h?.finalPointsB,
+        });
+      }
+      return { label: r.replace(/^KO — /, ''), slots };
+    });
     if (cols.length < 1) return '';
     if (cols.length === 1) return '';
     return buildFlightBracketSVG(cols);
@@ -1217,36 +1358,28 @@
     if (koMatches.length === 0) return '';
     const rounds = koRoundsFromMatches(koMatches);
     if (rounds.length === 0) return '';
-    // Build history lookup by round for points
-    const histKOByRound = new Map<string, { finalPointsA?: number; finalPointsB?: number }[]>();
-    for (const rec of historyMatches) {
-      const r = rec.round ?? '';
-      if (!r || !KO_BRACKET_ROUND_RX.test(r)) continue;
-      const arr = histKOByRound.get(r) ?? [];
-      arr.push({ finalPointsA: rec.result?.finalPointsA, finalPointsB: rec.result?.finalPointsB });
-      histKOByRound.set(r, arr);
-    }
-    const cols = rounds.map((r) => ({
-      label: stageLabel(r),
-      slots: koMatches
-        .filter((m) => m.round === r)
-        .sort((a, b) => (a.matchOrder ?? 0) - (b.matchOrder ?? 0))
-        .map((m, idx): BracketSlot => {
-          const histRec = histKOByRound.get(r)?.[idx];
-          return {
-            aId: m.aResolvedId,
-            aName: m.aName,
-            bId: m.bResolvedId,
-            bName: m.bName,
-            isDone: !!m.completedAt,
-            winner: m.result?.winner === 'a' ? 'a' : m.result?.winner === 'b' ? 'b' : undefined,
-            setsA: m.result?.setsA,
-            setsB: m.result?.setsB,
-            pointsA: histRec?.finalPointsA,
-            pointsB: histRec?.finalPointsB,
-          };
-        }),
-    }));
+    const histKOMap = buildHistByRound(historyMatches, (r) => KO_BRACKET_ROUND_RX.test(r));
+    const cols = rounds.map((r) => {
+      const slots: BracketSlot[] = [];
+      for (const m of koMatches.filter((m) => m.round === r).sort((a, b) => (a.matchOrder ?? 0) - (b.matchOrder ?? 0))) {
+        const h = findHistEntry(histKOMap, r, m.aName, m.bName, slots.length);
+        const isDone = !!m.completedAt || !!h;
+        slots.push({
+          aId: m.aResolvedId,
+          aName: m.aName,
+          bId: m.bResolvedId,
+          bName: m.bName,
+          isDone,
+          winner: m.result?.winner === 'a' ? 'a' : m.result?.winner === 'b' ? 'b'
+            : h?.winner === 'a' ? 'a' : h?.winner === 'b' ? 'b' : undefined,
+          setsA: m.result?.setsA ?? h?.setsA,
+          setsB: m.result?.setsB ?? h?.setsB,
+          pointsA: h?.finalPointsA,
+          pointsB: h?.finalPointsB,
+        });
+      }
+      return { label: stageLabel(r), slots };
+    });
     return buildFlightBracketSVG(cols);
   });
 
@@ -2145,7 +2278,7 @@
   /* ─── Per-match QR grid ─────────────────────────────────────── */
   .match-qr-grid {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 16rem), 1fr));
     gap: 1.2rem 1.5rem;
     margin-top: 1rem;
   }
@@ -2196,13 +2329,13 @@
     flex-shrink: 0;
   }
   .mqr-qr-holder {
-    width: 180px;
-    height: 180px;
+    width: min(180px, 100%);
+    aspect-ratio: 1;
     display: flex;
     align-items: center;
     justify-content: center;
   }
-  .mqr-qr-holder :global(svg) { width: 180px !important; height: 180px !important; }
+  .mqr-qr-holder :global(svg) { width: 100% !important; height: 100% !important; max-width: 180px; max-height: 180px; }
 
   @media print {
     :global(body) { background: #fff; margin: 0; padding: 0; }
