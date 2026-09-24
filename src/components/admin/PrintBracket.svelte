@@ -1914,9 +1914,9 @@
           <div class="match-qr-grid">
             {#each round.matches as m, mi (m.mid)}
               {@const matchNum = schedule.slice(0, ri).reduce((acc, r) => acc + r.matches.length, 0) + mi + 1}
+              {@const mqrNames = resolvedPlannedNames.get(m.mid)}
               <div class="match-qr-cell">
                 <p class="mqr-board">Match {matchNum}</p>
-                {@const mqrNames = resolvedPlannedNames.get(m.mid)}
                 <div class="mqr-matchup">
                   <span class="mqr-side">{mqrNames?.aName ?? resolvedName(m.aResolvedId, m.aName)}{#if m.a2Name}<br/><span class="mqr-partner">{resolvedName(m.a2ResolvedId, m.a2Name)}</span>{/if}</span>
                   <span class="mqr-vs">vs</span>
