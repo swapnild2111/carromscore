@@ -26,6 +26,7 @@
   import type { Tournament, Round } from '../../lib/tournaments';
   import { loadAssignedPlayers } from '../../lib/tournaments';
   import { loadAll as loadAllPlayers, subscribeStore as subscribePlayerStore } from '../../lib/players';
+  import { type MatchRecord, reconcileResultFromBoardLog } from '../../lib/history';
   import { flagEmoji, countryName } from '../../lib/countries';
 
   interface Props {
@@ -57,14 +58,37 @@
   // Live subscription to /planned filtered by this tournament.
   let plannedMatches = $state<PlannedMatch[]>([]);
   let unsub: (() => void) | null = null;
+
+  // Live subscription to /matches for this tournament — used to show
+  // scores for matches played without a QR scan (no completedAt on planned).
+  let historyMatches = $state<MatchRecord[]>([]);
+  let unsubMatches: (() => void) | null = null;
+
   onMount(() => {
     (async () => {
       unsub = await subscribePlannedByTournament(tournament.key, (arr) => {
         plannedMatches = arr;
       });
+      const { getDatabase, ref, query, orderByChild, equalTo, onValue } = await import('firebase/database');
+      const { firebaseApp } = await import('../../lib/firebase');
+      const db = getDatabase(firebaseApp());
+      const matchesQ = query(ref(db, 'matches'), orderByChild('tournamentKey'), equalTo(tournament.key));
+      const unsubFn = onValue(matchesQ, (snap) => {
+        const raw = snap.val() as Record<string, Omit<MatchRecord, 'id'>> | null;
+        const out: MatchRecord[] = [];
+        if (raw) {
+          for (const [id, v] of Object.entries(raw)) {
+            if (!v || typeof v !== 'object') continue;
+            out.push({ id, ...v } as MatchRecord);
+          }
+        }
+        historyMatches = out;
+      });
+      unsubMatches = () => unsubFn();
     })();
     return () => {
       unsub?.();
+      unsubMatches?.();
     };
   });
 
@@ -445,8 +469,27 @@
     else flash('Slot reset to ready');
   }
 
+  // Find a history match for a planned slot by name-matching within
+  // the same round. Handles matches played without a QR scan (no
+  // completedAt on the planned record).
+  function findHistMatch(m: PlannedMatch): MatchRecord | undefined {
+    if (!m.aName || !m.bName) return undefined;
+    const round = rounds.find((r) => r.key === m.roundKey);
+    if (!round) return undefined;
+    const roundName = round.name;
+    const aN = m.aName.trim().toLowerCase();
+    const bN = m.bName.trim().toLowerCase();
+    return historyMatches.find((h) => {
+      if ((h.round ?? '') !== roundName) return false;
+      const hA = (h.aName ?? '').trim().toLowerCase();
+      const hB = (h.bName ?? '').trim().toLowerCase();
+      return (hA === aN && hB === bN) || (hA === bN && hB === aN);
+    });
+  }
+
   function statusOf(m: PlannedMatch): 'awaiting' | 'planned' | 'claimed' | 'complete' {
     if (m.completedAt) return 'complete';
+    if (findHistMatch(m)) return 'complete';
     if (m.claimedBy) return 'claimed';
     const round = rounds.find((r) => r.key === m.roundKey);
     if (round && !round.startedAt) return 'awaiting';
@@ -676,7 +719,10 @@
                     </td>
                     <td class="col-status">
                       {#if statusOf(m) === 'complete'}
-                        {@const r = m.result}
+                        {@const histRec = findHistMatch(m)}
+                        {@const rawResult = m.result ?? (histRec ? reconcileResultFromBoardLog(histRec) : null)}
+                        {@const swapped = !m.result && histRec && (histRec.aName ?? '').trim().toLowerCase() === (m.bName ?? '').trim().toLowerCase()}
+                        {@const r = rawResult ? { winner: swapped ? (rawResult.winner === 'a' ? 'b' : rawResult.winner === 'b' ? 'a' : 'draw') : rawResult.winner, setsA: swapped ? rawResult.setsB : rawResult.setsA, setsB: swapped ? rawResult.setsA : rawResult.setsB } : null}
                         <span class="pill pill-complete" title="Match complete">
                           {#if r}
                             {r.winner === 'a' ? resolvedName(m.aResolvedId, m.aName).split(' ')[0] : r.winner === 'b' ? resolvedName(m.bResolvedId, m.bName).split(' ')[0] : 'Draw'} · {r.setsA}–{r.setsB}
