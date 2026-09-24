@@ -1028,8 +1028,22 @@
       const totalRounds = meta.roundCols;
       const hasBye = meta.byePlayer !== null;
 
-      // Group name label (same style as stage column label in buildFlightBracketSVG)
-      lines.push(`<text x="${meta.x + groupW(meta) / 2}" y="${meta.y - 7}" text-anchor="middle" font-size="10" font-weight="700" font-family="sans-serif" fill="#888" letter-spacing="0.06em">${esc(meta.name.toUpperCase())}</text>`);
+      // Per-round column headers (same style as buildFlightBracketSVG stage labels).
+      // When there are multiple groups, prefix the group name on the first column only.
+      const multiGroup = groups.length > 1;
+      for (let ri = 0; ri < totalRounds; ri++) {
+        const rx = meta.x + ri * (COL_W + COL_GAP);
+        const roundKey = groupRoundKey(meta.name, ri, totalRounds);
+        // Strip the "G1 — " prefix to get just "R16", "QF", "SF", "Final"
+        const roundShort = roundKey.replace(/^.*?—\s*/, '');
+        // Human-friendly label: R16/R32 → "ROUNDS", others as-is uppercased
+        const colLabel = /^R\d+$/.test(roundShort) ? 'ROUNDS' : roundShort.toUpperCase();
+        // First column of a multi-group layout: show "G1  ROUNDS" together
+        const displayLabel = multiGroup && ri === 0
+          ? `${esc(meta.name.toUpperCase())}  ${colLabel}`
+          : colLabel;
+        lines.push(`<text x="${rx + COL_W / 2}" y="${meta.y - 7}" text-anchor="middle" font-size="10" font-weight="700" font-family="sans-serif" fill="#888" letter-spacing="0.06em">${displayLabel}</text>`);
+      }
 
       for (let ri = 0; ri < totalRounds; ri++) {
         const rMatches = meta.rounds[ri]!;
