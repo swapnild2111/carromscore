@@ -1036,8 +1036,12 @@
         const roundKey = groupRoundKey(meta.name, ri, totalRounds);
         // Strip the "G1 — " prefix to get just "R16", "QF", "SF", "Final"
         const roundShort = roundKey.replace(/^.*?—\s*/, '');
-        // Human-friendly label: R16/R32 → "ROUNDS", others as-is uppercased
-        const colLabel = /^R\d+$/.test(roundShort) ? 'ROUNDS' : roundShort.toUpperCase();
+        // Human-friendly label: expand abbreviations to full words
+        const ROUND_LABELS: Record<string, string> = {
+          'Final': 'FINAL', 'SF': 'SEMI FINALS', 'QF': 'QUARTER FINALS',
+          'R16': 'ROUNDS', 'R32': 'ROUNDS', 'R64': 'ROUNDS',
+        };
+        const colLabel = ROUND_LABELS[roundShort] ?? (/^R\d+$/.test(roundShort) ? 'ROUNDS' : roundShort.toUpperCase());
         // First column of a multi-group layout: show "G1  ROUNDS" together
         const displayLabel = multiGroup && ri === 0
           ? `${esc(meta.name.toUpperCase())}  ${colLabel}`
