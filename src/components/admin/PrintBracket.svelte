@@ -1133,32 +1133,58 @@
     const allPlayers = loadAllPlayersFn();
     const byId = new Map(allPlayers.map((p) => [p.id, p.canonicalName]));
     const sorted = Object.values(groups).sort((a, b) => a.order - b.order);
-    // Build a lookup: roundName → match result (with points from history where available)
+    // Build a lookup: roundName → history records, keyed by normalised player name pair
+    // so matches played without QR scan (no completedAt on /planned) still get scores.
     type MatchResult = { winner?: 'a' | 'b'; setsA?: number; setsB?: number; pointsA?: number; pointsB?: number; isDone: boolean; aName: string; bName: string };
-    // Index history by round name for point lookup
-    const histByRound = new Map<string, { finalPointsA?: number; finalPointsB?: number }[]>();
+    type HistEntry = { finalPointsA?: number; finalPointsB?: number; winner?: 'a'|'b'|'draw'; setsA?: number; setsB?: number; aName: string; bName: string };
+    const histByRound = new Map<string, HistEntry[]>();
     for (const rec of historyMatches) {
       const r = rec.round ?? '';
       if (!r) continue;
       const arr = histByRound.get(r) ?? [];
-      arr.push({ finalPointsA: rec.result?.finalPointsA, finalPointsB: rec.result?.finalPointsB });
+      arr.push({
+        finalPointsA: rec.result?.finalPointsA,
+        finalPointsB: rec.result?.finalPointsB,
+        winner: rec.result?.winner ?? undefined,
+        setsA: rec.result?.setsA,
+        setsB: rec.result?.setsB,
+        aName: (rec.aName ?? '').trim().toLowerCase(),
+        bName: (rec.bName ?? '').trim().toLowerCase(),
+      });
       histByRound.set(r, arr);
+    }
+    // Match a planned record to a history entry: prefer exact player-name match,
+    // fall back to position index (for doubles or name mismatches).
+    function findHistRec(round: string, aName: string, bName: string, fallbackIdx: number): HistEntry | undefined {
+      const bucket = histByRound.get(round);
+      if (!bucket) return undefined;
+      const an = aName.trim().toLowerCase();
+      const bn = bName.trim().toLowerCase();
+      const exact = bucket.find((h) => h.aName === an && h.bName === bn);
+      if (exact) return exact;
+      const swapped = bucket.find((h) => h.aName === bn && h.bName === an);
+      if (swapped) return swapped;
+      return bucket[fallbackIdx];
     }
     const matchMap = new Map<string, MatchResult[]>();
     for (const m of plannedMatches) {
       if (!m.round || !/— (R\d+|QF|SF|Final)/.test(m.round)) continue;
       const arr = matchMap.get(m.round) ?? [];
-      const histIdx = arr.length;
-      const histRec = histByRound.get(m.round)?.[histIdx];
+      const aName = m.aResolvedId ? (byId.get(m.aResolvedId) ?? m.aName) : m.aName;
+      const bName = m.bResolvedId ? (byId.get(m.bResolvedId) ?? m.bName) : m.bName;
+      const histRec = findHistRec(m.round, aName, bName, arr.length);
+      // isDone: prefer planned.completedAt, fall back to history record existing
+      const isDone = !!m.completedAt || !!histRec;
       arr.push({
-        isDone: !!m.completedAt,
-        winner: m.result?.winner === 'a' ? 'a' : m.result?.winner === 'b' ? 'b' : undefined,
-        setsA: m.result?.setsA,
-        setsB: m.result?.setsB,
+        isDone,
+        winner: m.result?.winner === 'a' ? 'a' : m.result?.winner === 'b' ? 'b'
+          : histRec?.winner === 'a' ? 'a' : histRec?.winner === 'b' ? 'b' : undefined,
+        setsA: m.result?.setsA ?? histRec?.setsA,
+        setsB: m.result?.setsB ?? histRec?.setsB,
         pointsA: histRec?.finalPointsA,
         pointsB: histRec?.finalPointsB,
-        aName: m.aResolvedId ? (byId.get(m.aResolvedId) ?? m.aName) : m.aName,
-        bName: m.bResolvedId ? (byId.get(m.bResolvedId) ?? m.bName) : m.bName,
+        aName,
+        bName,
       });
       matchMap.set(m.round, arr);
     }
