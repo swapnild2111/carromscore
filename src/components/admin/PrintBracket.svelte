@@ -433,6 +433,67 @@
   // subscription so it reflects every round.
   const matchCount = $derived<number>(plannedMatches.length);
 
+  // Resolved display names for planned slots whose aName/bName is a
+  // placeholder like "G1 Winner 3". Maps mid → { aName, bName }.
+  // Used by QR cards so they show real player names instead of placeholders.
+  const resolvedPlannedNames = $derived.by<Map<string, { aName: string; bName: string }>>(() => {
+    const map = new Map<string, { aName: string; bName: string }>();
+    if (!plannedMatches.length) return map;
+    // Build: roundName → matchOrder → winner name, from history + planned results
+    const winnerByRound = new Map<string, Map<number, string>>();
+    const addWinner = (roundName: string, order: number, name: string) => {
+      if (!winnerByRound.has(roundName)) winnerByRound.set(roundName, new Map());
+      if (!winnerByRound.get(roundName)!.has(order)) winnerByRound.get(roundName)!.set(order, name);
+    };
+    // From planned records with completedAt
+    for (const p of plannedMatches) {
+      if (!p.completedAt || !p.result || p.matchOrder == null || !p.round) continue;
+      const w = p.result.winner;
+      if (w === 'a' && p.aName) addWinner(p.round, p.matchOrder, p.aName);
+      else if (w === 'b' && p.bName) addWinner(p.round, p.matchOrder, p.bName);
+    }
+    // From history matches (no QR scan — no completedAt on planned)
+    for (const h of historyMatches) {
+      const roundName = h.round ?? '';
+      if (!roundName) continue;
+      const planned = plannedMatches.find((p) => {
+        if (p.round !== roundName || p.matchOrder == null) return false;
+        const pA = (p.aName ?? '').trim().toLowerCase();
+        const pB = (p.bName ?? '').trim().toLowerCase();
+        const hA = (h.aName ?? '').trim().toLowerCase();
+        const hB = (h.bName ?? '').trim().toLowerCase();
+        return (pA === hA && pB === hB) || (pA === hB && pB === hA);
+      });
+      if (!planned) continue;
+      const swapped = (h.aName ?? '').trim().toLowerCase() === (planned.bName ?? '').trim().toLowerCase();
+      const w = h.result?.winner;
+      const ew = swapped ? (w === 'a' ? 'b' : w === 'b' ? 'a' : w) : w;
+      if (ew === 'a' && planned.aName) addWinner(roundName, planned.matchOrder!, planned.aName);
+      else if (ew === 'b' && planned.bName) addWinner(roundName, planned.matchOrder!, planned.bName);
+    }
+    // Resolve placeholder names using tournament round order
+    void tournamentTick;
+    const t = tournament;
+    const tRounds = t?.rounds ?? [];
+    for (const m of plannedMatches) {
+      const aRx = (m.aName ?? '').match(/^(.+)\s+(?:Winner|Finalist)\s+(\d+)$/i);
+      const bRx = (m.bName ?? '').match(/^(.+)\s+(?:Winner|Finalist)\s+(\d+)$/i);
+      if (!aRx && !bRx) continue;
+      const currentRound = m.round ?? '';
+      const currentIdx = tRounds.findIndex((r) => r.name === currentRound);
+      if (currentIdx <= 0) continue;
+      const prevRoundName = tRounds[currentIdx - 1]!.name;
+      const prevWinners = winnerByRound.get(prevRoundName);
+      if (!prevWinners) continue;
+      const resolvedA = aRx ? (prevWinners.get(parseInt(aRx[2]!, 10)) ?? m.aName ?? '') : (m.aName ?? '');
+      const resolvedB = bRx ? (prevWinners.get(parseInt(bRx[2]!, 10)) ?? m.bName ?? '') : (m.bName ?? '');
+      if (resolvedA !== m.aName || resolvedB !== m.bName) {
+        map.set(m.mid, { aName: resolvedA, bName: resolvedB });
+      }
+    }
+    return map;
+  });
+
   // Rounds + matches grouped for the schedule section. Each entry has
   // the round display name, order, and its matches sorted by matchOrder.
   type ScheduleRound = {
@@ -1606,12 +1667,13 @@
               <tbody>
                 {#each round.matches as m, mi (m.mid)}
                   {@const matchNum = mergedSchedule.slice(0, ri).reduce((acc, r) => acc + r.matches.length, 0) + mi + 1}
+                  {@const schedNames = resolvedPlannedNames.get(m.mid)}
                   <tr>
                     <td class="sched-board">{qrMode === 'match' ? `M${matchNum}` : (m.board ? `B${m.board}` : '—')}</td>
                     <td class="sched-matchup">
-                      <span class="sched-player">{resolvedName(m.aResolvedId, m.aName)}{#if m.a2Name} + {resolvedName(m.a2ResolvedId, m.a2Name)}{/if}</span>
+                      <span class="sched-player">{schedNames?.aName ?? resolvedName(m.aResolvedId, m.aName)}{#if m.a2Name} + {resolvedName(m.a2ResolvedId, m.a2Name)}{/if}</span>
                       <span class="sched-vs">vs</span>
-                      <span class="sched-player">{resolvedName(m.bResolvedId, m.bName)}{#if m.b2Name} + {resolvedName(m.b2ResolvedId, m.b2Name)}{/if}</span>
+                      <span class="sched-player">{schedNames?.bName ?? resolvedName(m.bResolvedId, m.bName)}{#if m.b2Name} + {resolvedName(m.b2ResolvedId, m.b2Name)}{/if}</span>
                     </td>
                   </tr>
                 {/each}
@@ -1854,10 +1916,11 @@
               {@const matchNum = schedule.slice(0, ri).reduce((acc, r) => acc + r.matches.length, 0) + mi + 1}
               <div class="match-qr-cell">
                 <p class="mqr-board">Match {matchNum}</p>
+                {@const mqrNames = resolvedPlannedNames.get(m.mid)}
                 <div class="mqr-matchup">
-                  <span class="mqr-side">{resolvedName(m.aResolvedId, m.aName)}{#if m.a2Name}<br/><span class="mqr-partner">{resolvedName(m.a2ResolvedId, m.a2Name)}</span>{/if}</span>
+                  <span class="mqr-side">{mqrNames?.aName ?? resolvedName(m.aResolvedId, m.aName)}{#if m.a2Name}<br/><span class="mqr-partner">{resolvedName(m.a2ResolvedId, m.a2Name)}</span>{/if}</span>
                   <span class="mqr-vs">vs</span>
-                  <span class="mqr-side">{resolvedName(m.bResolvedId, m.bName)}{#if m.b2Name}<br/><span class="mqr-partner">{resolvedName(m.b2ResolvedId, m.b2Name)}</span>{/if}</span>
+                  <span class="mqr-side">{mqrNames?.bName ?? resolvedName(m.bResolvedId, m.bName)}{#if m.b2Name}<br/><span class="mqr-partner">{resolvedName(m.b2ResolvedId, m.b2Name)}</span>{/if}</span>
                 </div>
                 <div class="mqr-qr-holder">
                   {#if qrByMid[m.mid]}
