@@ -2026,6 +2026,10 @@
     if (awardExtraSet && (winner === 'a' || winner === 'b')) {
       const s = winner === 'a' ? sideA : sideB;
       s.sets = Math.min(cfg.bestOf, s.sets + 1);
+      // Credit the deciding set in setWinners so the archive has a
+      // complete per-set log. Without this, End-on-final-board (without
+      // a SET+1 tap) leaves setWinners one entry short.
+      if (!isPractice) setWinners = [...setWinners, winner];
     }
     matchResult = winner;
     showWinnerPopup = true;
