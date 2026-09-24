@@ -32,6 +32,8 @@
     normalizeKey,
   } from '../../lib/tournaments';
   import { BRACKET_ROUND_RX } from '../../lib/bracket';
+  import LiveScoreboardView from '../LiveScoreboardView.svelte';
+  import { reconcileResultFromBoardLog } from '../../lib/history';
   // BarChart removed v3.4.12 — the two horizontal bar rows above the
   // Leaderboard were redundant with the Leaderboard table itself.
   // Reports now leans on sortable + filterable tables mirroring the
@@ -562,30 +564,39 @@
   let rrMSortKey = $state<MSortKey>('endedAt');
   let rrMSortDir = $state<'asc' | 'desc'>('desc');
 
-  // Match detail popup
-  type MatchDetail = {
-    sideA: string; sideB: string; winner: string;
-    sets: Array<{ set: number; aPoints: number; bPoints: number; boards: number }>;
-  };
-  let matchDetail = $state<MatchDetail | null>(null);
-
-  const globalSetScoresMap = $derived(buildSetScoresMap(matches));
+  // Match detail popup — reuses the same LiveScoreboardView as the history tab
+  let detailMatchRecord = $state<MatchRecord | null>(null);
 
   function openMatchDetail(r: ReportRow): void {
-    const scores = globalSetScoresMap.get(r._matchId) ?? [];
-    // Group board scores by set number
-    const bySet = new Map<number, { aPoints: number; bPoints: number; boards: number }>();
-    for (const s of scores) {
-      const cur = bySet.get(s.set) ?? { aPoints: 0, bPoints: 0, boards: 0 };
-      cur.aPoints += s.a;
-      cur.bPoints += s.b;
-      cur.boards += 1;
-      bySet.set(s.set, cur);
-    }
-    const sets = [...bySet.entries()]
-      .sort(([a], [b]) => a - b)
-      .map(([set, v]) => ({ set, ...v }));
-    matchDetail = { sideA: r.sideA, sideB: r.sideB, winner: r.winner, sets };
+    detailMatchRecord = matches.find((m) => m.id === r._matchId) ?? null;
+  }
+
+  function matchAsLiveRecord(m: MatchRecord): import('../../lib/live-sync').LiveRecord {
+    const rec = reconcileResultFromBoardLog(m);
+    const log = (m.boardLog ?? []).filter((e) => !!e && typeof e === 'object');
+    const lastSetIdx = log.reduce((max, e) => Math.max(max, e.set ?? 0), -1);
+    const lastSetBoards = log.filter((e) => (e.set ?? 0) === lastSetIdx).length;
+    const boardDisplay = lastSetBoards > 0 ? lastSetBoards : rec.boardCount;
+    return {
+      matchId: m.id,
+      updatedAt: m.endedAt ?? 0,
+      meta: {
+        mode: m.mode,
+        playerA: m.mode === 'doubles' ? `${m.aName ?? ''} & ${m.a2Name ?? ''}` : (m.aName ?? ''),
+        playerB: m.mode === 'doubles' ? `${m.bName ?? ''} & ${m.b2Name ?? ''}` : (m.bName ?? ''),
+        bestOf: m.cfg?.bestOf ?? 1,
+        pointsTarget: m.cfg?.pointsTarget ?? 25,
+        maxBoards: m.cfg?.maxBoards ?? 8,
+      },
+      liveState: {
+        sideA: { points: rec.finalPointsA, sets: rec.setsA },
+        sideB: { points: rec.finalPointsB, sets: rec.setsB },
+        board: boardDisplay,
+        winner: rec.winner === 'a' ? 'a' : rec.winner === 'b' ? 'b' : null,
+        currentBreak: null,
+        queenHolder: null,
+      },
+    };
   }
   function toggleRRLBSort(k: LBSortKey): void {
     if (rrLBSortKey === k) {
@@ -1570,42 +1581,18 @@
   </div>
 </section>
 
-{#if matchDetail}
+{#if detailMatchRecord}
+  {@const popupRecord = matchAsLiveRecord(detailMatchRecord)}
   <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-  <div class="match-detail-backdrop" onclick={() => (matchDetail = null)}>
-    <div class="match-detail-popup" onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Match detail">
-      <div class="match-detail-header">
-        <div class="match-detail-players">
-          <span class="match-detail-side match-detail-side-a" class:match-detail-winner={matchDetail.winner === 'A'}>{matchDetail.sideA}</span>
-          <span class="match-detail-vs">vs</span>
-          <span class="match-detail-side match-detail-side-b" class:match-detail-winner={matchDetail.winner === 'B'}>{matchDetail.sideB}</span>
-        </div>
+  <div class="match-detail-backdrop" onclick={() => (detailMatchRecord = null)}>
+    <div class="match-detail-sheet" onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Match detail">
+      <header class="match-detail-sheet-hdr">
+        <span class="match-detail-sheet-title">Match detail</span>
+        <button class="sheet-close" onclick={() => (detailMatchRecord = null)} aria-label="Close">✕</button>
+      </header>
+      <div class="match-detail-sheet-body">
+        <LiveScoreboardView record={popupRecord} />
       </div>
-      {#if matchDetail.sets.length > 0}
-        <table class="match-detail-sets">
-          <thead>
-            <tr>
-              <th>Set</th>
-              <th>{matchDetail.sideA}</th>
-              <th>{matchDetail.sideB}</th>
-              <th>Boards</th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each matchDetail.sets as s}
-              <tr class:set-winner-a={s.aPoints > s.bPoints} class:set-winner-b={s.bPoints > s.aPoints}>
-                <td class="set-num">Set {s.set + 1}</td>
-                <td class="set-pts" class:set-pts-hi={s.aPoints > s.bPoints}>{s.aPoints}</td>
-                <td class="set-pts" class:set-pts-hi={s.bPoints > s.aPoints}>{s.bPoints}</td>
-                <td class="set-boards">{s.boards}</td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
-      {:else}
-        <p class="match-detail-no-data">No board-by-board data available for this match.</p>
-      {/if}
-      <button class="match-detail-close" onclick={() => (matchDetail = null)}>Close</button>
     </div>
   </div>
 {/if}
@@ -2525,7 +2512,7 @@
     background: rgba(245, 166, 35, 0.07);
   }
 
-  /* Match detail popup */
+  /* Match detail popup — sheet over backdrop */
   .match-detail-backdrop {
     position: fixed;
     inset: 0;
@@ -2536,84 +2523,46 @@
     z-index: 1000;
     padding: 1rem;
   }
-  .match-detail-popup {
+  .match-detail-sheet {
     background: var(--surface, #1a1d2e);
     border: 1px solid var(--border, #2d3344);
     border-radius: 12px;
-    padding: 1.25rem 1.5rem;
-    max-width: 480px;
+    max-width: 520px;
     width: 100%;
     display: flex;
     flex-direction: column;
-    gap: 1rem;
+    max-height: 90vh;
+    overflow: hidden;
   }
-  .match-detail-header {
-    border-bottom: 1px solid var(--border, #2d3344);
-    padding-bottom: 0.75rem;
-  }
-  .match-detail-players {
+  .match-detail-sheet-hdr {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    flex-wrap: wrap;
+    justify-content: space-between;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--border, #2d3344);
+    flex-shrink: 0;
   }
-  .match-detail-side {
-    font-weight: 600;
-    font-size: 0.95rem;
-    opacity: 0.7;
-  }
-  .match-detail-winner {
-    opacity: 1;
-    color: var(--amber, #f5a623);
-  }
-  .match-detail-vs {
-    font-size: 0.75rem;
-    opacity: 0.4;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-  }
-  .match-detail-sets {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.875rem;
-  }
-  .match-detail-sets th {
-    text-align: left;
-    padding: 0.3rem 0.5rem;
-    font-size: 0.7rem;
+  .match-detail-sheet-title {
+    font-size: 0.8rem;
     text-transform: uppercase;
     letter-spacing: 0.06em;
     opacity: 0.5;
-    border-bottom: 1px solid var(--border, #2d3344);
   }
-  .match-detail-sets td {
-    padding: 0.4rem 0.5rem;
-    border-bottom: 1px solid rgba(255,255,255,0.04);
+  .match-detail-sheet-body {
+    overflow-y: auto;
+    padding: 0.5rem 0;
   }
-  .match-detail-sets tr:last-child td { border-bottom: 0; }
-  .set-num { opacity: 0.6; font-size: 0.8rem; }
-  .set-pts { font-weight: 600; font-size: 1rem; }
-  .set-pts-hi { color: var(--amber, #f5a623); }
-  .set-boards { opacity: 0.45; font-size: 0.8rem; }
-  .match-detail-no-data {
-    font-size: 0.85rem;
-    opacity: 0.5;
-    text-align: center;
-    margin: 0.5rem 0;
-  }
-  .match-detail-close {
-    align-self: flex-end;
+  .sheet-close {
     background: transparent;
-    border: 1px solid var(--border, #2d3344);
-    border-radius: 6px;
-    padding: 0.35rem 1rem;
-    font-size: 0.85rem;
+    border: none;
+    font-size: 1rem;
     cursor: pointer;
     color: inherit;
+    opacity: 0.6;
+    padding: 0.25rem 0.5rem;
+    line-height: 1;
   }
-  .match-detail-close:hover {
-    background: rgba(255,255,255,0.07);
-  }
+  .sheet-close:hover { opacity: 1; }
   .winner-cell { padding: 0.3rem !important; }
   .winner-tag {
     display: inline-block;
