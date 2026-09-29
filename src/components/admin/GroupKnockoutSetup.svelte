@@ -597,7 +597,15 @@
                 draggable={true}
                 role="listitem"
                 ondragstart={() => onDragStart('__dummies__', i)}
-              >{playerName(did)}</div>
+              >
+                <span class="chip-name">{playerName(did)}</span>
+                <button
+                  type="button"
+                  class="dummy-remove-btn"
+                  aria-label="Remove {playerName(did)}"
+                  onclick={(e) => { e.stopPropagation(); removeDummyFromGroups(did); }}
+                >×</button>
+              </div>
             {/each}
             {#if unassignedDummies.length === 0}
               <div class="group-empty">All dummies assigned</div>
