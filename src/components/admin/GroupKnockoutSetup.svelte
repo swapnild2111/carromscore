@@ -252,14 +252,6 @@
     (tournament.rounds ?? []).some((r) => /^Group /i.test(r.name) && r.startedAt)
   );
 
-  // Stale-config: groups are locked but tournament boards changed → recommendation shifted.
-  const savedGroupCount = $derived(koCfg?.groupCount ?? 0);
-  const configStale = $derived(
-    groupsLocked &&
-    !roundsStarted &&
-    savedGroupCount > 0 &&
-    recommendedGroupCount !== savedGroupCount
-  );
 
   async function lockAndGenerate() {
     if (generating) return;
@@ -588,13 +580,6 @@
           {/if}
         </div>
 
-        {#if configStale && !groupsDirty}
-          <div class="config-stale-banner">
-            <span class="stale-icon">⚠</span>
-            <span class="stale-msg">Tournament config changed — recommendation is now <strong>{recommendedGroupCount} group{recommendedGroupCount !== 1 ? 's' : ''}</strong> (was {savedGroupCount}). Re-generate brackets to apply.</span>
-            <button type="button" class="btn btn-primary btn-sm" onclick={doRedraw} disabled={redrawing || generating}>{redrawing ? 'Re-generating…' : '↺ Re-generate'}</button>
-          </div>
-        {/if}
 
         <!-- Dummy pool -->
         {#if dummyCount > 0 && !roundsStarted}
@@ -753,14 +738,12 @@
                 disabled={startingRounds}
               >{startingRounds ? 'Starting…' : '▶ Start all group rounds'}</button>
             {/if}
-            {#if !configStale}
-              <button
-                type="button"
-                class="btn btn-secondary"
-                onclick={doRedraw}
-                disabled={redrawing || generating}
-              >{redrawing ? 'Re-generating…' : '↺ Re-generate brackets'}</button>
-            {/if}
+            <button
+              type="button"
+              class="btn btn-secondary"
+              onclick={doRedraw}
+              disabled={redrawing || generating}
+            >{redrawing ? 'Re-generating…' : '↺ Re-generate brackets'}</button>
           {:else if !groupsLocked && sortedGroups.length > 0}
             <button
               type="button"
