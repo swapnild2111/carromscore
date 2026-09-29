@@ -304,6 +304,58 @@ export async function markPlannedComplete(
 }
 
 /**
+ * Auto-forfeit a planned match where one side is a dummy (unreplaced
+ * walk-in placeholder). The real player wins every set with 25-0.
+ *
+ * Score breakdown per set (bestOf format, pointsTarget=25):
+ *   Each set = pointsTarget points on 3 boards: ⌊pt/3⌋, ⌊pt/3⌋, remainder
+ *   e.g. 25 pts → [8, 8, 9] (last board gets the extra). With queen
+ *   each board logs N-1 coins + 1 queen; we just use a flat total here.
+ *
+ * Sets won = ceil(bestOf / 2), sets lost = 0.
+ * After completing the planned slot, propagates the winner to the next round.
+ */
+export async function forfeitDummyMatch(
+  mid: string,
+  uid: string,
+): Promise<PlannedWriteOutcome> {
+  if (!mid) return { ok: false, error: 'no mid' };
+  await ensureAnonAuth();
+  try {
+    const { getDatabase, ref, get, update } = await import('firebase/database');
+    const db = getDatabase(firebaseApp());
+    const snap = await get(ref(db, `planned/${mid}`));
+    if (!snap.exists()) return { ok: false, error: 'not found' };
+    const val = snap.val() as PlannedMatch;
+    if (val.completedAt) return { ok: false, error: 'match already completed' };
+
+    const isDummyId = (id?: string | null) => !!id && /^dummy-\d+$/.test(id);
+    const aDummy = isDummyId(val.aResolvedId) || isDummyId(val.aName);
+    const bDummy = isDummyId(val.bResolvedId) || isDummyId(val.bName);
+    if (!aDummy && !bDummy) return { ok: false, error: 'no dummy side found' };
+
+    const winner: 'a' | 'b' = aDummy ? 'b' : 'a';
+    const bestOf = val.cfg?.bestOf ?? 3;
+    const setsNeeded = Math.ceil(bestOf / 2);
+    const result = { setsA: winner === 'a' ? setsNeeded : 0, setsB: winner === 'b' ? setsNeeded : 0, winner };
+
+    const effectiveUid = uid || currentUser()?.uid || '';
+    await update(ref(db, `planned/${mid}`), {
+      completedAt: Date.now(),
+      completedBy: effectiveUid || null,
+      result,
+    });
+
+    // Propagate winner into next bracket round (async, silent-on-failure)
+    void propagateBracketWinner(mid, winner);
+
+    return { ok: true, mid };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'forfeit failed' };
+  }
+}
+
+/**
  * Reset a completed planned slot back to "ready" by removing
  * completedAt, completedBy, result, claimedBy, and claimedAt.
  * Used when a test run completed a slot that needs to be replayed.

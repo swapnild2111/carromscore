@@ -449,25 +449,11 @@ function groupLabel(idx: number): string {
  * Standard single-elimination seeded pairs for a list of player IDs.
  * Returns [string, string][] for round 1 matches.
  */
+/** Pair players in the order the organizer arranged them: 1v2, 3v4, 5v6, … */
 function seededPairs(ids: string[]): [string, string][] {
-  function buildPositions(size: number): number[] {
-    if (size === 2) return [1, 2];
-    const prev = buildPositions(size / 2);
-    const result: number[] = [];
-    for (const s of prev) result.push(s, size + 1 - s);
-    return result;
-  }
-
-  const bracketSize = Math.pow(2, Math.ceil(Math.log2(Math.max(ids.length, 2))));
-  const positions = buildPositions(bracketSize);
   const pairs: [string, string][] = [];
-
-  for (let i = 0; i < positions.length; i += 2) {
-    const aIdx = positions[i]! - 1;
-    const bIdx = positions[i + 1]! - 1;
-    const a = ids[aIdx];
-    const b = ids[bIdx];
-    if (a && b) pairs.push([a, b]);
+  for (let i = 0; i + 1 < ids.length; i += 2) {
+    pairs.push([ids[i]!, ids[i + 1]!]);
   }
   return pairs;
 }

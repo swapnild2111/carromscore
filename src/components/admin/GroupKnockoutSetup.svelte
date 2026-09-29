@@ -100,6 +100,12 @@
   }
   let dummyCount = $state(countSavedDummies(tournament.groups ?? {}));
 
+  function addDummy() {
+    dummyCount += 1;
+    // New dummy appears in the unassigned dummy pool (unassignedDummies derived)
+    groupsDirty = true;
+  }
+
   function isDummy(id: string): boolean {
     return /^dummy-\d+$/.test(id);
   }
@@ -107,6 +113,29 @@
   const dummyIds = $derived(
     Array.from({ length: dummyCount }, (_, i) => `dummy-${i + 1}`)
   );
+
+  // ─── Champion marking ────────────────────────────────────────────────────────
+  // groupChampions: groupKey → playerId of the marked champion (one per group)
+  let groupChampions = $state<Record<string, string>>(
+    (() => {
+      const saved: Record<string, string> = {};
+      for (const [gKey, g] of Object.entries(tournament.groups ?? {})) {
+        if (g.championId) saved[gKey] = g.championId;
+      }
+      return saved;
+    })()
+  );
+
+  function toggleChampion(gKey: string, pid: string) {
+    if (groupChampions[gKey] === pid) {
+      const next = { ...groupChampions };
+      delete next[gKey];
+      groupChampions = next;
+    } else {
+      groupChampions = { ...groupChampions, [gKey]: pid };
+    }
+    groupsDirty = true;
+  }
 
   const assignedToGroup = $derived(
     new Set(Object.values(localGroups).flatMap((g) => g.playerIds))
@@ -270,7 +299,15 @@
       return;
     }
 
-    const saveOutcome = await updateLeagueGroups(tournament.key, localGroups);
+    // Merge champion markings into groups before saving
+    const groupsWithChampions: Record<string, LeagueGroup> = {};
+    for (const [gKey, g] of Object.entries(localGroups)) {
+      const champ = groupChampions[gKey];
+      groupsWithChampions[gKey] = champ ? { ...g, championId: champ } : { ...g };
+      if (!champ) delete groupsWithChampions[gKey]!.championId;
+    }
+
+    const saveOutcome = await updateLeagueGroups(tournament.key, groupsWithChampions);
     if (!saveOutcome.ok) {
       generating = false;
       const raw = saveOutcome.error ?? '';
@@ -511,32 +548,12 @@
             </div>
           {/if}
           {#if !roundsStarted}
-            <div class="group-count-row">
-              <span class="group-count-label">Dummy slots</span>
-              <div class="group-count-stepper">
-                <button
-                  type="button"
-                  class="stepper-btn"
-                  aria-label="Fewer dummies"
-                  disabled={dummyCount <= 0 || redrawing || generating}
-                  onclick={() => {
-                    const newCount = Math.max(0, dummyCount - 1);
-                    // Remove the last dummy from groups if assigned
-                    removeDummyFromGroups(`dummy-${dummyCount}`);
-                    dummyCount = newCount;
-                  }}
-                >−</button>
-                <span class="stepper-value">{dummyCount}</span>
-                <button
-                  type="button"
-                  class="stepper-btn"
-                  aria-label="More dummies"
-                  disabled={dummyCount >= 32 || redrawing || generating}
-                  onclick={() => { dummyCount = dummyCount + 1; }}
-                >+</button>
-              </div>
-              <span class="group-count-hint">walk-in placeholders</span>
-            </div>
+            <button
+              type="button"
+              class="btn btn-secondary btn-sm add-dummy-btn"
+              onclick={addDummy}
+              disabled={redrawing || generating}
+            >+ Add Dummy</button>
           {/if}
           {#if roundsStarted}
             <span class="draw-locked-hint">🔒 Groups locked — rounds in progress</span>
@@ -606,7 +623,7 @@
         <div class="groups-grid" style="grid-template-columns: repeat({Math.min(sortedGroups.length, 4)}, 1fr)">
           {#each sortedGroups as [gKey, group] (gKey)}
             {@const status = groupMatchStatus(gKey, group.name)}
-            {@const hasOddBye = group.playerIds.length % 2 !== 0 && group.playerIds.length > 1}
+            {@const hasOdd = group.playerIds.length % 2 !== 0 && group.playerIds.length > 1}
             <div
               class="group-col"
               class:group-col-locked={roundsStarted}
@@ -618,6 +635,9 @@
             >
               <div class="group-col-header">
                 <span>{group.name}</span>
+                {#if hasOdd && !roundsStarted}
+                  <span class="odd-warn" title="Odd number of players — add a player or dummy">⚠</span>
+                {/if}
                 <div class="group-col-header-right">
                   {#if roundsStarted}
                     <span class="group-match-status" class:group-match-done={status.done}>{status.label}</span>
@@ -627,21 +647,32 @@
                 </div>
               </div>
               {#each group.playerIds as pid, i (pid)}
+                {@const isChampion = groupChampions[gKey] === pid}
                 <div
                   class="player-chip"
                   class:player-chip-locked={roundsStarted}
                   class:player-chip-dummy={isDummy(pid)}
-                  class:player-chip-bye={hasOddBye && i === 0}
                   class:player-chip-drop-above={dropTargetGroup === gKey && dropTargetIdx === i}
                   draggable={!roundsStarted}
                   role="listitem"
-                  title={hasOddBye && i === 0 ? 'Top seed — receives bye in Round 1' : undefined}
                   ondragstart={roundsStarted ? undefined : () => onDragStart(gKey, i)}
                   ondragover={roundsStarted ? undefined : (e) => { e.preventDefault(); dropTargetGroup = gKey; dropTargetIdx = i; }}
                   ondragleave={roundsStarted ? undefined : () => { if (dropTargetGroup === gKey && dropTargetIdx === i) { dropTargetGroup = null; dropTargetIdx = null; } }}
                   ondrop={roundsStarted ? undefined : (e) => { e.stopPropagation(); onDrop(gKey, i); }}
                 >
-                  {playerName(pid)}{hasOddBye && i === 0 ? ' 👑' : ''}
+                  <span class="chip-name">{playerName(pid)}</span>
+                  {#if !roundsStarted && !isDummy(pid)}
+                    <button
+                      type="button"
+                      class="crown-btn"
+                      class:crown-active={isChampion}
+                      aria-label="{isChampion ? 'Unmark' : 'Mark'} {playerName(pid)} as champion"
+                      title="{isChampion ? 'Champion (click to unmark)' : 'Mark as champion'}"
+                      onclick={(e) => { e.stopPropagation(); toggleChampion(gKey, pid); }}
+                    >♛</button>
+                  {:else if isChampion}
+                    <span class="crown-badge" title="Champion">♛</span>
+                  {/if}
                   {#if isDummy(pid) && !roundsStarted}
                     <button
                       type="button"
@@ -654,9 +685,6 @@
               {/each}
               {#if group.playerIds.length === 0}
                 <div class="group-empty">Drop players here</div>
-              {/if}
-              {#if hasOddBye && !roundsStarted}
-                <div class="bye-note">Top seed skips Round 1</div>
               {/if}
             </div>
           {/each}
@@ -1054,9 +1082,10 @@
     margin-bottom: 0.25rem;
     cursor: grab;
     user-select: none;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    min-width: 0;
   }
   .player-chip:active { cursor: grabbing; }
   .player-chip:hover { background: rgba(255, 255, 255, 0.1); }
@@ -1066,10 +1095,6 @@
   }
   .player-chip-locked:active { cursor: default; }
   .player-chip-locked:hover { background: rgba(255, 255, 255, 0.06); }
-  .player-chip-bye {
-    border-color: rgba(255, 213, 74, 0.3);
-    background: rgba(255, 213, 74, 0.06);
-  }
   .player-chip-drop-above {
     border-top: 2px solid var(--accent, #ffd54a);
     margin-top: -1px;
@@ -1079,13 +1104,35 @@
     background: rgba(80, 140, 240, 0.1);
     color: rgba(160, 200, 255, 0.9);
     font-style: italic;
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    overflow: visible;
+  }
+  .chip-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
+  .crown-btn {
+    flex-shrink: 0;
+    background: transparent;
+    border: none;
+    padding: 0 2px;
+    font-size: 0.75rem;
+    line-height: 1;
+    cursor: pointer;
+    color: rgba(255, 255, 255, 0.2);
+    border-radius: 3px;
+    transition: color 0.15s;
+  }
+  .crown-btn:hover { color: rgba(255, 213, 74, 0.7); }
+  .crown-btn.crown-active { color: #ffd54a; }
+  .crown-badge {
+    flex-shrink: 0;
+    font-size: 0.75rem;
+    color: #ffd54a;
   }
   .dummy-remove-btn {
-    margin-left: auto;
+    flex-shrink: 0;
     padding: 0 4px;
     font-size: 0.8rem;
     line-height: 1;
@@ -1094,7 +1141,6 @@
     color: rgba(160, 200, 255, 0.5);
     cursor: pointer;
     border-radius: 3px;
-    flex-shrink: 0;
   }
   .dummy-remove-btn:hover { color: #f88; background: rgba(255, 100, 100, 0.12); }
   .dummy-pool .group-col-header { color: rgba(120, 180, 255, 0.8); }
@@ -1104,12 +1150,15 @@
     opacity: 0.7;
     margin-left: 4px;
   }
-  .bye-note {
-    font-size: 0.65rem;
-    color: rgba(255, 213, 74, 0.6);
-    font-style: italic;
-    text-align: center;
-    margin-top: 0.25rem;
+  .odd-warn {
+    color: #f87171;
+    font-size: 0.85rem;
+    margin-left: 4px;
+    flex-shrink: 0;
+  }
+  .add-dummy-btn {
+    font-size: 0.75rem;
+    padding: 0.2rem 0.6rem;
   }
   .group-empty {
     color: var(--muted, #9aa0a6);
@@ -1278,6 +1327,11 @@
     :root:not([data-theme="dark"]) .player-chip-dummy { background: rgba(50, 100, 220, 0.08); border-color: rgba(50, 100, 220, 0.3); color: #2255bb; }
     :root:not([data-theme="dark"]) .dummy-remove-btn { color: rgba(50, 100, 220, 0.5); }
     :root:not([data-theme="dark"]) .dummy-pool .group-col-header { color: #2255bb; }
+    :root:not([data-theme="dark"]) .crown-btn { color: rgba(0, 0, 0, 0.18); }
+    :root:not([data-theme="dark"]) .crown-btn:hover { color: rgba(180, 130, 0, 0.7); }
+    :root:not([data-theme="dark"]) .crown-btn.crown-active { color: #b8860b; }
+    :root:not([data-theme="dark"]) .crown-badge { color: #b8860b; }
+    :root:not([data-theme="dark"]) .odd-warn { color: #dc2626; }
   }
   :root[data-theme="light"] .gko-card { background: #fff; border-color: rgba(0, 0, 0, 0.1); color: #111; }
   :root[data-theme="light"] .ls-header { border-bottom-color: rgba(0, 0, 0, 0.08); }
@@ -1298,7 +1352,6 @@
   :root[data-theme="light"] .seeding-tbl th { background: rgba(0, 0, 0, 0.04); border-bottom-color: rgba(0, 0, 0, 0.07); }
   :root[data-theme="light"] .seeding-tbl td { border-bottom-color: rgba(0, 0, 0, 0.07); }
   :root[data-theme="light"] .draw-locked-hint { color: rgba(160, 100, 0, 0.8); }
-  :root[data-theme="light"] .bye-note { color: rgba(160, 100, 0, 0.7); }
   :root[data-theme="light"] .group-count-row { background: rgba(0, 0, 0, 0.04); border-color: rgba(0, 0, 0, 0.12); }
   :root[data-theme="light"] .stepper-btn { background: rgba(0, 0, 0, 0.06); border-color: rgba(0, 0, 0, 0.15); color: #111; }
   :root[data-theme="light"] .stepper-btn:hover:not(:disabled) { background: rgba(0, 0, 0, 0.12); }
@@ -1307,4 +1360,9 @@
   :root[data-theme="light"] .player-chip-dummy { background: rgba(50, 100, 220, 0.08); border-color: rgba(50, 100, 220, 0.3); color: #2255bb; }
   :root[data-theme="light"] .dummy-remove-btn { color: rgba(50, 100, 220, 0.5); }
   :root[data-theme="light"] .dummy-pool .group-col-header { color: #2255bb; }
+  :root[data-theme="light"] .crown-btn { color: rgba(0, 0, 0, 0.18); }
+  :root[data-theme="light"] .crown-btn:hover { color: rgba(180, 130, 0, 0.7); }
+  :root[data-theme="light"] .crown-btn.crown-active { color: #b8860b; }
+  :root[data-theme="light"] .crown-badge { color: #b8860b; }
+  :root[data-theme="light"] .odd-warn { color: #dc2626; }
 </style>

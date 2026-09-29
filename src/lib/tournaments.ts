@@ -151,6 +151,7 @@ export type LeagueGroup = {
   name: string;        // display name, e.g. "G1"
   order: number;       // 1-indexed sort order
   playerIds: string[]; // ordered array of assigned player IDs
+  championId?: string; // organizer-marked champion (gets seeded #1 in combined KO)
 };
 
 /**
@@ -520,7 +521,8 @@ function parseGroups(raw: unknown): Record<string, LeagueGroup> | undefined {
         if (typeof id === 'string' && id) playerIds.push(id);
       }
     }
-    out[gKey] = { name, order, playerIds };
+    const championId = typeof g.championId === 'string' && g.championId ? g.championId : undefined;
+    out[gKey] = { name, order, playerIds, ...(championId ? { championId } : {}) };
   }
   return Object.keys(out).length > 0 ? out : undefined;
 }
