@@ -320,7 +320,7 @@
     const result = await generateGroupPhase({
       tournamentKey: tournament.key,
       tournamentName: tournament.name,
-      groups: localGroups,
+      groups: groupsToSave,
       playerNames,
       defaults: {
         mode: tournament.defaults?.mode ?? 'singles',

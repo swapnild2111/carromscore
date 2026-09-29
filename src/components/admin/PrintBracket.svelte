@@ -1013,14 +1013,13 @@
   // Groups are laid out in up to 2 columns (even indices left, odd indices right).
   // SVG uses viewBox + width=100% to scale to fit any print page width.
   function buildGroupKODiagramSVG(
-    groups: Array<{ name: string; players: string[]; matchMap: Map<string, {isDone: boolean; winner?: 'a'|'b'; setsA?: number; setsB?: number; pointsA?: number; pointsB?: number; aName: string; bName: string}[]> }>,
+    groups: Array<{ name: string; players: string[]; preQualifyNames?: Set<string>; matchMap: Map<string, {isDone: boolean; winner?: 'a'|'b'; setsA?: number; setsB?: number; pointsA?: number; pointsB?: number; aName: string; bName: string}[]> }>,
   ): string {
     if (groups.length === 0) return '';
 
-    // ── Same constants as buildFlightBracketSVG ──
     const COL_W   = 240;
     const COL_GAP = 48;
-    const SLOT_H  = 44;   // total height of one match slot (both players)
+    const SLOT_H  = 44;
     const NAME_MAX = 22;
 
     function clip(s: string) { return s.length > NAME_MAX ? s.slice(0, NAME_MAX - 1) + '…' : s; }
@@ -1028,32 +1027,32 @@
       return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
 
-    // ── Additional layout for groups ──
-    const GRP_GAP  = 24;  // vertical gap between groups in the same column
-    const LBL_H    = 20;  // height reserved above each group for its name label
-    const PAD      = 20;  // outer padding
-    const MATCH_SP = 56;  // vertical spacing between match centres (same as buildFlightBracketSVG MATCH_H)
+    const GRP_GAP  = 24;
+    const LBL_H    = 20;
+    const PAD      = 20;
+    const MATCH_SP = 56;
 
-    // ── Helpers ──
-    function makePairs(ids: string[]): [string, string][] {
-      const n = ids.length;
+    /** Sequential 1v2, 3v4, … pairs */
+    function seqPairs(ids: string[]): [string, string][] {
       const pairs: [string, string][] = [];
-      for (let i = 0; i < Math.floor(n / 2); i++) pairs.push([ids[i]!, ids[n - 1 - i]!]);
+      for (let i = 0; i + 1 < ids.length; i += 2) pairs.push([ids[i]!, ids[i + 1]!]);
       return pairs;
     }
 
-    // Map round index ri (0=first, totalRounds-1=Final) to the round key used in matchMap
-    function groupRoundKey(groupName: string, ri: number, totalRounds: number): string {
-      if (totalRounds === 1) return `${groupName} — Final`;
-      const fromEnd = totalRounds - 1 - ri;
+    // Map round index ri (0=first, totalRounds-1=Final) to the round key used in matchMap.
+    // When hasPQ is true, ri=0 maps to "Pre-qualify", ri=1 maps to the first main round.
+    function groupRoundKey(groupName: string, ri: number, totalRounds: number, hasPQ: boolean): string {
+      if (hasPQ && ri === 0) return `${groupName} — Pre-qualify`;
+      const mainRi = hasPQ ? ri - 1 : ri;
+      const mainTotal = hasPQ ? totalRounds - 1 : totalRounds;
+      if (mainTotal === 1) return `${groupName} — Final`;
+      const fromEnd = mainTotal - 1 - mainRi;
       const revLabels = ['Final', 'SF', 'QF', 'R16', 'R32'];
       return `${groupName} — ${revLabels[fromEnd] ?? `R${fromEnd}`}`;
     }
 
     type MatchInfo = { isDone: boolean; winner?: 'a'|'b'; setsA?: number; setsB?: number; pointsA?: number; pointsB?: number; aName: string; bName: string };
 
-    // Same score display logic as buildFlightBracketSVG:
-    // single-set match → show total points (e.g. "25–14"); multi-set → show set count "2–1"
     function groupScoreLines(res: MatchInfo | undefined): string[] {
       if (!res?.isDone) return [];
       const sA = res.setsA ?? 0;
@@ -1068,67 +1067,99 @@
       return [`${sA}–${sB}`];
     }
 
+    type RoundSlot = { aName: string; bName: string; isByeSlot?: boolean };
+
     type GroupMeta = {
       gi: number;
       name: string;
-      rounds: Array<Array<[string, string]>>;  // [aName, bName] per match per round
-      byePlayer: string | null;
+      // rounds[ri] = array of match slots for that round column
+      rounds: Array<Array<RoundSlot>>;
+      hasPQ: boolean;
+      // For classic brackets only: top-seed bye player (odd groups)
+      classicByePlayer: string | null;
       x: number; y: number; h: number;
       roundCols: number;
     };
 
     const groupMetas: GroupMeta[] = groups.map((g, gi) => {
       const ps = g.players;
-      const hasBye = ps.length % 2 !== 0 && ps.length > 1;
-      const byePlayer = hasBye ? (ps[0] ?? null) : null;
-      const active = hasBye ? ps.slice(1) : [...ps];
-      const rounds: Array<Array<[string, string]>> = [];
+      const pqSet = g.preQualifyNames ?? new Set<string>();
+      const hasPQ = pqSet.size >= 2;
+      const rounds: Array<Array<RoundSlot>> = [];
+      let classicByePlayer: string | null = null;
+
       if (ps.length <= 1) {
-        rounds.push([[ps[0] ?? 'TBD', '(bye)']]);
+        rounds.push([{ aName: ps[0] ?? 'TBD', bName: '(bye)' }]);
       } else if (ps.length === 2) {
-        rounds.push([[ps[0]!, ps[1]!]]);
-      } else {
-        // R1: pair up active players (seeded top vs bottom)
-        rounds.push(makePairs(active));
-        // Build subsequent rounds until we reach the final (1 match)
-        // First subsequent round may include the bye player as a pre-seeded winner
-        let prevCount = rounds[0]!.length;
-        let firstSubRound = true;
+        rounds.push([{ aName: ps[0]!, bName: ps[1]! }]);
+      } else if (hasPQ) {
+        // ── Pre-qualify topology ──
+        // pqSet contains resolved player names; ps contains all names in playerIds order.
+        const pqMatchCount = Math.floor(pqSet.size / 2);
+        const byeCount = ps.length - pqSet.size;
+        const r2TotalSlots = byeCount + pqMatchCount;
+        const r2MatchCount = Math.ceil(r2TotalSlots / 2);
+
+        // R1: pre-qualify round slots (pqMatchCount matches)
+        const r1Slots: RoundSlot[] = [];
+        for (let i = 0; i < pqMatchCount; i++) r1Slots.push({ aName: '', bName: '' });
+        rounds.push(r1Slots);
+
+        // R2: bye players + pq winners (r2MatchCount matches)
+        const r2Slots: RoundSlot[] = [];
+        for (let i = 0; i < r2MatchCount; i++) r2Slots.push({ aName: '', bName: '' });
+        rounds.push(r2Slots);
+
+        // Subsequent rounds until Final (1 match)
+        let prevCount = r2MatchCount;
         while (prevCount > 1) {
           const nextCount = Math.ceil(prevCount / 2);
-          const slots: [string, string][] = [];
+          const slots: RoundSlot[] = [];
+          for (let i = 0; i < nextCount; i++) slots.push({ aName: '', bName: '' });
+          rounds.push(slots);
+          prevCount = nextCount;
+        }
+      } else {
+        // ── Classic topology: sequential 1v2 pairs, odd-group bye ──
+        const hasBye = ps.length % 2 !== 0;
+        classicByePlayer = hasBye ? (ps[0] ?? null) : null;
+        const active = hasBye ? ps.slice(1) : [...ps];
+        const r1Pairs = seqPairs(active);
+        rounds.push(r1Pairs.map(([a, b]) => ({ aName: a, bName: b })));
+        let prevCount = r1Pairs.length;
+        let firstSub = true;
+        while (prevCount > 1) {
+          const nextCount = Math.ceil(prevCount / 2);
+          const slots: RoundSlot[] = [];
           for (let i = 0; i < nextCount; i++) {
-            // First slot of first sub-round: bye player seeds in here; others are TBD
-            const aLabel = firstSubRound && i === 0 && byePlayer
-              ? clip(esc(byePlayer))
+            const aLabel = firstSub && i === 0 && classicByePlayer
+              ? clip(esc(classicByePlayer))
               : '';
-            slots.push([aLabel, '']);
+            slots.push({ aName: aLabel, bName: '' });
           }
           rounds.push(slots);
           prevCount = nextCount;
-          firstSubRound = false;
+          firstSub = false;
         }
       }
-      return { gi, name: g.name, rounds, byePlayer, x: 0, y: 0, h: 0, roundCols: rounds.length };
+
+      return { gi, name: g.name, rounds, hasPQ, classicByePlayer, x: 0, y: 0, h: 0, roundCols: rounds.length };
     });
 
-    // Height of one group block: determined by R1 match count × per-match vertical span
     function groupH(meta: GroupMeta): number {
-      const r1Count = meta.rounds[0]!.length;
-      return r1Count * MATCH_SP;
+      // Height is determined by the round with the most matches
+      const maxSlots = Math.max(...meta.rounds.map((r) => r.length), 1);
+      return maxSlots * MATCH_SP;
     }
-    // Width of one group block
     function groupW(meta: GroupMeta): number {
       return meta.roundCols * COL_W + (meta.roundCols - 1) * COL_GAP;
     }
 
-    // slotCY: centre-y of match mi in a round with `count` matches, within block height h starting at y
     function slotCY(y: number, h: number, mi: number, count: number): number {
       const spacing = h / count;
       return y + spacing * mi + spacing / 2;
     }
 
-    // ── Stack all groups vertically ──
     const maxGroupW = Math.max(...groupMetas.map(groupW), 0);
     const totalW    = PAD + maxGroupW + PAD;
     let stackY      = PAD;
@@ -1140,27 +1171,23 @@
 
     const lines: string[] = [];
 
-    // ── Draw each group ──
+    const ROUND_LABELS: Record<string, string> = {
+      'Pre-qualify': 'PRE-QUALIFY',
+      'Final': 'FINAL', 'SF': 'SEMI FINALS', 'QF': 'QUARTER FINALS',
+      'R16': 'ROUNDS', 'R32': 'ROUNDS', 'R64': 'ROUNDS',
+    };
+
     for (const meta of groupMetas) {
       const gData = groups[meta.gi]!;
       const totalRounds = meta.roundCols;
-      const hasBye = meta.byePlayer !== null;
-
-      // Per-round column headers (same style as buildFlightBracketSVG stage labels).
-      // When there are multiple groups, prefix the group name on the first column only.
       const multiGroup = groups.length > 1;
+
+      // Column headers
       for (let ri = 0; ri < totalRounds; ri++) {
         const rx = meta.x + ri * (COL_W + COL_GAP);
-        const roundKey = groupRoundKey(meta.name, ri, totalRounds);
-        // Strip the "G1 — " prefix to get just "R16", "QF", "SF", "Final"
+        const roundKey = groupRoundKey(meta.name, ri, totalRounds, meta.hasPQ);
         const roundShort = roundKey.replace(/^.*?—\s*/, '');
-        // Human-friendly label: expand abbreviations to full words
-        const ROUND_LABELS: Record<string, string> = {
-          'Final': 'FINAL', 'SF': 'SEMI FINALS', 'QF': 'QUARTER FINALS',
-          'R16': 'ROUNDS', 'R32': 'ROUNDS', 'R64': 'ROUNDS',
-        };
         const colLabel = ROUND_LABELS[roundShort] ?? (/^R\d+$/.test(roundShort) ? 'ROUNDS' : roundShort.toUpperCase());
-        // First column of a multi-group layout: show "G1  ROUNDS" together
         const displayLabel = multiGroup && ri === 0
           ? `${esc(meta.name.toUpperCase())}  ${colLabel}`
           : colLabel;
@@ -1168,77 +1195,72 @@
       }
 
       for (let ri = 0; ri < totalRounds; ri++) {
-        const rMatches = meta.rounds[ri]!;
+        const rSlots = meta.rounds[ri]!;
         const rx = meta.x + ri * (COL_W + COL_GAP);
-        const roundKey = groupRoundKey(meta.name, ri, totalRounds);
+        const roundKey = groupRoundKey(meta.name, ri, totalRounds, meta.hasPQ);
         const roundResults: MatchInfo[] = gData.matchMap.get(roundKey) ?? [];
 
-        // ── Connector lines between round columns — handles any feed ratio ──
+        // ── Connector lines ──
         if (ri < totalRounds - 1) {
-          const nextMatches = meta.rounds[ri + 1]!;
-          const x1 = rx + COL_W;
-          const x2 = meta.x + (ri + 1) * (COL_W + COL_GAP);
+          const nextSlots = meta.rounds[ri + 1]!;
+          const x1   = rx + COL_W;
+          const x2   = meta.x + (ri + 1) * (COL_W + COL_GAP);
           const xMid = x1 + COL_GAP / 2;
-          const feedRatio = rMatches.length / nextMatches.length;
-          for (let ni = 0; ni < nextMatches.length; ni++) {
-            const cy2 = slotCY(meta.y, meta.h, ni, nextMatches.length);
-            const firstSrc = Math.round(ni * feedRatio);
-            const lastSrc = Math.round((ni + 1) * feedRatio) - 1;
-            for (let si = firstSrc; si <= lastSrc && si < rMatches.length; si++) {
-              const cy1 = slotCY(meta.y, meta.h, si, rMatches.length);
+
+          if (meta.hasPQ && ri === 0) {
+            // Pre-qualify → R2: each PQ match feeds one slot in R2; bye players have no PQ connector.
+            // R2 slots layout: [bye0, bye1, …, byeN-1, pqW0, pqW1, …]
+            // pqWinner i feeds into slot (byeCount_in_r2_pairs + i) in R2
+            const byeCount = meta.rounds[1]!.length - rSlots.length;
+            const pqOffset = Math.ceil(byeCount / 2); // how many R2 match-slots the bye players occupy (approx)
+            // More precisely: bye players fill slots 0..(byeCount-1) sequentially,
+            // pq winners fill slots byeCount..(byeCount+pqWinnerCount-1).
+            // R2 matches: (bye0 vs bye1), (bye2 vs bye3), …, (pqW0 vs pqW1), …
+            // pq winner i → R2 slot index = floor(byeCount/2) + floor(i/2)
+            // For each PQ match i, the winner goes to R2 slot: Math.floor(byeCount/2) + Math.floor(i/2)
+            const byeR2Pairs = Math.floor(byeCount / 2);
+            for (let pqi = 0; pqi < rSlots.length; pqi++) {
+              const cy1   = slotCY(meta.y, meta.h, pqi, rSlots.length);
+              const r2Idx = byeR2Pairs + Math.floor(pqi / 2);
+              const cy2   = slotCY(meta.y, meta.h, r2Idx, nextSlots.length);
               lines.push(`<line x1="${x1}" y1="${cy1}" x2="${xMid}" y2="${cy1}" stroke="#bbb" stroke-width="1.25"/>`);
               lines.push(`<line x1="${xMid}" y1="${cy1}" x2="${xMid}" y2="${cy2}" stroke="#bbb" stroke-width="1.25"/>`);
+              lines.push(`<line x1="${xMid}" y1="${cy2}" x2="${x2}" y2="${cy2}" stroke="#bbb" stroke-width="1.25"/>`);
             }
-            lines.push(`<line x1="${xMid}" y1="${cy2}" x2="${x2}" y2="${cy2}" stroke="#bbb" stroke-width="1.25"/>`);
+          } else {
+            // Standard halving connectors: each next slot fed by 2 prev slots
+            for (let ni = 0; ni < nextSlots.length; ni++) {
+              const cy2  = slotCY(meta.y, meta.h, ni, nextSlots.length);
+              const srcA = ni * 2;
+              const srcB = ni * 2 + 1;
+              for (const si of [srcA, srcB]) {
+                if (si < rSlots.length) {
+                  const cy1 = slotCY(meta.y, meta.h, si, rSlots.length);
+                  lines.push(`<line x1="${x1}" y1="${cy1}" x2="${xMid}" y2="${cy1}" stroke="#bbb" stroke-width="1.25"/>`);
+                  lines.push(`<line x1="${xMid}" y1="${cy1}" x2="${xMid}" y2="${cy2}" stroke="#bbb" stroke-width="1.25"/>`);
+                }
+              }
+              lines.push(`<line x1="${xMid}" y1="${cy2}" x2="${x2}" y2="${cy2}" stroke="#bbb" stroke-width="1.25"/>`);
+            }
           }
         }
 
-        // Resolve who should appear in a not-yet-played slot by looking up the
-        // winner of the preceding round match that feeds into this slot position.
-        // feedSide: 'a' = top feeder into this slot, 'b' = bottom feeder.
-        function resolveAdvancer(roundIdx: number, matchIdx: number, feedSide: 'a' | 'b'): string | null {
-          if (roundIdx === 0) return null;
-          const prevRound = meta.rounds[roundIdx - 1]!;
-          const prevKey   = groupRoundKey(meta.name, roundIdx - 1, totalRounds);
-          const prevResults: MatchInfo[] = gData.matchMap.get(prevKey) ?? [];
-          const feedRatio = prevRound.length / rMatches.length;
-          const firstSrc  = Math.round(matchIdx * feedRatio);
-          const lastSrc   = Math.round((matchIdx + 1) * feedRatio) - 1;
-          // top feeder → firstSrc slot; bottom feeder → lastSrc slot
-          const srcIdx = feedSide === 'a' ? firstSrc : lastSrc;
-          const src = prevResults[srcIdx];
-          if (!src?.isDone || !src.winner) return null;
-          const name = src.winner === 'a' ? src.aName : src.bName;
-          return name ? clip(esc(name)) : null;
-        }
-
-        // ── Match slots (identical to buildFlightBracketSVG slot drawing) ──
-        for (let mi = 0; mi < rMatches.length; mi++) {
-          const [aN, bN] = rMatches[mi]!;
-          const cy  = slotCY(meta.y, meta.h, mi, rMatches.length);
-          const sh  = SLOT_H;
-          const sy  = cy - sh / 2;
-
-          const isFinalWithBye = ri === totalRounds - 1 && hasBye && totalRounds > 1;
-          const aLabel = isFinalWithBye ? clip(esc(meta.byePlayer ?? aN)) : clip(esc(aN));
-          const bLabel = isFinalWithBye ? 'W Round 1' : clip(esc(bN));
+        // ── Match slots ──
+        for (let mi = 0; mi < rSlots.length; mi++) {
+          const slot = rSlots[mi]!;
+          const cy   = slotCY(meta.y, meta.h, mi, rSlots.length);
+          const sh   = SLOT_H;
+          const sy   = cy - sh / 2;
 
           const res: MatchInfo | undefined = roundResults[mi];
-          const isDone   = res?.isDone ?? false;
-          const winnerA  = isDone && res?.winner === 'a';
-          const winnerB  = isDone && res?.winner === 'b';
+          const isDone  = res?.isDone ?? false;
+          const winnerA = isDone && res?.winner === 'a';
+          const winnerB = isDone && res?.winner === 'b';
 
-          // Use resolved names when available: actual match names when done,
-          // winner propagated from the previous round when not yet played,
-          // or the seeded name from the bracket draw (aLabel/bLabel) as final fallback.
-          const aName = isDone && res?.aName
-            ? clip(esc(res.aName))
-            : (resolveAdvancer(ri, mi, 'a') ?? aLabel);
-          const bName = isDone && res?.bName
-            ? clip(esc(res.bName))
-            : (resolveAdvancer(ri, mi, 'b') ?? bLabel);
+          // Use real match names from matchMap when available; fall back to seeded slot names
+          const aName = isDone && res?.aName ? clip(esc(res.aName)) : (slot.aName ? clip(esc(slot.aName)) : 'TBD');
+          const bName = isDone && res?.bName ? clip(esc(res.bName)) : (slot.bName ? clip(esc(slot.bName)) : 'TBD');
 
-          // Exact same text style as buildFlightBracketSVG
           const aFill    = winnerA ? '#000' : '#333';
           const bFill    = winnerB ? '#000' : '#333';
           const aWeight  = winnerA ? '700' : '400';
@@ -1246,27 +1268,19 @@
           const aOpacity = isDone && !winnerA ? '0.38' : '1';
           const bOpacity = isDone && !winnerB ? '0.38' : '1';
 
-          // Score pill — same logic as buildFlightBracketSVG
-          const sLines = groupScoreLines(res);
+          const sLines    = groupScoreLines(res);
           const scoreText = sLines[0] ?? '';
-          const pillW = scoreText ? Math.max(36, Math.min(scoreText.length * 6.5 + 10, COL_W - 90)) : 0;
+          const pillW     = scoreText ? Math.max(36, Math.min(scoreText.length * 6.5 + 10, COL_W - 90)) : 0;
 
-          // Slot rect + midline + names (exactly as buildFlightBracketSVG)
           lines.push(`<rect x="${rx}" y="${sy}" width="${COL_W}" height="${sh}" rx="5" fill="#fff" stroke="#bbb" stroke-width="1"/>`);
           lines.push(`<line x1="${rx + 1}" y1="${sy + sh / 2}" x2="${rx + COL_W - 1}" y2="${sy + sh / 2}" stroke="#ebebeb" stroke-width="0.75"/>`);
           lines.push(`<text x="${rx + 8}" y="${sy + 16}" font-size="11" font-weight="${aWeight}" opacity="${aOpacity}" font-family="sans-serif" fill="${aFill}">${aName}</text>`);
           lines.push(`<text x="${rx + 8}" y="${sy + sh - 8}" font-size="11" font-weight="${bWeight}" opacity="${bOpacity}" font-family="sans-serif" fill="${bFill}">${bName}</text>`);
 
-          if (isFinalWithBye) {
-            const bpx = rx + COL_W - 36;
-            lines.push(`<rect x="${bpx}" y="${sy + 3}" width="32" height="14" rx="3" fill="#fef3c7"/>`);
-            lines.push(`<text x="${bpx + 16}" y="${sy + 13}" text-anchor="middle" font-size="7.5" font-weight="700" font-family="sans-serif" fill="#d97706">BYE</text>`);
-          }
-
           if (scoreText) {
-            const px = rx + COL_W - pillW - 4;
+            const px    = rx + COL_W - pillW - 4;
             const pillH = 17;
-            const py = cy - pillH / 2;
+            const py    = cy - pillH / 2;
             lines.push(`<rect x="${px}" y="${py}" width="${pillW}" height="${pillH}" rx="8" fill="#f5f5f5" stroke="#e0e0e0" stroke-width="0.75"/>`);
             lines.push(`<text x="${px + pillW / 2}" y="${py + 12}" text-anchor="middle" font-size="9.5" font-family="sans-serif" fill="#444" font-weight="600">${scoreText}</text>`);
           }
@@ -1329,7 +1343,7 @@
     }
     const matchMap = new Map<string, MatchResult[]>();
     for (const m of plannedMatches) {
-      if (!m.round || !/— (R\d+|QF|SF|Final)/.test(m.round)) continue;
+      if (!m.round || !/— (Pre-qualify|R\d+|QF|SF|Final)/.test(m.round)) continue;
       const arr = matchMap.get(m.round) ?? [];
       const aName = m.aResolvedId ? (byId.get(m.aResolvedId) ?? m.aName) : m.aName;
       const bName = m.bResolvedId ? (byId.get(m.bResolvedId) ?? m.bName) : m.bName;
@@ -1349,11 +1363,15 @@
       });
       matchMap.set(m.round, arr);
     }
-    return sorted.map((g) => ({
-      name: g.name,
-      players: (g.playerIds ?? []).map((id) => byId.get(id) ?? id),
-      matchMap,
-    }));
+    return sorted.map((g) => {
+      const pqNameSet = new Set((g.preQualifyIds ?? []).map((id) => byId.get(id) ?? id));
+      return {
+        name: g.name,
+        players: (g.playerIds ?? []).map((id) => byId.get(id) ?? id),
+        preQualifyNames: pqNameSet,
+        matchMap,
+      };
+    });
   });
 
   const groupKODiagramSVG = $derived.by(() => {
