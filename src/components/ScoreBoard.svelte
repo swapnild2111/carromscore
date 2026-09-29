@@ -701,6 +701,14 @@
             timerOverFired = true;
             timerOverToast = true;
           }
+          // Stop counting once time is up — display stays clamped at 00:00
+          if (timerElapsedMs >= timerTotalMs) {
+            timerElapsedMs = timerTotalMs;
+            if (timerIntervalId !== null) {
+              window.clearInterval(timerIntervalId);
+              timerIntervalId = null;
+            }
+          }
         }, 1000);
       }, 1000);
     }
@@ -2984,14 +2992,14 @@
       </span>
     {:else if cfg.timerDuration > 0}
       {@const timerTotalMs = cfg.timerDuration * 60 * 1000}
-      {@const timerOver = timerElapsedMs > timerTotalMs}
-      {@const timerDisplayMs = timerOver ? timerElapsedMs - timerTotalMs : timerTotalMs - timerElapsedMs}
-      {@const timerMins = Math.floor(timerDisplayMs / 60000)}
-      {@const timerSecs = Math.floor((timerDisplayMs % 60000) / 1000)}
+      {@const timerOver = timerElapsedMs >= timerTotalMs}
+      {@const timerRemainMs = timerOver ? 0 : timerTotalMs - timerElapsedMs}
+      {@const timerMins = Math.floor(timerRemainMs / 60000)}
+      {@const timerSecs = Math.floor((timerRemainMs % 60000) / 1000)}
       <!-- spacer keeps the pill truly centered against the buttons on the right -->
       <span class="timer-spacer" aria-hidden="true"></span>
-      <span class="timer-pill" class:timer-over={timerOver} class:timer-warn={!timerOver && timerTotalMs - timerElapsedMs < 60000}>
-        {timerOver ? '+' : ''}{timerMins}:{String(timerSecs).padStart(2, '0')}
+      <span class="timer-pill" class:timer-over={timerOver} class:timer-warn={!timerOver && timerRemainMs < 60000}>
+        {timerMins}:{String(timerSecs).padStart(2, '0')}
       </span>
     {:else}
       <span class="hint">
@@ -4518,11 +4526,15 @@
     color: var(--danger);
     background: rgba(239, 83, 80, 0.15);
     border-color: rgba(239, 83, 80, 0.5);
-    animation: timer-warn-pulse 0.6s ease-in-out infinite;
+    animation: timer-over-flash 1s step-start infinite;
   }
   @keyframes timer-warn-pulse {
     0%, 100% { opacity: 1; }
     50%       { opacity: 0.65; }
+  }
+  @keyframes timer-over-flash {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0; }
   }
 
   .winner-dot {

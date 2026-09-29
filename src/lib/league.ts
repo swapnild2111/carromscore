@@ -565,7 +565,7 @@ export async function generateKnockoutBracket(
     let unsubOnce: (() => void) | null = null;
     subscribePlannedByTournament(tournamentKey, async (matches) => {
       if (unsubOnce) unsubOnce();
-      const bracketRoundRx = /^(R32|R16|QF|SF|Final)$/i;
+      const bracketRoundRx = /^(R256|R128|R64|R32|R16|QF|SF|Final)$/i;
       const toDelete = matches.filter((m) => bracketRoundRx.test(m.round ?? '') && !m.completedAt);
       await Promise.all(toDelete.map((m) => deletePlannedMatch(m.mid)));
       resolve();
@@ -573,13 +573,21 @@ export async function generateKnockoutBracket(
   });
 
   const bracketSize = Math.pow(2, Math.ceil(Math.log2(Math.max(seeds.length, 2))));
-  const allLabels = [
-    { label: 'R32', matchCount: 16 },
-    { label: 'R16', matchCount: 8 },
-    { label: 'QF',  matchCount: 4 },
-    { label: 'SF',  matchCount: 2 },
+  // Generate round labels dynamically: Final, SF, QF, then R16, R32, R64, R128, ...
+  // so any bracket size works without hardcoding round names.
+  const namedRounds: Array<{ label: string; matchCount: number }> = [
     { label: 'Final', matchCount: 1 },
+    { label: 'SF',    matchCount: 2 },
+    { label: 'QF',    matchCount: 4 },
+    { label: 'R16',   matchCount: 8 },
+    { label: 'R32',   matchCount: 16 },
   ];
+  // Add dynamically-named Rx rounds for larger brackets (64+)
+  for (let mc = 32; mc < bracketSize; mc *= 2) {
+    namedRounds.push({ label: `R${mc * 2}`, matchCount: mc });
+  }
+  // Sort ascending by matchCount (first round first)
+  const allLabels = [...namedRounds].sort((a, b) => b.matchCount - a.matchCount);
   const roundDefs = allLabels.filter((r) => r.matchCount <= bracketSize / 2);
 
   const roundKeys: string[] = [];

@@ -1597,6 +1597,21 @@
     font-size: 0.85rem;
     color: var(--muted);
   }
+  .add-country-label input[type="text"] {
+    background: #0f0f0f;
+    color: var(--fg);
+    border: 1px solid #2a2a2a;
+    border-radius: 0.4rem;
+    padding: 0.45rem 0.55rem;
+    font: inherit;
+    font-size: 0.88rem;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .add-country-label input[type="text"]:focus {
+    outline: none;
+    border-color: var(--accent, #ffd54a);
+  }
   .add-meta-row {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -1614,6 +1629,43 @@
   .add-meta-field select {
     width: 100%;
     box-sizing: border-box;
+    background: #0f0f0f;
+    color: var(--fg);
+    border: 1px solid #2a2a2a;
+    border-radius: 0.4rem;
+    padding: 0.45rem 0.55rem;
+    font: inherit;
+    font-size: 0.88rem;
+    appearance: none;
+    -webkit-appearance: none;
+  }
+  .add-meta-field input:focus,
+  .add-meta-field select:focus {
+    outline: none;
+    border-color: var(--accent, #ffd54a);
+  }
+  .add-meta-field select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%239aa0a6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.55rem center;
+    background-size: 10px 6px;
+    padding-right: 1.8rem;
+  }
+  .add-meta-field select option {
+    background: #1a1a1a;
+  }
+  .add-meta-field input[type="date"]::-webkit-calendar-picker-indicator {
+    filter: invert(0.6);
+    cursor: pointer;
+  }
+  /* Label span styling to match edit-field */
+  .add-meta-field > span,
+  .add-country-label > span {
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: var(--muted);
   }
   /* Bulk-add textarea. Same visual language as .dialog-card input[type=text];
      multi-line so it fits comma + newline batches without a scroll bar. */

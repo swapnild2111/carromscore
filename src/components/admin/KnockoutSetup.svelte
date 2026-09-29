@@ -100,11 +100,15 @@
     const size = Math.pow(2, Math.ceil(Math.log2(n)));
     const byes = size - n;
     const rounds: string[] = [];
-    if (size >= 32) rounds.push('R32');
-    if (size >= 16) rounds.push('R16');
-    if (size >= 8)  rounds.push('QF');
-    if (size >= 4)  rounds.push('SF');
-    rounds.push('Final');
+    for (let s = size; s >= 2; s /= 2) {
+      const matchCount = s / 2;
+      if      (matchCount === 1) rounds.push('Final');
+      else if (matchCount === 2) rounds.push('SF');
+      else if (matchCount === 4) rounds.push('QF');
+      else if (matchCount === 8) rounds.push('R16');
+      else                       rounds.push(`R${s}`);
+    }
+    rounds.reverse();
     const byeNote = byes > 0 ? ` — top ${byes} seed${byes > 1 ? 's' : ''} get bye${byes > 1 ? 's' : ''}` : '';
     return `${n} players → ${rounds.join(' → ')}${byeNote}`;
   }
@@ -271,12 +275,10 @@
     (async () => {
       const assigned = await loadAssignedPlayers(tournament.key);
       if (assigned.size > 0) {
+        // Closed/invite tournament — only assigned players
         availablePlayerIds = [...assigned];
-      } else if (tournament.country) {
-        availablePlayerIds = players
-          .filter((p) => p.country?.toUpperCase() === tournament.country!.toUpperCase())
-          .map((p) => p.id);
       } else {
+        // Open tournament — any organizer can use any player regardless of country
         availablePlayerIds = players.map((p) => p.id);
       }
       // Auto-select all assigned players into the bracket when the tournament

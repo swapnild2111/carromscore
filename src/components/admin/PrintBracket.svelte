@@ -576,7 +576,7 @@
     if (n.includes('SF')) return 'Semi Finals';
     if (n.includes('QF')) return 'Quarter Finals';
     if (n.includes('R16') || n.toLowerCase().includes('round of 16')) return 'Rounds';
-    if (n.includes('R32')) return 'Rounds';
+    if (/^R\d+$/.test(n)) return 'Rounds';
     return n;
   }
 
@@ -676,6 +676,10 @@
     const COL_GAP = 48;
     const NAME_MAX = 22;
 
+    function esc(s: string): string {
+      return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
     function clip(s: string): string {
       return s.length > NAME_MAX ? s.slice(0, NAME_MAX - 1) + '…' : s;
     }
@@ -725,7 +729,7 @@
     for (let ci = 0; ci < cols.length; ci++) {
       const x = colX(ci);
       lines.push(`<text x="${x + COL_W / 2}" y="-6" text-anchor="middle" font-size="10" font-weight="700"
-            font-family="sans-serif" fill="#888" letter-spacing="0.06em">${cols[ci].label.toUpperCase()}</text>`);
+            font-family="sans-serif" fill="#888" letter-spacing="0.06em">${esc(cols[ci].label.toUpperCase())}</text>`);
     }
 
     // Connector lines — each next-slot is fed by currCount/nextCount source slots.
@@ -763,8 +767,8 @@
         const sh = slotH(slot);
         const sy = cy - sh / 2;
 
-        const aName = clip(resolvedName(slot.aId, slot.aName));
-        const bName = clip(resolvedName(slot.bId, slot.bName));
+        const aName = esc(clip(resolvedName(slot.aId, slot.aName)));
+        const bName = esc(clip(resolvedName(slot.bId, slot.bName)));
         const aIsWinner = slot.isDone && slot.winner === 'a';
         const bIsWinner = slot.isDone && slot.winner === 'b';
 
@@ -1012,7 +1016,6 @@
     const GRP_GAP  = 24;  // vertical gap between groups in the same column
     const LBL_H    = 20;  // height reserved above each group for its name label
     const PAD      = 20;  // outer padding
-    const CTR_GAP  = 64;  // horizontal gap between left and right group columns
     const MATCH_SP = 56;  // vertical spacing between match centres (same as buildFlightBracketSVG MATCH_H)
 
     // ── Helpers ──
@@ -1079,12 +1082,11 @@
           const nextCount = Math.ceil(prevCount / 2);
           const slots: [string, string][] = [];
           for (let i = 0; i < nextCount; i++) {
-            // First slot of first sub-round: bye player (if any) seeds in here
+            // First slot of first sub-round: bye player seeds in here; others are TBD
             const aLabel = firstSubRound && i === 0 && byePlayer
               ? clip(esc(byePlayer))
-              : 'W R' + (rounds.length);
-            const bLabel = 'W Round ' + rounds.length;
-            slots.push([aLabel, bLabel]);
+              : '';
+            slots.push([aLabel, '']);
           }
           rounds.push(slots);
           prevCount = nextCount;
@@ -1110,36 +1112,15 @@
       return y + spacing * mi + spacing / 2;
     }
 
-    // ── Split into left/right display columns ──
-    const leftGroups  = groupMetas.filter((_, i) => i % 2 === 0);
-    const rightGroups = groupMetas.filter((_, i) => i % 2 !== 0);
-
-    const leftColW  = leftGroups.length  > 0 ? Math.max(...leftGroups.map(groupW))  : 0;
-    const rightColW = rightGroups.length > 0 ? Math.max(...rightGroups.map(groupW)) : 0;
-
-    function colH(metas: GroupMeta[]): number {
-      if (metas.length === 0) return 0;
-      return metas.reduce((acc, m) => acc + groupH(m) + LBL_H, 0) + (metas.length - 1) * GRP_GAP;
+    // ── Stack all groups vertically ──
+    const maxGroupW = Math.max(...groupMetas.map(groupW), 0);
+    const totalW    = PAD + maxGroupW + PAD;
+    let stackY      = PAD;
+    for (const m of groupMetas) {
+      m.h = groupH(m); m.x = PAD; m.y = stackY + LBL_H;
+      stackY += m.h + LBL_H + GRP_GAP;
     }
-    const contentH = Math.max(colH(leftGroups), colH(rightGroups));
-    const totalW   = PAD + leftColW + (rightGroups.length > 0 ? CTR_GAP + rightColW : 0) + PAD;
-    const totalH   = PAD + contentH + PAD;
-
-    // ── Assign x/y to each group ──
-    {
-      let cy = PAD;
-      for (const m of leftGroups) {
-        m.h = groupH(m); m.x = PAD; m.y = cy + LBL_H;
-        cy += m.h + LBL_H + GRP_GAP;
-      }
-    }
-    {
-      let cy = PAD;
-      for (const m of rightGroups) {
-        m.h = groupH(m); m.x = PAD + leftColW + CTR_GAP; m.y = cy + LBL_H;
-        cy += m.h + LBL_H + GRP_GAP;
-      }
-    }
+    const totalH = PAD + stackY + PAD;
 
     const lines: string[] = [];
 
@@ -1232,13 +1213,14 @@
           const winnerB  = isDone && res?.winner === 'b';
 
           // Use resolved names when available: actual match names when done,
-          // or winner name propagated from the previous round when not yet played.
+          // winner propagated from the previous round when not yet played,
+          // or the seeded name from the bracket draw (aLabel/bLabel) as final fallback.
           const aName = isDone && res?.aName
             ? clip(esc(res.aName))
-            : (resolveAdvancer(ri, mi, 'a') ?? '');
+            : (resolveAdvancer(ri, mi, 'a') ?? aLabel);
           const bName = isDone && res?.bName
             ? clip(esc(res.bName))
-            : (resolveAdvancer(ri, mi, 'b') ?? '');
+            : (resolveAdvancer(ri, mi, 'b') ?? bLabel);
 
           // Exact same text style as buildFlightBracketSVG
           const aFill    = winnerA ? '#000' : '#333';

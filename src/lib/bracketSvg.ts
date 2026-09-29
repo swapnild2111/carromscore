@@ -1,13 +1,24 @@
 import type { PlannedMatch } from './planned';
 
-export const KO_BRACKET_ROUND_ORDER = ['R32', 'R16', 'QF', 'SF', 'Final'] as const;
-export const KO_BRACKET_ROUND_RX = /^(R32|R16|QF|SF|Final)$/i;
+export const KO_BRACKET_ROUND_RX = /^(R\d+|QF|SF|Final)$/i;
+
+/** Canonical sort order for bracket round names (first round first). */
+function koRoundOrder(round: string): number {
+  if (round === 'Final') return 0;
+  if (round === 'SF') return 1;
+  if (round === 'QF') return 2;
+  if (round === 'R16') return 3;
+  if (round === 'R32') return 4;
+  const m = round.match(/^R(\d+)$/i);
+  if (m) return Math.log2(parseInt(m[1]!, 10));
+  return 99;
+}
 
 /** Ordered round names present in the given matches, in canonical bracket order. */
 export function koRoundsFromMatches(matches: PlannedMatch[]): string[] {
   const seen = new Set<string>();
-  for (const m of matches) if (m.round) seen.add(m.round);
-  return KO_BRACKET_ROUND_ORDER.filter((r) => seen.has(r));
+  for (const m of matches) if (m.round && KO_BRACKET_ROUND_RX.test(m.round)) seen.add(m.round);
+  return [...seen].sort((a, b) => koRoundOrder(b) - koRoundOrder(a));
 }
 
 /**
