@@ -148,10 +148,9 @@ export type LeagueCfg = {
  * One group in the league stage (v4.0). Keyed by a slug like "g1".
  */
 export type LeagueGroup = {
-  name: string;           // display name, e.g. "G1"
-  order: number;          // 1-indexed sort order
-  playerIds: string[];    // ordered array of assigned player IDs
-  championIds?: string[]; // organizer-marked champions (one or more)
+  name: string;             // display name, e.g. "G1"
+  order: number;            // 1-indexed sort order
+  playerIds: string[];      // ordered array of assigned player IDs
   preQualifyIds?: string[]; // players who play in the first round (pre-qualify stage)
 };
 
@@ -522,18 +521,6 @@ function parseGroups(raw: unknown): Record<string, LeagueGroup> | undefined {
         if (typeof id === 'string' && id) playerIds.push(id);
       }
     }
-    // Parse championIds (new array) with fallback to legacy single championId
-    const championIds: string[] = [];
-    if (Array.isArray(g.championIds)) {
-      for (const id of g.championIds) { if (typeof id === 'string' && id) championIds.push(id); }
-    } else if (g.championIds && typeof g.championIds === 'object') {
-      for (const k of Object.keys(g.championIds as object).sort((a, b) => Number(a) - Number(b))) {
-        const id = (g.championIds as Record<string, unknown>)[k];
-        if (typeof id === 'string' && id) championIds.push(id);
-      }
-    } else if (typeof g.championId === 'string' && g.championId) {
-      championIds.push(g.championId);
-    }
     const preQualifyIds: string[] = [];
     if (Array.isArray(g.preQualifyIds)) {
       for (const id of g.preQualifyIds) { if (typeof id === 'string' && id) preQualifyIds.push(id); }
@@ -545,7 +532,6 @@ function parseGroups(raw: unknown): Record<string, LeagueGroup> | undefined {
     }
     out[gKey] = {
       name, order, playerIds,
-      ...(championIds.length > 0 ? { championIds } : {}),
       ...(preQualifyIds.length > 0 ? { preQualifyIds } : {}),
     };
   }

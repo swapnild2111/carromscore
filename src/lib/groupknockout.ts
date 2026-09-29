@@ -73,12 +73,16 @@ export type GroupPhaseParams = {
 };
 
 /**
- * Generate Phase 1: one mini single-elimination bracket per group.
+ * Generate Phase 1: one single-elimination bracket per group.
  *
- * Odd-sized group: top seed (position 0 in group.playerIds) receives a bye
- * in round 1 and enters directly at the group final.
+ * Pre-qualify aware:
+ *   - Players in group.preQualifyIds play Round 1 (sequential pairs: 1v2, 3v4…).
+ *   - Players NOT in preQualifyIds receive a bye and enter directly at Round 2.
+ *   - Pre-qualify round winners fill the remaining Round 2 slots in order.
+ *   - If no preQualifyIds are set, the old behaviour applies: all players enter
+ *     at Round 1 (sequential pairs), with an odd-one-out bye if group is odd.
  *
- * Group of 2: single match, both players qualify (winner=1st, loser=2nd).
+ * Group of 2: single match (both qualify — winner=1st, loser=2nd).
  * Group of 1: validation error.
  */
 export async function generateGroupPhase(
@@ -100,120 +104,129 @@ export async function generateGroupPhase(
   const sortedGroups = Object.values(groups).sort((a, b) => a.order - b.order);
 
   for (const group of sortedGroups) {
-    const { name: groupName, playerIds } = group;
+    const { name: groupName, playerIds, preQualifyIds } = group;
     const size = playerIds.length;
 
     if (size < 1) continue;
-
     if (size === 1) {
       result.errors.push(`Group "${groupName}" has only 1 player — move them to another group`);
       continue;
     }
 
-    if (size === 2) {
-      // Single match; both qualify — no bracket needed
-      const roundLabel = `${groupName} — Final`;
-      const rOut = await addRound(tournamentKey, roundLabel);
-      if (!rOut.ok) result.errors.push(`${roundLabel}: addRound failed`);
-      result.roundsCreated.push(roundLabel);
+    const pqSet = new Set(preQualifyIds ?? []);
+    const hasPQ = pqSet.size >= 2; // need at least 2 to form a pre-qualify round
 
-      await createPlannedMatch({
-        mode: defaults.mode,
-        tournament: tournamentName,
-        tournamentKey,
-        round: roundLabel,
-        roundKey: normalizeKey(roundLabel),
-        matchOrder: 1,
-        aName: playerNames.get(playerIds[0]!) ?? playerIds[0]!,
-        aResolvedId: playerIds[0]!,
-        bName: playerNames.get(playerIds[1]!) ?? playerIds[1]!,
-        bResolvedId: playerIds[1]!,
-        cfg,
-        createdBy: myUid,
+    if (!hasPQ) {
+      // ── No pre-qualify: classic bracket (all players, sequential pairs) ──────
+      await generateClassicGroupBracket({
+        groupName, playerIds, playerNames, tournamentKey, tournamentName,
+        defaults, cfg, myUid, result, addRound, normalizeKey, createPlannedMatch,
       });
-      result.matchesCreated++;
       continue;
     }
 
-    // Odd group: top seed gets a bye — remove from R1, add directly to Final slot
-    const hasBye = size % 2 !== 0;
-    const byeSeedId = hasBye ? playerIds[0]! : null;
-    const activeR1Ids = hasBye ? playerIds.slice(1) : [...playerIds];
+    // ── Pre-qualify bracket ───────────────────────────────────────────────────
+    // pqPlayers: subset of playerIds that are in preQualifyIds (in playerIds order)
+    // byePlayers: the rest (in playerIds order)
+    const pqPlayers = playerIds.filter((id) => pqSet.has(id));
+    const byePlayers = playerIds.filter((id) => !pqSet.has(id));
+    const pqPairs = seededPairs(pqPlayers);
+    const pqWinnerCount = pqPairs.length; // one winner per R1 match
 
-    // Build bracket rounds for the active players
-    const bracketSize = Math.pow(2, Math.ceil(Math.log2(Math.max(activeR1Ids.length, 2))));
-    const roundDefs = buildGroupRoundDefs(groupName, bracketSize, hasBye);
+    // Total R2 slots = byePlayers + pqWinnerCount
+    // R2 players in order: byePlayers first (sequential), then pq-winners
+    const r2TotalSlots = byePlayers.length + pqWinnerCount;
 
-    // Create rounds
+    // Build the full bracket from R2 upwards
+    const bracketSize = Math.pow(2, Math.ceil(Math.log2(Math.max(r2TotalSlots, 2))));
+
+    // Round labels: R1 (pre-qualify), then the main bracket rounds from R2 up
+    const mainRoundDefs = buildGroupRoundDefs(groupName, bracketSize, false);
+    // mainRoundDefs[0] is the "first round" of the main bracket (R2 in our scenario)
+    // Prepend the Pre-qualify round
+    const pqRoundLabel = `${groupName} — Pre-qualify`;
+    const allRoundDefs = [{ label: pqRoundLabel }, ...mainRoundDefs];
+
     const roundKeys: string[] = [];
-    for (const rd of roundDefs) {
+    for (const rd of allRoundDefs) {
       const rOut = await addRound(tournamentKey, rd.label);
       if (!rOut.ok) result.errors.push(`${rd.label}: addRound failed`);
       roundKeys.push(normalizeKey(rd.label));
       result.roundsCreated.push(rd.label);
     }
 
-    // First round: seeded real pairs from activeR1Ids
-    const pairs = seededPairs(activeR1Ids);
-    const r1Label = roundDefs[0]!.label;
-    const r1Key = roundKeys[0]!;
-    for (let i = 0; i < pairs.length; i++) {
-      const [aId, bId] = pairs[i]!;
+    // ── Round 1: pre-qualify matches (real players) ───────────────────────────
+    const pqRKey = roundKeys[0]!;
+    for (let i = 0; i < pqPairs.length; i++) {
+      const [aId, bId] = pqPairs[i]!;
       await createPlannedMatch({
-        mode: defaults.mode,
-        tournament: tournamentName,
-        tournamentKey,
-        round: r1Label,
-        roundKey: r1Key,
-        matchOrder: i + 1,
-        aName: playerNames.get(aId) ?? aId,
-        aResolvedId: aId,
-        bName: playerNames.get(bId) ?? bId,
-        bResolvedId: bId,
-        cfg,
-        createdBy: myUid,
+        mode: defaults.mode, tournament: tournamentName, tournamentKey,
+        round: pqRoundLabel, roundKey: pqRKey, matchOrder: i + 1,
+        aName: playerNames.get(aId) ?? aId, aResolvedId: aId,
+        bName: playerNames.get(bId) ?? bId, bResolvedId: bId,
+        cfg, createdBy: myUid,
       });
       result.matchesCreated++;
     }
 
-    // Subsequent rounds: placeholder slots (winner propagation fills them later)
-    let prevCount = pairs.length;
-    for (let ri = 1; ri < roundDefs.length; ri++) {
-      const rd = roundDefs[ri]!;
-      const rKey = roundKeys[ri]!;
-      const isFinal = ri === roundDefs.length - 1;
-      const slotCount = isFinal ? 1 : Math.max(1, Math.ceil(prevCount / 2));
+    // ── Round 2 (main bracket R1): bye players + pre-qualify winners ──────────
+    // Pair them sequentially: (bye1 vs bye2), (bye3 vs bye4), …, then pq-winners
+    // If byePlayers is odd, the last bye player gets a free slot name
+    const r2Label = mainRoundDefs[0]!.label;
+    const r2Key = roundKeys[1]!;
 
-      if (isFinal && hasBye && byeSeedId) {
-        // Top-seeded bye enters the Final as one of the two slots
+    // Build the full ordered list for R2:
+    // interleave byes sequentially, appending pq-winner placeholders at the end
+    const r2Slots: Array<{ name: string; resolvedId?: string }> = [
+      ...byePlayers.map((id) => ({ name: playerNames.get(id) ?? id, resolvedId: id })),
+      ...Array.from({ length: pqWinnerCount }, (_, i) => ({
+        name: `${groupName} Pre-qualify Winner ${i + 1}`,
+      })),
+    ];
+
+    const r2PairsWithIds: Array<[{ name: string; resolvedId?: string }, { name: string; resolvedId?: string }]> = [];
+    for (let i = 0; i + 1 < r2Slots.length; i += 2) {
+      r2PairsWithIds.push([r2Slots[i]!, r2Slots[i + 1]!]);
+    }
+
+    let r2MatchOrder = 1;
+    for (const [slotA, slotB] of r2PairsWithIds) {
+      await createPlannedMatch({
+        mode: defaults.mode, tournament: tournamentName, tournamentKey,
+        round: r2Label, roundKey: r2Key, matchOrder: r2MatchOrder++,
+        aName: slotA.name, ...(slotA.resolvedId ? { aResolvedId: slotA.resolvedId } : {}),
+        bName: slotB.name, ...(slotB.resolvedId ? { bResolvedId: slotB.resolvedId } : {}),
+        cfg, createdBy: myUid,
+      });
+      result.matchesCreated++;
+    }
+    // If r2Slots has odd count, last slot gets a bye placeholder match
+    if (r2Slots.length % 2 !== 0) {
+      const lastSlot = r2Slots.at(-1)!;
+      await createPlannedMatch({
+        mode: defaults.mode, tournament: tournamentName, tournamentKey,
+        round: r2Label, roundKey: r2Key, matchOrder: r2MatchOrder++,
+        aName: lastSlot.name, ...(lastSlot.resolvedId ? { aResolvedId: lastSlot.resolvedId } : {}),
+        bName: `${groupName} Bye`,
+        cfg, createdBy: myUid,
+      });
+      result.matchesCreated++;
+    }
+
+    // ── Subsequent rounds: placeholder halving ────────────────────────────────
+    let prevCount = r2PairsWithIds.length + (r2Slots.length % 2 !== 0 ? 1 : 0);
+    for (let ri = 2; ri < allRoundDefs.length; ri++) {
+      const rd = allRoundDefs[ri]!;
+      const rKey = roundKeys[ri]!;
+      const slotCount = Math.max(1, Math.ceil(prevCount / 2));
+      for (let i = 0; i < slotCount; i++) {
         await createPlannedMatch({
-          mode: defaults.mode,
-          tournament: tournamentName,
-          tournamentKey,
-          round: rd.label,
-          roundKey: rKey,
-          matchOrder: 1,
-          aName: playerNames.get(byeSeedId) ?? byeSeedId,
-          aResolvedId: byeSeedId,
-          bName: `${groupName} Winner`,
-          cfg,
-          createdBy: myUid,
+          mode: defaults.mode, tournament: tournamentName, tournamentKey,
+          round: rd.label, roundKey: rKey, matchOrder: i + 1,
+          aName: `${groupName} Winner ${i * 2 + 1}`,
+          bName: `${groupName} Winner ${i * 2 + 2}`,
+          cfg, createdBy: myUid,
         });
-      } else {
-        for (let i = 0; i < slotCount; i++) {
-          await createPlannedMatch({
-            mode: defaults.mode,
-            tournament: tournamentName,
-            tournamentKey,
-            round: rd.label,
-            roundKey: rKey,
-            matchOrder: i + 1,
-            aName: `${groupName} Winner ${i * 2 + 1}`,
-            bName: `${groupName} Winner ${i * 2 + 2}`,
-            cfg,
-            createdBy: myUid,
-          });
-        }
       }
       result.matchesCreated += slotCount;
       prevCount = slotCount;
@@ -221,6 +234,106 @@ export async function generateGroupPhase(
   }
 
   return result;
+}
+
+/**
+ * Classic group bracket: all players enter at Round 1, sequential pairs (1v2, 3v4…).
+ * Odd group: top seed gets a bye and enters the Final directly.
+ */
+async function generateClassicGroupBracket(opts: {
+  groupName: string;
+  playerIds: string[];
+  playerNames: Map<string, string>;
+  tournamentKey: string;
+  tournamentName: string;
+  defaults: GroupPhaseParams['defaults'];
+  cfg: Record<string, unknown>;
+  myUid: string;
+  result: GroupPhaseResult;
+  addRound: (key: string, name: string) => Promise<{ ok: boolean }>;
+  normalizeKey: (name: string) => string;
+  createPlannedMatch: (opts: Record<string, unknown>) => Promise<unknown>;
+}): Promise<void> {
+  const { groupName, playerIds, playerNames, tournamentKey, tournamentName,
+    defaults, cfg, myUid, result, addRound, normalizeKey, createPlannedMatch } = opts;
+  const size = playerIds.length;
+
+  if (size === 2) {
+    const roundLabel = `${groupName} — Final`;
+    const rOut = await addRound(tournamentKey, roundLabel);
+    if (!rOut.ok) result.errors.push(`${roundLabel}: addRound failed`);
+    result.roundsCreated.push(roundLabel);
+    await createPlannedMatch({
+      mode: defaults.mode, tournament: tournamentName, tournamentKey,
+      round: roundLabel, roundKey: normalizeKey(roundLabel), matchOrder: 1,
+      aName: playerNames.get(playerIds[0]!) ?? playerIds[0]!,
+      aResolvedId: playerIds[0]!,
+      bName: playerNames.get(playerIds[1]!) ?? playerIds[1]!,
+      bResolvedId: playerIds[1]!,
+      cfg, createdBy: myUid,
+    });
+    result.matchesCreated++;
+    return;
+  }
+
+  const hasBye = size % 2 !== 0;
+  const byeSeedId = hasBye ? playerIds[0]! : null;
+  const activeR1Ids = hasBye ? playerIds.slice(1) : [...playerIds];
+
+  const bracketSize = Math.pow(2, Math.ceil(Math.log2(Math.max(activeR1Ids.length, 2))));
+  const roundDefs = buildGroupRoundDefs(groupName, bracketSize, hasBye);
+  const roundKeys: string[] = [];
+  for (const rd of roundDefs) {
+    const rOut = await addRound(tournamentKey, rd.label);
+    if (!rOut.ok) result.errors.push(`${rd.label}: addRound failed`);
+    roundKeys.push(normalizeKey(rd.label));
+    result.roundsCreated.push(rd.label);
+  }
+
+  const pairs = seededPairs(activeR1Ids);
+  const r1Label = roundDefs[0]!.label;
+  const r1Key = roundKeys[0]!;
+  for (let i = 0; i < pairs.length; i++) {
+    const [aId, bId] = pairs[i]!;
+    await createPlannedMatch({
+      mode: defaults.mode, tournament: tournamentName, tournamentKey,
+      round: r1Label, roundKey: r1Key, matchOrder: i + 1,
+      aName: playerNames.get(aId) ?? aId, aResolvedId: aId,
+      bName: playerNames.get(bId) ?? bId, bResolvedId: bId,
+      cfg, createdBy: myUid,
+    });
+    result.matchesCreated++;
+  }
+
+  let prevCount = pairs.length;
+  for (let ri = 1; ri < roundDefs.length; ri++) {
+    const rd = roundDefs[ri]!;
+    const rKey = roundKeys[ri]!;
+    const isFinal = ri === roundDefs.length - 1;
+    const slotCount = isFinal ? 1 : Math.max(1, Math.ceil(prevCount / 2));
+
+    if (isFinal && hasBye && byeSeedId) {
+      await createPlannedMatch({
+        mode: defaults.mode, tournament: tournamentName, tournamentKey,
+        round: rd.label, roundKey: rKey, matchOrder: 1,
+        aName: playerNames.get(byeSeedId) ?? byeSeedId, aResolvedId: byeSeedId,
+        bName: `${groupName} Winner`,
+        cfg, createdBy: myUid,
+      });
+    } else {
+      for (let i = 0; i < slotCount; i++) {
+        await createPlannedMatch({
+          mode: defaults.mode, tournament: tournamentName, tournamentKey,
+          round: rd.label, roundKey: rKey, matchOrder: i + 1,
+          aName: `${groupName} Winner ${i * 2 + 1}`,
+          bName: `${groupName} Winner ${i * 2 + 2}`,
+          cfg, createdBy: myUid,
+        });
+      }
+    }
+    result.matchesCreated += slotCount;
+    prevCount = slotCount;
+  }
 }
 
 // ─── Phase 2: combined knockout ───────────────────────────────────────────────

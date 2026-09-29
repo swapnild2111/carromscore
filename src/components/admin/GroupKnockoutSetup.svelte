@@ -114,28 +114,6 @@
     Array.from({ length: dummyCount }, (_, i) => `dummy-${i + 1}`)
   );
 
-  // ─── Champion marking ────────────────────────────────────────────────────────
-  // champions: flat Set of playerIds marked as champion (multiple per group allowed)
-  let champions = $state<Set<string>>(
-    (() => {
-      const s = new Set<string>();
-      for (const g of Object.values(tournament.groups ?? {})) {
-        for (const id of g.championIds ?? []) s.add(id);
-        // legacy single championId
-        if (g.championId) s.add(g.championId as string);
-      }
-      return s;
-    })()
-  );
-
-  function toggleChampion(pid: string) {
-    const next = new Set(champions);
-    if (next.has(pid)) next.delete(pid);
-    else next.add(pid);
-    champions = next;
-    groupsDirty = true;
-  }
-
   // ─── Pre-qualify marking ─────────────────────────────────────────────────────
   // preQualified: flat Set of playerIds who play in the first round (pre-qualify)
   let preQualified = $state<Set<string>>(
@@ -313,13 +291,11 @@
       }
     }
 
-    // Merge champion and pre-qualify markings into groups before saving
+    // Merge pre-qualify markings into groups before saving
     const groupsToSave: Record<string, LeagueGroup> = {};
     for (const [gKey, g] of Object.entries(localGroups)) {
-      const groupChampionIds = g.playerIds.filter((pid) => champions.has(pid));
       const groupPreQualifyIds = g.playerIds.filter((pid) => preQualified.has(pid));
       const entry: LeagueGroup = { name: g.name, order: g.order, playerIds: g.playerIds };
-      if (groupChampionIds.length > 0) entry.championIds = groupChampionIds;
       if (groupPreQualifyIds.length > 0) entry.preQualifyIds = groupPreQualifyIds;
       groupsToSave[gKey] = entry;
     }
@@ -487,15 +463,7 @@
           }),
         };
       }
-      // Shift champion/preQualify IDs if any dummy was marked (renumber shifted dummies)
-      const newChampions = new Set<string>();
-      for (const cid of champions) {
-        const cdm = cid.match(/^dummy-(\d+)$/);
-        if (cid === dummyId) continue; // removed dummy — drop
-        if (cdm && parseInt(cdm[1]!, 10) > removedN) newChampions.add(`dummy-${parseInt(cdm[1]!, 10) - 1}`);
-        else newChampions.add(cid);
-      }
-      champions = newChampions;
+      // Shift preQualify IDs if any dummy was marked (renumber shifted dummies)
       const newPreQualified = new Set<string>();
       for (const pid of preQualified) {
         const pdm = pid.match(/^dummy-(\d+)$/);
@@ -694,7 +662,6 @@
                 </div>
               </div>
               {#each group.playerIds as pid, i (pid)}
-                {@const isChampion = champions.has(pid)}
                 {@const isPreQualify = preQualified.has(pid)}
                 <div
                   class="player-chip"
@@ -709,28 +676,17 @@
                   ondrop={roundsStarted ? undefined : (e) => { e.stopPropagation(); onDrop(gKey, i); }}
                 >
                   <span class="chip-name">{playerName(pid)}</span>
-                  {#if !roundsStarted && !isDummy(pid)}
-                    <button
-                      type="button"
-                      class="champion-btn"
-                      class:champion-active={isChampion}
-                      aria-label="{isChampion ? 'Unmark' : 'Mark'} {playerName(pid)} as champion"
-                      title="{isChampion ? 'Champion (click to unmark)' : 'Mark as champion'}"
-                      onclick={(e) => { e.stopPropagation(); toggleChampion(pid); }}
-                    >Champion</button>
-                    <button
-                      type="button"
-                      class="prequalify-btn"
-                      class:prequalify-active={isPreQualify}
-                      aria-label="{isPreQualify ? 'Unmark' : 'Mark'} {playerName(pid)} as pre-qualifier"
-                      title="{isPreQualify ? 'Pre-qualify (click to unmark)' : 'Mark as pre-qualifier (plays Round 1)'}"
-                      onclick={(e) => { e.stopPropagation(); togglePreQualify(pid); }}
-                    >Pre-qualify</button>
-                  {:else if !isDummy(pid)}
-                    {#if isChampion}
-                      <span class="champion-badge">Champion</span>
-                    {/if}
-                    {#if isPreQualify}
+                  {#if !isDummy(pid)}
+                    {#if !roundsStarted}
+                      <button
+                        type="button"
+                        class="prequalify-btn"
+                        class:prequalify-active={isPreQualify}
+                        aria-label="{isPreQualify ? 'Unmark' : 'Mark'} {playerName(pid)} as pre-qualifier"
+                        title="{isPreQualify ? 'Pre-qualify Round 1 (click to unmark)' : 'Mark as pre-qualifier (plays Round 1)'}"
+                        onclick={(e) => { e.stopPropagation(); togglePreQualify(pid); }}
+                      >Pre-qualify</button>
+                    {:else if isPreQualify}
                       <span class="prequalify-badge">Pre-qualify</span>
                     {/if}
                   {/if}
@@ -1173,43 +1129,6 @@
     white-space: nowrap;
     min-width: 0;
   }
-  .champion-btn {
-    flex-shrink: 0;
-    background: transparent;
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    padding: 1px 6px;
-    font-size: 0.65rem;
-    font-weight: 600;
-    line-height: 1.4;
-    cursor: pointer;
-    color: rgba(255, 255, 255, 0.3);
-    border-radius: 10px;
-    letter-spacing: 0.03em;
-    transition: all 0.15s;
-    white-space: nowrap;
-  }
-  .champion-btn:hover {
-    color: rgba(255, 213, 74, 0.8);
-    border-color: rgba(255, 213, 74, 0.4);
-    background: rgba(255, 213, 74, 0.06);
-  }
-  .champion-btn.champion-active {
-    color: #111;
-    background: #ffd54a;
-    border-color: #ffd54a;
-  }
-  .champion-badge {
-    flex-shrink: 0;
-    font-size: 0.65rem;
-    font-weight: 700;
-    letter-spacing: 0.03em;
-    color: #111;
-    background: #ffd54a;
-    border: 1px solid #ffd54a;
-    border-radius: 10px;
-    padding: 1px 6px;
-    white-space: nowrap;
-  }
   .prequalify-btn {
     flex-shrink: 0;
     background: transparent;
@@ -1443,10 +1362,6 @@
     :root:not([data-theme="dark"]) .player-chip-dummy { background: rgba(50, 100, 220, 0.08); border-color: rgba(50, 100, 220, 0.3); color: #2255bb; }
     :root:not([data-theme="dark"]) .dummy-remove-btn { color: rgba(50, 100, 220, 0.5); }
     :root:not([data-theme="dark"]) .dummy-pool .group-col-header { color: #2255bb; }
-    :root:not([data-theme="dark"]) .champion-btn { color: rgba(0, 0, 0, 0.3); border-color: rgba(0, 0, 0, 0.15); }
-    :root:not([data-theme="dark"]) .champion-btn:hover { color: #7a5c00; border-color: rgba(180, 130, 0, 0.5); background: rgba(180, 130, 0, 0.08); }
-    :root:not([data-theme="dark"]) .champion-btn.champion-active { color: #111; background: #f0c000; border-color: #f0c000; }
-    :root:not([data-theme="dark"]) .champion-badge { color: #111; background: #f0c000; border-color: #f0c000; }
     :root:not([data-theme="dark"]) .prequalify-btn { color: rgba(0, 0, 0, 0.3); border-color: rgba(0, 0, 0, 0.15); }
     :root:not([data-theme="dark"]) .prequalify-btn:hover { color: #005f70; border-color: rgba(0, 120, 140, 0.5); background: rgba(0, 120, 140, 0.08); }
     :root:not([data-theme="dark"]) .prequalify-btn.prequalify-active { color: #fff; background: #007a8a; border-color: #007a8a; }
@@ -1480,10 +1395,6 @@
   :root[data-theme="light"] .player-chip-dummy { background: rgba(50, 100, 220, 0.08); border-color: rgba(50, 100, 220, 0.3); color: #2255bb; }
   :root[data-theme="light"] .dummy-remove-btn { color: rgba(50, 100, 220, 0.5); }
   :root[data-theme="light"] .dummy-pool .group-col-header { color: #2255bb; }
-  :root[data-theme="light"] .champion-btn { color: rgba(0, 0, 0, 0.3); border-color: rgba(0, 0, 0, 0.15); }
-  :root[data-theme="light"] .champion-btn:hover { color: #7a5c00; border-color: rgba(180, 130, 0, 0.5); background: rgba(180, 130, 0, 0.08); }
-  :root[data-theme="light"] .champion-btn.champion-active { color: #111; background: #f0c000; border-color: #f0c000; }
-  :root[data-theme="light"] .champion-badge { color: #111; background: #f0c000; border-color: #f0c000; }
   :root[data-theme="light"] .prequalify-btn { color: rgba(0, 0, 0, 0.3); border-color: rgba(0, 0, 0, 0.15); }
   :root[data-theme="light"] .prequalify-btn:hover { color: #005f70; border-color: rgba(0, 120, 140, 0.5); background: rgba(0, 120, 140, 0.08); }
   :root[data-theme="light"] .prequalify-btn.prequalify-active { color: #fff; background: #007a8a; border-color: #007a8a; }
