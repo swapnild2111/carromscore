@@ -596,7 +596,7 @@
           {/if}
         </div>
 
-        {#if configStale}
+        {#if configStale && !groupsDirty}
           <div class="config-stale-banner">
             <span class="stale-icon">⚠</span>
             <span class="stale-msg">Tournament config changed — recommendation is now <strong>{recommendedGroupCount} group{recommendedGroupCount !== 1 ? 's' : ''}</strong> (was {savedGroupCount}). Re-generate brackets to apply.</span>
@@ -1149,20 +1149,21 @@
     flex-shrink: 0;
     background: transparent;
     border: none;
-    padding: 0 2px;
-    font-size: 0.75rem;
+    padding: 0 3px;
+    font-size: 1rem;
     line-height: 1;
     cursor: pointer;
-    color: rgba(255, 255, 255, 0.2);
+    color: rgba(255, 255, 255, 0.25);
     border-radius: 3px;
-    transition: color 0.15s;
+    transition: color 0.15s, transform 0.1s;
   }
-  .crown-btn:hover { color: rgba(255, 213, 74, 0.7); }
-  .crown-btn.crown-active { color: #ffd54a; }
+  .crown-btn:hover { color: rgba(255, 213, 74, 0.8); transform: scale(1.15); }
+  .crown-btn.crown-active { color: #ffd54a; filter: drop-shadow(0 0 3px rgba(255, 213, 74, 0.5)); }
   .crown-badge {
     flex-shrink: 0;
-    font-size: 0.75rem;
+    font-size: 1rem;
     color: #ffd54a;
+    filter: drop-shadow(0 0 3px rgba(255, 213, 74, 0.5));
   }
   .dummy-remove-btn {
     flex-shrink: 0;
