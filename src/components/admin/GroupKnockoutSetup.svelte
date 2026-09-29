@@ -11,6 +11,7 @@
     updateLeagueGroups,
     updateKnockoutCfg,
     startRound,
+    deleteRound,
     clearAllRoundsAndPlanned,
     loadRounds,
     loadAssignedPlayers,
@@ -246,7 +247,7 @@
   let groupsDirty = $state(false);
 
   const roundsStarted = $derived(
-    (tournament.rounds ?? []).some((r) => /^Group /i.test(r.name) && r.startedAt)
+    (tournament.rounds ?? []).some((r) => / — /.test(r.name) && !/^KO —/.test(r.name) && r.startedAt)
   );
 
 
@@ -267,9 +268,12 @@
     generateError = '';
     generateResult = null;
 
-    // Delete existing group-phase planned matches before re-generating
-    const existingGroupMatches = plannedMatches.filter((m) => /^Group /i.test(m.round ?? ''));
-    await Promise.all(existingGroupMatches.map((m) => deletePlannedMatch(m.mid)));
+    // Delete all existing group-phase rounds (and their planned matches) before re-generating.
+    // Group rounds are named "G1 — QF", "G1 — Pre-qualify", etc. — match on " — " separator.
+    const existingGroupRounds = loadRounds(tournament.key).filter(
+      (r) => / — /.test(r.name) && !/^KO —/.test(r.name)
+    );
+    await Promise.all(existingGroupRounds.map((r) => deleteRound(tournament.key, r.key)));
 
     // Save knockoutCfg only on first generate (not re-generate) — writing the
     // tournament root requires being the creator; groups sub-path is separate.
@@ -348,7 +352,7 @@
     // Read directly from memoryStore (not tournament prop) so freshly-created
     // rounds are included without waiting for a Svelte re-render cycle.
     const rounds = loadRounds(tournament.key);
-    const groupRounds = rounds.filter((r) => /^Group /i.test(r.name) && !r.startedAt);
+    const groupRounds = rounds.filter((r) => / — /.test(r.name) && !/^KO —/.test(r.name) && !r.startedAt);
     for (const r of groupRounds) {
       await startRound(tournament.key, r.key);
     }
@@ -580,8 +584,8 @@
         </div>
 
 
-        <!-- Dummy pool -->
-        {#if dummyCount > 0 && !roundsStarted}
+        <!-- Dummy pool — only shown when there are unassigned dummies -->
+        {#if unassignedDummies.length > 0 && !roundsStarted}
           <div
             class="group-col unassigned-col dummy-pool"
             role="list"
@@ -638,7 +642,10 @@
         <div class="groups-grid" style="grid-template-columns: repeat({Math.min(sortedGroups.length, 4)}, 1fr)">
           {#each sortedGroups as [gKey, group] (gKey)}
             {@const status = groupMatchStatus(gKey, group.name)}
-            {@const hasOdd = group.playerIds.length % 2 !== 0 && group.playerIds.length > 1}
+            {@const pqCount = group.playerIds.filter((pid) => preQualified.has(pid)).length}
+            {@const byeCount = group.playerIds.length - pqCount}
+            {@const r2SlotCount = byeCount + Math.floor(pqCount / 2)}
+            {@const hasOdd = r2SlotCount % 2 !== 0 && group.playerIds.length > 1}
             <div
               class="group-col"
               class:group-col-locked={roundsStarted}
@@ -651,7 +658,7 @@
               <div class="group-col-header">
                 <span>{group.name}</span>
                 {#if hasOdd && !roundsStarted}
-                  <span class="odd-warn" title="Odd number of players — add a player or dummy">⚠</span>
+                  <span class="odd-warn" title="Odd effective slots in R2 — one player will get a bye. Add a player, dummy, or adjust Pre-qualify markings.">⚠ odd</span>
                 {/if}
                 <div class="group-col-header-right">
                   {#if roundsStarted}
@@ -739,7 +746,7 @@
               disabled={sortedGroups.length === 0}
             >{groupsLocked ? 'Re-generate brackets' : 'Lock groups &amp; generate brackets'}</button>
           {:else if groupsLocked}
-            {#if (tournament.rounds ?? []).some((r) => /^Group /i.test(r.name) && !r.startedAt)}
+            {#if (tournament.rounds ?? []).some((r) => / — /.test(r.name) && !/^KO —/.test(r.name) && !r.startedAt)}
               <button
                 type="button"
                 class="btn btn-primary"
@@ -747,12 +754,6 @@
                 disabled={startingRounds}
               >{startingRounds ? 'Starting…' : '▶ Start all group rounds'}</button>
             {/if}
-            <button
-              type="button"
-              class="btn btn-secondary"
-              onclick={doRedraw}
-              disabled={redrawing || generating}
-            >{redrawing ? 'Re-generating…' : '↺ Re-generate brackets'}</button>
           {:else if !groupsLocked && sortedGroups.length > 0}
             <button
               type="button"
