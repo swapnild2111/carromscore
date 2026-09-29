@@ -537,14 +537,6 @@
         aria-selected={activeTab === 'draw'}
         onclick={() => { activeTab = 'draw'; }}
       >Groups &amp; Draw</button>
-      <button
-        type="button"
-        class="ls-tab"
-        class:ls-tab-active={activeTab === 'knockout'}
-        role="tab"
-        aria-selected={activeTab === 'knockout'}
-        onclick={() => { activeTab = 'knockout'; }}
-      >Combined Knockout</button>
     </div>
 
     <!-- ─── Groups & Draw ─────────────────────────────────────────────────────── -->
@@ -695,14 +687,14 @@
                   {#if !roundsStarted && !isDummy(pid)}
                     <button
                       type="button"
-                      class="crown-btn"
-                      class:crown-active={isChampion}
+                      class="champion-btn"
+                      class:champion-active={isChampion}
                       aria-label="{isChampion ? 'Unmark' : 'Mark'} {playerName(pid)} as champion"
                       title="{isChampion ? 'Champion (click to unmark)' : 'Mark as champion'}"
                       onclick={(e) => { e.stopPropagation(); toggleChampion(gKey, pid); }}
-                    >♛</button>
+                    >Champion</button>
                   {:else if isChampion}
-                    <span class="crown-badge" title="Champion">♛</span>
+                    <span class="champion-badge">Champion</span>
                   {/if}
                   {#if isDummy(pid) && !roundsStarted}
                     <button
@@ -1145,25 +1137,42 @@
     white-space: nowrap;
     min-width: 0;
   }
-  .crown-btn {
+  .champion-btn {
     flex-shrink: 0;
     background: transparent;
-    border: none;
-    padding: 0 3px;
-    font-size: 1rem;
-    line-height: 1;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    padding: 1px 6px;
+    font-size: 0.65rem;
+    font-weight: 600;
+    line-height: 1.4;
     cursor: pointer;
-    color: rgba(255, 255, 255, 0.25);
-    border-radius: 3px;
-    transition: color 0.15s, transform 0.1s;
+    color: rgba(255, 255, 255, 0.3);
+    border-radius: 10px;
+    letter-spacing: 0.03em;
+    transition: all 0.15s;
+    white-space: nowrap;
   }
-  .crown-btn:hover { color: rgba(255, 213, 74, 0.8); transform: scale(1.15); }
-  .crown-btn.crown-active { color: #ffd54a; filter: drop-shadow(0 0 3px rgba(255, 213, 74, 0.5)); }
-  .crown-badge {
+  .champion-btn:hover {
+    color: rgba(255, 213, 74, 0.8);
+    border-color: rgba(255, 213, 74, 0.4);
+    background: rgba(255, 213, 74, 0.06);
+  }
+  .champion-btn.champion-active {
+    color: #111;
+    background: #ffd54a;
+    border-color: #ffd54a;
+  }
+  .champion-badge {
     flex-shrink: 0;
-    font-size: 1rem;
-    color: #ffd54a;
-    filter: drop-shadow(0 0 3px rgba(255, 213, 74, 0.5));
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    color: #111;
+    background: #ffd54a;
+    border: 1px solid #ffd54a;
+    border-radius: 10px;
+    padding: 1px 6px;
+    white-space: nowrap;
   }
   .dummy-remove-btn {
     flex-shrink: 0;
@@ -1361,10 +1370,10 @@
     :root:not([data-theme="dark"]) .player-chip-dummy { background: rgba(50, 100, 220, 0.08); border-color: rgba(50, 100, 220, 0.3); color: #2255bb; }
     :root:not([data-theme="dark"]) .dummy-remove-btn { color: rgba(50, 100, 220, 0.5); }
     :root:not([data-theme="dark"]) .dummy-pool .group-col-header { color: #2255bb; }
-    :root:not([data-theme="dark"]) .crown-btn { color: rgba(0, 0, 0, 0.18); }
-    :root:not([data-theme="dark"]) .crown-btn:hover { color: rgba(180, 130, 0, 0.7); }
-    :root:not([data-theme="dark"]) .crown-btn.crown-active { color: #b8860b; }
-    :root:not([data-theme="dark"]) .crown-badge { color: #b8860b; }
+    :root:not([data-theme="dark"]) .champion-btn { color: rgba(0, 0, 0, 0.3); border-color: rgba(0, 0, 0, 0.15); }
+    :root:not([data-theme="dark"]) .champion-btn:hover { color: #7a5c00; border-color: rgba(180, 130, 0, 0.5); background: rgba(180, 130, 0, 0.08); }
+    :root:not([data-theme="dark"]) .champion-btn.champion-active { color: #111; background: #f0c000; border-color: #f0c000; }
+    :root:not([data-theme="dark"]) .champion-badge { color: #111; background: #f0c000; border-color: #f0c000; }
     :root:not([data-theme="dark"]) .odd-warn { color: #dc2626; }
   }
   :root[data-theme="light"] .gko-card { background: #fff; border-color: rgba(0, 0, 0, 0.1); color: #111; }
@@ -1394,9 +1403,9 @@
   :root[data-theme="light"] .player-chip-dummy { background: rgba(50, 100, 220, 0.08); border-color: rgba(50, 100, 220, 0.3); color: #2255bb; }
   :root[data-theme="light"] .dummy-remove-btn { color: rgba(50, 100, 220, 0.5); }
   :root[data-theme="light"] .dummy-pool .group-col-header { color: #2255bb; }
-  :root[data-theme="light"] .crown-btn { color: rgba(0, 0, 0, 0.18); }
-  :root[data-theme="light"] .crown-btn:hover { color: rgba(180, 130, 0, 0.7); }
-  :root[data-theme="light"] .crown-btn.crown-active { color: #b8860b; }
-  :root[data-theme="light"] .crown-badge { color: #b8860b; }
+  :root[data-theme="light"] .champion-btn { color: rgba(0, 0, 0, 0.3); border-color: rgba(0, 0, 0, 0.15); }
+  :root[data-theme="light"] .champion-btn:hover { color: #7a5c00; border-color: rgba(180, 130, 0, 0.5); background: rgba(180, 130, 0, 0.08); }
+  :root[data-theme="light"] .champion-btn.champion-active { color: #111; background: #f0c000; border-color: #f0c000; }
+  :root[data-theme="light"] .champion-badge { color: #111; background: #f0c000; border-color: #f0c000; }
   :root[data-theme="light"] .odd-warn { color: #dc2626; }
 </style>
