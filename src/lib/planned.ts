@@ -223,6 +223,41 @@ export async function loadAllPlannedByRound(
  * claimedBy — so the umpire-owned end-of-match delete works from
  * the umpire's own device.
  */
+/**
+ * Replace one side of a planned slot — used to swap a Dummy placeholder
+ * with a real player. Only works on non-completed slots.
+ */
+export async function patchPlannedPlayer(
+  mid: string,
+  side: 'a' | 'b',
+  name: string,
+  resolvedId?: string,
+): Promise<PlannedWriteOutcome> {
+  if (!mid) return { ok: false, error: 'no mid' };
+  try {
+    const [{ getDatabase, ref, get, update }] = await Promise.all([
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    const snap = await get(ref(db, `planned/${mid}`));
+    if (!snap.exists()) return { ok: false, error: 'not found' };
+    const val = snap.val() as PlannedMatch;
+    if (val.completedAt) return { ok: false, error: 'match already completed' };
+    const patch: Record<string, unknown> = {
+      [side === 'a' ? 'aName' : 'bName']: name.trim().slice(0, 80),
+    };
+    if (resolvedId) {
+      patch[side === 'a' ? 'aResolvedId' : 'bResolvedId'] = resolvedId;
+    } else {
+      patch[side === 'a' ? 'aResolvedId' : 'bResolvedId'] = null;
+    }
+    await update(ref(db, `planned/${mid}`), patch);
+    return { ok: true, mid };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'patch failed' };
+  }
+}
+
 export async function deletePlannedMatch(mid: string): Promise<PlannedWriteOutcome> {
   if (!mid) return { ok: false, error: 'no mid' };
   try {

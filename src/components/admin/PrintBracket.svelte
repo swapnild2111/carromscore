@@ -92,6 +92,12 @@
     tournamentKey = params.get('tournament') ?? '';
     if (params.get('qrMode') === 'match') qrMode = 'match';
     else if (params.get('qrMode') === 'board') qrMode = 'board';
+    // Always write the resolved mode to the URL so it's visible and shareable
+    if (!params.has('qrMode')) {
+      const url = new URL(window.location.href);
+      url.searchParams.set('qrMode', qrMode);
+      window.history.replaceState(null, '', url.toString());
+    }
     if (!tournamentKey) {
       plannedReady = true;
       playersReady = true;
@@ -319,11 +325,21 @@
   // Board numbers to print: union of all `board` values across
   // rounds, then filled 1..max so gaps still print a sticker.
   const boards = $derived.by<number[]>(() => {
+    // First: derive from assigned board numbers on planned matches
     let max = 0;
     for (const m of plannedMatches) {
       if (m.board && m.board >= 1 && m.board <= 99 && m.board > max) {
         max = m.board;
       }
+    }
+    // Fallback: use venueBoards from tournament config so per-board stickers
+    // can be printed even before any match has a board number assigned
+    if (max === 0) {
+      const venue = tournament?.knockoutCfg?.venueBoards
+        ?? tournament?.knockoutCfg?.boardsAvailable
+        ?? tournament?.defaults?.maxBoards
+        ?? 0;
+      max = Math.min(Math.max(0, venue), 99);
     }
     if (max === 0) return [];
     const out: number[] = [];
@@ -1550,10 +1566,10 @@
       </div>
       {#if boards.length > 0 || plannedMatches.length > 0}
         <p class="hint">
-          {#if qrMode === 'board' && boards.length > 0}
+          {#if qrMode === 'board'}
             Board stickers — permanent QR per board, same every round. Cut out and stick to each physical board.
           {:else}
-            Match cards — one QR per match. Cut out and place at the board for that match.{#if qrMode === 'board' && boards.length === 0} <em>(no board numbers assigned — showing per-match QRs)</em>{/if}
+            Match cards — one QR per match. Cut out and place at the board for that match.
           {/if}
         </p>
       {/if}
@@ -1568,6 +1584,9 @@
         <div class="cover-hdr-main">
           <p class="brand">Carromscore</p>
           <h1 class="cover-name">{tournamentName}</h1>
+          {#if tournament?.startDate}
+            <p class="cover-date">{new Date(tournament.startDate + 'T00:00:00').toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+          {/if}
           {#if tournament?.country}
             <p class="cover-country">
               <span aria-hidden="true">{flagEmoji(tournament?.country ?? '')}</span>
@@ -1876,14 +1895,14 @@
           <span class="page-footer-brand">carromscore.app</span>
         </div>
       </section>
-    {:else}
+    {:else if qrMode === 'match' || boards.length === 0}
       <!-- ─── PER-MATCH QR CARDS (one QR per planned match) ─────────── -->
       {#each schedule as round, ri (round.roundKey)}
         <section class="page qr-grid-page">
           <div class="qr-grid-hdr">
             <div class="qr-grid-hdr-main">
               <p class="brand">Carromscore</p>
-              <p class="qr-grid-title">{tournamentName} — {round.roundName}</p>
+              <p class="qr-grid-title">{tournamentName} — Match QR Cards — {round.roundName}</p>
               {#if printOrganizerName}
                 <p class="bracket-organizer">Organised by {printOrganizerName}</p>
               {/if}
@@ -2077,6 +2096,12 @@
     color: #000;
     letter-spacing: 0.01em;
     line-height: 1.15;
+  }
+  .cover-date {
+    margin: 0.15rem 0 0;
+    font-size: 1rem;
+    color: #555;
+    font-weight: 500;
   }
   .cover-country {
     margin: 0.3rem 0 0;

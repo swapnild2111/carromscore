@@ -86,11 +86,36 @@
 
   let assignedPlayerIds = $state<string[]>([]);
 
+  // ─── Dummy slots ─────────────────────────────────────────────────────────────
+  // Restore dummyCount from saved groups (dummy-N IDs may already be in playerIds)
+  function countSavedDummies(groups: Record<string, LeagueGroup>): number {
+    let max = 0;
+    for (const g of Object.values(groups)) {
+      for (const id of g.playerIds) {
+        const m = id.match(/^dummy-(\d+)$/);
+        if (m) max = Math.max(max, parseInt(m[1]!, 10));
+      }
+    }
+    return max;
+  }
+  let dummyCount = $state(countSavedDummies(tournament.groups ?? {}));
+
+  function isDummy(id: string): boolean {
+    return /^dummy-\d+$/.test(id);
+  }
+
+  const dummyIds = $derived(
+    Array.from({ length: dummyCount }, (_, i) => `dummy-${i + 1}`)
+  );
+
   const assignedToGroup = $derived(
     new Set(Object.values(localGroups).flatMap((g) => g.playerIds))
   );
   const unassignedPlayers = $derived(
     assignedPlayerIds.filter((id) => !assignedToGroup.has(id))
+  );
+  const unassignedDummies = $derived(
+    dummyIds.filter((id) => !assignedToGroup.has(id))
   );
 
   const sortedGroups = $derived(
@@ -99,9 +124,9 @@
 
 
   // ─── Drag state ──────────────────────────────────────────────────────────────
-  let dragSrc = $state<{ fromGroup: string | '__unassigned__'; playerIdx: number } | null>(null);
+  let dragSrc = $state<{ fromGroup: string | '__unassigned__' | '__dummies__'; playerIdx: number } | null>(null);
 
-  function onDragStart(fromGroup: string | '__unassigned__', playerIdx: number) {
+  function onDragStart(fromGroup: string | '__unassigned__' | '__dummies__', playerIdx: number) {
     dragSrc = { fromGroup, playerIdx };
   }
 
@@ -109,17 +134,21 @@
   let dropTargetGroup = $state<string | null>(null);
   let dropTargetIdx = $state<number | null>(null);
 
-  function onDrop(toGroup: string | '__unassigned__', toIdx?: number) {
+  function onDrop(toGroup: string | '__unassigned__' | '__dummies__', toIdx?: number) {
     if (!dragSrc) return;
     const { fromGroup, playerIdx } = dragSrc;
 
     const srcIds = fromGroup === '__unassigned__'
       ? [...unassignedPlayers]
-      : [...(localGroups[fromGroup]?.playerIds ?? [])];
+      : fromGroup === '__dummies__'
+        ? [...unassignedDummies]
+        : [...(localGroups[fromGroup]?.playerIds ?? [])];
     const pid = srcIds[playerIdx];
     if (!pid) { dragSrc = null; dropTargetGroup = null; dropTargetIdx = null; return; }
 
-    if (fromGroup === toGroup && toGroup !== '__unassigned__') {
+    const isPoolTarget = toGroup === '__unassigned__' || toGroup === '__dummies__';
+
+    if (fromGroup === toGroup && !isPoolTarget) {
       // Reorder within same group
       if (toIdx !== undefined && toIdx !== playerIdx) {
         const ids = [...(localGroups[toGroup]?.playerIds ?? [])];
@@ -129,14 +158,14 @@
         groupsDirty = true;
       }
     } else {
-      // Move between groups
-      if (fromGroup !== '__unassigned__' && localGroups[fromGroup]) {
+      // Move between groups (or back to a pool)
+      if (fromGroup !== '__unassigned__' && fromGroup !== '__dummies__' && localGroups[fromGroup]) {
         localGroups[fromGroup] = {
           ...localGroups[fromGroup]!,
           playerIds: localGroups[fromGroup]!.playerIds.filter((id) => id !== pid),
         };
       }
-      if (toGroup !== '__unassigned__' && localGroups[toGroup]) {
+      if (!isPoolTarget && localGroups[toGroup]) {
         const ids = [...localGroups[toGroup]!.playerIds];
         if (toIdx !== undefined) {
           ids.splice(toIdx, 0, pid);
@@ -254,6 +283,9 @@
 
     const playerName = (id: string) => players.find((p) => p.id === id)?.canonicalName ?? id;
     const playerNames = new Map(assignedPlayerIds.map((id) => [id, playerName(id)]));
+    for (const did of dummyIds) {
+      playerNames.set(did, `Dummy ${did.replace('dummy-', '')}`);
+    }
 
     const result = await generateGroupPhase({
       tournamentKey: tournament.key,
@@ -369,7 +401,21 @@
 
   // ─── Player name helper ───────────────────────────────────────────────────────
   function playerName(id: string): string {
+    if (isDummy(id)) return `Dummy ${id.replace('dummy-', '')}`;
     return players.find((p) => p.id === id)?.canonicalName ?? id;
+  }
+
+  function removeDummyFromGroups(dummyId: string) {
+    for (const gKey of Object.keys(localGroups)) {
+      if (localGroups[gKey]!.playerIds.includes(dummyId)) {
+        localGroups[gKey] = {
+          ...localGroups[gKey]!,
+          playerIds: localGroups[gKey]!.playerIds.filter((id) => id !== dummyId),
+        };
+        groupsDirty = true;
+        break;
+      }
+    }
   }
 
   function groupMatchStatus(gKey: string, gName: string) {
@@ -464,6 +510,34 @@
               {/if}
             </div>
           {/if}
+          {#if !roundsStarted}
+            <div class="group-count-row">
+              <span class="group-count-label">Dummy slots</span>
+              <div class="group-count-stepper">
+                <button
+                  type="button"
+                  class="stepper-btn"
+                  aria-label="Fewer dummies"
+                  disabled={dummyCount <= 0 || redrawing || generating}
+                  onclick={() => {
+                    const newCount = Math.max(0, dummyCount - 1);
+                    // Remove the last dummy from groups if assigned
+                    removeDummyFromGroups(`dummy-${dummyCount}`);
+                    dummyCount = newCount;
+                  }}
+                >−</button>
+                <span class="stepper-value">{dummyCount}</span>
+                <button
+                  type="button"
+                  class="stepper-btn"
+                  aria-label="More dummies"
+                  disabled={dummyCount >= 32 || redrawing || generating}
+                  onclick={() => { dummyCount = dummyCount + 1; }}
+                >+</button>
+              </div>
+              <span class="group-count-hint">walk-in placeholders</span>
+            </div>
+          {/if}
           {#if roundsStarted}
             <span class="draw-locked-hint">🔒 Groups locked — rounds in progress</span>
           {:else if groupsLocked && !groupsDirty}
@@ -479,6 +553,30 @@
             <span class="stale-icon">⚠</span>
             <span class="stale-msg">Tournament config changed — recommendation is now <strong>{recommendedGroupCount} group{recommendedGroupCount !== 1 ? 's' : ''}</strong> (was {savedGroupCount}). Re-generate brackets to apply.</span>
             <button type="button" class="btn btn-primary btn-sm" onclick={doRedraw} disabled={redrawing || generating}>{redrawing ? 'Re-generating…' : '↺ Re-generate'}</button>
+          </div>
+        {/if}
+
+        <!-- Dummy pool -->
+        {#if dummyCount > 0 && !roundsStarted}
+          <div
+            class="group-col unassigned-col dummy-pool"
+            role="list"
+            aria-label="Dummy slots"
+            ondragover={(e) => e.preventDefault()}
+            ondrop={() => onDrop('__dummies__')}
+          >
+            <div class="group-col-header">Dummy slots <span class="dummy-hint">(drag into group)</span></div>
+            {#each unassignedDummies as did, i (did)}
+              <div
+                class="player-chip player-chip-dummy"
+                draggable={true}
+                role="listitem"
+                ondragstart={() => onDragStart('__dummies__', i)}
+              >{playerName(did)}</div>
+            {/each}
+            {#if unassignedDummies.length === 0}
+              <div class="group-empty">All dummies assigned</div>
+            {/if}
           </div>
         {/if}
 
@@ -532,6 +630,7 @@
                 <div
                   class="player-chip"
                   class:player-chip-locked={roundsStarted}
+                  class:player-chip-dummy={isDummy(pid)}
                   class:player-chip-bye={hasOddBye && i === 0}
                   class:player-chip-drop-above={dropTargetGroup === gKey && dropTargetIdx === i}
                   draggable={!roundsStarted}
@@ -543,6 +642,14 @@
                   ondrop={roundsStarted ? undefined : (e) => { e.stopPropagation(); onDrop(gKey, i); }}
                 >
                   {playerName(pid)}{hasOddBye && i === 0 ? ' 👑' : ''}
+                  {#if isDummy(pid) && !roundsStarted}
+                    <button
+                      type="button"
+                      class="dummy-remove-btn"
+                      aria-label="Remove {playerName(pid)}"
+                      onclick={(e) => { e.stopPropagation(); removeDummyFromGroups(pid); }}
+                    >×</button>
+                  {/if}
                 </div>
               {/each}
               {#if group.playerIds.length === 0}
@@ -967,6 +1074,36 @@
     border-top: 2px solid var(--accent, #ffd54a);
     margin-top: -1px;
   }
+  .player-chip-dummy {
+    border-color: rgba(120, 180, 255, 0.35);
+    background: rgba(80, 140, 240, 0.1);
+    color: rgba(160, 200, 255, 0.9);
+    font-style: italic;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    overflow: visible;
+  }
+  .dummy-remove-btn {
+    margin-left: auto;
+    padding: 0 4px;
+    font-size: 0.8rem;
+    line-height: 1;
+    background: transparent;
+    border: none;
+    color: rgba(160, 200, 255, 0.5);
+    cursor: pointer;
+    border-radius: 3px;
+    flex-shrink: 0;
+  }
+  .dummy-remove-btn:hover { color: #f88; background: rgba(255, 100, 100, 0.12); }
+  .dummy-pool .group-col-header { color: rgba(120, 180, 255, 0.8); }
+  .dummy-hint {
+    font-size: 0.65rem;
+    font-weight: 400;
+    opacity: 0.7;
+    margin-left: 4px;
+  }
   .bye-note {
     font-size: 0.65rem;
     color: rgba(255, 213, 74, 0.6);
@@ -1138,6 +1275,9 @@
     :root:not([data-theme="dark"]) .stepper-btn:hover:not(:disabled) { background: rgba(0, 0, 0, 0.12); }
     :root:not([data-theme="dark"]) .config-stale-banner { background: rgba(200, 130, 0, 0.1); border-color: rgba(200, 130, 0, 0.4); }
     :root:not([data-theme="dark"]) .stale-msg { color: #111; }
+    :root:not([data-theme="dark"]) .player-chip-dummy { background: rgba(50, 100, 220, 0.08); border-color: rgba(50, 100, 220, 0.3); color: #2255bb; }
+    :root:not([data-theme="dark"]) .dummy-remove-btn { color: rgba(50, 100, 220, 0.5); }
+    :root:not([data-theme="dark"]) .dummy-pool .group-col-header { color: #2255bb; }
   }
   :root[data-theme="light"] .gko-card { background: #fff; border-color: rgba(0, 0, 0, 0.1); color: #111; }
   :root[data-theme="light"] .ls-header { border-bottom-color: rgba(0, 0, 0, 0.08); }
@@ -1164,4 +1304,7 @@
   :root[data-theme="light"] .stepper-btn:hover:not(:disabled) { background: rgba(0, 0, 0, 0.12); }
   :root[data-theme="light"] .config-stale-banner { background: rgba(200, 130, 0, 0.1); border-color: rgba(200, 130, 0, 0.4); }
   :root[data-theme="light"] .stale-msg { color: #111; }
+  :root[data-theme="light"] .player-chip-dummy { background: rgba(50, 100, 220, 0.08); border-color: rgba(50, 100, 220, 0.3); color: #2255bb; }
+  :root[data-theme="light"] .dummy-remove-btn { color: rgba(50, 100, 220, 0.5); }
+  :root[data-theme="light"] .dummy-pool .group-col-header { color: #2255bb; }
 </style>

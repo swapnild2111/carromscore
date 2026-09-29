@@ -9,7 +9,7 @@
   import type { Tournament } from '../../lib/tournaments';
   import { startRound, loadAssignedPlayers } from '../../lib/tournaments';
   import { loadAll as loadAllPlayers, subscribeStore as subscribePlayerStore } from '../../lib/players';
-  import { subscribePlannedByTournament, type PlannedMatch } from '../../lib/planned';
+  import { subscribePlannedByTournament, patchPlannedPlayer, type PlannedMatch } from '../../lib/planned';
   import {
     shuffleArray,
     computeGroupStandings,
