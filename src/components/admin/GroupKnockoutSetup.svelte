@@ -778,7 +778,7 @@
               class="btn btn-primary"
               onclick={lockAndGenerate}
               disabled={sortedGroups.length === 0}
-            >Lock groups &amp; generate brackets</button>
+            >{groupsLocked ? 'Re-generate brackets' : 'Lock groups &amp; generate brackets'}</button>
           {:else if groupsLocked}
             {#if (tournament.rounds ?? []).some((r) => /^Group /i.test(r.name) && !r.startedAt)}
               <button
