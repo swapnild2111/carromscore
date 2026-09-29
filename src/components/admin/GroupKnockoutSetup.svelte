@@ -443,16 +443,47 @@
   }
 
   function removeDummyFromGroups(dummyId: string) {
+    // Remove from group if assigned
     for (const gKey of Object.keys(localGroups)) {
       if (localGroups[gKey]!.playerIds.includes(dummyId)) {
         localGroups[gKey] = {
           ...localGroups[gKey]!,
           playerIds: localGroups[gKey]!.playerIds.filter((id) => id !== dummyId),
         };
-        groupsDirty = true;
         break;
       }
     }
+    // Renumber: compact remaining dummies so there are no gaps
+    const m = dummyId.match(/^dummy-(\d+)$/);
+    if (m) {
+      const removedN = parseInt(m[1]!, 10);
+      // Shift down all dummy IDs > removedN in every group
+      for (const gKey of Object.keys(localGroups)) {
+        localGroups[gKey] = {
+          ...localGroups[gKey]!,
+          playerIds: localGroups[gKey]!.playerIds.map((id) => {
+            const dm = id.match(/^dummy-(\d+)$/);
+            if (dm && parseInt(dm[1]!, 10) > removedN) {
+              return `dummy-${parseInt(dm[1]!, 10) - 1}`;
+            }
+            return id;
+          }),
+        };
+      }
+      // Also shift champion IDs if any dummy was a champion (unlikely but safe)
+      const newChampions: Record<string, string> = {};
+      for (const [gKey, cid] of Object.entries(groupChampions)) {
+        const cdm = cid.match(/^dummy-(\d+)$/);
+        if (cdm && parseInt(cdm[1]!, 10) > removedN) {
+          newChampions[gKey] = `dummy-${parseInt(cdm[1]!, 10) - 1}`;
+        } else if (cid !== dummyId) {
+          newChampions[gKey] = cid;
+        }
+      }
+      groupChampions = newChampions;
+      dummyCount -= 1;
+    }
+    groupsDirty = true;
   }
 
   function groupMatchStatus(gKey: string, gName: string) {
@@ -730,12 +761,14 @@
                 disabled={startingRounds}
               >{startingRounds ? 'Starting…' : '▶ Start all group rounds'}</button>
             {/if}
-            <button
-              type="button"
-              class="btn btn-secondary"
-              onclick={doRedraw}
-              disabled={redrawing || generating}
-            >{redrawing ? 'Re-generating…' : '↺ Re-generate brackets'}</button>
+            {#if !configStale}
+              <button
+                type="button"
+                class="btn btn-secondary"
+                onclick={doRedraw}
+                disabled={redrawing || generating}
+              >{redrawing ? 'Re-generating…' : '↺ Re-generate brackets'}</button>
+            {/if}
           {:else if !groupsLocked && sortedGroups.length > 0}
             <button
               type="button"
