@@ -293,21 +293,24 @@
     const existingGroupMatches = plannedMatches.filter((m) => /^Group /i.test(m.round ?? ''));
     await Promise.all(existingGroupMatches.map((m) => deletePlannedMatch(m.mid)));
 
-    // Save config + groups
-    const cfg: KnockoutCfg = {
-      participantCount: assignedPlayerIds.length,
-      venueBoards,
-      groupCount: sortedGroups.length,
-      groupSize: Math.ceil(assignedPlayerIds.length / Math.max(1, sortedGroups.length)),
-    };
-    const cfgOutcome = await updateKnockoutCfg(tournament.key, cfg, 'knockout');
-    if (!cfgOutcome.ok) {
-      generating = false;
-      const raw = cfgOutcome.error ?? '';
-      generateError = raw.includes('PERMISSION_DENIED')
-        ? 'Permission denied — you can only edit tournaments you created.'
-        : raw || 'Failed to save config';
-      return;
+    // Save knockoutCfg only on first generate (not re-generate) — writing the
+    // tournament root requires being the creator; groups sub-path is separate.
+    if (!groupsLocked) {
+      const cfg: KnockoutCfg = {
+        participantCount: assignedPlayerIds.length,
+        venueBoards,
+        groupCount: sortedGroups.length,
+        groupSize: Math.ceil(assignedPlayerIds.length / Math.max(1, sortedGroups.length)),
+      };
+      const cfgOutcome = await updateKnockoutCfg(tournament.key, cfg, 'knockout');
+      if (!cfgOutcome.ok) {
+        generating = false;
+        const raw = cfgOutcome.error ?? '';
+        generateError = raw.includes('PERMISSION_DENIED')
+          ? 'Permission denied — you can only edit tournaments you created.'
+          : raw || 'Failed to save config';
+        return;
+      }
     }
 
     // Merge champion and pre-qualify markings into groups before saving

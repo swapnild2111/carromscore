@@ -157,6 +157,12 @@
             "playerIds": {
               "$idx": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 64" }
             },
+            "championIds": {
+              "$idx": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 64" }
+            },
+            "preQualifyIds": {
+              "$idx": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 64" }
+            },
             "$other": { ".validate": false }
           }
         },
