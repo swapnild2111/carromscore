@@ -29,6 +29,9 @@
     addOrganiser,
     removeOrganiser,
     loadOrganisers,
+    addCoOrganiser,
+    removeCoOrganiser,
+    loadCoOrganisers,
     assignPlayer,
     unassignPlayer,
     bulkAssignPlayers,
@@ -85,13 +88,11 @@
   function canManageTournament(t: Tournament): boolean {
     if (!role) return false;
     if (role.isSuper) return true;
-    // Own-only auth (v3.3): an organiser can manage tournaments they
-    // created. `createdBy` was stamped at creation time by
-    // createOrTouchTournament; records without it (legacy anonymous
-    // creates) fall through to super-only management.
     if (!role.isOrganiser) return false;
     const myUid = currentUser()?.uid;
-    return !!(myUid && t.createdBy === myUid);
+    if (!myUid) return false;
+    // Creator owns it; co-organiser has same rights.
+    return t.createdBy === myUid || !!(t.coOrganisers?.[myUid]);
   }
 
   let tick = $state(0);
@@ -186,6 +187,10 @@
   let usersMap = $state<Record<string, { uid: string; email: string; displayName?: string }>>({});
   let usersLoading = $state(false);
   let userPickerValue = $state('');
+  // Co-organiser state — shared between Edit and Add dialogs
+  let coOrgUids = $state<string[]>([]);
+  let coOrgLoading = $state(false);
+  let coOrgPickerValue = $state('');
   let saving = $state(false);
   let banner = $state<{ kind: 'ok' | 'err'; message: string } | null>(null);
   /** Selected tournament keys for bulk delete. */
@@ -568,7 +573,7 @@
     if (!role.isOrganiser) return [];
     const myUid = currentUser()?.uid;
     if (!myUid) return [];
-    return all.filter((t) => t.createdBy === myUid);
+    return all.filter((t) => t.createdBy === myUid || !!(t.coOrganisers?.[myUid]));
   });
 
   /** Search-filtered, type-filtered, organizer-filtered, sorted view of `list()`. */
@@ -690,6 +695,13 @@
     editingBoardsAvailable = String(t.knockoutCfg?.boardsAvailable ?? t.knockoutCfg?.venueBoards ?? 2);
     editingGroupCount = t.knockoutCfg?.groupCount ?? 0;
     const isKoRr = (t.format === 'knockout' || t.format === 'roundrobin');
+    coOrgUids = [];
+    coOrgPickerValue = '';
+    coOrgLoading = true;
+    loadCoOrganisers(t.key).then((uids) => {
+      coOrgUids = uids;
+      coOrgLoading = false;
+    }).catch(() => { coOrgLoading = false; });
     editingOriginal = {
       name: t.name,
       type: t.type ?? 'open',
@@ -731,6 +743,8 @@
     editingDefaultMaxBoards = '';
     editingDefaultTimerDuration = '';
     editingOriginal = null;
+    coOrgUids = [];
+    coOrgPickerValue = '';
   }
   async function saveEdit() {
     if (!editingKey || !editingOriginal) return;
@@ -1021,6 +1035,39 @@
     if (!u) return uid.slice(0, 8) + '…';
     if (u.displayName) return `${u.displayName} · ${u.email}`;
     return u.email || uid.slice(0, 8) + '…';
+  }
+
+  function coOrgLabelForUid(uid: string): string {
+    const name = orgProfilesMap[uid];
+    if (name) return `${name} (${uid.slice(0, 8)}…)`;
+    return uid.slice(0, 8) + '…';
+  }
+
+  async function addCoOrg() {
+    const uid = coOrgPickerValue.trim();
+    if (!uid || !editingKey) return;
+    if (coOrgUids.includes(uid)) { coOrgPickerValue = ''; return; }
+    saving = true;
+    const outcome = await addCoOrganiser(editingKey, uid);
+    saving = false;
+    if (outcome.ok) {
+      coOrgUids = [...coOrgUids, uid];
+      coOrgPickerValue = '';
+    } else {
+      flash('err', `Could not add co-organiser (${outcome.error})`);
+    }
+  }
+
+  async function removeCoOrg(uid: string) {
+    if (!editingKey) return;
+    saving = true;
+    const outcome = await removeCoOrganiser(editingKey, uid);
+    saving = false;
+    if (outcome.ok) {
+      coOrgUids = coOrgUids.filter((u) => u !== uid);
+    } else {
+      flash('err', `Could not remove co-organiser (${outcome.error})`);
+    }
   }
 
   /** List of uid options for the picker, excluding already-assigned
@@ -2090,6 +2137,47 @@
           </label>
         </fieldset>
 
+        <fieldset class="edit-fieldset">
+          <legend>Co-organisers</legend>
+          <p class="fieldset-hint">Co-organisers can edit matches in this tournament. Enter their Firebase UID to add them.</p>
+          {#if coOrgLoading}
+            <p class="empty">Loading…</p>
+          {:else}
+            <ul class="uid-list">
+              {#each coOrgUids as uid (uid)}
+                <li class="uid-row">
+                  <span class="uid-label">{coOrgLabelForUid(uid)}</span>
+                  <button
+                    type="button"
+                    class="btn btn-danger btn-sm"
+                    onclick={() => removeCoOrg(uid)}
+                    disabled={saving}
+                  >Remove</button>
+                </li>
+              {/each}
+              {#if coOrgUids.length === 0}
+                <li class="empty">No co-organisers yet.</li>
+              {/if}
+            </ul>
+          {/if}
+          <div class="uid-add">
+            <input
+              type="text"
+              class="uid-input"
+              placeholder="Firebase UID"
+              bind:value={coOrgPickerValue}
+              disabled={saving}
+              aria-label="Co-organiser Firebase UID"
+            />
+            <button
+              type="button"
+              class="btn btn-primary"
+              onclick={addCoOrg}
+              disabled={saving || !coOrgPickerValue.trim()}
+            >Add</button>
+          </div>
+        </fieldset>
+
         <div class="dialog-actions">
           <button type="button" class="btn" onclick={cancelEdit} disabled={saving}>Cancel</button>
           <button
@@ -2584,6 +2672,11 @@
               aria-label="Default timer duration"
             />
           </label>
+        </fieldset>
+
+        <fieldset class="edit-fieldset">
+          <legend>Co-organisers</legend>
+          <p class="fieldset-hint">Save the tournament first, then open Edit to add co-organisers.</p>
         </fieldset>
 
         <div class="dialog-actions">
@@ -3767,6 +3860,26 @@
   }
   @media (max-width: 30rem) {
     .defaults-grid { grid-template-columns: 1fr; }
+  }
+  .edit-fieldset {
+    margin: 0.7rem 0 0.4rem;
+    padding: 0.7rem 0.85rem 0.5rem;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 0.5rem;
+  }
+  .edit-fieldset legend {
+    padding: 0 0.4rem;
+    color: var(--accent, #ffd54a);
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .fieldset-hint {
+    color: var(--muted, #9aa0a6);
+    font-size: 0.82rem;
+    margin: 0 0 0.5rem;
+    line-height: 1.4;
   }
 
   .league-cfg-grid {

@@ -90,7 +90,7 @@ export type Tournament = {
    * knockout flights. `'knockout'` — single-elimination bracket (future).
    * Absent = treat as 'standard' for backwards compatibility.
    */
-  format?: 'standard' | 'league' | 'knockout' | 'roundrobin';
+  format?: 'standard' | 'league' | 'knockout' | 'roundrobin' | 'groupknockout';
   /**
    * League configuration — only meaningful when `format === 'league'`.
    */
@@ -107,6 +107,12 @@ export type Tournament = {
   groups?: Record<string, LeagueGroup>;
   /** Unix ms timestamp set when the organiser locks the tournament. Absent = unlocked. */
   lockedAt?: number;
+  /**
+   * Co-organiser UIDs: other authenticated users who have the same
+   * management rights as the creator on this tournament. Map of
+   * uid → true. Written by the creator (or super) via /coOrganisers.
+   */
+  coOrganisers?: Record<string, true>;
 };
 
 /**
@@ -195,7 +201,7 @@ export type Round = {
 export type CreateTournamentMeta = {
   type?: 'open' | 'closed';
   country?: string;
-  format?: 'standard' | 'league' | 'knockout' | 'roundrobin';
+  format?: 'standard' | 'league' | 'knockout' | 'roundrobin' | 'groupknockout';
 };
 
 /**
@@ -506,6 +512,15 @@ function parseKnockoutCfg(raw: unknown): KnockoutCfg | undefined {
 }
 
 
+function parseCoOrganisers(raw: unknown): Record<string, true> | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const out: Record<string, true> = {};
+  for (const [uid, val] of Object.entries(raw as Record<string, unknown>)) {
+    if (val === true && uid.length >= 1 && uid.length <= 64) out[uid] = true;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 function parseGroups(raw: unknown): Record<string, LeagueGroup> | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
   const out: Record<string, LeagueGroup> = {};
@@ -600,13 +615,14 @@ function mergeRemote(raw: Record<string, unknown>): void {
     const rounds = parseRounds(v.rounds);
     const defaults = parseDefaults(v.defaults);
     const format =
-      v.format === 'league' || v.format === 'knockout' || v.format === 'standard' || v.format === 'roundrobin'
-        ? (v.format as 'league' | 'knockout' | 'standard' | 'roundrobin')
+      v.format === 'league' || v.format === 'knockout' || v.format === 'standard' || v.format === 'roundrobin' || v.format === 'groupknockout'
+        ? (v.format as 'league' | 'knockout' | 'standard' | 'roundrobin' | 'groupknockout')
         : undefined;
     const leagueCfg = parseLeagueCfg(v.leagueCfg);
     const knockoutCfg = parseKnockoutCfg(v.knockoutCfg);
     const groups = parseGroups(v.groups);
     const lockedAt = typeof v.lockedAt === 'number' && v.lockedAt > 0 ? v.lockedAt : undefined;
+    const coOrganisers = parseCoOrganisers(v.coOrganisers);
     const existing = memoryStore.find((t) => t.key === key);
     if (existing) {
       existing.name = name;
@@ -640,6 +656,8 @@ function mergeRemote(raw: Record<string, unknown>): void {
       else delete existing.groups;
       if (lockedAt) existing.lockedAt = lockedAt;
       else delete existing.lockedAt;
+      if (coOrganisers) existing.coOrganisers = coOrganisers;
+      else delete existing.coOrganisers;
     } else {
       memoryStore.push({
         key,
@@ -660,6 +678,7 @@ function mergeRemote(raw: Record<string, unknown>): void {
         ...(knockoutCfg ? { knockoutCfg } : {}),
         ...(groups ? { groups } : {}),
         ...(lockedAt ? { lockedAt } : {}),
+        ...(coOrganisers ? { coOrganisers } : {}),
       });
     }
   }
@@ -1501,6 +1520,83 @@ export async function loadOrganisers(key: string): Promise<string[]> {
     return Object.entries(val)
       .filter(([, v]) => v === true)
       .map(([uid]) => uid);
+  } catch {
+    return [];
+  }
+}
+
+// ─── Co-organiser helpers (v5.2) ─────────────────────────────────────
+
+/** Add a co-organiser. Writable by the tournament creator or super. */
+export async function addCoOrganiser(
+  key: string,
+  uid: string,
+): Promise<TournamentWriteOutcome> {
+  const cleanUid = uid.trim();
+  if (!key) return { ok: false, error: 'Missing tournament key' };
+  if (!cleanUid || cleanUid.length > 64)
+    return { ok: false, error: 'UID must be 1-64 characters' };
+  try {
+    const [{ firebaseApp }, { getDatabase, ref, set }] = await Promise.all([
+      import('./firebase'),
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    await set(ref(db, `tournaments/${key}/coOrganisers/${cleanUid}`), true);
+    const t = memoryStore.find((x) => x.key === key);
+    if (t) {
+      t.coOrganisers = { ...(t.coOrganisers ?? {}), [cleanUid]: true };
+      notify();
+    }
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg || 'Add co-organiser failed' };
+  }
+}
+
+/** Remove a co-organiser. Idempotent. */
+export async function removeCoOrganiser(
+  key: string,
+  uid: string,
+): Promise<TournamentWriteOutcome> {
+  const cleanUid = uid.trim();
+  if (!key) return { ok: false, error: 'Missing tournament key' };
+  if (!cleanUid) return { ok: false, error: 'Missing UID' };
+  try {
+    const [{ firebaseApp }, { getDatabase, ref, remove }] = await Promise.all([
+      import('./firebase'),
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    await remove(ref(db, `tournaments/${key}/coOrganisers/${cleanUid}`));
+    const t = memoryStore.find((x) => x.key === key);
+    if (t && t.coOrganisers) {
+      const next = { ...t.coOrganisers };
+      delete next[cleanUid];
+      t.coOrganisers = Object.keys(next).length > 0 ? next : undefined;
+      notify();
+    }
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg || 'Remove co-organiser failed' };
+  }
+}
+
+/** One-shot fetch of co-organiser UIDs for a tournament. */
+export async function loadCoOrganisers(key: string): Promise<string[]> {
+  if (!key) return [];
+  try {
+    const [{ firebaseApp }, { getDatabase, ref, get }] = await Promise.all([
+      import('./firebase'),
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    const snap = await get(ref(db, `tournaments/${key}/coOrganisers`));
+    const val = snap.val() as Record<string, unknown> | null;
+    if (!val) return [];
+    return Object.entries(val).filter(([, v]) => v === true).map(([uid]) => uid);
   } catch {
     return [];
   }

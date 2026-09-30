@@ -92,6 +92,13 @@
             ".validate": "newData.isBoolean() && newData.val() == true && $uid.length >= 1 && $uid.length <= 64"
           }
         },
+        "coOrganisers": {
+          ".read": "auth != null",
+          "$uid": {
+            ".write": "auth != null && (root.child('adminRoles').child(auth.uid).val() == 'super' || root.child('tournaments').child($key).child('createdBy').val() == auth.uid)",
+            ".validate": "!newData.exists() || (newData.isBoolean() && newData.val() == true && $uid.length >= 1 && $uid.length <= 64)"
+          }
+        },
         "assignedPlayerIds": {
           "$playerId": {
             ".write": "auth != null && ((root.child('adminRoles').child(auth.uid).val() == 'super') || (root.child('tournaments').child($key).child('createdBy').val() == auth.uid))",
