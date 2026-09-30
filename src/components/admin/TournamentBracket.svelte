@@ -456,8 +456,12 @@
   }
 
   async function resetRow(m: PlannedMatch) {
+    const isHistoryOnly = !m.completedAt && !!findHistMatch(m);
+    const msg = isHistoryOnly
+      ? `This match was scored without a QR scan — the result lives in match history, not the bracket slot.\n\nResetting the bracket slot won't remove the recorded result.\n\nContinue anyway?`
+      : `Reset this slot back to "ready"?\n${m.aName} vs ${m.bName}\n\nThis removes the recorded result and lets the match be played again.`;
     // eslint-disable-next-line no-alert
-    if (!window.confirm(`Reset this slot back to "ready"?\n${m.aName} vs ${m.bName}\n\nThis removes the recorded result and lets the match be played again.`)) return;
+    if (!window.confirm(msg)) return;
     const outcome = await resetPlannedMatch(m.mid);
     if (!outcome.ok) inlineError = outcome.error;
     else flash('Slot reset to ready');
@@ -816,7 +820,7 @@
                           title="Forfeit dummy — advance the real player to next round"
                         >✓</button>
                       {/if}
-                      {#if m.completedAt}
+                      {#if statusOf(m) === 'complete'}
                         <button
                           type="button"
                           class="row-reset"
