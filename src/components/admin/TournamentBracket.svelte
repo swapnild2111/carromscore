@@ -965,6 +965,10 @@
     outline: none;
     border-color: rgba(255, 213, 74, 0.55);
   }
+  .round-select option {
+    background: #1e1e1e;
+    color: #f5f5f5;
+  }
 
   .bracket-add {
     background: rgba(255, 255, 255, 0.02);
