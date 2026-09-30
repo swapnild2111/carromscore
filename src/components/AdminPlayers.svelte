@@ -1058,7 +1058,7 @@
             screen you'll resolve any names that already exist in the
             roster.
           </p>
-          <label class="add-country-label">
+          <label class="edit-field">
             <span>Country (applied to every player in this batch)</span>
             <CountrySelect
               bind:value={addingCountry}
@@ -1067,7 +1067,7 @@
             />
           </label>
           <div class="add-meta-row">
-            <label class="add-meta-field">
+            <label class="edit-field" style="margin:0">
               <span>Gender</span>
               <select bind:value={addingGender} aria-label="Gender">
                 <option value="">— optional —</option>
@@ -1076,26 +1076,26 @@
                 <option value="other">Other</option>
               </select>
             </label>
-            <label class="add-meta-field">
+            <label class="edit-field" style="margin:0">
               <span>Date of birth</span>
               <input type="date" bind:value={addingDob} aria-label="Date of birth" />
             </label>
           </div>
           <div class="add-meta-row">
-            <label class="add-meta-field">
+            <label class="edit-field" style="margin:0">
               <span>Phone</span>
               <input type="tel" bind:value={addingPhone} placeholder="optional" aria-label="Phone" />
             </label>
-            <label class="add-meta-field">
+            <label class="edit-field" style="margin:0">
               <span>Email</span>
               <input type="email" bind:value={addingEmail} placeholder="optional" aria-label="Email" />
             </label>
           </div>
-          <label class="add-country-label">
+          <label class="edit-field">
             <span>Address</span>
             <input type="text" bind:value={addingAddress} placeholder="optional" aria-label="Address" />
           </label>
-          <label class="add-country-label">
+          <label class="edit-field">
             <span>Represents</span>
             <input type="text" bind:value={addingRepresents} placeholder="optional" aria-label="Represents" maxlength="100" />
           </label>
@@ -1540,8 +1540,7 @@
     letter-spacing: 0.06em;
     font-size: 0.7rem;
   }
-  .edit-field input,
-  .edit-field select {
+  .edit-field input {
     width: 100%;
     background: #0f0f0f;
     color: var(--fg);
@@ -1551,13 +1550,25 @@
     font: inherit;
     font-size: 0.9rem;
   }
+  .edit-field input:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
   .edit-field select {
-    padding-right: 1.9rem;
-    appearance: none;
-    -webkit-appearance: none;
+    width: 100%;
+    background-color: #0f0f0f;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%239aa0a6'/%3E%3C/svg%3E");
     background-repeat: no-repeat;
     background-position: right 0.6rem center;
+    background-size: 10px 6px;
+    color: var(--fg);
+    border: 1px solid #2a2a2a;
+    border-radius: 0.4rem;
+    padding: 0.45rem 1.9rem 0.45rem 0.55rem;
+    font: inherit;
+    font-size: 0.9rem;
+    appearance: none;
+    -webkit-appearance: none;
     cursor: pointer;
   }
   .edit-field select:focus {
@@ -1566,6 +1577,10 @@
   }
   .edit-field select option {
     background: #1a1a1a;
+  }
+  .edit-field input[type="date"]::-webkit-calendar-picker-indicator {
+    filter: invert(0.6);
+    cursor: pointer;
   }
   .edit-row {
     display: flex;
@@ -1658,7 +1673,7 @@
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 0.75rem;
-    margin: 0.5rem 0 0.75rem;
+    margin: 0.5rem 0 0.85rem;
   }
   .add-meta-field {
     display: flex;

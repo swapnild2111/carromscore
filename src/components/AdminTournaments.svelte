@@ -1750,7 +1750,7 @@
                       disabled={lockingKey === t.key}
                       aria-label={t.lockedAt ? 'Unlock tournament' : 'Lock tournament'}
                       title={t.lockedAt ? 'Locked — click to unlock' : 'Lock tournament (disable editing)'}
-                    >{t.lockedAt ? '🔒' : '🔓'}</button>
+                    >{t.lockedAt ? '🔒 Locked' : '🔓 Lock'}</button>
                   {/if}
                   {#if setupNoPlayersKey === t.key}
                     <span class="setup-no-players-warn">
@@ -1804,14 +1804,15 @@
                       aria-label="Print tournament pack"
                       title="Print tournament pack (cover sheet + board QR stickers)"
                     >🖨</a>
-                    <button
-                      type="button"
-                      class="btn btn-danger btn-delete-x"
-                      onclick={() => startDelete(t.key)}
-                      aria-label="Delete tournament"
-                      title="Delete tournament"
-                      disabled={!!t.lockedAt}
-                    >✕</button>
+                    {#if !t.lockedAt}
+                      <button
+                        type="button"
+                        class="btn btn-danger btn-delete-x"
+                        onclick={() => startDelete(t.key)}
+                        aria-label="Delete tournament"
+                        title="Delete tournament"
+                      >✕</button>
+                    {/if}
                   </div>
                 {/if}
               </td>

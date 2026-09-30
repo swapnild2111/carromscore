@@ -357,19 +357,27 @@
   async function startAllGroupRounds() {
     startingRounds = true;
     const rounds = loadRounds(tournament.key);
-    const groupRounds = rounds
+    const allGroupRounds = rounds
       .filter((r) => / — /.test(r.name) && !/^KO —/.test(r.name) && !r.startedAt)
       .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-    // Only start the first (lowest-order) round so players can play it before QF starts.
-    if (groupRounds.length > 0) {
-      const firstRound = groupRounds[0]!;
-      await startRound(tournament.key, firstRound.key);
-      // Auto-forfeit any match in this round that has a dummy side (bye).
+
+    // Find the first (lowest-order) round for each group prefix (e.g. "G1", "G2")
+    const firstRoundPerGroup = new Map<string, typeof allGroupRounds[0]>();
+    for (const r of allGroupRounds) {
+      const prefix = r.name.split(' — ')[0]!;
+      if (!firstRoundPerGroup.has(prefix)) firstRoundPerGroup.set(prefix, r);
+    }
+    const firstRounds = [...firstRoundPerGroup.values()];
+
+    if (firstRounds.length > 0) {
+      await Promise.all(firstRounds.map((r) => startRound(tournament.key, r.key)));
+      // Auto-forfeit dummy-side matches in all started first rounds
       const isDummySide = (m: PlannedMatch) =>
         /^dummy-\d+$/i.test(m.aResolvedId ?? m.aName ?? '') ||
         /^dummy-\d+$/i.test(m.bResolvedId ?? m.bName ?? '');
+      const startedKeys = new Set(firstRounds.map((r) => r.key));
       const dummyMatches = plannedMatches.filter(
-        (m) => m.roundKey === firstRound.key && isDummySide(m) && !m.completedAt,
+        (m) => startedKeys.has(m.roundKey ?? '') && isDummySide(m) && !m.completedAt,
       );
       await Promise.all(dummyMatches.map((m) => forfeitDummyMatch(m.mid, myUid)));
     }
