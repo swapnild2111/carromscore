@@ -76,7 +76,7 @@ export type PlannedWriteOutcome =
   | { ok: false; error: string };
 
 export type PlannedReadOutcome =
-  | { ok: true; match: PlannedMatch | null; reason?: 'no-active-round' | 'all-complete' }
+  | { ok: true; match: PlannedMatch | null; reason?: 'no-active-round' | 'all-complete' | 'no-board' }
   | { ok: false; error: string };
 
 /**
@@ -252,6 +252,29 @@ export async function patchPlannedPlayer(
       patch[side === 'a' ? 'aResolvedId' : 'bResolvedId'] = null;
     }
     await update(ref(db, `planned/${mid}`), patch);
+    return { ok: true, mid };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'patch failed' };
+  }
+}
+
+export async function patchPlannedBoard(
+  mid: string,
+  board: number,
+): Promise<PlannedWriteOutcome> {
+  if (!mid) return { ok: false, error: 'no mid' };
+  const b = Math.floor(board);
+  if (!Number.isFinite(b) || b < 1 || b > 99) return { ok: false, error: 'board must be 1–99' };
+  try {
+    const [{ getDatabase, ref, get, update }] = await Promise.all([
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    const snap = await get(ref(db, `planned/${mid}`));
+    if (!snap.exists()) return { ok: false, error: 'not found' };
+    const val = snap.val() as PlannedMatch;
+    if (val.completedAt) return { ok: false, error: 'match already completed' };
+    await update(ref(db, `planned/${mid}`), { board: b });
     return { ok: true, mid };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'patch failed' };
@@ -497,9 +520,11 @@ export async function resolvePlannedByBoard(
 
     const candidates: PlannedMatch[] = [];
     let hasMatchesForBoard = false;
+    let hasAnyTournamentMatch = false;
     for (const [mid, v] of Object.entries(raw)) {
       if (!v || typeof v !== 'object') continue;
       if (v.tournamentKey !== tournamentKey) continue;
+      hasAnyTournamentMatch = true;
       if (v.board !== board) continue;
       hasMatchesForBoard = true;
       // Skip completed slots — they've already been played.
@@ -510,11 +535,13 @@ export async function resolvePlannedByBoard(
       candidates.push({ mid, ...v });
     }
     if (candidates.length === 0) {
-      // Distinguish "no open round" from "all matches on this board done".
+      // Distinguish "no open round" from "all matches on this board done"
+      // from "board number not assigned to any match".
       const noActiveRound = hasRoundData && openRoundOrder.size === 0 && totalRounds > 0;
-      let reason: 'no-active-round' | 'all-complete' | undefined;
+      let reason: 'no-active-round' | 'all-complete' | 'no-board' | undefined;
       if (noActiveRound) reason = 'no-active-round';
       else if (hasMatchesForBoard) reason = 'all-complete';
+      else if (hasAnyTournamentMatch) reason = 'no-board';
       return { ok: true, match: null, ...(reason ? { reason } : {}) };
     }
     // Sort: unclaimed first, then by round order (earlier round first),

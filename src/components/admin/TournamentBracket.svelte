@@ -20,6 +20,7 @@
     createPlannedMatch,
     deletePlannedMatch,
     resetPlannedMatch,
+    patchPlannedBoard,
     subscribePlannedByTournament,
     type PlannedMatch,
   } from '../../lib/planned';
@@ -131,6 +132,28 @@
   // currently on Round 2 is 0 → 1) — the organiser can override.
   let addBoard = $state<number>(1);
   let addBusy = $state(false);
+
+  // Inline board-number editing on existing rows
+  let editingBoardMid = $state<string | null>(null);
+  let editingBoardValue = $state<number>(1);
+  let editingBoardBusy = $state(false);
+
+  function startEditBoard(m: PlannedMatch) {
+    editingBoardMid = m.mid;
+    editingBoardValue = m.board ?? 1;
+  }
+  function cancelEditBoard() {
+    editingBoardMid = null;
+  }
+  async function saveEditBoard() {
+    if (!editingBoardMid) return;
+    editingBoardBusy = true;
+    const outcome = await patchPlannedBoard(editingBoardMid, editingBoardValue);
+    editingBoardBusy = false;
+    if (outcome.ok) {
+      editingBoardMid = null;
+    }
+  }
 
   // ─── Player name autocomplete (v3.6.1) ─────────────────────────────
   // Reuses the /players Firebase identity store so bracket entry uses
@@ -336,27 +359,7 @@
     addB2Name = '';
     resolvedIds = { aName: null, a2Name: null, bName: null, b2Name: null };
     mode = defaultMode;
-    // Auto-suggest next board number for this round: highest board
-    // used in the current round + 1. If no matches yet, start at 1.
-    // Organiser can override before adding.
-    const maxBoardInRound = rowsForRound.reduce(
-      (m, r) => (r.board && r.board > m ? r.board : m),
-      0,
-    );
-    addBoard = Math.max(1, maxBoardInRound + 1);
   }
-
-  // Also seed addBoard when the round changes / rows arrive so a
-  // brand-new modal opens with the right suggestion.
-  $effect(() => {
-    if (!addAName && !addA2Name && !addBName && !addB2Name) {
-      const maxBoardInRound = rowsForRound.reduce(
-        (m, r) => (r.board && r.board > m ? r.board : m),
-        0,
-      );
-      addBoard = Math.max(1, maxBoardInRound + 1);
-    }
-  });
 
   async function addRow() {
     inlineError = null;
@@ -397,20 +400,8 @@
       inlineError = 'Pick a round first';
       return;
     }
-    const board = Math.floor(addBoard);
-    if (!Number.isFinite(board) || board < 1 || board > 99) {
-      inlineError = 'Board number must be between 1 and 99';
-      return;
-    }
-    // Duplicate board check inside the current round: two matches
-    // both assigned to Board 3 in Round 1 would leave the QR scanner
-    // ambiguous. Auto-advance would pick the lowest matchOrder, but
-    // that's a surprise — flag it here instead.
-    const conflict = rowsForRound.find((r) => r.board === board);
-    if (conflict) {
-      inlineError = `Board ${board} already has a match in ${selectedRound.name} (${conflict.aName} vs ${conflict.bName}). Delete it first or pick another board.`;
-      return;
-    }
+    // Auto-assign next board number: highest board in this round + 1.
+    const board = rowsForRound.reduce((m, r) => (r.board && r.board > m ? r.board : m), 0) + 1;
     addBusy = true;
     const nextOrder = (rowsForRound[rowsForRound.length - 1]?.matchOrder ?? 0) + 1;
     const outcome = await createPlannedMatch({
@@ -699,17 +690,6 @@
                 disabled={addBusy}
               >Doubles</button>
             </div>
-            <label class="board-picker">
-              <span>Board</span>
-              <input
-                type="number"
-                min="1"
-                max="99"
-                step="1"
-                bind:value={addBoard}
-                disabled={addBusy}
-              />
-            </label>
           </div>
 
           <div class="add-grid" class:add-grid-doubles={mode === 'doubles'}>
@@ -761,10 +741,26 @@
                   <tr>
                     <td class="col-num">{m.matchOrder ?? '—'}</td>
                     <td class="col-board">
-                      {#if m.board}
-                        <span class="board-badge">B{m.board}</span>
+                      {#if editingBoardMid === m.mid}
+                        <span class="board-edit-row">
+                          <input
+                            type="number"
+                            class="board-edit-input"
+                            min="1"
+                            max="99"
+                            step="1"
+                            bind:value={editingBoardValue}
+                            disabled={editingBoardBusy}
+                            onkeydown={(e) => { if (e.key === 'Enter') saveEditBoard(); else if (e.key === 'Escape') cancelEditBoard(); }}
+                            aria-label="Board number"
+                          />
+                          <button type="button" class="board-edit-ok" onclick={saveEditBoard} disabled={editingBoardBusy}>✓</button>
+                          <button type="button" class="board-edit-cancel" onclick={cancelEditBoard} disabled={editingBoardBusy}>✕</button>
+                        </span>
+                      {:else if m.board}
+                        <button type="button" class="board-badge board-badge-btn" onclick={() => startEditBoard(m)} title="Click to change board">B{m.board}</button>
                       {:else}
-                        <span class="board-missing" title="No board assigned — this match won't be reachable by QR scan">—</span>
+                        <button type="button" class="board-missing board-missing-btn" onclick={() => startEditBoard(m)} title="Click to assign a board number">—</button>
                       {/if}
                     </td>
                     <td>
@@ -1078,6 +1074,43 @@
     font-size: 0.85rem;
     cursor: help;
   }
+  .board-badge-btn, .board-missing-btn {
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    font: inherit;
+  }
+  .board-missing-btn { cursor: pointer; }
+  .board-missing-btn:hover { color: rgba(239, 83, 80, 1); text-decoration: underline; }
+  .board-badge-btn:hover { opacity: 0.75; }
+  .board-edit-row {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+  }
+  .board-edit-input {
+    width: 3.2rem;
+    padding: 0.15rem 0.3rem;
+    background: #1a1a1a;
+    border: 1px solid rgba(255, 213, 74, 0.5);
+    border-radius: 0.3rem;
+    color: var(--fg, #f5f5f5);
+    font: inherit;
+    font-size: 0.82rem;
+    text-align: center;
+  }
+  .board-edit-ok, .board-edit-cancel {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 0.85rem;
+    padding: 0 0.1rem;
+    line-height: 1;
+  }
+  .board-edit-ok { color: #66bb6a; }
+  .board-edit-cancel { color: rgba(239, 83, 80, 0.8); }
+  .board-edit-ok:disabled, .board-edit-cancel:disabled { opacity: 0.4; cursor: not-allowed; }
 
   .mode-toggle {
     display: inline-flex;
