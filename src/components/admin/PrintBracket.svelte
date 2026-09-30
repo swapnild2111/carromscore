@@ -210,6 +210,10 @@
   // Optional — print works fine without it; logo/organizer just won't show.
   type OrgProfile = { displayName?: string; orgName?: string; logoUrl?: string };
   let orgProfile = $state<OrgProfile | null>(null);
+  // Co-org profiles: uid → profile. Loaded once when tournament has coOrganisers.
+  let coOrgProfiles = $state<Map<string, OrgProfile>>(new Map());
+  // Which organiser's logo/name to print. Defaults to the creator; user can switch.
+  let selectedLogoUid = $state<string | null>(null);
 
   // Tournament record (name, type, country, defaults). Nudged by
   // tournamentTick. Falls back to a minimal shim when the record
@@ -239,21 +243,74 @@
       orgProfile = null;
     }
   }
+  async function loadCoOrgProfiles(uids: string[]) {
+    const db = getDatabase(firebaseApp());
+    const results = await Promise.all(
+      uids.map(async (uid) => {
+        try {
+          const snap = await get(ref(db, `organiserProfiles/${uid}`));
+          return snap.exists() ? ([uid, snap.val() as OrgProfile] as const) : null;
+        } catch {
+          return null;
+        }
+      }),
+    );
+    const map = new Map<string, OrgProfile>();
+    for (const entry of results) {
+      if (entry) map.set(entry[0], entry[1]);
+    }
+    coOrgProfiles = map;
+  }
   // Re-run only if profile not yet loaded (onMount beat the store, or createdBy changed).
   $effect(() => {
     const uid = tournament?.createdBy;
     if (uid && !orgProfile) void loadOrgProfile(uid);
   });
+  // Load co-org profiles once when the tournament's coOrganisers list is known.
+  $effect(() => {
+    const coOrgs = tournament?.coOrganisers;
+    if (!coOrgs) return;
+    const uids = Object.keys(coOrgs);
+    if (uids.length === 0) return;
+    const missing = uids.filter((u) => !coOrgProfiles.has(u));
+    if (missing.length > 0) void loadCoOrgProfiles(uids);
+  });
 
-  // Derived print values.
-  // Logo: organiser profile first, then fall back to the legacy per-tournament
-  // logoUrl (tournaments created before the profile system stored the logo directly).
-  // Organizer name: organiser profile only (the old per-tournament organizerName
-  // field was removed from the add/edit dialogs).
-  const printLogoUrl = $derived(orgProfile?.logoUrl || tournament?.logoUrl || null);
-  const printOrganizerName = $derived(
-    orgProfile?.orgName || orgProfile?.displayName || tournament?.organizerName || null,
-  );
+  // All logo-bearing organisers: creator first, then co-orgs that have a profile.
+  const logoOptions = $derived.by(() => {
+    const t = tournament;
+    if (!t) return [] as { uid: string; label: string; logoUrl: string | null }[];
+    const options: { uid: string; label: string; logoUrl: string | null }[] = [];
+    // Creator
+    const creatorLabel =
+      orgProfile?.orgName || orgProfile?.displayName || t.organizerName || 'Creator';
+    options.push({ uid: t.createdBy ?? '', label: creatorLabel, logoUrl: orgProfile?.logoUrl ?? t.logoUrl ?? null });
+    // Co-orgs
+    for (const uid of Object.keys(t.coOrganisers ?? {})) {
+      const p = coOrgProfiles.get(uid);
+      const label = p?.orgName || p?.displayName || uid.slice(0, 8) + '…';
+      options.push({ uid, label, logoUrl: p?.logoUrl ?? null });
+    }
+    return options;
+  });
+
+  // Active profile for printing — follows selectedLogoUid, defaults to creator.
+  const activeLogoOption = $derived.by(() => {
+    if (logoOptions.length === 0) return null;
+    if (selectedLogoUid) {
+      const found = logoOptions.find((o) => o.uid === selectedLogoUid);
+      if (found) return found;
+    }
+    return logoOptions[0] ?? null;
+  });
+
+  // Derived print values — driven by whichever logo option is selected.
+  const printLogoUrl = $derived(activeLogoOption?.logoUrl ?? tournament?.logoUrl ?? null);
+  const printOrganizerName = $derived.by(() => {
+    const label = activeLogoOption?.label;
+    if (label && label !== 'Creator') return label;
+    return orgProfile?.orgName || orgProfile?.displayName || tournament?.organizerName || null;
+  });
 
   // Load assigned-player set once when we have both the tournament
   // and its type. Silent-on-failure: an empty set just hides the
@@ -1658,6 +1715,22 @@
                 aria-pressed={qrMode === 'match'}
                 onclick={() => setQrMode('match')}
               >Per match</button>
+            </div>
+          </div>
+        {/if}
+        {#if logoOptions.length > 1}
+          <div class="qr-type-group" role="group" aria-label="Logo">
+            <span class="qr-type-label">Logo</span>
+            <div class="seg-ctrl">
+              {#each logoOptions as opt (opt.uid)}
+                <button
+                  type="button"
+                  class="seg-btn"
+                  class:seg-active={activeLogoOption?.uid === opt.uid}
+                  aria-pressed={activeLogoOption?.uid === opt.uid}
+                  onclick={() => (selectedLogoUid = opt.uid)}
+                >{opt.label}</button>
+              {/each}
             </div>
           </div>
         {/if}
