@@ -821,7 +821,10 @@
         {#if roundsStarted}
           <!-- no actions — groups locked, rounds in progress -->
         {:else if generating}
-          <button type="button" class="btn btn-primary" disabled>Generating…</button>
+          <div class="generating-indicator">
+            <span class="spinner" aria-hidden="true"></span>
+            <span>Generating brackets…</span>
+          </div>
         {:else if groupsLocked}
           <button
             type="button"
@@ -1181,6 +1184,29 @@
     text-align: center;
     padding: 0.5rem 0;
     font-style: italic;
+  }
+
+  /* Bracket generation progress indicator */
+  .generating-indicator {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    color: var(--muted, #9aa0a6);
+    font-size: 0.875rem;
+    padding: 0.4rem 0;
+  }
+  .spinner {
+    display: inline-block;
+    width: 1rem;
+    height: 1rem;
+    border: 2px solid rgba(255, 255, 255, 0.15);
+    border-top-color: var(--accent, #ffd54f);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    flex-shrink: 0;
+  }
+  @keyframes spin {
+    to { transform: rotate(360deg); }
   }
 
   /* Actions */

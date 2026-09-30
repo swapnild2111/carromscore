@@ -106,7 +106,7 @@
   async function onboardOrganiser() {
     const email = addEmail.trim();
     if (!email) {
-      flash('err', 'Enter an email address');
+      flash('err', 'Enter or select an email address');
       return;
     }
     const uid = findUidByEmail(email);
@@ -175,7 +175,7 @@
     <p class="lead-sub">
       To grant access: the recipient signs in with Google at
       <code>/carromscore/</code> once (via Admin in the footer).
-      Then enter their Gmail address below.
+      They'll then appear in the autocomplete below.
     </p>
   </div>
 
@@ -222,14 +222,23 @@
   </p>
   <div class="add-form">
     <label class="add-uid">
-      <span>Gmail address</span>
+      <span>Email address</span>
       <input
         type="email"
+        list="user-suggestions"
         bind:value={addEmail}
-        placeholder="name@gmail.com"
+        placeholder="Type a name or email…"
         aria-label="Recipient email"
         maxlength="128"
+        autocomplete="off"
       />
+      <datalist id="user-suggestions">
+        {#each Object.values(users).sort((a, b) => (a.displayName ?? a.email ?? '').localeCompare(b.displayName ?? b.email ?? '')) as u (u.uid ?? u.email)}
+          {#if u.email}
+            <option value={u.email}>{u.displayName ? `${u.displayName} (${u.email})` : u.email}</option>
+          {/if}
+        {/each}
+      </datalist>
     </label>
     <button
       type="button"
