@@ -2987,15 +2987,15 @@
                       All state changes are confirm-gated so a stray
                       tap doesn't silently move the round.
                     -->
+                    <button
+                      type="button"
+                      class="btn btn-icon btn-round-start"
+                      onclick={() => startSelectedRound(r)}
+                      disabled={roundsSaving || !!r.startedAt || r.state === 'closed' || !plannedCountByRound[`${roundsKey}/${r.key}`]}
+                      aria-label="Start round"
+                      title={r.state === 'closed' ? 'Round is closed — reopen first' : r.startedAt ? 'Round already started' : !plannedCountByRound[`${roundsKey}/${r.key}`] ? 'Add bracket matches before starting the round' : 'Start round — umpires can score under it now'}
+                    >▶</button>
                     {#if r.state !== 'closed'}
-                      <button
-                        type="button"
-                        class="btn btn-icon btn-round-start"
-                        onclick={() => startSelectedRound(r)}
-                        disabled={roundsSaving || !!r.startedAt || !plannedCountByRound[`${roundsKey}/${r.key}`]}
-                        aria-label="Start round"
-                        title={r.startedAt ? 'Round already started' : !plannedCountByRound[`${roundsKey}/${r.key}`] ? 'Add bracket matches before starting the round' : 'Start round — umpires can score under it now'}
-                      >▶</button>
                       <button
                         type="button"
                         class="btn btn-icon btn-round-close"
@@ -3012,7 +3012,7 @@
                         disabled={roundsSaving}
                         aria-label="Reopen round"
                         title="Reopen round — umpires can add matches to it again"
-                      >↩</button>
+                      >↺</button>
                     {/if}
                     <button
                       type="button"
