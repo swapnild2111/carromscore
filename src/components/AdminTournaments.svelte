@@ -191,6 +191,7 @@
   let coOrgUids = $state<string[]>([]);
   let coOrgLoading = $state(false);
   let coOrgPickerValue = $state('');
+  let superUids = $state<Set<string>>(new Set());
   let saving = $state(false);
   let banner = $state<{ kind: 'ok' | 'err'; message: string } | null>(null);
   /** Selected tournament keys for bulk delete. */
@@ -698,7 +699,19 @@
     coOrgUids = [];
     coOrgPickerValue = '';
     coOrgLoading = true;
-    loadCoOrganisers(t.key).then((uids) => {
+    Promise.all([
+      loadCoOrganisers(t.key),
+      (async () => {
+        if (superUids.size > 0) return;
+        const [{ firebaseApp }, { getDatabase, ref, get }] = await Promise.all([
+          import('../lib/firebase'),
+          import('firebase/database'),
+        ]);
+        const snap = await get(ref(getDatabase(firebaseApp()), 'adminRoles'));
+        const raw = snap.val() as Record<string, string> | null;
+        if (raw) superUids = new Set(Object.keys(raw));
+      })(),
+    ]).then(([uids]) => {
       coOrgUids = uids;
       coOrgLoading = false;
     }).catch(() => { coOrgLoading = false; });
@@ -1038,9 +1051,7 @@
   }
 
   function coOrgLabelForUid(uid: string): string {
-    const name = orgProfilesMap[uid];
-    if (name) return `${name} (${uid.slice(0, 8)}…)`;
-    return uid.slice(0, 8) + '…';
+    return orgProfilesMap[uid] ?? uid.slice(0, 8) + '…';
   }
 
   async function addCoOrg() {
@@ -1071,11 +1082,11 @@
   }
 
   /** Organiser profiles eligible to be added as co-organisers (excludes
-   *  already-added ones). Uses orgProfilesMap which is readable by organisers. */
+   *  already-added ones and super-admins). Uses orgProfilesMap. */
   const eligibleCoOrgs = $derived(() => {
     const already = new Set(coOrgUids);
     return Object.entries(orgProfilesMap)
-      .filter(([uid]) => !already.has(uid))
+      .filter(([uid]) => !already.has(uid) && !superUids.has(uid))
       .map(([uid, name]) => ({ uid, name }))
       .sort((a, b) => a.name.localeCompare(b.name));
   });
