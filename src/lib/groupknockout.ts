@@ -131,10 +131,12 @@ export async function generateGroupPhase(
     const pqPlayers = playerIds.filter((id) => pqSet.has(id));
     const byePlayers = playerIds.filter((id) => !pqSet.has(id));
     const pqPairs = seededPairs(pqPlayers);
+    // Odd PQ count: last player gets a bye directly into R2
+    const pqByeId = pqPlayers.length % 2 !== 0 ? pqPlayers.at(-1)! : null;
     const pqWinnerCount = pqPairs.length; // one winner per R1 match
 
-    // Total R2 slots = byePlayers + pqWinnerCount
-    const r2TotalSlots = byePlayers.length + pqWinnerCount;
+    // Total R2 slots = byePlayers + pqWinnerCount + pqBye (if any)
+    const r2TotalSlots = byePlayers.length + pqWinnerCount + (pqByeId ? 1 : 0);
 
     // Build the full bracket from R2 upwards
     const bracketSize = Math.pow(2, Math.ceil(Math.log2(Math.max(r2TotalSlots, 2))));
@@ -177,7 +179,8 @@ export async function generateGroupPhase(
     const r2Label = mainRoundDefs[0]!.label;
     const r2Key = roundKeys[1]!;
 
-    // Walk playerIds in order, replacing each consecutive PQ pair with a winner slot
+    // Walk playerIds in order, replacing each consecutive PQ pair with a winner slot.
+    // Odd PQ count: the last PQ player (pqByeId) has no PQ match — slot them directly.
     let pqPairIdx = 0;
     const r2Slots: Array<{ name: string; resolvedId?: string }> = [];
     {
@@ -185,11 +188,17 @@ export async function generateGroupPhase(
       while (i < playerIds.length) {
         const id = playerIds[i]!;
         if (pqSet.has(id)) {
-          // This player is PQ — consume them and the next PQ player as a pair
-          r2Slots.push({ name: `${groupName} Pre-qualify Winner ${pqPairIdx + 1}` });
-          pqPairIdx++;
-          // Skip both players in this PQ pair
-          i += 2;
+          if (id === pqByeId) {
+            // Odd PQ player: bye directly into R2
+            r2Slots.push({ name: playerNames.get(id) ?? id, resolvedId: id });
+            i++;
+          } else {
+            // This player is PQ — consume them and the next PQ player as a pair
+            r2Slots.push({ name: `${groupName} Pre-qualify Winner ${pqPairIdx + 1}` });
+            pqPairIdx++;
+            // Skip both players in this PQ pair
+            i += 2;
+          }
         } else {
           r2Slots.push({ name: playerNames.get(id) ?? id, resolvedId: id });
           i++;

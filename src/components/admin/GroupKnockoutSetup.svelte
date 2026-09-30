@@ -741,19 +741,17 @@
                   ondrop={roundsStarted ? undefined : (e) => { e.stopPropagation(); onDrop(gKey, i); }}
                 >
                   <span class="chip-name">{playerName(pid)}</span>
-                  {#if !isDummy(pid)}
-                    {#if !roundsStarted}
-                      <button
-                        type="button"
-                        class="prequalify-btn"
-                        class:prequalify-active={isPreQualify}
-                        aria-label="{isPreQualify ? 'Unmark' : 'Mark'} {playerName(pid)} as pre-qualifier"
-                        title="{isPreQualify ? 'Pre-qualify Round 1 (click to unmark)' : 'Mark as pre-qualifier (plays Round 1)'}"
-                        onclick={(e) => { e.stopPropagation(); togglePreQualify(pid); }}
-                      >Pre-qualify</button>
-                    {:else if isPreQualify}
-                      <span class="prequalify-badge">Pre-qualify</span>
-                    {/if}
+                  {#if !roundsStarted}
+                    <button
+                      type="button"
+                      class="prequalify-btn"
+                      class:prequalify-active={isPreQualify}
+                      aria-label="{isPreQualify ? 'Unmark' : 'Mark'} {playerName(pid)} as pre-qualifier"
+                      title="{isPreQualify ? 'Pre-qualify Round 1 (click to unmark)' : 'Mark as pre-qualifier (plays Round 1)'}"
+                      onclick={(e) => { e.stopPropagation(); togglePreQualify(pid); }}
+                    >Pre-qualify</button>
+                  {:else if isPreQualify}
+                    <span class="prequalify-badge">Pre-qualify</span>
                   {/if}
                   {#if isDummy(pid) && !roundsStarted}
                     <button
