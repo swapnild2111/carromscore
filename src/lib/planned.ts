@@ -386,19 +386,18 @@ export async function forfeitDummyMatch(
 export async function resetPlannedMatch(mid: string): Promise<PlannedWriteOutcome> {
   if (!mid) return { ok: false, error: 'no mid' };
   try {
-    const [{ getDatabase, ref, get, update }] = await Promise.all([
+    const [{ getDatabase, ref, get, set }] = await Promise.all([
       import('firebase/database'),
     ]);
     const db = getDatabase(firebaseApp());
     const snap = await get(ref(db, `planned/${mid}`));
     if (!snap.exists()) return { ok: false, error: 'not found' };
-    await update(ref(db, `planned/${mid}`), {
-      completedAt: null,
-      completedBy: null,
-      result: null,
-      claimedBy: null,
-      claimedAt: null,
-    });
+    const val = snap.val() as PlannedMatch;
+    // Strip all transient fields — use set() so the write goes through
+    // the organiser branch of the rule (update() is blocked when completedAt exists).
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { completedAt: _a, completedBy: _b, result: _c, claimedBy: _d, claimedAt: _e, mid: _mid, ...core } = val as PlannedMatch;
+    await set(ref(db, `planned/${mid}`), core);
     return { ok: true, mid };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'reset failed' };
