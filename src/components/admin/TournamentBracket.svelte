@@ -21,6 +21,7 @@
     deletePlannedMatch,
     resetPlannedMatch,
     patchPlannedBoard,
+    forfeitDummyMatch,
     subscribePlannedByTournament,
     type PlannedMatch,
   } from '../../lib/planned';
@@ -462,6 +463,17 @@
     else flash('Slot reset to ready');
   }
 
+  function hasDummySide(m: PlannedMatch): boolean {
+    const rx = /^dummy-\d+$/i;
+    return rx.test(m.aResolvedId ?? m.aName ?? '') || rx.test(m.bResolvedId ?? m.bName ?? '');
+  }
+
+  async function forfeitRow(m: PlannedMatch) {
+    const outcome = await forfeitDummyMatch(m.mid, myUid);
+    if (!outcome.ok) inlineError = outcome.error;
+    else flash('Dummy forfeited — winner advanced');
+  }
+
   // Build a map from roundKey → matchOrder → winner name, combining
   // planned results and history. Used to resolve placeholder names.
   const winnerByRoundOrder = $derived.by(() => {
@@ -795,6 +807,15 @@
                       {/if}
                     </td>
                     <td class="col-actions">
+                      {#if !m.completedAt && hasDummySide(m)}
+                        <button
+                          type="button"
+                          class="row-forfeit"
+                          onclick={() => forfeitRow(m)}
+                          aria-label="Forfeit dummy — advance real player"
+                          title="Forfeit dummy — advance the real player to next round"
+                        >✓</button>
+                      {/if}
                       {#if m.completedAt}
                         <button
                           type="button"
