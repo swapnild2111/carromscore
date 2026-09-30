@@ -674,9 +674,8 @@ export async function propagateBracketWinner(
     if (!nextEntry) return; // Final has no next round
     const nextRoundKey = nextEntry[0];
 
-    // 4. Target slot: ceil(matchOrder / 2), side A if matchOrder odd, B if even
+    // 4. Target slot: ceil(matchOrder / 2) in the next round
     const targetOrder = Math.ceil(matchOrder / 2);
-    const targetSide  = matchOrder % 2 === 1 ? 'a' : 'b';
 
     // 5. Find the target planned slot (indexed by tournamentKey to avoid full scan)
     const { query, orderByChild, equalTo } = await import('firebase/database');
@@ -689,9 +688,24 @@ export async function propagateBracketWinner(
         v?.matchOrder === targetOrder,
     );
     if (!entry) return;
-    const [targetMid] = entry;
+    const [targetMid, targetSlot] = entry;
 
-    // 6. Patch the name into the target slot
+    // 6. Determine which side to patch.
+    // Prefer the side that holds a placeholder (no resolvedId) so we never
+    // overwrite a real player that was seeded directly into this slot.
+    // Fall back to the odd/even formula when both sides are placeholders.
+    const aIsReal = !!(targetSlot as PlannedMatch).aResolvedId;
+    const bIsReal = !!(targetSlot as PlannedMatch).bResolvedId;
+    let targetSide: 'a' | 'b';
+    if (aIsReal && !bIsReal) {
+      targetSide = 'b';
+    } else if (bIsReal && !aIsReal) {
+      targetSide = 'a';
+    } else {
+      targetSide = matchOrder % 2 === 1 ? 'a' : 'b';
+    }
+
+    // 7. Patch the name into the target slot
     const patch: Record<string, unknown> = {};
     if (targetSide === 'a') {
       patch['aName'] = winnerName ?? '';
@@ -702,7 +716,7 @@ export async function propagateBracketWinner(
     }
     await update(ref(db, `planned/${targetMid}`), patch);
 
-    // 7. Auto-advance: if all matches in the just-completed round are done,
+    // 8. Auto-advance: if all matches in the just-completed round are done,
     //    close the current round and start the next one automatically.
     try {
       const roundMatchesSnap = await get(

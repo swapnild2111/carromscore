@@ -17,7 +17,7 @@
     loadAssignedPlayers,
   } from '../../lib/tournaments';
   import { loadAll as loadAllPlayers, subscribeStore as subscribePlayerStore } from '../../lib/players';
-  import { subscribePlannedByTournament, deletePlannedMatch, forfeitDummyMatch, type PlannedMatch } from '../../lib/planned';
+  import { subscribePlannedByTournament, deletePlannedMatch, forfeitDummyMatch, loadPendingPlannedByTournament, type PlannedMatch } from '../../lib/planned';
   import { loadMatchesByTournamentKey, type MatchRecord } from '../../lib/history';
   import { potSeeding } from '../../lib/league';
   import {
@@ -371,12 +371,14 @@
 
     if (firstRounds.length > 0) {
       await Promise.all(firstRounds.map((r) => startRound(tournament.key, r.key)));
-      // Auto-forfeit dummy-side matches in all started first rounds
+      // Auto-forfeit dummy-side matches. Fetch fresh from Firebase rather than
+      // reading reactive plannedMatches, which may not have propagated yet.
       const isDummySide = (m: PlannedMatch) =>
         /^dummy-\d+$/i.test(m.aResolvedId ?? m.aName ?? '') ||
         /^dummy-\d+$/i.test(m.bResolvedId ?? m.bName ?? '');
       const startedKeys = new Set(firstRounds.map((r) => r.key));
-      const dummyMatches = plannedMatches.filter(
+      const freshMatches = await loadPendingPlannedByTournament(tournament.key);
+      const dummyMatches = freshMatches.filter(
         (m) => startedKeys.has(m.roundKey ?? '') && isDummySide(m) && !m.completedAt,
       );
       await Promise.all(dummyMatches.map((m) => forfeitDummyMatch(m.mid, myUid)));
