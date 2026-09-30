@@ -22,6 +22,7 @@
     resetPlannedMatch,
     patchPlannedBoard,
     forfeitDummyMatch,
+    propagateBracketWinner,
     subscribePlannedByTournament,
     type PlannedMatch,
   } from '../../lib/planned';
@@ -473,9 +474,14 @@
   }
 
   async function forfeitRow(m: PlannedMatch) {
+    const isDummyA = /^dummy-\d+$/i.test(m.aResolvedId ?? m.aName ?? '');
+    const winner: 'a' | 'b' = isDummyA ? 'b' : 'a';
     const outcome = await forfeitDummyMatch(m.mid, myUid);
-    if (!outcome.ok) inlineError = outcome.error;
-    else flash('Dummy forfeited — winner advanced');
+    if (!outcome.ok) { inlineError = outcome.error; return; }
+    // Propagate winner as organiser — the void call inside forfeitDummyMatch
+    // may fail DB rules for non-organiser callers (umpires/anon users).
+    await propagateBracketWinner(m.mid, winner);
+    flash('Dummy forfeited — winner advanced');
   }
 
   // Build a map from roundKey → matchOrder → winner name, combining
