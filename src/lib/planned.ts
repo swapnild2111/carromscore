@@ -673,36 +673,66 @@ export async function propagateBracketWinner(
     if (!nextEntry) return; // Final has no next round
     const nextRoundKey = nextEntry[0];
 
-    // 4. Target slot: ceil(matchOrder / 2) in the next round
-    const targetOrder = Math.ceil(matchOrder / 2);
-
-    // 5. Find the target planned slot (indexed by tournamentKey to avoid full scan)
+    // 4. Load all planned matches for this tournament to find the target slot.
     const { query, orderByChild, equalTo } = await import('firebase/database');
     const allSnap = await get(query(ref(db, 'planned'), orderByChild('tournamentKey'), equalTo(tournamentKey)));
     const all = allSnap.val() as Record<string, Omit<PlannedMatch, 'mid'>> | null;
     if (!all) return;
-    const entry = Object.entries(all).find(
-      ([, v]) =>
-        v?.roundKey === nextRoundKey &&
-        v?.matchOrder === targetOrder,
-    );
-    if (!entry) return;
-    const [targetMid, targetSlot] = entry;
 
-    // 6. Determine which side to patch.
-    // Prefer the side that holds a placeholder (no resolvedId) so we never
-    // overwrite a real player that was seeded directly into this slot.
-    // Fall back to the odd/even formula when both sides are placeholders.
-    const aIsReal = !!(targetSlot as PlannedMatch).aResolvedId;
-    const bIsReal = !!(targetSlot as PlannedMatch).bResolvedId;
-    let targetSide: 'a' | 'b';
-    if (aIsReal && !bIsReal) {
-      targetSide = 'b';
-    } else if (bIsReal && !aIsReal) {
-      targetSide = 'a';
-    } else {
-      targetSide = matchOrder % 2 === 1 ? 'a' : 'b';
+    const nextRoundMatches = Object.entries(all).filter(([, v]) => v?.roundKey === nextRoundKey);
+
+    // 5. Find the target slot.
+    //
+    // Primary strategy: match by placeholder name.
+    // When a group has direct seeds, the bracket generator places PQ winner
+    // placeholders named "${groupName} Pre-qualify Winner ${matchOrder}" in the
+    // exact slot intended for that PQ match's winner. Look for any slot in the
+    // next round whose aName or bName matches this pattern.
+    //
+    // The group name is extracted from the round label (e.g. "G1 — Pre-qualify" → "G1").
+    const roundLabel = thisRound[1].name ?? '';
+    const groupNameMatch = /^([A-Za-z0-9]+)\s*[—-]/.exec(roundLabel);
+    const groupName = groupNameMatch?.[1];
+    const placeholderName = groupName
+      ? `${groupName} Pre-qualify Winner ${matchOrder}`
+      : null;
+
+    let entry: [string, Omit<PlannedMatch, 'mid'>] | undefined;
+    let targetSide: 'a' | 'b' = matchOrder % 2 === 1 ? 'a' : 'b';
+
+    if (placeholderName) {
+      // Search all next-round slots for a side with this exact placeholder name
+      const placeholderEntry = nextRoundMatches.find(
+        ([, v]) => v?.aName === placeholderName || v?.bName === placeholderName,
+      );
+      if (placeholderEntry) {
+        entry = placeholderEntry as [string, Omit<PlannedMatch, 'mid'>];
+        targetSide = placeholderEntry[1].aName === placeholderName ? 'a' : 'b';
+      }
     }
+
+    if (!entry) {
+      // Fallback: ceil(matchOrder / 2) formula with real-player side detection
+      const targetOrder = Math.ceil(matchOrder / 2);
+      const formulaEntry = nextRoundMatches.find(([, v]) => v?.matchOrder === targetOrder);
+      if (!formulaEntry) return;
+      entry = formulaEntry as [string, Omit<PlannedMatch, 'mid'>];
+      const targetSlotFallback = formulaEntry[1] as PlannedMatch;
+      const aIsReal = !!targetSlotFallback.aResolvedId;
+      const bIsReal = !!targetSlotFallback.bResolvedId;
+      if (aIsReal && !bIsReal) {
+        targetSide = 'b';
+      } else if (bIsReal && !aIsReal) {
+        targetSide = 'a';
+      } else if (!aIsReal && !bIsReal) {
+        targetSide = matchOrder % 2 === 1 ? 'a' : 'b';
+      } else {
+        // Both sides already have real players — nothing to fill
+        return;
+      }
+    }
+
+    const [targetMid] = entry;
 
     // 7. Patch the name into the target slot
     const patch: Record<string, unknown> = {};
