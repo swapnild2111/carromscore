@@ -120,7 +120,7 @@
           "$other":        { ".validate": false }
         },
         "format": {
-          ".validate": "newData.isString() && (newData.val() == 'standard' || newData.val() == 'league' || newData.val() == 'knockout' || newData.val() == 'roundrobin')"
+          ".validate": "newData.isString() && (newData.val() == 'standard' || newData.val() == 'league' || newData.val() == 'knockout' || newData.val() == 'roundrobin' || newData.val() == 'groupknockout')"
         },
         "knockoutCfg": {
           ".validate": "!newData.exists() || newData.hasChildren(['participantCount'])",
@@ -164,7 +164,7 @@
             "$other": { ".validate": false }
           }
         },
-        "lockedAt":   { ".validate": "newData.isNumber() && newData.val() >= 0" },
+        "lockedAt":   { ".validate": "!newData.exists() || (newData.isNumber() && newData.val() >= 0)" },
         "$other":     { ".validate": false }
       }
     },

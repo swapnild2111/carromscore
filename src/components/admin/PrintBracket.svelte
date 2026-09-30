@@ -1206,6 +1206,14 @@
       // ── Player name rows ──
       for (const leaf of d.leaves) {
         const cy = gy + d.rowRelY(leaf.rowIdx);
+        const xStubLocal = nameX + NAME_W;
+        const nameText = clip(leaf.player);
+        // Approx text width at 11px sans-serif: ~6.2px per char
+        const approxTextW = Math.min(nameText.length * 6.2 + 4, NAME_W - 10);
+        const lineStart = nameX + 5 + approxTextW + 3;
+        if (lineStart < xStubLocal - 4) {
+          lines.push(`<line x1="${lineStart}" y1="${cy}" x2="${xStubLocal - 4}" y2="${cy}" stroke="#ccc" stroke-width="0.7"/>`);
+        }
         lines.push(`<text x="${nameX + 5}" y="${cy + 4}" font-size="11" font-family="sans-serif" fill="#222">${clip(esc(leaf.player))}</text>`);
       }
 

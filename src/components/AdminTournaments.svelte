@@ -901,8 +901,9 @@
   async function toggleLock(t: Tournament) {
     if (lockingKey) return;
     lockingKey = t.key;
-    await setTournamentLocked(t.key, !t.lockedAt);
+    const r = await setTournamentLocked(t.key, !t.lockedAt);
     lockingKey = null;
+    if (!r.ok) flash('err', r.error ?? 'Lock failed');
   }
 
   function startDelete(key: string) {

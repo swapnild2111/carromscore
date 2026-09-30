@@ -374,6 +374,7 @@
       await Promise.all(dummyMatches.map((m) => forfeitDummyMatch(m.mid, myUid)));
     }
     startingRounds = false;
+    onClose();
   }
 
   // ─── Phase 2: combined knockout ───────────────────────────────────────────────

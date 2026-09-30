@@ -1551,6 +1551,19 @@
     font: inherit;
     font-size: 0.9rem;
   }
+  .edit-field select {
+    padding-right: 1.9rem;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%239aa0a6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.6rem center;
+    cursor: pointer;
+  }
+  .edit-field select:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
   .edit-field select option {
     background: #1a1a1a;
   }
