@@ -134,7 +134,6 @@ export async function generateGroupPhase(
     const pqWinnerCount = pqPairs.length; // one winner per R1 match
 
     // Total R2 slots = byePlayers + pqWinnerCount
-    // R2 players in order: byePlayers first (sequential), then pq-winners
     const r2TotalSlots = byePlayers.length + pqWinnerCount;
 
     // Build the full bracket from R2 upwards
@@ -169,20 +168,34 @@ export async function generateGroupPhase(
       result.matchesCreated++;
     }
 
-    // ── Round 2 (main bracket R1): bye players + pre-qualify winners ──────────
-    // Pair them sequentially: (bye1 vs bye2), (bye3 vs bye4), …, then pq-winners
-    // If byePlayers is odd, the last bye player gets a free slot name
+    // ── Round 2 (main bracket R1): players in original sequence ──────────────
+    // Maintain the original playerIds order: each consecutive PQ pair is replaced
+    // by one winner placeholder in the same position. This ensures the adjacent
+    // bye player faces the PQ winner, matching the sequential bracket in the PDF.
+    // Example: [1,2,3,4,5,6, 7,8, 9,10] with {7,8} and {9,10} as PQ →
+    //   r2 = [1,2,3,4,5,6, pqW1, pqW2] (winners replace their pairs in sequence)
     const r2Label = mainRoundDefs[0]!.label;
     const r2Key = roundKeys[1]!;
 
-    // Build the full ordered list for R2:
-    // interleave byes sequentially, appending pq-winner placeholders at the end
-    const r2Slots: Array<{ name: string; resolvedId?: string }> = [
-      ...byePlayers.map((id) => ({ name: playerNames.get(id) ?? id, resolvedId: id })),
-      ...Array.from({ length: pqWinnerCount }, (_, i) => ({
-        name: `${groupName} Pre-qualify Winner ${i + 1}`,
-      })),
-    ];
+    // Walk playerIds in order, replacing each consecutive PQ pair with a winner slot
+    let pqPairIdx = 0;
+    const r2Slots: Array<{ name: string; resolvedId?: string }> = [];
+    {
+      let i = 0;
+      while (i < playerIds.length) {
+        const id = playerIds[i]!;
+        if (pqSet.has(id)) {
+          // This player is PQ — consume them and the next PQ player as a pair
+          r2Slots.push({ name: `${groupName} Pre-qualify Winner ${pqPairIdx + 1}` });
+          pqPairIdx++;
+          // Skip both players in this PQ pair
+          i += 2;
+        } else {
+          r2Slots.push({ name: playerNames.get(id) ?? id, resolvedId: id });
+          i++;
+        }
+      }
+    }
 
     const r2PairsWithIds: Array<[{ name: string; resolvedId?: string }, { name: string; resolvedId?: string }]> = [];
     for (let i = 0; i + 1 < r2Slots.length; i += 2) {
@@ -343,6 +356,7 @@ export type CombinedKOParams = {
   tournamentName: string;
   groups: Record<string, LeagueGroup>; // used for naming only
   groupCount: number;
+  groupNames?: string[]; // ordered list of group names for KO seeding (e.g. ["G1","G2","G3","G4"])
   defaults: {
     mode: 'singles' | 'doubles';
     bestOf: number;
@@ -368,7 +382,7 @@ export async function generateCombinedKnockout(
   const { addRound, normalizeKey } = await import('./tournaments');
   const { createPlannedMatch } = await import('./planned');
 
-  const { tournamentKey, tournamentName, groupCount, defaults, myUid } = params;
+  const { tournamentKey, tournamentName, groupCount, groupNames, defaults, myUid } = params;
   const result: CombinedKOResult = { roundsCreated: [], matchesCreated: 0, errors: [] };
 
   const cfg = {
@@ -378,22 +392,26 @@ export async function generateCombinedKnockout(
     ...(defaults.timerDuration != null ? { format: `t${defaults.timerDuration}` } : {}),
   };
 
-  const totalQualifiers = groupCount * 2; // G champions + G runners-up
-  const needsPreQF = !isPowerOfTwo(totalQualifiers);
-  const preQFCount = needsPreQF ? totalQualifiers - nextPowerOfTwo(totalQualifiers / 2) : 0;
-  const mainBracketSize = needsPreQF ? nextPowerOfTwo(totalQualifiers / 2) : totalQualifiers / 2;
+  // Use provided group names (in KO seed order) or fall back to A/B/C/D labels
+  const gName = (k: number) => groupNames?.[k] ?? groupLabel(k);
 
-  // Build cross-pairing QF slots: A[k] vs B[G+1-k]
-  // Groups sorted by order; A[0]=champion group 1, B[0]=runner-up group 1, etc.
-  const qfPairs: Array<{ aSlot: string; bSlot: string }> = [];
-  for (let k = 0; k < groupCount; k++) {
-    const aGroup = groupLabel(k);                     // A1, A2, …
-    const bGroup = groupLabel(groupCount - 1 - k);   // B(G+1-k) in 0-indexed
-    qfPairs.push({
-      aSlot: `${aGroup} Champion`,
-      bSlot: `${bGroup} Runner-Up`,
+  // Each group contributes 1 qualifier (the group Final winner).
+  // Cross-pairing: seed[k] vs seed[G-1-k] so same-group players can only meet in the Final.
+  const totalQualifiers = groupCount; // 1 per group
+  const needsPreQF = !isPowerOfTwo(totalQualifiers);
+  const preQFCount = needsPreQF ? totalQualifiers - nextPowerOfTwo(Math.ceil(totalQualifiers / 2)) : 0;
+  const mainBracketSize = needsPreQF ? nextPowerOfTwo(Math.ceil(totalQualifiers / 2)) : Math.ceil(totalQualifiers / 2);
+
+  // Cross-pairing: pair first vs last, second vs second-last, etc.
+  // For odd count the middle seed gets a bye into the next round.
+  const firstRoundPairs: Array<{ aSlot: string; bSlot: string }> = [];
+  for (let k = 0; k < Math.floor(groupCount / 2); k++) {
+    firstRoundPairs.push({
+      aSlot: gName(k),
+      bSlot: gName(groupCount - 1 - k),
     });
   }
+  const byeSeed = groupCount % 2 === 1 ? gName(Math.floor(groupCount / 2)) : null;
 
   const roundDefs = buildCombinedRoundDefs(mainBracketSize, needsPreQF, preQFCount);
 
@@ -411,68 +429,44 @@ export async function generateCombinedKnockout(
     return result;
   }
 
-  // First round (Pre-QF or QF): use cross-pairing slot names
-  // Pre-QF: only the lowest-seeded preQFCount pairs; rest get a bye into next round
   const firstRd = roundDefs[0]!;
   const firstRdKey = roundKeys[0]!;
 
   if (needsPreQF) {
-    // Lowest-seeded pairs play Pre-QF (last preQFCount pairs in qfPairs list)
-    const preQFPairs = qfPairs.slice(qfPairs.length - preQFCount);
-    for (let i = 0; i < preQFPairs.length; i++) {
-      const pair = preQFPairs[i]!;
+    // Odd groupCount: the middle seed plays a Pre-QF against one of the lower seeds.
+    // firstRoundPairs already has the right pairings; byeSeed advances straight to next round.
+    for (let i = 0; i < firstRoundPairs.length; i++) {
+      const pair = firstRoundPairs[i]!;
       await createPlannedMatch({
-        mode: defaults.mode,
-        tournament: tournamentName,
-        tournamentKey,
-        round: firstRd.label,
-        roundKey: firstRdKey,
-        matchOrder: i + 1,
-        aName: pair.aSlot,
-        bName: pair.bSlot,
-        cfg,
-        createdBy: myUid,
+        mode: defaults.mode, tournament: tournamentName, tournamentKey,
+        round: firstRd.label, roundKey: firstRdKey, matchOrder: i + 1,
+        aName: pair.aSlot, bName: pair.bSlot, cfg, createdBy: myUid,
       });
       result.matchesCreated++;
     }
 
-    // Second round (QF): top pairs from qfPairs + Pre-QF winners
-    const qfRd = roundDefs[1]!;
-    const qfRdKey = roundKeys[1]!;
-    const topPairs = qfPairs.slice(0, qfPairs.length - preQFCount);
+    // Next round: bye seed + Pre-QF winners
+    const nextRd = roundDefs[1]!;
+    const nextRdKey = roundKeys[1]!;
     let matchOrder = 1;
-    for (const pair of topPairs) {
+    if (byeSeed) {
       await createPlannedMatch({
-        mode: defaults.mode,
-        tournament: tournamentName,
-        tournamentKey,
-        round: qfRd.label,
-        roundKey: qfRdKey,
-        matchOrder: matchOrder++,
-        aName: pair.aSlot,
-        bName: pair.bSlot,
-        cfg,
-        createdBy: myUid,
+        mode: defaults.mode, tournament: tournamentName, tournamentKey,
+        round: nextRd.label, roundKey: nextRdKey, matchOrder: matchOrder++,
+        aName: byeSeed, bName: `Pre-QF Winner 1`, cfg, createdBy: myUid,
       });
       result.matchesCreated++;
     }
-    for (let i = 0; i < preQFPairs.length; i++) {
+    for (let i = byeSeed ? 1 : 0; i < firstRoundPairs.length; i++) {
       await createPlannedMatch({
-        mode: defaults.mode,
-        tournament: tournamentName,
-        tournamentKey,
-        round: qfRd.label,
-        roundKey: qfRdKey,
-        matchOrder: matchOrder++,
-        aName: `Pre-QF Winner ${i + 1}`,
-        bName: 'KO Qualifier',
-        cfg,
-        createdBy: myUid,
+        mode: defaults.mode, tournament: tournamentName, tournamentKey,
+        round: nextRd.label, roundKey: nextRdKey, matchOrder: matchOrder++,
+        aName: `KO Winner ${i * 2 + 1}`, bName: `KO Winner ${i * 2 + 2}`, cfg, createdBy: myUid,
       });
       result.matchesCreated++;
     }
 
-    // Subsequent rounds after QF: placeholder halving
+    // Subsequent rounds: halving placeholders
     let prevCount = mainBracketSize;
     for (let ri = 2; ri < roundDefs.length; ri++) {
       const rd = roundDefs[ri]!;
@@ -480,58 +474,37 @@ export async function generateCombinedKnockout(
       const slotCount = Math.max(1, Math.ceil(prevCount / 2));
       for (let i = 0; i < slotCount; i++) {
         await createPlannedMatch({
-          mode: defaults.mode,
-          tournament: tournamentName,
-          tournamentKey,
-          round: rd.label,
-          roundKey: rKey,
-          matchOrder: i + 1,
-          aName: `KO Winner ${i * 2 + 1}`,
-          bName: `KO Winner ${i * 2 + 2}`,
-          cfg,
-          createdBy: myUid,
+          mode: defaults.mode, tournament: tournamentName, tournamentKey,
+          round: rd.label, roundKey: rKey, matchOrder: i + 1,
+          aName: `KO Winner ${i * 2 + 1}`, bName: `KO Winner ${i * 2 + 2}`, cfg, createdBy: myUid,
         });
         result.matchesCreated++;
       }
       prevCount = slotCount;
     }
   } else {
-    // No Pre-QF: first round is straight QF with cross-pairings
-    for (let i = 0; i < qfPairs.length; i++) {
-      const pair = qfPairs[i]!;
+    // Even groupCount: first round pairs all seeds directly
+    for (let i = 0; i < firstRoundPairs.length; i++) {
+      const pair = firstRoundPairs[i]!;
       await createPlannedMatch({
-        mode: defaults.mode,
-        tournament: tournamentName,
-        tournamentKey,
-        round: firstRd.label,
-        roundKey: firstRdKey,
-        matchOrder: i + 1,
-        aName: pair.aSlot,
-        bName: pair.bSlot,
-        cfg,
-        createdBy: myUid,
+        mode: defaults.mode, tournament: tournamentName, tournamentKey,
+        round: firstRd.label, roundKey: firstRdKey, matchOrder: i + 1,
+        aName: pair.aSlot, bName: pair.bSlot, cfg, createdBy: myUid,
       });
       result.matchesCreated++;
     }
 
-    // Subsequent rounds: placeholder halving
-    let prevCount = qfPairs.length;
+    // Subsequent rounds: halving placeholders
+    let prevCount = firstRoundPairs.length;
     for (let ri = 1; ri < roundDefs.length; ri++) {
       const rd = roundDefs[ri]!;
       const rKey = roundKeys[ri]!;
       const slotCount = Math.max(1, Math.ceil(prevCount / 2));
       for (let i = 0; i < slotCount; i++) {
         await createPlannedMatch({
-          mode: defaults.mode,
-          tournament: tournamentName,
-          tournamentKey,
-          round: rd.label,
-          roundKey: rKey,
-          matchOrder: i + 1,
-          aName: `KO Winner ${i * 2 + 1}`,
-          bName: `KO Winner ${i * 2 + 2}`,
-          cfg,
-          createdBy: myUid,
+          mode: defaults.mode, tournament: tournamentName, tournamentKey,
+          round: rd.label, roundKey: rKey, matchOrder: i + 1,
+          aName: `KO Winner ${i * 2 + 1}`, bName: `KO Winner ${i * 2 + 2}`, cfg, createdBy: myUid,
         });
         result.matchesCreated++;
       }
@@ -600,33 +573,32 @@ function buildGroupRoundDefs(
   return defs;
 }
 
-/** Build round labels for the combined knockout phase. */
+/** Build round labels for the combined knockout phase.
+ *  mainBracketSize = number of matches in the first non-Pre-QF round.
+ *  Labels are chosen by bracket depth so they read correctly for any group count.
+ */
 function buildCombinedRoundDefs(
   mainBracketSize: number,
   hasPreQF: boolean,
-  preQFCount: number,
+  _preQFCount: number,
 ): Array<{ label: string }> {
+  // Label by depth from Final: 1→Final, 2→SF+Final, 4→QF+SF+Final, 8→R16+…
+  const LABELS: Record<number, string> = {
+    1: 'KO — Final',
+    2: 'KO — Semi Finals',
+    4: 'KO — Quarter Finals',
+    8: 'KO — Round of 16',
+  };
+
   const rounds: Array<{ label: string }> = [];
+  if (hasPreQF) rounds.push({ label: 'KO — Pre-QF' });
 
-  if (hasPreQF) {
-    rounds.push({ label: 'KO — Pre-QF' });
-  }
-
-  const all = [
-    { matchCount: mainBracketSize, label: 'KO — QF' },
-    { matchCount: mainBracketSize / 2, label: 'KO — SF' },
-    { matchCount: 1, label: 'KO — Final' },
-  ];
-
-  for (const r of all) {
-    if (r.matchCount >= 1) rounds.push({ label: r.label });
-  }
-
-  // For small brackets: 2 qualifiers = just a Final, 4 = SF+Final, etc.
-  if (mainBracketSize === 1) {
-    return hasPreQF
-      ? [{ label: 'KO — Pre-QF' }, { label: 'KO — Final' }]
-      : [{ label: 'KO — Final' }];
+  let count = mainBracketSize;
+  while (count >= 1) {
+    const lbl = LABELS[count] ?? `KO — R${count * 2}`;
+    rounds.push({ label: lbl });
+    if (count === 1) break;
+    count = Math.ceil(count / 2);
   }
 
   return rounds;

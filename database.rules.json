@@ -163,6 +163,7 @@
             "$other": { ".validate": false }
           }
         },
+        "lockedAt":   { ".validate": "newData.isNumber() && newData.val() >= 0" },
         "$other":     { ".validate": false }
       }
     },

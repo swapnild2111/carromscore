@@ -674,6 +674,28 @@ export async function propagateBracketWinner(
       if (winnerResolved) patch['bResolvedId'] = winnerResolved;
     }
     await update(ref(db, `planned/${targetMid}`), patch);
+
+    // 7. Auto-advance: if all matches in the just-completed round are done,
+    //    close the current round and start the next one automatically.
+    try {
+      const roundMatchesSnap = await get(
+        query(ref(db, 'planned'), orderByChild('roundKey'), equalTo(roundKey)),
+      );
+      const roundMatchesRaw = roundMatchesSnap.val() as Record<string, Omit<PlannedMatch, 'mid'>> | null;
+      if (roundMatchesRaw) {
+        const roundMatches = Object.values(roundMatchesRaw).filter(
+          (m) => m.tournamentKey === tournamentKey,
+        );
+        const allDone = roundMatches.length > 0 && roundMatches.every((m) => !!m.completedAt);
+        if (allDone) {
+          const { setRoundState, startRound } = await import('./tournaments');
+          await setRoundState(tournamentKey, roundKey, 'closed');
+          await startRound(tournamentKey, nextRoundKey);
+        }
+      }
+    } catch {
+      // silent — auto-advance failure should not block anything
+    }
   } catch {
     // silent — bracket still works without propagation
   }

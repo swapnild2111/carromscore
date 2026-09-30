@@ -5,7 +5,7 @@
    * Tab 1 — Groups & Draw: player assignment via drag-and-drop + Phase 1 bracket generation.
    * Tab 2 — Combined KO: group standings + Phase 2 combined knockout generation.
    */
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import type { Tournament, LeagueGroup, KnockoutCfg } from '../../lib/tournaments';
   import {
     updateLeagueGroups,
@@ -34,9 +34,6 @@
 
   const { tournament, myUid, onClose }: Props = $props();
 
-  // ─── Tab ────────────────────────────────────────────────────────────────────
-  let activeTab = $state<'draw' | 'knockout'>('draw');
-
   // ─── Players ────────────────────────────────────────────────────────────────
   let players = $state(loadAllPlayers());
   let plannedMatches = $state<PlannedMatch[]>([]);
@@ -58,17 +55,22 @@
   const initKoCfg = tournament.knockoutCfg;
   const initBoards = Math.max(1, initKoCfg?.venueBoards ?? initKoCfg?.boardsAvailable ?? 4);
 
-  // Organizer can override; prefer explicit saved groupCount, else recommendation.
+  // If groups already exist, use their count as ground truth (beats any saved/recommended value).
+  const initSavedGroupCount = Object.keys(tournament.groups ?? {}).length;
+
+  // Organizer can override; prefer actual saved group count, then explicit cfg, then recommendation.
   // Note: assignedPlayerIds isn't populated yet at init, so use groups as proxy for player count.
   let manualGroupCount = $state<number>(
-    initKoCfg?.groupCount ?? recommendGroups(
-      Object.values(tournament.groups ?? {}).flatMap((g) => g.playerIds).length || 0,
-      initBoards
-    ).groupCount
+    initSavedGroupCount > 0
+      ? initSavedGroupCount
+      : (initKoCfg?.groupCount ?? recommendGroups(
+          Object.values(tournament.groups ?? {}).flatMap((g) => g.playerIds).length || 0,
+          initBoards
+        ).groupCount)
   );
 
   // Track whether the organizer has manually touched the stepper this session.
-  let groupCountManuallySet = $state(initKoCfg?.groupCount != null);
+  let groupCountManuallySet = $state(initSavedGroupCount > 0 || initKoCfg?.groupCount != null);
 
   // When no groups are saved yet AND organizer hasn't manually set a count, follow recommendation
   // once player list loads. Never clobber a manual choice.
@@ -341,9 +343,14 @@
     // Freeze stepper to the count we just saved so the $effect doesn't clobber it.
     manualGroupCount = sortedGroups.length;
     groupCountManuallySet = true;
+
+    // Auto-generate combined KO when there are multiple groups
+    if (sortedGroups.length > 1) {
+      await generateCombinedKO();
+    }
   }
 
-  // ─── Start all group rounds ───────────────────────────────────────────────────
+  // ─── Start first group round ──────────────────────────────────────────────────
 
   let startingRounds = $state(false);
 
@@ -352,9 +359,12 @@
     // Read directly from memoryStore (not tournament prop) so freshly-created
     // rounds are included without waiting for a Svelte re-render cycle.
     const rounds = loadRounds(tournament.key);
-    const groupRounds = rounds.filter((r) => / — /.test(r.name) && !/^KO —/.test(r.name) && !r.startedAt);
-    for (const r of groupRounds) {
-      await startRound(tournament.key, r.key);
+    const groupRounds = rounds
+      .filter((r) => / — /.test(r.name) && !/^KO —/.test(r.name) && !r.startedAt)
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    // Only start the first (lowest-order) round so players can play it before QF starts.
+    if (groupRounds.length > 0) {
+      await startRound(tournament.key, groupRounds[0].key);
     }
     startingRounds = false;
   }
@@ -364,6 +374,45 @@
   let koGenRunning = $state(false);
   let koGenResult = $state<{ roundsCreated: string[]; errors: string[] } | null>(null);
   let forceGenerate = $state(false);
+
+  // KO seeding order: organiser can drag groups to reorder; defaults to sorted group order.
+  // Stored as an array of group keys in seeding order (top seed first).
+  let koSeedOrder = $state<string[]>([]);
+
+  // Keep koSeedOrder in sync with sortedGroups: add new keys, remove stale ones,
+  // preserving any manual reordering.
+  $effect(() => {
+    const currentKeys = sortedGroups.map(([k]) => k);
+    // Read koSeedOrder via untrack to avoid registering it as a reactive dependency
+    const prev = untrack(() => koSeedOrder);
+    const filtered = prev.filter((k) => currentKeys.includes(k));
+    const missing = currentKeys.filter((k) => !filtered.includes(k));
+    if (missing.length > 0 || filtered.length !== prev.length) {
+      koSeedOrder = [...filtered, ...missing];
+    }
+  });
+
+  // Derived list of [key, group] in KO seed order
+  const koSeedGroups = $derived(
+    koSeedOrder
+      .map((k) => [k, localGroups[k]] as [string, LeagueGroup])
+      .filter(([, g]) => g != null)
+  );
+
+  let koDragSrc = $state<number | null>(null);
+  let koDragOver = $state<number | null>(null);
+
+  function onKODragStart(idx: number) { koDragSrc = idx; }
+  function onKODragOver(e: DragEvent, idx: number) { e.preventDefault(); koDragOver = idx; }
+  function onKODrop(toIdx: number) {
+    if (koDragSrc == null || koDragSrc === toIdx) { koDragSrc = null; koDragOver = null; return; }
+    const next = [...koSeedOrder];
+    const [moved] = next.splice(koDragSrc, 1);
+    next.splice(toIdx, 0, moved!);
+    koSeedOrder = next;
+    koDragSrc = null; koDragOver = null;
+  }
+  function onKODragEnd() { koDragSrc = null; koDragOver = null; }
 
   // Progress tracking for group phase
   const groupMatchCounts = $derived.by(() => {
@@ -408,15 +457,21 @@
     koGenRunning = true;
     koGenResult = null;
 
-    // Delete existing KO— planned matches before re-generating
+    // Delete existing KO rounds and planned matches before re-generating
+    const existingKORounds = loadRounds(tournament.key).filter((r) => /^KO —/.test(r.name));
+    await Promise.all(existingKORounds.map((r) => deleteRound(tournament.key, r.key)));
     const existingKOMatches = plannedMatches.filter((m) => /^KO —/i.test(m.round ?? ''));
     await Promise.all(existingKOMatches.map((m) => deletePlannedMatch(m.mid)));
+
+    // Group names in KO seed order (what the organiser arranged)
+    const orderedGroupNames = koSeedGroups.map(([, g]) => g.name);
 
     const result = await generateCombinedKnockout({
       tournamentKey: tournament.key,
       tournamentName: tournament.name,
       groups: localGroups,
       groupCount: sortedGroups.length,
+      groupNames: orderedGroupNames,
       defaults: {
         mode: tournament.defaults?.mode ?? 'singles',
         bestOf: tournament.defaults?.bestOf ?? 3,
@@ -522,21 +577,8 @@
       <button type="button" class="ls-close" onclick={onClose} aria-label="Close">✕</button>
     </div>
 
-    <!-- Tab bar -->
-    <div class="ls-tabs" role="tablist">
-      <button
-        type="button"
-        class="ls-tab"
-        class:ls-tab-active={activeTab === 'draw'}
-        role="tab"
-        aria-selected={activeTab === 'draw'}
-        onclick={() => { activeTab = 'draw'; }}
-      >Groups &amp; Draw</button>
-    </div>
-
     <!-- ─── Groups & Draw ─────────────────────────────────────────────────────── -->
-    {#if activeTab === 'draw'}
-      <div class="ls-body">
+    <div class="ls-body">
         <div class="draw-controls">
           {#if !roundsStarted}
             <div class="group-count-row">
@@ -658,7 +700,7 @@
               <div class="group-col-header">
                 <span>{group.name}</span>
                 {#if hasOdd && !roundsStarted}
-                  <span class="odd-warn" title="Odd effective slots in R2 — one player will get a bye. Add a player, dummy, or adjust Pre-qualify markings.">⚠ odd</span>
+                  <span class="odd-warn" title="Odd number of players — one player will get a bye. Add a player, dummy, or adjust Pre-qualify markings.">⚠ Odd number of players</span>
                 {/if}
                 <div class="group-col-header-right">
                   {#if roundsStarted}
@@ -714,141 +756,86 @@
           {/each}
         </div>
 
-        {#if generateError}
-          <p class="ls-error">{generateError}</p>
-        {/if}
+      </div>
 
-        {#if generateResult}
-          <div class="generate-result">
-            <strong>Phase 1 generated:</strong> {generateResult.matchesCreated} matches.
-            {#if generateResult.errors.length > 0}
-              <ul class="result-errors">
-                {#each generateResult.errors as e}<li>{e}</li>{/each}
-              </ul>
-            {/if}
+      <!-- ─── Combined Knockout seeding order (>1 group, not started) ──────────── -->
+      {#if sortedGroups.length > 1 && !roundsStarted}
+        <div class="ls-body stage2-section">
+          <div class="stage2-header">
+            <strong class="stage2-title">Combined Knockout seeding</strong>
+            <span class="stage2-hint">Drag to reorder — top vs bottom, 2nd vs 3rd, etc.</span>
           </div>
-        {/if}
+          <div class="ko-seed-list">
+            {#each koSeedGroups as [gKey, g], idx (gKey)}
+              <div
+                class="ko-seed-chip"
+                class:ko-seed-drag-over={koDragOver === idx}
+                draggable={true}
+                role="listitem"
+                ondragstart={() => onKODragStart(idx)}
+                ondragover={(e) => onKODragOver(e, idx)}
+                ondragleave={() => { if (koDragOver === idx) koDragOver = null; }}
+                ondrop={() => onKODrop(idx)}
+                ondragend={onKODragEnd}
+              >
+                <span class="ko-seed-rank">{idx + 1}</span>
+                <span class="ko-seed-name">{g.name}</span>
+                <span class="ko-seed-drag-handle">⠿</span>
+              </div>
+            {/each}
+          </div>
+        </div>
+      {/if}
 
-        {#if groupsLocked || roundsStarted}
-          <p class="bracket-hint">Close this panel and click <strong>Bracket</strong> on the tournament row to manage individual matches.</p>
-        {/if}
-
-        <div class="ls-actions">
-          {#if roundsStarted}
-            <!-- no actions — groups locked, rounds in progress -->
-          {:else if generating}
-            <button type="button" class="btn btn-primary" disabled>Generating…</button>
-          {:else if groupsDirty}
-            <button
-              type="button"
-              class="btn btn-primary"
-              onclick={lockAndGenerate}
-              disabled={sortedGroups.length === 0}
-            >{groupsLocked ? 'Re-generate brackets' : 'Lock groups &amp; generate brackets'}</button>
-          {:else if groupsLocked}
-            {#if (tournament.rounds ?? []).some((r) => / — /.test(r.name) && !/^KO —/.test(r.name) && !r.startedAt)}
-              <button
-                type="button"
-                class="btn btn-primary"
-                onclick={startAllGroupRounds}
-                disabled={startingRounds}
-              >{startingRounds ? 'Starting…' : '▶ Start all group rounds'}</button>
-            {/if}
-          {:else if !groupsLocked && sortedGroups.length > 0}
-            <button
-              type="button"
-              class="btn btn-primary"
-              onclick={lockAndGenerate}
-            >Generate brackets</button>
+      <!-- ─── Action buttons (always at card bottom) ───────────────────────────── -->
+      {#if generateError}
+        <p class="ls-error ls-error-footer">{generateError}</p>
+      {/if}
+      {#if generateResult}
+        <div class="generate-result generate-result-footer">
+          <strong>Phase 1 generated:</strong> {generateResult.matchesCreated} matches.
+          {#if generateResult.errors.length > 0}
+            <ul class="result-errors">
+              {#each generateResult.errors as e}<li>{e}</li>{/each}
+            </ul>
           {/if}
         </div>
-      </div>
-    {/if}
-
-    <!-- ─── Combined Knockout ─────────────────────────────────────────────────── -->
-    {#if activeTab === 'knockout'}
-      <div class="ls-body">
-        {#if !groupsLocked}
-          <p class="ls-info">Complete Stage 1 draw first — lock groups and generate group brackets to enable Phase 2.</p>
-        {:else}
-          <div class="stage2-header">
-            <span class="stage2-progress">
-              Group phase: <strong>{completedGroupMatches} / {totalGroupMatches}</strong> matches complete
-            </span>
-            {#if !allGroupsDone}
-              <label class="force-toggle">
-                <input type="checkbox" bind:checked={forceGenerate} />
-                Force generate (incomplete results)
-              </label>
-            {/if}
-          </div>
-
-          <!-- Per-group final status -->
-          {#if sortedGroups.length > 0}
-            <div class="ko-seeding-table">
-              <div class="ko-seeding-header">Combined KO seeding (champion × runner-up cross-pairing)</div>
-              <table class="seeding-tbl">
-                <thead>
-                  <tr>
-                    <th>Match</th>
-                    <th>Player A</th>
-                    <th>vs</th>
-                    <th>Player B</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {#each sortedGroups as [gKey, g], k (gKey)}
-                    {@const mirrorIdx = sortedGroups.length - 1 - k}
-                    {@const mirrorGroup = sortedGroups[mirrorIdx]?.[1]}
-                    {@const aFinal = groupFinalCounts.get(gKey)}
-                    {@const bFinal = mirrorGroup ? groupFinalCounts.get(sortedGroups[mirrorIdx]![0]) : undefined}
-                    {#if k <= Math.floor((sortedGroups.length - 1) / 2)}
-                      <tr>
-                        <td class="ko-match-label">QF {k + 1}</td>
-                        <td class="ko-slot-a">{g.name} Champion</td>
-                        <td class="ko-vs">vs</td>
-                        <td class="ko-slot-b">{mirrorGroup?.name ?? '?'} Runner-Up</td>
-                        <td class="ko-status">
-                          {#if (aFinal?.completed ?? 0) > 0 && (bFinal?.completed ?? 0) > 0}
-                            <span class="status-ready">Ready</span>
-                          {:else}
-                            <span class="status-pending">Pending</span>
-                          {/if}
-                        </td>
-                      </tr>
-                    {/if}
-                  {/each}
-                </tbody>
-              </table>
-            </div>
-          {/if}
-
-          <div class="stage2-controls">
+      {/if}
+      <div class="ls-actions ls-actions-footer">
+        {#if roundsStarted}
+          <!-- no actions — groups locked, rounds in progress -->
+        {:else if generating}
+          <button type="button" class="btn btn-primary" disabled>Generating…</button>
+        {:else if groupsLocked}
+          <button
+            type="button"
+            class="btn btn-secondary"
+            onclick={lockAndGenerate}
+            disabled={sortedGroups.length === 0}
+          >Re-generate brackets</button>
+          {#if (tournament.rounds ?? []).some((r) => / — /.test(r.name) && !/^KO —/.test(r.name) && !r.startedAt)}
             <button
               type="button"
               class="btn btn-primary"
-              onclick={generateCombinedKO}
-              disabled={koGenRunning || (!allGroupsDone && !forceGenerate)}
-            >{koGenRunning ? 'Generating KO draw…' : 'Generate Combined KO →'}</button>
-          </div>
-
-          {#if koGenResult}
-            <div class="generate-result">
-              {#if koGenResult.roundsCreated.length > 0}
-                <strong>Rounds added:</strong> {koGenResult.roundsCreated.join(', ')}.
-                Open the Bracket view to see the seeded draw.
-              {/if}
-              {#if koGenResult.errors.length > 0}
-                <ul class="result-errors">
-                  {#each koGenResult.errors as e}<li>{e}</li>{/each}
-                </ul>
-              {/if}
-            </div>
+              onclick={startAllGroupRounds}
+              disabled={startingRounds}
+            >{startingRounds ? 'Starting…' : '▶ Start first round'}</button>
           {/if}
+        {:else if groupsDirty}
+          <button
+            type="button"
+            class="btn btn-primary"
+            onclick={lockAndGenerate}
+            disabled={sortedGroups.length === 0}
+          >Lock groups &amp; generate brackets</button>
+        {:else if !groupsLocked && sortedGroups.length > 0}
+          <button
+            type="button"
+            class="btn btn-primary"
+            onclick={lockAndGenerate}
+          >Generate brackets</button>
         {/if}
       </div>
-    {/if}
   </div>
 </div>
 
@@ -898,30 +885,6 @@
     border-radius: 0.25rem;
   }
   .ls-close:hover { color: var(--fg, #f5f5f5); }
-
-  .ls-tabs {
-    display: flex;
-    gap: 0;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-    flex-shrink: 0;
-    padding: 0 1rem;
-  }
-  .ls-tab {
-    background: none;
-    border: none;
-    color: var(--muted, #9aa0a6);
-    font-size: 0.85rem;
-    font-weight: 600;
-    padding: 0.6rem 1rem;
-    cursor: pointer;
-    border-bottom: 2px solid transparent;
-    margin-bottom: -1px;
-  }
-  .ls-tab:hover { color: var(--fg, #f5f5f5); }
-  .ls-tab-active {
-    color: var(--accent, #ffd54a);
-    border-bottom-color: var(--accent, #ffd54a);
-  }
 
   .ls-body {
     padding: 1rem 1.25rem;
@@ -1211,6 +1174,19 @@
     gap: 0.75rem;
     flex-wrap: wrap;
   }
+  .ls-actions-footer {
+    margin-top: 0;
+    padding: 1rem 1.25rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    flex-shrink: 0;
+  }
+  .ls-error-footer {
+    padding: 0.5rem 1.25rem 0;
+  }
+  .generate-result-footer {
+    padding: 0.5rem 1.25rem 0;
+    font-size: 0.85rem;
+  }
   .ls-error {
     color: #e05c5c;
     font-size: 0.85rem;
@@ -1235,19 +1211,65 @@
     padding-left: 1.2rem;
     margin: 0.4rem 0 0;
   }
-  .bracket-hint {
+  /* Stage 2 */
+  .stage2-section {
+    border-top: 1px solid rgba(255,255,255,0.08);
+    margin-top: 0.5rem;
+  }
+  .stage2-title {
+    font-size: 0.9rem;
+    color: var(--text, #e8eaed);
+  }
+  .stage2-hint {
     font-size: 0.78rem;
     color: var(--muted, #9aa0a6);
-    margin: 0.5rem 0 0;
   }
-
-  /* Stage 2 */
   .stage2-header {
     display: flex;
     align-items: center;
     gap: 1rem;
-    margin-bottom: 1rem;
+    margin-bottom: 0.75rem;
     flex-wrap: wrap;
+  }
+  .ko-seed-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    max-width: 280px;
+  }
+  .ko-seed-chip {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.45rem 0.75rem;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 6px;
+    cursor: grab;
+    user-select: none;
+    transition: background 0.1s;
+  }
+  .ko-seed-chip:hover { background: rgba(255,255,255,0.08); }
+  .ko-seed-drag-over {
+    border-color: #e5a623;
+    background: rgba(229,166,35,0.1);
+  }
+  .ko-seed-rank {
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--muted, #9aa0a6);
+    min-width: 1rem;
+    text-align: center;
+  }
+  .ko-seed-name {
+    font-size: 0.85rem;
+    font-weight: 600;
+    flex: 1;
+  }
+  .ko-seed-drag-handle {
+    font-size: 1rem;
+    color: var(--muted, #9aa0a6);
+    opacity: 0.5;
   }
   .stage2-progress {
     font-size: 0.85rem;
@@ -1336,9 +1358,8 @@
   @media (prefers-color-scheme: light) {
     :root:not([data-theme="dark"]) .gko-card { background: #fff; border-color: rgba(0, 0, 0, 0.1); color: #111; }
     :root:not([data-theme="dark"]) .ls-header { border-bottom-color: rgba(0, 0, 0, 0.08); }
+    :root:not([data-theme="dark"]) .ls-actions-footer { border-top-color: rgba(0, 0, 0, 0.08); }
     :root:not([data-theme="dark"]) .ls-close:hover { color: #111; }
-    :root:not([data-theme="dark"]) .ls-tabs { border-bottom-color: rgba(0, 0, 0, 0.08); }
-    :root:not([data-theme="dark"]) .ls-tab:hover { color: #111; }
     :root:not([data-theme="dark"]) .group-col { background: rgba(0, 0, 0, 0.02); border-color: rgba(0, 0, 0, 0.1); }
     :root:not([data-theme="dark"]) .group-col-header { border-bottom-color: rgba(0, 0, 0, 0.08); }
     :root:not([data-theme="dark"]) .group-count { background: rgba(0, 0, 0, 0.06); }
@@ -1371,9 +1392,8 @@
   }
   :root[data-theme="light"] .gko-card { background: #fff; border-color: rgba(0, 0, 0, 0.1); color: #111; }
   :root[data-theme="light"] .ls-header { border-bottom-color: rgba(0, 0, 0, 0.08); }
+  :root[data-theme="light"] .ls-actions-footer { border-top-color: rgba(0, 0, 0, 0.08); }
   :root[data-theme="light"] .ls-close:hover { color: #111; }
-  :root[data-theme="light"] .ls-tabs { border-bottom-color: rgba(0, 0, 0, 0.08); }
-  :root[data-theme="light"] .ls-tab:hover { color: #111; }
   :root[data-theme="light"] .group-col { background: rgba(0, 0, 0, 0.02); border-color: rgba(0, 0, 0, 0.1); }
   :root[data-theme="light"] .group-col-header { border-bottom-color: rgba(0, 0, 0, 0.08); }
   :root[data-theme="light"] .group-count { background: rgba(0, 0, 0, 0.06); }

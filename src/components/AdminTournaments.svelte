@@ -46,6 +46,7 @@
     updateKnockoutCfg,
 
     updateTournamentFormat,
+    setTournamentLocked,
     type Round,
     type Tournament,
     type LeagueCfg,
@@ -896,6 +897,14 @@
     }
   }
 
+  let lockingKey = $state<string | null>(null);
+  async function toggleLock(t: Tournament) {
+    if (lockingKey) return;
+    lockingKey = t.key;
+    await setTournamentLocked(t.key, !t.lockedAt);
+    lockingKey = null;
+  }
+
   function startDelete(key: string) {
     deleteConfirmKey = key;
     deleteConfirmText = '';
@@ -1699,8 +1708,9 @@
                     <button
                       type="button"
                       class="row-name-btn"
-                      onclick={() => startEdit(t)}
-                      title="Rename, change type, edit defaults"
+                      onclick={() => !t.lockedAt && startEdit(t)}
+                      title={t.lockedAt ? 'Tournament locked' : 'Rename, change type, edit defaults'}
+                      class:row-name-btn-locked={!!t.lockedAt}
                     >{t.name}</button>
                   {:else}
                     <div class="row-name-text">{t.name}</div>
@@ -1711,6 +1721,7 @@
                       class="btn btn-setup btn-league"
                       onclick={() => startSetup(t)}
                       title="League draw and schedule"
+                      disabled={!!t.lockedAt}
                     >Setup</button>
                   {:else if t.format === 'knockout'}
                     <button
@@ -1718,6 +1729,7 @@
                       class="btn btn-setup btn-knockout"
                       onclick={() => startSetup(t)}
                       title="Knockout groups and bracket"
+                      disabled={!!t.lockedAt}
                     >Setup</button>
                   {:else if t.format === 'roundrobin'}
                     <button
@@ -1725,7 +1737,21 @@
                       class="btn btn-setup btn-roundrobin"
                       onclick={() => startSetup(t)}
                       title="Round Robin schedule and bracket"
+                      disabled={!!t.lockedAt}
                     >Setup</button>
+                  {/if}
+                  {#if false /* lock button: hidden until feature is finalized — see pending_features memory */}
+                    {#if canManageTournament(t)}
+                      <button
+                        type="button"
+                        class="btn btn-lock"
+                        class:btn-lock-active={!!t.lockedAt}
+                        onclick={() => toggleLock(t)}
+                        disabled={lockingKey === t.key}
+                        aria-label={t.lockedAt ? 'Unlock tournament' : 'Lock tournament'}
+                        title={t.lockedAt ? 'Locked — click to unlock' : 'Lock tournament (disable editing)'}
+                      >{t.lockedAt ? '🔒' : '🔓'}</button>
+                    {/if}
                   {/if}
                   {#if setupNoPlayersKey === t.key}
                     <span class="setup-no-players-warn">
@@ -1754,6 +1780,7 @@
                         class="btn"
                         onclick={() => startAssign(t)}
                         title="Assign players to this tournament"
+                        disabled={!!t.lockedAt}
                       >Players{assignedCountByKey[t.key] !== undefined ? ` (${assignedCountByKey[t.key]})` : ''}</button>
                     {/if}
                     <button
@@ -1761,12 +1788,14 @@
                       class="btn"
                       onclick={() => startRounds(t)}
                       title="Add / rename rounds"
+                      disabled={!!t.lockedAt}
                     >Rounds{t.rounds && t.rounds.length > 0 ? ` (${t.rounds.length})` : ''}</button>
                     <button
                       type="button"
                       class="btn"
                       onclick={() => startBracket(t)}
                       title="Add matches to bracket"
+                      disabled={!!t.lockedAt}
                     >Bracket{plannedCountByKey[t.key] !== undefined && plannedCountByKey[t.key] > 0 ? ` (${plannedCountByKey[t.key]})` : ''}</button>
                     <a
                       class="btn btn-print"
@@ -1782,6 +1811,7 @@
                       onclick={() => startDelete(t.key)}
                       aria-label="Delete tournament"
                       title="Delete tournament"
+                      disabled={!!t.lockedAt}
                     >✕</button>
                   </div>
                 {/if}
@@ -3332,6 +3362,26 @@
     color: #ff6b6b;
     border-color: rgba(220, 60, 60, 0.7);
     background: rgba(220, 60, 60, 0.15);
+  }
+  .btn-lock {
+    font-size: 0.9rem;
+    line-height: 1;
+    padding: 0.2rem 0.45rem;
+    opacity: 0.55;
+    border-color: transparent;
+    background: transparent;
+    transition: opacity 0.15s;
+  }
+  .btn-lock:hover { opacity: 1; }
+  .btn-lock-active {
+    opacity: 1;
+    color: #f0a020;
+    border-color: rgba(240, 160, 32, 0.35);
+    background: rgba(240, 160, 32, 0.1);
+  }
+  .row-name-btn-locked {
+    cursor: default;
+    opacity: 0.7;
   }
   /* White field labels inside Add/Edit tournament popup */
   .field-label-white {

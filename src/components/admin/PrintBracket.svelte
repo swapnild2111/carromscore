@@ -685,8 +685,10 @@
   // Light theme for print.
   function buildFlightBracketSVG(
     cols: Array<{ label: string; slots: BracketSlot[] }>,
+    allowSingleCol = false,
   ): string {
-    if (cols.length < 2) return '';
+    if (cols.length < 1) return '';
+    if (cols.length < 2 && !allowSingleCol) return '';
 
     const COL_W = 240;
     const COL_GAP = 48;
@@ -1017,272 +1019,335 @@
   ): string {
     if (groups.length === 0) return '';
 
-    const COL_W   = 240;
-    const COL_GAP = 48;
-    const SLOT_H  = 44;
-    const NAME_MAX = 22;
-
-    function clip(s: string) { return s.length > NAME_MAX ? s.slice(0, NAME_MAX - 1) + '…' : s; }
-    function esc(s: string) {
-      return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    }
-
-    const GRP_GAP  = 24;
-    const LBL_H    = 20;
-    const PAD      = 20;
-    const MATCH_SP = 56;
-
-    /** Sequential 1v2, 3v4, … pairs */
-    function seqPairs(ids: string[]): [string, string][] {
-      const pairs: [string, string][] = [];
-      for (let i = 0; i + 1 < ids.length; i += 2) pairs.push([ids[i]!, ids[i + 1]!]);
-      return pairs;
-    }
-
-    // Map round index ri (0=first, totalRounds-1=Final) to the round key used in matchMap.
-    // When hasPQ is true, ri=0 maps to "Pre-qualify", ri=1 maps to the first main round.
-    function groupRoundKey(groupName: string, ri: number, totalRounds: number, hasPQ: boolean): string {
-      if (hasPQ && ri === 0) return `${groupName} — Pre-qualify`;
-      const mainRi = hasPQ ? ri - 1 : ri;
-      const mainTotal = hasPQ ? totalRounds - 1 : totalRounds;
-      if (mainTotal === 1) return `${groupName} — Final`;
-      const fromEnd = mainTotal - 1 - mainRi;
-      const revLabels = ['Final', 'SF', 'QF', 'R16', 'R32'];
-      return `${groupName} — ${revLabels[fromEnd] ?? `R${fromEnd}`}`;
-    }
-
     type MatchInfo = { isDone: boolean; winner?: 'a'|'b'; setsA?: number; setsB?: number; pointsA?: number; pointsB?: number; aName: string; bName: string };
 
-    function groupScoreLines(res: MatchInfo | undefined): string[] {
-      if (!res?.isDone) return [];
-      const sA = res.setsA ?? 0;
-      const sB = res.setsB ?? 0;
-      const totalSets = sA + sB;
-      if (totalSets <= 1) {
-        const pA = res.pointsA ?? 0;
-        const pB = res.pointsB ?? 0;
-        if (pA > 0 || pB > 0) return [`${pA}–${pB}`];
-        return [`${sA}–${sB}`];
-      }
-      return [`${sA}–${sB}`];
+    const NAME_MAX = 22;
+    function clip(s: string) { return s.length > NAME_MAX ? s.slice(0, NAME_MAX - 1) + '…' : s; }
+    function esc(s: string) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+    function fmtScore(res: MatchInfo | undefined): string {
+      if (!res?.isDone) return '';
+      const sA = res.setsA ?? 0; const sB = res.setsB ?? 0;
+      if (sA + sB <= 1) { const pA = res.pointsA ?? 0; const pB = res.pointsB ?? 0; if (pA > 0 || pB > 0) return `${pA}–${pB}`; }
+      return `${sA}–${sB}`;
     }
 
-    type RoundSlot = { aName: string; bName: string; isByeSlot?: boolean };
+    // ── Layout constants ──
+    // Everything is built on a single ROW_H grid.
+    // Each player occupies one row. Match boxes span their two input rows.
+    const ROW_H  = 32;   // px per player row — drives all Y positions
+    const BOX_H  = 44;   // match-box height (slightly taller than a row for padding)
+    const COL_W  = 175;  // match-box width
+    const COL_GAP = 36;  // horizontal gap between columns
+    const NAME_W = 155;  // player name column width
+    const ARM    = 28;   // gap between name col and col-0, and between columns
+    const GRP_PAD = 40;
+    const LBL_H  = 24;
+    const PAD    = 24;
 
-    type GroupMeta = {
-      gi: number;
-      name: string;
-      // rounds[ri] = array of match slots for that round column
-      rounds: Array<Array<RoundSlot>>;
-      hasPQ: boolean;
-      // For classic brackets only: top-seed bye player (odd groups)
-      classicByePlayer: string | null;
-      x: number; y: number; h: number;
-      roundCols: number;
-    };
+    function colLabel(key: string): string {
+      const short = key.replace(/^.*?—\s*/, '');
+      const MAP: Record<string,string> = { 'Pre-qualify':'PRE-QUALIFY', Final:'FINAL', SF:'SEMI FINALS', QF:'QUARTER FINALS' };
+      return MAP[short] ?? (/^R\d+$/.test(short) ? 'ROUNDS' : short.toUpperCase());
+    }
 
-    const groupMetas: GroupMeta[] = groups.map((g, gi) => {
-      const ps = g.players;
+    // ── Per-group pre-computation ──
+    // Key insight: build a flat array of "leaf rows" — one per player.
+    // Each leaf has an absolute row index within the group (0, 1, 2, …).
+    // The Y center of row i is: gy + i * ROW_H + ROW_H/2
+    // Match-box centers are the average Y of their two input leaves (or single leaf for bye).
+    // This single grid drives EVERYTHING: name positions, box positions, connector lines.
+
+    type Leaf = { player: string; rowIdx: number };
+    // A "node" at each column: spans a range of row indices [top, bot] and has a center Y.
+    // center = gy + (top + bot) / 2 * ROW_H + ROW_H/2
+    // For a match box: top = first input's rowIdx, bot = last input's rowIdx.
+
+    const grpData = groups.map((g, gi) => {
       const pqSet = g.preQualifyNames ?? new Set<string>();
       const hasPQ = pqSet.size >= 2;
-      const rounds: Array<Array<RoundSlot>> = [];
-      let classicByePlayer: string | null = null;
 
-      if (ps.length <= 1) {
-        rounds.push([{ aName: ps[0] ?? 'TBD', bName: '(bye)' }]);
-      } else if (ps.length === 2) {
-        rounds.push([{ aName: ps[0]!, bName: ps[1]! }]);
-      } else if (hasPQ) {
-        // ── Pre-qualify topology ──
-        // pqSet contains resolved player names; ps contains all names in playerIds order.
-        const pqMatchCount = Math.floor(pqSet.size / 2);
-        const byeCount = ps.length - pqSet.size;
-        const r2TotalSlots = byeCount + pqMatchCount;
-        const r2MatchCount = Math.ceil(r2TotalSlots / 2);
+      // Walk players in original order — same sequence as the match seeding in groupknockout.ts.
+      // Each consecutive PQ pair is kept together inline; bye players occupy their own rows.
+      // This ensures SVG row order matches the actual QF match order.
+      //
+      // leaves: one entry per player row (in display order top→bottom)
+      // pqPairLeaves: for each PQ pair, the two leaf indices [leafIdxA, leafIdxB]
+      // r2Leaves: virtual row positions for each QF input slot (bye row or PQ-pair midpoint)
+      type Span = { topRow: number; botRow: number };
+      const leaves: Leaf[] = [];
+      // pqPairs stored as [leafIdxA, leafIdxB] so we can build PQ col spans
+      const pqPairLeafIndices: [number, number][] = [];
+      // r2Leaves: fractional row position for each QF input (bye = its row, pqW = avg of pair rows)
+      const r2Leaves: number[] = [];
 
-        // R1: pre-qualify round slots (pqMatchCount matches)
-        const r1Slots: RoundSlot[] = [];
-        for (let i = 0; i < pqMatchCount; i++) r1Slots.push({ aName: '', bName: '' });
-        rounds.push(r1Slots);
-
-        // R2: bye players + pq winners (r2MatchCount matches)
-        const r2Slots: RoundSlot[] = [];
-        for (let i = 0; i < r2MatchCount; i++) r2Slots.push({ aName: '', bName: '' });
-        rounds.push(r2Slots);
-
-        // Subsequent rounds until Final (1 match)
-        let prevCount = r2MatchCount;
-        while (prevCount > 1) {
-          const nextCount = Math.ceil(prevCount / 2);
-          const slots: RoundSlot[] = [];
-          for (let i = 0; i < nextCount; i++) slots.push({ aName: '', bName: '' });
-          rounds.push(slots);
-          prevCount = nextCount;
-        }
-      } else {
-        // ── Classic topology: sequential 1v2 pairs, odd-group bye ──
-        const hasBye = ps.length % 2 !== 0;
-        classicByePlayer = hasBye ? (ps[0] ?? null) : null;
-        const active = hasBye ? ps.slice(1) : [...ps];
-        const r1Pairs = seqPairs(active);
-        rounds.push(r1Pairs.map(([a, b]) => ({ aName: a, bName: b })));
-        let prevCount = r1Pairs.length;
-        let firstSub = true;
-        while (prevCount > 1) {
-          const nextCount = Math.ceil(prevCount / 2);
-          const slots: RoundSlot[] = [];
-          for (let i = 0; i < nextCount; i++) {
-            const aLabel = firstSub && i === 0 && classicByePlayer
-              ? clip(esc(classicByePlayer))
-              : '';
-            slots.push({ aName: aLabel, bName: '' });
-          }
-          rounds.push(slots);
-          prevCount = nextCount;
-          firstSub = false;
+      let i = 0;
+      while (i < g.players.length) {
+        const p = g.players[i]!;
+        if (hasPQ && pqSet.has(p)) {
+          // PQ pair: consume this player and the next PQ player
+          const p2 = g.players[i + 1] ?? p; // guard against dangling odd PQ player
+          const idxA = leaves.length;
+          leaves.push({ player: p,  rowIdx: leaves.length });
+          const idxB = leaves.length;
+          leaves.push({ player: p2, rowIdx: leaves.length });
+          pqPairLeafIndices.push([idxA, idxB]);
+          // PQ winner's virtual row = midpoint of its two leaf rows
+          r2Leaves.push((leaves[idxA]!.rowIdx + leaves[idxB]!.rowIdx) / 2);
+          i += 2;
+        } else {
+          const idx = leaves.length;
+          leaves.push({ player: p, rowIdx: idx });
+          r2Leaves.push(idx); // bye: virtual row = its own row
+          i++;
         }
       }
 
-      return { gi, name: g.name, rounds, hasPQ, classicByePlayer, x: 0, y: 0, h: 0, roundCols: rounds.length };
+      const pqMatchCount = pqPairLeafIndices.length;
+      const byePs = g.players.filter((p) => !pqSet.has(p));
+      const totalRows = leaves.length;
+
+      // Row center Y (relative to group top gy)
+      function rowRelY(rowIdx: number) { return rowIdx * ROW_H + ROW_H / 2; }
+
+      // Match center Y from span [topRow, botRow] (relative to gy)
+      function spanRelY(topRow: number, botRow: number) {
+        return (rowRelY(topRow) + rowRelY(botRow)) / 2;
+      }
+
+      const cols: Span[][] = [];
+
+      if (hasPQ) {
+        // Col 0: PQ matches — each span covers the two PQ player rows for that pair
+        const pqCol: Span[] = pqPairLeafIndices.map(([idxA, idxB]) => ({
+          topRow: leaves[idxA]!.rowIdx,
+          botRow: leaves[idxB]!.rowIdx,
+        }));
+        cols.push(pqCol);
+      }
+
+      // Build halving rounds starting from r2 pairs
+      let currentSlots = r2Leaves;
+      while (currentSlots.length >= 1) {
+        const col: Span[] = [];
+        for (let i = 0; i + 1 < currentSlots.length; i += 2) {
+          col.push({ topRow: currentSlots[i]!, botRow: currentSlots[i + 1]! });
+        }
+        if (currentSlots.length % 2 === 1) {
+          // odd slot gets a bye — span just covers itself
+          const last = currentSlots[currentSlots.length - 1]!;
+          col.push({ topRow: last, botRow: last });
+        }
+        cols.push(col);
+        if (col.length <= 1) break;
+        currentSlots = col.map((s) => (s.topRow + s.botRow) / 2);
+      }
+
+      // Round keys per column — must match buildGroupRoundDefs in groupknockout.ts exactly.
+      // buildGroupRoundDefs filters by matchCount <= bracketSize/2, which is based on r2Leaves count.
+      const allCols: string[] = [];
+      if (hasPQ) allCols.push(`${g.name} — Pre-qualify`);
+      {
+        const n = r2Leaves.length;
+        const bSize = n <= 1 ? 2 : Math.pow(2, Math.ceil(Math.log2(n)));
+        const maxCount = bSize / 2;
+        const allDefs = [
+          { lbl: 'R32', mc: 16 }, { lbl: 'R16', mc: 8 },
+          { lbl: 'QF',  mc: 4  }, { lbl: 'SF',  mc: 2 },
+          { lbl: 'Final', mc: 1 },
+        ];
+        const defs = allDefs.filter((d) => d.mc <= maxCount);
+        if (!defs.some((d) => d.lbl === 'Final')) defs.push({ lbl: 'Final', mc: 1 });
+        for (const d of defs) allCols.push(`${g.name} — ${d.lbl}`);
+      }
+
+      const groupH = totalRows * ROW_H;
+
+      return { gi, g, hasPQ, byePs, pqMatchCount, leaves, r2Leaves, cols, allCols, groupH, rowRelY, spanRelY };
     });
 
-    function groupH(meta: GroupMeta): number {
-      // Height is determined by the round with the most matches
-      const maxSlots = Math.max(...meta.rounds.map((r) => r.length), 1);
-      return maxSlots * MATCH_SP;
+    // Stack groups vertically
+    let stackY = PAD;
+    const grpY: number[] = [];
+    for (const d of grpData) {
+      grpY.push(stackY + LBL_H);
+      stackY += d.groupH + LBL_H + GRP_PAD;
     }
-    function groupW(meta: GroupMeta): number {
-      return meta.roundCols * COL_W + (meta.roundCols - 1) * COL_GAP;
-    }
+    const totalH = PAD + stackY;
 
-    function slotCY(y: number, h: number, mi: number, count: number): number {
-      const spacing = h / count;
-      return y + spacing * mi + spacing / 2;
+    const maxCols = Math.max(...grpData.map((d) => d.allCols.length), 1);
+    const nameX   = PAD;
+    const minCol0 = nameX + NAME_W + ARM;  // leftmost possible col-0 start (for groups with max cols)
+    const totalW  = minCol0 + maxCols * (COL_W + COL_GAP) - COL_GAP + ARM + PAD;
+    // Right-align each group's columns: groups with fewer columns start later so Final aligns.
+    const colsRight = totalW - PAD - ARM; // right edge of the last column
+    function gCol0X(numCols: number) {
+      return colsRight - numCols * (COL_W + COL_GAP) + COL_GAP;
     }
-
-    const maxGroupW = Math.max(...groupMetas.map(groupW), 0);
-    const totalW    = PAD + maxGroupW + PAD;
-    let stackY      = PAD;
-    for (const m of groupMetas) {
-      m.h = groupH(m); m.x = PAD; m.y = stackY + LBL_H;
-      stackY += m.h + LBL_H + GRP_GAP;
-    }
-    const totalH = PAD + stackY + PAD;
 
     const lines: string[] = [];
 
-    const ROUND_LABELS: Record<string, string> = {
-      'Pre-qualify': 'PRE-QUALIFY',
-      'Final': 'FINAL', 'SF': 'SEMI FINALS', 'QF': 'QUARTER FINALS',
-      'R16': 'ROUNDS', 'R32': 'ROUNDS', 'R64': 'ROUNDS',
-    };
-
-    for (const meta of groupMetas) {
-      const gData = groups[meta.gi]!;
-      const totalRounds = meta.roundCols;
+    for (let gi = 0; gi < grpData.length; gi++) {
+      const d  = grpData[gi]!;
+      const gy = grpY[gi]!;
       const multiGroup = groups.length > 1;
+      const col0X = gCol0X(d.allCols.length);  // this group's first column left edge
 
-      // Column headers
-      for (let ri = 0; ri < totalRounds; ri++) {
-        const rx = meta.x + ri * (COL_W + COL_GAP);
-        const roundKey = groupRoundKey(meta.name, ri, totalRounds, meta.hasPQ);
-        const roundShort = roundKey.replace(/^.*?—\s*/, '');
-        const colLabel = ROUND_LABELS[roundShort] ?? (/^R\d+$/.test(roundShort) ? 'ROUNDS' : roundShort.toUpperCase());
-        const displayLabel = multiGroup && ri === 0
-          ? `${esc(meta.name.toUpperCase())}  ${colLabel}`
-          : colLabel;
-        lines.push(`<text x="${rx + COL_W / 2}" y="${meta.y - 7}" text-anchor="middle" font-size="10" font-weight="700" font-family="sans-serif" fill="#888" letter-spacing="0.06em">${displayLabel}</text>`);
+      // Group label
+      if (multiGroup) {
+        lines.push(`<text x="${nameX}" y="${gy - 6}" font-size="11" font-weight="700" font-family="sans-serif" fill="#555" letter-spacing="0.04em">${esc(d.g.name.toUpperCase())}</text>`);
       }
 
-      for (let ri = 0; ri < totalRounds; ri++) {
-        const rSlots = meta.rounds[ri]!;
-        const rx = meta.x + ri * (COL_W + COL_GAP);
-        const roundKey = groupRoundKey(meta.name, ri, totalRounds, meta.hasPQ);
-        const roundResults: MatchInfo[] = gData.matchMap.get(roundKey) ?? [];
+      // Column headers
+      for (let ci = 0; ci < d.allCols.length; ci++) {
+        const cx = col0X + ci * (COL_W + COL_GAP);
+        lines.push(`<text x="${cx + COL_W/2}" y="${gy - 6}" text-anchor="middle" font-size="9" font-weight="700" font-family="sans-serif" fill="#888" letter-spacing="0.06em">${colLabel(d.allCols[ci]!)}</text>`);
+      }
 
-        // ── Connector lines ──
-        if (ri < totalRounds - 1) {
-          const nextSlots = meta.rounds[ri + 1]!;
-          const x1   = rx + COL_W;
-          const x2   = meta.x + (ri + 1) * (COL_W + COL_GAP);
-          const xMid = x1 + COL_GAP / 2;
+      // ── Player name rows ──
+      for (const leaf of d.leaves) {
+        const cy = gy + d.rowRelY(leaf.rowIdx);
+        lines.push(`<line x1="${nameX}" y1="${cy}" x2="${nameX + NAME_W}" y2="${cy}" stroke="#ddd" stroke-width="0.75"/>`);
+        lines.push(`<text x="${nameX + 5}" y="${cy + 4}" font-size="11" font-family="sans-serif" fill="#222">${clip(esc(leaf.player))}</text>`);
+      }
 
-          if (meta.hasPQ && ri === 0) {
-            // Pre-qualify → R2: each PQ match feeds one slot in R2; bye players have no PQ connector.
-            // R2 slots layout: [bye0, bye1, …, byeN-1, pqW0, pqW1, …]
-            // pqWinner i feeds into slot (byeCount_in_r2_pairs + i) in R2
-            const byeCount = meta.rounds[1]!.length - rSlots.length;
-            const pqOffset = Math.ceil(byeCount / 2); // how many R2 match-slots the bye players occupy (approx)
-            // More precisely: bye players fill slots 0..(byeCount-1) sequentially,
-            // pq winners fill slots byeCount..(byeCount+pqWinnerCount-1).
-            // R2 matches: (bye0 vs bye1), (bye2 vs bye3), …, (pqW0 vs pqW1), …
-            // pq winner i → R2 slot index = floor(byeCount/2) + floor(i/2)
-            // For each PQ match i, the winner goes to R2 slot: Math.floor(byeCount/2) + Math.floor(i/2)
-            const byeR2Pairs = Math.floor(byeCount / 2);
-            for (let pqi = 0; pqi < rSlots.length; pqi++) {
-              const cy1   = slotCY(meta.y, meta.h, pqi, rSlots.length);
-              const r2Idx = byeR2Pairs + Math.floor(pqi / 2);
-              const cy2   = slotCY(meta.y, meta.h, r2Idx, nextSlots.length);
-              lines.push(`<line x1="${x1}" y1="${cy1}" x2="${xMid}" y2="${cy1}" stroke="#bbb" stroke-width="1.25"/>`);
-              lines.push(`<line x1="${xMid}" y1="${cy1}" x2="${xMid}" y2="${cy2}" stroke="#bbb" stroke-width="1.25"/>`);
-              lines.push(`<line x1="${xMid}" y1="${cy2}" x2="${x2}" y2="${cy2}" stroke="#bbb" stroke-width="1.25"/>`);
+      // ── Name → col-0 connectors ──
+      {
+        const xStub  = nameX + NAME_W;
+        const xPQMid = xStub + ARM / 2;           // bracket elbow before PQ col
+        const cx0    = col0X;                      // PQ col left edge (or first col if no PQ)
+        const cx1    = col0X + (COL_W + COL_GAP); // second col left edge
+
+        if (d.hasPQ) {
+          // ── PQ player pairs → PQ box ──
+          for (const span of d.cols[0]!) {
+            const cyA  = gy + d.rowRelY(span.topRow);
+            const cyB  = gy + d.rowRelY(span.botRow);
+            const midY = (cyA + cyB) / 2;
+            lines.push(`<line x1="${xStub}" y1="${cyA}" x2="${xPQMid}" y2="${cyA}" stroke="#bbb" stroke-width="1.25"/>`);
+            lines.push(`<line x1="${xStub}" y1="${cyB}" x2="${xPQMid}" y2="${cyB}" stroke="#bbb" stroke-width="1.25"/>`);
+            lines.push(`<line x1="${xPQMid}" y1="${cyA}" x2="${xPQMid}" y2="${cyB}" stroke="#bbb" stroke-width="1.25"/>`);
+            lines.push(`<line x1="${xPQMid}" y1="${midY}" x2="${cx0}" y2="${midY}" stroke="#bbb" stroke-width="1.25"/>`);
+          }
+
+          // ── Bye players + PQ winners → second col (QF) boxes ──
+          // xm: the shared vertical bracket X — same x the PQ→QF inter-column connector uses.
+          const xm    = col0X + COL_W + COL_GAP / 2;
+          const qfCol = d.cols[1]!;
+          for (let qi = 0; qi < qfCol.length; qi++) {
+            const qspan = qfCol[qi]!;
+            const qcY   = gy + d.spanRelY(qspan.topRow, qspan.botRow);
+            const r2a   = d.r2Leaves[qi * 2];
+            const r2b   = d.r2Leaves[qi * 2 + 1];
+            const aIsBye = r2a !== undefined && Number.isInteger(r2a);
+            const bIsBye = r2b !== undefined && Number.isInteger(r2b);
+
+            if (aIsBye && bIsBye) {
+              // Both bye — bracket arm at xPQMid, then long line to second col
+              const cyA = gy + d.rowRelY(r2a!);
+              const cyB = gy + d.rowRelY(r2b!);
+              lines.push(`<line x1="${xStub}" y1="${cyA}" x2="${xPQMid}" y2="${cyA}" stroke="#bbb" stroke-width="1.25"/>`);
+              lines.push(`<line x1="${xStub}" y1="${cyB}" x2="${xPQMid}" y2="${cyB}" stroke="#bbb" stroke-width="1.25"/>`);
+              lines.push(`<line x1="${xPQMid}" y1="${cyA}" x2="${xPQMid}" y2="${cyB}" stroke="#bbb" stroke-width="1.25"/>`);
+              lines.push(`<line x1="${xPQMid}" y1="${qcY}" x2="${cx1}" y2="${qcY}" stroke="#bbb" stroke-width="1.25"/>`);
+            } else if (aIsBye || bIsBye) {
+              // One bye + one PQ winner: bye arm to xm, drop to qcY (inter-col draws xm→cx1).
+              const byeRow = aIsBye ? r2a! : r2b!;
+              const byCy   = gy + d.rowRelY(byeRow);
+              lines.push(`<line x1="${xStub}" y1="${byCy}" x2="${xm}" y2="${byCy}" stroke="#bbb" stroke-width="1.25"/>`);
+              lines.push(`<line x1="${xm}" y1="${byCy}" x2="${xm}" y2="${qcY}" stroke="#bbb" stroke-width="1.25"/>`);
+            }
+          }
+        } else {
+          // No PQ — bracket arms from name col directly to first match column
+          for (const span of d.cols[0]!) {
+            const cyA  = gy + d.rowRelY(span.topRow);
+            const cyB  = span.topRow === span.botRow ? cyA : gy + d.rowRelY(span.botRow);
+            const midY = (cyA + cyB) / 2;
+            lines.push(`<line x1="${xStub}" y1="${cyA}" x2="${xPQMid}" y2="${cyA}" stroke="#bbb" stroke-width="1.25"/>`);
+            if (span.topRow !== span.botRow) {
+              lines.push(`<line x1="${xStub}" y1="${cyB}" x2="${xPQMid}" y2="${cyB}" stroke="#bbb" stroke-width="1.25"/>`);
+              lines.push(`<line x1="${xPQMid}" y1="${cyA}" x2="${xPQMid}" y2="${cyB}" stroke="#bbb" stroke-width="1.25"/>`);
+            }
+            lines.push(`<line x1="${xPQMid}" y1="${midY}" x2="${cx0}" y2="${midY}" stroke="#bbb" stroke-width="1.25"/>`);
+          }
+        }
+      }
+
+      // ── Match columns: boxes + inter-column connectors ──
+      for (let ci = 0; ci < d.cols.length; ci++) {
+        const col = d.cols[ci]!;
+        const cx  = col0X + ci * (COL_W + COL_GAP);
+        const rk  = d.allCols[ci]!;
+        const rRes: MatchInfo[] = d.g.matchMap.get(rk) ?? [];
+
+        // Inter-column connectors (current col → next col)
+        if (ci < d.cols.length - 1) {
+          const nextCol = d.cols[ci + 1]!;
+          const x1  = cx + COL_W;
+          const x2  = col0X + (ci + 1) * (COL_W + COL_GAP);
+          const xm  = x1 + COL_GAP / 2;
+
+          if (d.hasPQ && ci === 0) {
+            // PQ → QF: find the r2Leaves index of each PQ winner (fractional entry),
+            // then the QF slot index = floor(r2Leaves_index / 2).
+            const fracIndices = d.r2Leaves
+              .map((rv, idx) => ({ rv, idx }))
+              .filter(({ rv }) => !Number.isInteger(rv));
+            for (let mi = 0; mi < col.length; mi++) {
+              const span = col[mi]!;
+              const cy1  = gy + d.spanRelY(span.topRow, span.botRow);
+              const r2idx = fracIndices[mi]?.idx ?? -1;
+              const r2i   = r2idx >= 0 ? Math.floor(r2idx / 2) : -1;
+              if (r2i >= 0 && r2i < nextCol.length) {
+                const ns   = nextCol[r2i]!;
+                const cy2  = gy + d.spanRelY(ns.topRow, ns.botRow);
+                lines.push(`<line x1="${x1}" y1="${cy1}" x2="${xm}" y2="${cy1}" stroke="#bbb" stroke-width="1.25"/>`);
+                lines.push(`<line x1="${xm}" y1="${cy1}" x2="${xm}" y2="${cy2}" stroke="#bbb" stroke-width="1.25"/>`);
+                lines.push(`<line x1="${xm}" y1="${cy2}" x2="${x2}" y2="${cy2}" stroke="#bbb" stroke-width="1.25"/>`);
+              }
             }
           } else {
-            // Standard halving connectors: each next slot fed by 2 prev slots
-            for (let ni = 0; ni < nextSlots.length; ni++) {
-              const cy2  = slotCY(meta.y, meta.h, ni, nextSlots.length);
-              const srcA = ni * 2;
-              const srcB = ni * 2 + 1;
-              for (const si of [srcA, srcB]) {
-                if (si < rSlots.length) {
-                  const cy1 = slotCY(meta.y, meta.h, si, rSlots.length);
-                  lines.push(`<line x1="${x1}" y1="${cy1}" x2="${xMid}" y2="${cy1}" stroke="#bbb" stroke-width="1.25"/>`);
-                  lines.push(`<line x1="${xMid}" y1="${cy1}" x2="${xMid}" y2="${cy2}" stroke="#bbb" stroke-width="1.25"/>`);
+            // Standard: pairs of current col → next col
+            for (let ni = 0; ni < nextCol.length; ni++) {
+              const ns   = nextCol[ni]!;
+              const cy2  = gy + d.spanRelY(ns.topRow, ns.botRow);
+              for (const si of [ni * 2, ni * 2 + 1]) {
+                if (si < col.length) {
+                  const s   = col[si]!;
+                  const cy1 = gy + d.spanRelY(s.topRow, s.botRow);
+                  lines.push(`<line x1="${x1}" y1="${cy1}" x2="${xm}" y2="${cy1}" stroke="#bbb" stroke-width="1.25"/>`);
+                  lines.push(`<line x1="${xm}" y1="${cy1}" x2="${xm}" y2="${cy2}" stroke="#bbb" stroke-width="1.25"/>`);
                 }
               }
-              lines.push(`<line x1="${xMid}" y1="${cy2}" x2="${x2}" y2="${cy2}" stroke="#bbb" stroke-width="1.25"/>`);
+              lines.push(`<line x1="${xm}" y1="${cy2}" x2="${x2}" y2="${cy2}" stroke="#bbb" stroke-width="1.25"/>`);
             }
           }
         }
 
-        // ── Match slots ──
-        for (let mi = 0; mi < rSlots.length; mi++) {
-          const slot = rSlots[mi]!;
-          const cy   = slotCY(meta.y, meta.h, mi, rSlots.length);
-          const sh   = SLOT_H;
-          const sy   = cy - sh / 2;
+        // Match boxes
+        for (let mi = 0; mi < col.length; mi++) {
+          const span = col[mi]!;
+          const cy   = gy + d.spanRelY(span.topRow, span.botRow);
+          const sy   = cy - BOX_H / 2;
+          const res  = rRes[mi];
+          const isDone = res?.isDone ?? false;
+          const wA  = isDone && res?.winner === 'a';
+          const wB  = isDone && res?.winner === 'b';
+          const isPlaceholder = (n?: string) => /(?:Pre-qualify Winner|Winner \d+|Finalist \d+)/i.test(n ?? '');
+          const aN  = res?.aName ? (isPlaceholder(res.aName) ? '' : clip(esc(res.aName))) : 'TBD';
+          const bN  = res?.bName ? (isPlaceholder(res.bName) ? '' : clip(esc(res.bName))) : 'TBD';
 
-          const res: MatchInfo | undefined = roundResults[mi];
-          const isDone  = res?.isDone ?? false;
-          const winnerA = isDone && res?.winner === 'a';
-          const winnerB = isDone && res?.winner === 'b';
+          lines.push(`<rect x="${cx}" y="${sy}" width="${COL_W}" height="${BOX_H}" rx="5" fill="#fff" stroke="#bbb" stroke-width="1"/>`);
+          lines.push(`<line x1="${cx+1}" y1="${cy}" x2="${cx+COL_W-1}" y2="${cy}" stroke="#ebebeb" stroke-width="0.75"/>`);
+          lines.push(`<text x="${cx+7}" y="${sy+16}" font-size="11" font-weight="${wA?'700':'400'}" opacity="${isDone&&!wA?'0.38':'1'}" font-family="sans-serif" fill="#333">${aN}</text>`);
+          lines.push(`<text x="${cx+7}" y="${sy+BOX_H-8}" font-size="11" font-weight="${wB?'700':'400'}" opacity="${isDone&&!wB?'0.38':'1'}" font-family="sans-serif" fill="#333">${bN}</text>`);
 
-          // Use real match names from matchMap when available; fall back to seeded slot names
-          const aName = isDone && res?.aName ? clip(esc(res.aName)) : (slot.aName ? clip(esc(slot.aName)) : 'TBD');
-          const bName = isDone && res?.bName ? clip(esc(res.bName)) : (slot.bName ? clip(esc(slot.bName)) : 'TBD');
-
-          const aFill    = winnerA ? '#000' : '#333';
-          const bFill    = winnerB ? '#000' : '#333';
-          const aWeight  = winnerA ? '700' : '400';
-          const bWeight  = winnerB ? '700' : '400';
-          const aOpacity = isDone && !winnerA ? '0.38' : '1';
-          const bOpacity = isDone && !winnerB ? '0.38' : '1';
-
-          const sLines    = groupScoreLines(res);
-          const scoreText = sLines[0] ?? '';
-          const pillW     = scoreText ? Math.max(36, Math.min(scoreText.length * 6.5 + 10, COL_W - 90)) : 0;
-
-          lines.push(`<rect x="${rx}" y="${sy}" width="${COL_W}" height="${sh}" rx="5" fill="#fff" stroke="#bbb" stroke-width="1"/>`);
-          lines.push(`<line x1="${rx + 1}" y1="${sy + sh / 2}" x2="${rx + COL_W - 1}" y2="${sy + sh / 2}" stroke="#ebebeb" stroke-width="0.75"/>`);
-          lines.push(`<text x="${rx + 8}" y="${sy + 16}" font-size="11" font-weight="${aWeight}" opacity="${aOpacity}" font-family="sans-serif" fill="${aFill}">${aName}</text>`);
-          lines.push(`<text x="${rx + 8}" y="${sy + sh - 8}" font-size="11" font-weight="${bWeight}" opacity="${bOpacity}" font-family="sans-serif" fill="${bFill}">${bName}</text>`);
-
-          if (scoreText) {
-            const px    = rx + COL_W - pillW - 4;
-            const pillH = 17;
-            const py    = cy - pillH / 2;
-            lines.push(`<rect x="${px}" y="${py}" width="${pillW}" height="${pillH}" rx="8" fill="#f5f5f5" stroke="#e0e0e0" stroke-width="0.75"/>`);
-            lines.push(`<text x="${px + pillW / 2}" y="${py + 12}" text-anchor="middle" font-size="9.5" font-family="sans-serif" fill="#444" font-weight="600">${scoreText}</text>`);
+          const s = fmtScore(res);
+          if (s) {
+            const pw = Math.max(32, s.length * 6.5 + 10);
+            const px = cx + COL_W - pw - 4; const py = cy - 8;
+            lines.push(`<rect x="${px}" y="${py}" width="${pw}" height="16" rx="7" fill="#f5f5f5" stroke="#e0e0e0" stroke-width="0.75"/>`);
+            lines.push(`<text x="${px+pw/2}" y="${py+11}" text-anchor="middle" font-size="9.5" font-family="sans-serif" fill="#444" font-weight="600">${s}</text>`);
           }
         }
       }
@@ -1385,30 +1450,38 @@
     void tournamentTick;
     void playerTick;
     if (tournament?.format !== 'knockout') return '';
-    if (!tournament.groups || Object.keys(tournament.groups).length === 0) return '';
+    if (!tournament.groups || Object.keys(tournament.groups).length < 2) return '';
     const koMatches = plannedMatches
-      .filter((m) => /^KO — /.test(m.round ?? ''))
-      .sort((a, b) => (a.matchOrder ?? 0) - (b.matchOrder ?? 0));
+      .filter((m) => /^KO — /.test(m.round ?? ''));
     if (koMatches.length === 0) return '';
     const histKOMap = buildHistByRound(historyMatches, (r) => /^KO — /.test(r));
-    // Group by round label, preserving order
-    const roundOrder: string[] = [];
+    // Group by round label, ordering rounds by bracket stage (Pre-QF → R16 → QF → SF → Final)
+    const KO_STAGE_ORDER = ['Pre-QF', 'Round of 16', 'Quarter Finals', 'Semi Finals', 'Final'];
+    const stageRank = (r: string) => {
+      const s = r.replace(/^KO — /, '');
+      const i = KO_STAGE_ORDER.indexOf(s);
+      return i >= 0 ? i : 99;
+    };
     const roundMap = new Map<string, PlannedMatch[]>();
     for (const m of koMatches) {
       const r = m.round!;
-      if (!roundMap.has(r)) { roundMap.set(r, []); roundOrder.push(r); }
+      if (!roundMap.has(r)) roundMap.set(r, []);
       roundMap.get(r)!.push(m);
     }
+    const roundOrder = [...roundMap.keys()].sort((a, b) => stageRank(a) - stageRank(b));
+    // Sort matches within each round by matchOrder
+    for (const arr of roundMap.values()) arr.sort((a, b) => (a.matchOrder ?? 0) - (b.matchOrder ?? 0));
     const cols = roundOrder.map((r) => {
       const slots: BracketSlot[] = [];
       for (const m of (roundMap.get(r) ?? [])) {
         const h = findHistEntry(histKOMap, r, m.aName, m.bName, slots.length);
         const isDone = !!m.completedAt || !!h;
+        const isKOPlaceholder = (n: string) => /(?:Winner|Finalist)\s+\d+|KO Qualifier/i.test(n);
         slots.push({
           aId: m.aResolvedId,
-          aName: m.aName,
+          aName: m.aResolvedId ? (resolvedName(m.aResolvedId, m.aName)) : (isKOPlaceholder(m.aName) ? '' : m.aName),
           bId: m.bResolvedId,
-          bName: m.bName,
+          bName: m.bResolvedId ? (resolvedName(m.bResolvedId, m.bName)) : (isKOPlaceholder(m.bName) ? '' : m.bName),
           isDone,
           winner: m.result?.winner === 'a' ? 'a' : m.result?.winner === 'b' ? 'b'
             : h?.winner === 'a' ? 'a' : h?.winner === 'b' ? 'b' : undefined,
@@ -1421,8 +1494,7 @@
       return { label: r.replace(/^KO — /, ''), slots };
     });
     if (cols.length < 1) return '';
-    if (cols.length === 1) return '';
-    return buildFlightBracketSVG(cols);
+    return buildFlightBracketSVG(cols, true);
   });
 
   // Standalone KO bracket SVG — for format='knockout' tournaments.
@@ -1760,36 +1832,12 @@
         </div>
         <div class="bracket-svg-wrap">
           {@html groupKODiagramSVG}
-        </div>
-        <div class="page-footer">
-          {#if printLogoUrl}
-            <img src={printLogoUrl} alt="Organiser logo" class="page-footer-logo" />
+          {#if groupKOPhase2SVG}
+            <div class="combined-ko-divider">
+              <span class="combined-ko-label">Combined Knockout</span>
+            </div>
+            {@html groupKOPhase2SVG}
           {/if}
-          {#if printOrganizerName}
-            <span class="page-footer-org">Organised by {printOrganizerName}</span>
-          {/if}
-          <span class="page-footer-brand">carromscore.app</span>
-        </div>
-      </section>
-    {/if}
-
-    {#if groupKOPhase2SVG}
-      <!-- ─── GROUP KNOCKOUT PHASE 2 PAGE ──────────────────────────── -->
-      <section class="page bracket-page">
-        <div class="bracket-hdr">
-          <div class="bracket-hdr-main">
-            <p class="brand">Carromscore</p>
-            <h2 class="bracket-title">{tournamentName} — Phase 2: Knockout</h2>
-            {#if printOrganizerName}
-              <p class="bracket-organizer">Organised by {printOrganizerName}</p>
-            {/if}
-          </div>
-          {#if printLogoUrl}
-            <img src={printLogoUrl} alt="Organiser logo" class="bracket-logo" />
-          {/if}
-        </div>
-        <div class="bracket-svg-wrap">
-          {@html groupKOPhase2SVG}
         </div>
         <div class="page-footer">
           {#if printLogoUrl}
@@ -2067,6 +2115,27 @@
     page-break-after: always;
   }
   .page:last-child { break-after: auto; page-break-after: auto; }
+
+  .combined-ko-divider {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin: 2rem 0 1rem;
+  }
+  .combined-ko-divider::before,
+  .combined-ko-divider::after {
+    content: '';
+    flex: 1;
+    border-top: 1px solid #ccc;
+  }
+  .combined-ko-label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    color: #888;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
 
   /* ─── Per-page footer (logo + "Organised by") ───────────────── */
   /* Sits at the bottom of every .page via margin-top: auto in a

@@ -105,6 +105,8 @@ export type Tournament = {
    * (e.g. "g1") to group metadata + player ID list.
    */
   groups?: Record<string, LeagueGroup>;
+  /** Unix ms timestamp set when the organiser locks the tournament. Absent = unlocked. */
+  lockedAt?: number;
 };
 
 /**
@@ -604,6 +606,7 @@ function mergeRemote(raw: Record<string, unknown>): void {
     const leagueCfg = parseLeagueCfg(v.leagueCfg);
     const knockoutCfg = parseKnockoutCfg(v.knockoutCfg);
     const groups = parseGroups(v.groups);
+    const lockedAt = typeof v.lockedAt === 'number' && v.lockedAt > 0 ? v.lockedAt : undefined;
     const existing = memoryStore.find((t) => t.key === key);
     if (existing) {
       existing.name = name;
@@ -635,6 +638,8 @@ function mergeRemote(raw: Record<string, unknown>): void {
       else delete existing.knockoutCfg;
       if (groups) existing.groups = groups;
       else delete existing.groups;
+      if (lockedAt) existing.lockedAt = lockedAt;
+      else delete existing.lockedAt;
     } else {
       memoryStore.push({
         key,
@@ -654,6 +659,7 @@ function mergeRemote(raw: Record<string, unknown>): void {
         ...(leagueCfg ? { leagueCfg } : {}),
         ...(knockoutCfg ? { knockoutCfg } : {}),
         ...(groups ? { groups } : {}),
+        ...(lockedAt ? { lockedAt } : {}),
       });
     }
   }
@@ -1085,6 +1091,35 @@ export async function updateTournamentFormat(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return { ok: false, error: msg || 'Format update failed' };
+  }
+}
+
+/** Lock or unlock a tournament. Locked tournaments are read-only in the admin UI. */
+export async function setTournamentLocked(
+  key: string,
+  locked: boolean,
+): Promise<TournamentWriteOutcome> {
+  if (!key) return { ok: false, error: 'Missing tournament key' };
+  try {
+    const [{ firebaseApp }, { getDatabase, ref, update }] = await Promise.all([
+      import('./firebase'),
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    await update(ref(db, `tournaments/${key}`), {
+      lockedAt: locked ? Date.now() : null,
+      lastActive: Date.now(),
+    });
+    const t = memoryStore.find((x) => x.key === key);
+    if (t) {
+      t.lockedAt = locked ? Date.now() : undefined;
+      t.lastActive = Date.now();
+      notify();
+    }
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg || 'Lock update failed' };
   }
 }
 
