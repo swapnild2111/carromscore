@@ -1110,10 +1110,13 @@ export async function setTournamentLocked(
       lockedAt: locked ? Date.now() : null,
       lastActive: Date.now(),
     });
-    const t = memoryStore.find((x) => x.key === key);
-    if (t) {
-      t.lockedAt = locked ? Date.now() : undefined;
-      t.lastActive = Date.now();
+    const idx = memoryStore.findIndex((x) => x.key === key);
+    if (idx !== -1) {
+      memoryStore[idx] = {
+        ...memoryStore[idx]!,
+        lockedAt: locked ? Date.now() : undefined,
+        lastActive: Date.now(),
+      };
       notify();
     }
     return { ok: true };

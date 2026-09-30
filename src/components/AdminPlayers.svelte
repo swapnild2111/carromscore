@@ -880,7 +880,7 @@
 
         <label class="edit-field">
           <span>Gender</span>
-          <select bind:value={editGender} aria-label="Gender">
+          <select class="themed-select" bind:value={editGender} aria-label="Gender">
             <option value="">— not set —</option>
             <option value="male">Male</option>
             <option value="female">Female</option>
@@ -1066,31 +1066,27 @@
               ariaLabel="Batch country"
             />
           </label>
-          <div class="add-meta-row">
-            <label class="edit-field" style="margin:0">
-              <span>Gender</span>
-              <select bind:value={addingGender} aria-label="Gender">
-                <option value="">— optional —</option>
-                <option value="male">Male</option>
-                <option value="female">Female</option>
-                <option value="other">Other</option>
-              </select>
-            </label>
-            <label class="edit-field" style="margin:0">
-              <span>Date of birth</span>
-              <input type="date" bind:value={addingDob} aria-label="Date of birth" />
-            </label>
-          </div>
-          <div class="add-meta-row">
-            <label class="edit-field" style="margin:0">
-              <span>Phone</span>
-              <input type="tel" bind:value={addingPhone} placeholder="optional" aria-label="Phone" />
-            </label>
-            <label class="edit-field" style="margin:0">
-              <span>Email</span>
-              <input type="email" bind:value={addingEmail} placeholder="optional" aria-label="Email" />
-            </label>
-          </div>
+          <label class="edit-field">
+            <span>Gender</span>
+            <select class="themed-select" bind:value={addingGender} aria-label="Gender">
+              <option value="">— optional —</option>
+              <option value="male">Male</option>
+              <option value="female">Female</option>
+              <option value="other">Other</option>
+            </select>
+          </label>
+          <label class="edit-field">
+            <span>Date of birth</span>
+            <input type="date" bind:value={addingDob} aria-label="Date of birth" />
+          </label>
+          <label class="edit-field">
+            <span>Phone</span>
+            <input type="tel" bind:value={addingPhone} placeholder="optional" aria-label="Phone" />
+          </label>
+          <label class="edit-field">
+            <span>Email</span>
+            <input type="email" bind:value={addingEmail} placeholder="optional" aria-label="Email" />
+          </label>
           <label class="edit-field">
             <span>Address</span>
             <input type="text" bind:value={addingAddress} placeholder="optional" aria-label="Address" />
@@ -1554,14 +1550,14 @@
     outline: none;
     border-color: var(--accent);
   }
-  .edit-field select {
+  :global(.themed-select) {
     width: 100%;
     background-color: #0f0f0f;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%239aa0a6'/%3E%3C/svg%3E");
     background-repeat: no-repeat;
     background-position: right 0.6rem center;
     background-size: 10px 6px;
-    color: var(--fg);
+    color: var(--fg, #f5f5f5);
     border: 1px solid #2a2a2a;
     border-radius: 0.4rem;
     padding: 0.45rem 1.9rem 0.45rem 0.55rem;
@@ -1571,11 +1567,11 @@
     -webkit-appearance: none;
     cursor: pointer;
   }
-  .edit-field select:focus {
+  :global(.themed-select:focus) {
     outline: none;
-    border-color: var(--accent);
+    border-color: var(--accent, #ffd54a);
   }
-  .edit-field select option {
+  :global(.themed-select option) {
     background: #1a1a1a;
   }
   .edit-field input[type="date"]::-webkit-calendar-picker-indicator {
