@@ -1456,10 +1456,11 @@
     if (koMatches.length === 0) return '';
     const histKOMap = buildHistByRound(historyMatches, (r) => /^KO — /.test(r));
     // Group by round label, ordering rounds by bracket stage (Pre-QF → R16 → QF → SF → Final)
-    const KO_STAGE_ORDER = ['Pre-QF', 'Round of 16', 'Quarter Finals', 'Semi Finals', 'Final'];
+    // Short aliases (QF/SF) kept for backward compat with data created before the rename.
     const stageRank = (r: string) => {
       const s = r.replace(/^KO — /, '');
-      const i = KO_STAGE_ORDER.indexOf(s);
+      const order = ['Pre-QF', 'Round of 16', 'QF', 'Quarter Finals', 'SF', 'Semi Finals', 'Final'];
+      const i = order.indexOf(s);
       return i >= 0 ? i : 99;
     };
     const roundMap = new Map<string, PlannedMatch[]>();
