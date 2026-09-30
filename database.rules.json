@@ -263,7 +263,7 @@
     },
 
     "organiserProfiles": {
-      ".read": "auth != null && root.child('adminRoles').child(auth.uid).val() == 'super'",
+      ".read": "auth != null && (root.child('adminRoles').child(auth.uid).val() == 'super' || root.child('organiserRoles').child(auth.uid).val() == true)",
       "$uid": {
         ".read": true,
         ".write": "auth != null && auth.uid == $uid",

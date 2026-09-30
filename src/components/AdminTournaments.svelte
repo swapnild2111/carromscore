@@ -1070,6 +1070,16 @@
     }
   }
 
+  /** Organiser profiles eligible to be added as co-organisers (excludes
+   *  already-added ones). Uses orgProfilesMap which is readable by organisers. */
+  const eligibleCoOrgs = $derived(() => {
+    const already = new Set(coOrgUids);
+    return Object.entries(orgProfilesMap)
+      .filter(([uid]) => !already.has(uid))
+      .map(([uid, name]) => ({ uid, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  });
+
   /** List of uid options for the picker, excluding already-assigned
    *  organisers. Alpha-sorted by display label. */
   const eligibleUsers = $derived(() => {
@@ -2139,7 +2149,7 @@
 
         <fieldset class="edit-fieldset">
           <legend>Co-organisers</legend>
-          <p class="fieldset-hint">Co-organisers can edit matches in this tournament. Enter their Firebase UID to add them.</p>
+          <p class="fieldset-hint">Co-organisers can edit matches in this tournament.</p>
           {#if coOrgLoading}
             <p class="empty">Loading…</p>
           {:else}
@@ -2161,19 +2171,24 @@
             </ul>
           {/if}
           <div class="uid-add">
-            <input
-              type="text"
-              class="uid-input"
-              placeholder="Firebase UID"
+            <select
+              class="user-picker"
               bind:value={coOrgPickerValue}
               disabled={saving}
-              aria-label="Co-organiser Firebase UID"
-            />
+              aria-label="Pick a co-organiser"
+            >
+              <option value="">
+                {#if Object.keys(orgProfilesMap).length === 0}Loading organisers…{:else}Select an organiser…{/if}
+              </option>
+              {#each eligibleCoOrgs() as o (o.uid)}
+                <option value={o.uid}>{o.name}</option>
+              {/each}
+            </select>
             <button
               type="button"
               class="btn btn-primary"
               onclick={addCoOrg}
-              disabled={saving || !coOrgPickerValue.trim()}
+              disabled={saving || !coOrgPickerValue}
             >Add</button>
           </div>
         </fieldset>
