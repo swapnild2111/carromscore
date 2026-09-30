@@ -258,6 +258,29 @@ export async function patchPlannedPlayer(
   }
 }
 
+export async function patchPlannedBoard(
+  mid: string,
+  board: number,
+): Promise<PlannedWriteOutcome> {
+  if (!mid) return { ok: false, error: 'no mid' };
+  const b = Math.floor(board);
+  if (!Number.isFinite(b) || b < 1 || b > 99) return { ok: false, error: 'board must be 1–99' };
+  try {
+    const [{ getDatabase, ref, get, update }] = await Promise.all([
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    const snap = await get(ref(db, `planned/${mid}`));
+    if (!snap.exists()) return { ok: false, error: 'not found' };
+    const val = snap.val() as PlannedMatch;
+    if (val.completedAt) return { ok: false, error: 'match already completed' };
+    await update(ref(db, `planned/${mid}`), { board: b });
+    return { ok: true, mid };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'patch failed' };
+  }
+}
+
 export async function deletePlannedMatch(mid: string): Promise<PlannedWriteOutcome> {
   if (!mid) return { ok: false, error: 'no mid' };
   try {
