@@ -56,7 +56,7 @@
     type KnockoutCfg,
 
   } from '../lib/tournaments';
-  import { subscribeCurrentUserRole, type Role } from '../lib/roles';
+  import { subscribeCurrentUserRole, loadAllOrganiserRoles, type Role } from '../lib/roles';
   import { currentUser } from '../lib/auth';
   import {
     loadAll as loadAllPlayers,
@@ -193,6 +193,7 @@
    *  from the super-only Roles surface / super's own admin panel.
    */
   let usersMap = $state<Record<string, { uid: string; email: string; displayName?: string }>>({});
+  let organiserRoleUids = $state<Set<string>>(new Set());
   let usersLoading = $state(false);
   let userPickerValue = $state('');
   // Co-organiser state — shared between Edit and Add dialogs
@@ -986,7 +987,7 @@
   async function loadUsers() {
     usersLoading = true;
     try {
-      const raw = await loadAllUsers();
+      const [raw, orgRoleSet] = await Promise.all([loadAllUsers(), loadAllOrganiserRoles()]);
       // Slim the type — the dialog only needs uid/email/displayName.
       const slim: Record<string, { uid: string; email: string; displayName?: string }> = {};
       for (const [uid, u] of Object.entries(raw)) {
@@ -997,6 +998,7 @@
         };
       }
       usersMap = slim;
+      organiserRoleUids = orgRoleSet;
     } finally {
       usersLoading = false;
     }
@@ -1094,22 +1096,22 @@
   }
 
   /** Users eligible to be added as co-organisers (excludes already-added
-   *  and super-admins). Merges usersMap (all users, super-only) with
-   *  orgProfilesMap (organiser profiles, visible to all) so the picker
-   *  shows every organiser-role user even if they have no org profile. */
+   *  and super-admins). Only users with organiser role appear; name comes
+   *  from orgProfilesMap first, then displayName/email from usersMap. */
   const eligibleCoOrgs = $derived(() => {
     const already = new Set(coOrgUids);
     const seen = new Set<string>();
     const candidates: { uid: string; name: string }[] = [];
-    // orgProfilesMap: available to all organisers, has org display names
+    // orgProfilesMap: has org display names, only for users with org profile
     for (const [uid, name] of Object.entries(orgProfilesMap)) {
       if (already.has(uid) || superUids.has(uid)) continue;
       seen.add(uid);
       candidates.push({ uid, name });
     }
-    // usersMap: available to super admins — catches users without org profiles
+    // usersMap filtered to organiser-role UIDs — catches organisers without profiles
     for (const [uid, u] of Object.entries(usersMap)) {
       if (already.has(uid) || superUids.has(uid) || seen.has(uid)) continue;
+      if (!organiserRoleUids.has(uid)) continue;
       const name = u.displayName?.trim() || u.email || uid.slice(0, 8) + '…';
       candidates.push({ uid, name });
     }
