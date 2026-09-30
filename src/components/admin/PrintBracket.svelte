@@ -277,7 +277,7 @@
   // For open tournaments it's unique names gathered from planned
   // records, each attempted to resolve against /players for a
   // country pill.
-  type RosterRow = { name: string; country?: string };
+  type RosterRow = { name: string; country?: string; represents?: string };
   const roster = $derived.by<RosterRow[]>(() => {
     void playerTick;
     void tournamentTick;
@@ -296,6 +296,7 @@
         out.push({
           name: p.canonicalName,
           ...(p.country ? { country: p.country } : {}),
+          ...(p.represents ? { represents: p.represents } : {}),
         });
       }
     } else {
@@ -312,6 +313,7 @@
           out.push({
             name: p ? p.canonicalName : trimmed,
             ...(p?.country ? { country: p.country } : {}),
+            ...(p?.represents ? { represents: p.represents } : {}),
           });
         }
       }
@@ -1742,6 +1744,9 @@
               {#if p.country && p.country !== 'Unknown'}
                 <span class="roster-flag" aria-label={countryName(p.country)}>{flagEmoji(p.country)}</span>
               {/if}
+              {#if p.represents}
+                <span class="roster-represents">{p.represents}</span>
+              {/if}
             </li>
           {/each}
         </ol>
@@ -2285,6 +2290,13 @@
   .roster-flag {
     flex-shrink: 0;
     font-size: 0.85rem;
+  }
+  .roster-represents {
+    flex-shrink: 1;
+    font-size: 0.78rem;
+    color: #888;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .cover-empty {
     color: #666;
