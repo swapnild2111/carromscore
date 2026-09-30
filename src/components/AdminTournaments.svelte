@@ -707,6 +707,7 @@
     coOrgUids = [];
     coOrgPickerValue = '';
     coOrgLoading = true;
+    if (Object.keys(usersMap).length === 0) void loadUsers();
     Promise.all([
       loadCoOrganisers(t.key),
       (async () => {
@@ -1059,7 +1060,10 @@
   }
 
   function coOrgLabelForUid(uid: string): string {
-    return orgProfilesMap[uid] ?? uid.slice(0, 8) + '…';
+    if (orgProfilesMap[uid]) return orgProfilesMap[uid];
+    const u = usersMap[uid];
+    if (u) return u.displayName?.trim() || u.email || uid.slice(0, 8) + '…';
+    return uid.slice(0, 8) + '…';
   }
 
   async function addCoOrg() {
@@ -1089,14 +1093,27 @@
     }
   }
 
-  /** Organiser profiles eligible to be added as co-organisers (excludes
-   *  already-added ones and super-admins). Uses orgProfilesMap. */
+  /** Users eligible to be added as co-organisers (excludes already-added
+   *  and super-admins). Merges usersMap (all users, super-only) with
+   *  orgProfilesMap (organiser profiles, visible to all) so the picker
+   *  shows every organiser-role user even if they have no org profile. */
   const eligibleCoOrgs = $derived(() => {
     const already = new Set(coOrgUids);
-    return Object.entries(orgProfilesMap)
-      .filter(([uid]) => !already.has(uid) && !superUids.has(uid))
-      .map(([uid, name]) => ({ uid, name }))
-      .sort((a, b) => a.name.localeCompare(b.name));
+    const seen = new Set<string>();
+    const candidates: { uid: string; name: string }[] = [];
+    // orgProfilesMap: available to all organisers, has org display names
+    for (const [uid, name] of Object.entries(orgProfilesMap)) {
+      if (already.has(uid) || superUids.has(uid)) continue;
+      seen.add(uid);
+      candidates.push({ uid, name });
+    }
+    // usersMap: available to super admins — catches users without org profiles
+    for (const [uid, u] of Object.entries(usersMap)) {
+      if (already.has(uid) || superUids.has(uid) || seen.has(uid)) continue;
+      const name = u.displayName?.trim() || u.email || uid.slice(0, 8) + '…';
+      candidates.push({ uid, name });
+    }
+    return candidates.sort((a, b) => a.name.localeCompare(b.name));
   });
 
   /** List of uid options for the picker, excluding already-assigned
@@ -2194,7 +2211,7 @@
               aria-label="Pick a co-organiser"
             >
               <option value="">
-                {#if Object.keys(orgProfilesMap).length === 0}Loading organisers…{:else}Select an organiser…{/if}
+                {#if coOrgLoading || usersLoading}Loading…{:else}Select a user…{/if}
               </option>
               {#each eligibleCoOrgs() as o (o.uid)}
                 <option value={o.uid}>{o.name}</option>

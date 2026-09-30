@@ -55,7 +55,7 @@
     // v3.3: organiser role gates on parent tournament's createdBy.
     if (role.isOrganiser && m.tournamentKey) {
       const t = findByKey(m.tournamentKey);
-      if (t && uid && t.createdBy === uid) return true;
+      if (t && uid && (t.createdBy === uid || t.coOrganisers?.[uid])) return true;
     }
     return false;
   }

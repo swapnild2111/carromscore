@@ -1781,7 +1781,7 @@
     const t = findByKey(key);
     if (!t) return false;
     const myUid = currentUser()?.uid;
-    return !!(myUid && t.createdBy === myUid);
+    return !!(myUid && (t.createdBy === myUid || t.coOrganisers?.[myUid]));
   });
   // Fixed array of spark indices for the fireworks each-loop.
   const SPARK_INDICES = Array.from({ length: 20 }, (_, i) => i);

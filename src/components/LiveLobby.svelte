@@ -595,7 +595,7 @@
     if (!key) return false;
     const t = findByKey(key);
     if (!t) return false;
-    return !!(myUid && t.createdBy === myUid);
+    return !!(myUid && (t.createdBy === myUid || t.coOrganisers?.[myUid]));
   }
 
   /**
