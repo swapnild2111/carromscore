@@ -2176,9 +2176,6 @@
                   >Remove</button>
                 </li>
               {/each}
-              {#if coOrgUids.length === 0}
-                <li class="empty">No co-organisers yet.</li>
-              {/if}
             </ul>
           {/if}
           <div class="uid-add">
