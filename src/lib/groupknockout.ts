@@ -160,7 +160,7 @@ export async function generateGroupPhase(
       const [aId, bId] = pqPairs[i]!;
       await createPlannedMatch({
         mode: defaults.mode, tournament: tournamentName, tournamentKey,
-        round: pqRoundLabel, roundKey: pqRKey, matchOrder: i + 1,
+        round: pqRoundLabel, roundKey: pqRKey, matchOrder: i + 1, board: i + 1,
         aName: playerNames.get(aId) ?? aId, aResolvedId: aId,
         bName: playerNames.get(bId) ?? bId, bResolvedId: bId,
         cfg, createdBy: myUid,
@@ -204,9 +204,10 @@ export async function generateGroupPhase(
 
     let r2MatchOrder = 1;
     for (const [slotA, slotB] of r2PairsWithIds) {
+      const mo = r2MatchOrder++;
       await createPlannedMatch({
         mode: defaults.mode, tournament: tournamentName, tournamentKey,
-        round: r2Label, roundKey: r2Key, matchOrder: r2MatchOrder++,
+        round: r2Label, roundKey: r2Key, matchOrder: mo, board: mo,
         aName: slotA.name, ...(slotA.resolvedId ? { aResolvedId: slotA.resolvedId } : {}),
         bName: slotB.name, ...(slotB.resolvedId ? { bResolvedId: slotB.resolvedId } : {}),
         cfg, createdBy: myUid,
@@ -216,9 +217,10 @@ export async function generateGroupPhase(
     // If r2Slots has odd count, last slot gets a bye placeholder match
     if (r2Slots.length % 2 !== 0) {
       const lastSlot = r2Slots.at(-1)!;
+      const mo = r2MatchOrder++;
       await createPlannedMatch({
         mode: defaults.mode, tournament: tournamentName, tournamentKey,
-        round: r2Label, roundKey: r2Key, matchOrder: r2MatchOrder++,
+        round: r2Label, roundKey: r2Key, matchOrder: mo, board: mo,
         aName: lastSlot.name, ...(lastSlot.resolvedId ? { aResolvedId: lastSlot.resolvedId } : {}),
         bName: `${groupName} Bye`,
         cfg, createdBy: myUid,
@@ -235,7 +237,7 @@ export async function generateGroupPhase(
       for (let i = 0; i < slotCount; i++) {
         await createPlannedMatch({
           mode: defaults.mode, tournament: tournamentName, tournamentKey,
-          round: rd.label, roundKey: rKey, matchOrder: i + 1,
+          round: rd.label, roundKey: rKey, matchOrder: i + 1, board: i + 1,
           aName: `${groupName} Winner ${i * 2 + 1}`,
           bName: `${groupName} Winner ${i * 2 + 2}`,
           cfg, createdBy: myUid,
@@ -278,7 +280,7 @@ async function generateClassicGroupBracket(opts: {
     result.roundsCreated.push(roundLabel);
     await createPlannedMatch({
       mode: defaults.mode, tournament: tournamentName, tournamentKey,
-      round: roundLabel, roundKey: normalizeKey(roundLabel), matchOrder: 1,
+      round: roundLabel, roundKey: normalizeKey(roundLabel), matchOrder: 1, board: 1,
       aName: playerNames.get(playerIds[0]!) ?? playerIds[0]!,
       aResolvedId: playerIds[0]!,
       bName: playerNames.get(playerIds[1]!) ?? playerIds[1]!,
@@ -310,7 +312,7 @@ async function generateClassicGroupBracket(opts: {
     const [aId, bId] = pairs[i]!;
     await createPlannedMatch({
       mode: defaults.mode, tournament: tournamentName, tournamentKey,
-      round: r1Label, roundKey: r1Key, matchOrder: i + 1,
+      round: r1Label, roundKey: r1Key, matchOrder: i + 1, board: i + 1,
       aName: playerNames.get(aId) ?? aId, aResolvedId: aId,
       bName: playerNames.get(bId) ?? bId, bResolvedId: bId,
       cfg, createdBy: myUid,
@@ -328,7 +330,7 @@ async function generateClassicGroupBracket(opts: {
     if (isFinal && hasBye && byeSeedId) {
       await createPlannedMatch({
         mode: defaults.mode, tournament: tournamentName, tournamentKey,
-        round: rd.label, roundKey: rKey, matchOrder: 1,
+        round: rd.label, roundKey: rKey, matchOrder: 1, board: 1,
         aName: playerNames.get(byeSeedId) ?? byeSeedId, aResolvedId: byeSeedId,
         bName: `${groupName} Winner`,
         cfg, createdBy: myUid,
@@ -337,7 +339,7 @@ async function generateClassicGroupBracket(opts: {
       for (let i = 0; i < slotCount; i++) {
         await createPlannedMatch({
           mode: defaults.mode, tournament: tournamentName, tournamentKey,
-          round: rd.label, roundKey: rKey, matchOrder: i + 1,
+          round: rd.label, roundKey: rKey, matchOrder: i + 1, board: i + 1,
           aName: `${groupName} Winner ${i * 2 + 1}`,
           bName: `${groupName} Winner ${i * 2 + 2}`,
           cfg, createdBy: myUid,
@@ -439,7 +441,7 @@ export async function generateCombinedKnockout(
       const pair = firstRoundPairs[i]!;
       await createPlannedMatch({
         mode: defaults.mode, tournament: tournamentName, tournamentKey,
-        round: firstRd.label, roundKey: firstRdKey, matchOrder: i + 1,
+        round: firstRd.label, roundKey: firstRdKey, matchOrder: i + 1, board: i + 1,
         aName: pair.aSlot, bName: pair.bSlot, cfg, createdBy: myUid,
       });
       result.matchesCreated++;
@@ -450,17 +452,19 @@ export async function generateCombinedKnockout(
     const nextRdKey = roundKeys[1]!;
     let matchOrder = 1;
     if (byeSeed) {
+      const mo = matchOrder++;
       await createPlannedMatch({
         mode: defaults.mode, tournament: tournamentName, tournamentKey,
-        round: nextRd.label, roundKey: nextRdKey, matchOrder: matchOrder++,
+        round: nextRd.label, roundKey: nextRdKey, matchOrder: mo, board: mo,
         aName: byeSeed, bName: `Pre-QF Winner 1`, cfg, createdBy: myUid,
       });
       result.matchesCreated++;
     }
     for (let i = byeSeed ? 1 : 0; i < firstRoundPairs.length; i++) {
+      const mo = matchOrder++;
       await createPlannedMatch({
         mode: defaults.mode, tournament: tournamentName, tournamentKey,
-        round: nextRd.label, roundKey: nextRdKey, matchOrder: matchOrder++,
+        round: nextRd.label, roundKey: nextRdKey, matchOrder: mo, board: mo,
         aName: `KO Winner ${i * 2 + 1}`, bName: `KO Winner ${i * 2 + 2}`, cfg, createdBy: myUid,
       });
       result.matchesCreated++;
@@ -475,7 +479,7 @@ export async function generateCombinedKnockout(
       for (let i = 0; i < slotCount; i++) {
         await createPlannedMatch({
           mode: defaults.mode, tournament: tournamentName, tournamentKey,
-          round: rd.label, roundKey: rKey, matchOrder: i + 1,
+          round: rd.label, roundKey: rKey, matchOrder: i + 1, board: i + 1,
           aName: `KO Winner ${i * 2 + 1}`, bName: `KO Winner ${i * 2 + 2}`, cfg, createdBy: myUid,
         });
         result.matchesCreated++;
@@ -488,7 +492,7 @@ export async function generateCombinedKnockout(
       const pair = firstRoundPairs[i]!;
       await createPlannedMatch({
         mode: defaults.mode, tournament: tournamentName, tournamentKey,
-        round: firstRd.label, roundKey: firstRdKey, matchOrder: i + 1,
+        round: firstRd.label, roundKey: firstRdKey, matchOrder: i + 1, board: i + 1,
         aName: pair.aSlot, bName: pair.bSlot, cfg, createdBy: myUid,
       });
       result.matchesCreated++;
@@ -503,7 +507,7 @@ export async function generateCombinedKnockout(
       for (let i = 0; i < slotCount; i++) {
         await createPlannedMatch({
           mode: defaults.mode, tournament: tournamentName, tournamentKey,
-          round: rd.label, roundKey: rKey, matchOrder: i + 1,
+          round: rd.label, roundKey: rKey, matchOrder: i + 1, board: i + 1,
           aName: `KO Winner ${i * 2 + 1}`, bName: `KO Winner ${i * 2 + 2}`, cfg, createdBy: myUid,
         });
         result.matchesCreated++;
