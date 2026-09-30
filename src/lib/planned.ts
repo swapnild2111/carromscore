@@ -76,7 +76,7 @@ export type PlannedWriteOutcome =
   | { ok: false; error: string };
 
 export type PlannedReadOutcome =
-  | { ok: true; match: PlannedMatch | null; reason?: 'no-active-round' | 'all-complete' }
+  | { ok: true; match: PlannedMatch | null; reason?: 'no-active-round' | 'all-complete' | 'no-board' }
   | { ok: false; error: string };
 
 /**
@@ -497,9 +497,11 @@ export async function resolvePlannedByBoard(
 
     const candidates: PlannedMatch[] = [];
     let hasMatchesForBoard = false;
+    let hasAnyTournamentMatch = false;
     for (const [mid, v] of Object.entries(raw)) {
       if (!v || typeof v !== 'object') continue;
       if (v.tournamentKey !== tournamentKey) continue;
+      hasAnyTournamentMatch = true;
       if (v.board !== board) continue;
       hasMatchesForBoard = true;
       // Skip completed slots — they've already been played.
@@ -510,11 +512,13 @@ export async function resolvePlannedByBoard(
       candidates.push({ mid, ...v });
     }
     if (candidates.length === 0) {
-      // Distinguish "no open round" from "all matches on this board done".
+      // Distinguish "no open round" from "all matches on this board done"
+      // from "board number not assigned to any match".
       const noActiveRound = hasRoundData && openRoundOrder.size === 0 && totalRounds > 0;
-      let reason: 'no-active-round' | 'all-complete' | undefined;
+      let reason: 'no-active-round' | 'all-complete' | 'no-board' | undefined;
       if (noActiveRound) reason = 'no-active-round';
       else if (hasMatchesForBoard) reason = 'all-complete';
+      else if (hasAnyTournamentMatch) reason = 'no-board';
       return { ok: true, match: null, ...(reason ? { reason } : {}) };
     }
     // Sort: unclaimed first, then by round order (earlier round first),

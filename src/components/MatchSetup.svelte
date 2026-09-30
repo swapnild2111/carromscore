@@ -82,7 +82,7 @@
   type PlannedState =
     | { kind: 'idle' }
     | { kind: 'loading'; mid: string }
-    | { kind: 'not-found'; mid: string; reason?: 'no-active-round' | 'all-complete' }
+    | { kind: 'not-found'; mid: string; reason?: 'no-active-round' | 'all-complete' | 'no-board' }
     | { kind: 'completed'; mid: string; match: PlannedMatch }
     | { kind: 'takeover'; mid: string; match: PlannedMatch; claimerName: string }
     | { kind: 'loaded'; mid: string };
@@ -1527,6 +1527,9 @@
     {:else if plannedState.reason === 'all-complete'}
       <h3>All matches done</h3>
       <p>Every match on this board is already played. The organiser may need to start the next round.</p>
+    {:else if plannedState.reason === 'no-board'}
+      <h3>Board not assigned</h3>
+      <p>No match in the active round is assigned to this board. Ask the organiser to set board numbers in the bracket.</p>
     {:else}
       <h3>Match not available</h3>
       <p>This match slot isn't around anymore. It may have already been
