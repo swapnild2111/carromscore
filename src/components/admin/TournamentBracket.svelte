@@ -359,27 +359,7 @@
     addB2Name = '';
     resolvedIds = { aName: null, a2Name: null, bName: null, b2Name: null };
     mode = defaultMode;
-    // Auto-suggest next board number for this round: highest board
-    // used in the current round + 1. If no matches yet, start at 1.
-    // Organiser can override before adding.
-    const maxBoardInRound = rowsForRound.reduce(
-      (m, r) => (r.board && r.board > m ? r.board : m),
-      0,
-    );
-    addBoard = Math.max(1, maxBoardInRound + 1);
   }
-
-  // Also seed addBoard when the round changes / rows arrive so a
-  // brand-new modal opens with the right suggestion.
-  $effect(() => {
-    if (!addAName && !addA2Name && !addBName && !addB2Name) {
-      const maxBoardInRound = rowsForRound.reduce(
-        (m, r) => (r.board && r.board > m ? r.board : m),
-        0,
-      );
-      addBoard = Math.max(1, maxBoardInRound + 1);
-    }
-  });
 
   async function addRow() {
     inlineError = null;
@@ -420,20 +400,8 @@
       inlineError = 'Pick a round first';
       return;
     }
-    const board = Math.floor(addBoard);
-    if (!Number.isFinite(board) || board < 1 || board > 99) {
-      inlineError = 'Board number must be between 1 and 99';
-      return;
-    }
-    // Duplicate board check inside the current round: two matches
-    // both assigned to Board 3 in Round 1 would leave the QR scanner
-    // ambiguous. Auto-advance would pick the lowest matchOrder, but
-    // that's a surprise — flag it here instead.
-    const conflict = rowsForRound.find((r) => r.board === board);
-    if (conflict) {
-      inlineError = `Board ${board} already has a match in ${selectedRound.name} (${conflict.aName} vs ${conflict.bName}). Delete it first or pick another board.`;
-      return;
-    }
+    // Auto-assign next board number: highest board in this round + 1.
+    const board = rowsForRound.reduce((m, r) => (r.board && r.board > m ? r.board : m), 0) + 1;
     addBusy = true;
     const nextOrder = (rowsForRound[rowsForRound.length - 1]?.matchOrder ?? 0) + 1;
     const outcome = await createPlannedMatch({
@@ -722,17 +690,6 @@
                 disabled={addBusy}
               >Doubles</button>
             </div>
-            <label class="board-picker">
-              <span>Board</span>
-              <input
-                type="number"
-                min="1"
-                max="99"
-                step="1"
-                bind:value={addBoard}
-                disabled={addBusy}
-              />
-            </label>
           </div>
 
           <div class="add-grid" class:add-grid-doubles={mode === 'doubles'}>
