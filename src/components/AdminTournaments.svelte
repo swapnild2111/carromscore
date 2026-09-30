@@ -95,6 +95,14 @@
     return t.createdBy === myUid || !!(t.coOrganisers?.[myUid]);
   }
 
+  function canLockTournament(t: Tournament): boolean {
+    if (!role) return false;
+    if (role.isSuper) return true;
+    if (!role.isOrganiser) return false;
+    const myUid = currentUser()?.uid;
+    return !!(myUid && t.createdBy === myUid);
+  }
+
   let tick = $state(0);
   /** Live map of uid → display name from /organiserProfiles. Refreshes
    *  whenever any profile is saved, so the filter dropdown stays current. */
@@ -1809,7 +1817,7 @@
                       disabled={!!t.lockedAt}
                     >Setup</button>
                   {/if}
-                  {#if canManageTournament(t)}
+                  {#if canLockTournament(t)}
                     <button
                       type="button"
                       class="btn btn-lock"
