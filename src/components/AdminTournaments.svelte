@@ -74,7 +74,7 @@
   import GroupKnockoutSetup from './admin/GroupKnockoutSetup.svelte';
   import { recommendGroups } from '../lib/groupknockout';
 
-  import { loadPendingPlannedByTournament, deletePlannedMatch } from '../lib/planned';
+  import { loadPendingPlannedByTournament, deletePlannedMatch, forfeitDummyMatch } from '../lib/planned';
 
   /**
    * Current-user role gating: super sees every row's actions; a
@@ -1607,9 +1607,19 @@
     if (!roundsKey) return;
     roundsSaving = true;
     const outcome = await startRound(roundsKey, r.key);
+    if (!outcome.ok) { roundsSaving = false; flash('err', outcome.error); return; }
+
+    // Auto-forfeit any dummy-side matches in this round
+    const myUid = currentUser()?.uid ?? '';
+    const freshMatches = await loadPendingPlannedByTournament(roundsKey);
+    const isDummySide = (m: import('../lib/planned').PlannedMatch) =>
+      /^dummy-\d+$/i.test(m.aResolvedId ?? m.aName ?? '') ||
+      /^dummy-\d+$/i.test(m.bResolvedId ?? m.bName ?? '');
+    const dummyMatches = freshMatches.filter((m) => m.roundKey === r.key && isDummySide(m) && !m.completedAt);
+    await Promise.all(dummyMatches.map((m) => forfeitDummyMatch(m.mid, myUid)));
+
     roundsSaving = false;
-    if (!outcome.ok) flash('err', outcome.error);
-    else flash('ok', `${r.name} started`);
+    flash('ok', `${r.name} started`);
   }
   async function closeSelectedRound(r: Round) {
     if (!roundsKey) return;
@@ -1650,9 +1660,19 @@
     if (!ok) return;
     roundsSaving = true;
     const outcome = await setRoundState(roundsKey, r.key, 'open');
+    if (!outcome.ok) { roundsSaving = false; flash('err', outcome.error); return; }
+
+    // Auto-forfeit any pending dummy-side matches in this round
+    const myUid = currentUser()?.uid ?? '';
+    const freshMatches = await loadPendingPlannedByTournament(roundsKey);
+    const isDummySide = (m: import('../lib/planned').PlannedMatch) =>
+      /^dummy-\d+$/i.test(m.aResolvedId ?? m.aName ?? '') ||
+      /^dummy-\d+$/i.test(m.bResolvedId ?? m.bName ?? '');
+    const dummyMatches = freshMatches.filter((m) => m.roundKey === r.key && isDummySide(m) && !m.completedAt);
+    await Promise.all(dummyMatches.map((m) => forfeitDummyMatch(m.mid, myUid)));
+
     roundsSaving = false;
-    if (!outcome.ok) flash('err', outcome.error);
-    else flash('ok', `${r.name} reopened`);
+    flash('ok', `${r.name} reopened`);
   }
 
   async function startDeleteRound(r: Round) {

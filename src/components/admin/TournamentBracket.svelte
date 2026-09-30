@@ -21,7 +21,6 @@
     deletePlannedMatch,
     resetPlannedMatch,
     patchPlannedBoard,
-    forfeitDummyMatch,
     propagateBracketWinner,
     subscribePlannedByTournament,
     type PlannedMatch,
@@ -468,22 +467,6 @@
     else flash('Slot reset to ready');
   }
 
-  function hasDummySide(m: PlannedMatch): boolean {
-    const rx = /^dummy-\d+$/i;
-    return rx.test(m.aResolvedId ?? m.aName ?? '') || rx.test(m.bResolvedId ?? m.bName ?? '');
-  }
-
-  async function forfeitRow(m: PlannedMatch) {
-    const isDummyA = /^dummy-\d+$/i.test(m.aResolvedId ?? m.aName ?? '');
-    const winner: 'a' | 'b' = isDummyA ? 'b' : 'a';
-    const outcome = await forfeitDummyMatch(m.mid, myUid);
-    if (!outcome.ok) { inlineError = outcome.error; return; }
-    // Propagate winner as organiser — the void call inside forfeitDummyMatch
-    // may fail DB rules for non-organiser callers (umpires/anon users).
-    await propagateBracketWinner(m.mid, winner);
-    flash('Dummy forfeited — winner advanced');
-  }
-
   // Build a map from roundKey → matchOrder → winner name, combining
   // planned results and history. Used to resolve placeholder names.
   const winnerByRoundOrder = $derived.by(() => {
@@ -817,15 +800,6 @@
                       {/if}
                     </td>
                     <td class="col-actions">
-                      {#if !m.completedAt && hasDummySide(m)}
-                        <button
-                          type="button"
-                          class="row-forfeit"
-                          onclick={() => forfeitRow(m)}
-                          aria-label="Forfeit dummy — advance real player"
-                          title="Forfeit dummy — advance the real player to next round"
-                        >✓</button>
-                      {/if}
                       {#if statusOf(m) === 'complete'}
                         <button
                           type="button"
@@ -1352,23 +1326,6 @@
     background: rgba(100, 160, 255, 0.1);
     border-color: rgba(100, 160, 255, 0.5);
   }
-  .row-forfeit {
-    background: transparent;
-    border: 1px solid rgba(251, 146, 60, 0.4);
-    color: rgba(251, 146, 60, 0.9);
-    padding: 0.2rem 0.45rem;
-    border-radius: 0.3rem;
-    cursor: pointer;
-    font-size: 0.72rem;
-    font-weight: 600;
-    letter-spacing: 0.03em;
-    margin-right: 0.25rem;
-  }
-  .row-forfeit:hover:not(:disabled) {
-    background: rgba(251, 146, 60, 0.1);
-    border-color: rgba(251, 146, 60, 0.7);
-  }
-  .row-forfeit:disabled { opacity: 0.5; cursor: default; }
   .row-del {
     background: transparent;
     border: 1px solid rgba(239, 83, 80, 0.3);
