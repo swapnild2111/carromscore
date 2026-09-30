@@ -1073,7 +1073,8 @@
     if (!uid || !editingKey) return;
     if (coOrgUids.includes(uid)) { coOrgPickerValue = ''; return; }
     saving = true;
-    const outcome = await addCoOrganiser(editingKey, uid);
+    const displayName = coOrgLabelForUid(uid) || undefined;
+    const outcome = await addCoOrganiser(editingKey, uid, displayName);
     saving = false;
     if (outcome.ok) {
       coOrgUids = [...coOrgUids, uid];

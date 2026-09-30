@@ -211,9 +211,12 @@
   type OrgProfile = { displayName?: string; orgName?: string; logoUrl?: string };
   let orgProfile = $state<OrgProfile | null>(null);
   // Co-org profiles: uid → profile. Loaded once when tournament has coOrganisers.
-  let coOrgProfiles = $state<Map<string, OrgProfile>>(new Map());
+  // Plain object (not Map) so Svelte's $state proxy tracks field additions reactively.
+  let coOrgProfiles = $state<Record<string, OrgProfile>>({});
   // Which organiser's logo/name to print. Defaults to the creator; user can switch.
   let selectedLogoUid = $state<string | null>(null);
+  // Track which co-org profile fetches have been attempted (avoid re-fetching).
+  const coOrgFetchAttempted = new Set<string>();
 
   // Tournament record (name, type, country, defaults). Nudged by
   // tournamentTick. Falls back to a minimal shim when the record
@@ -243,74 +246,74 @@
       orgProfile = null;
     }
   }
-  async function loadCoOrgProfiles(uids: string[]) {
-    const db = getDatabase(firebaseApp());
-    const results = await Promise.all(
-      uids.map(async (uid) => {
-        try {
-          const snap = await get(ref(db, `organiserProfiles/${uid}`));
-          return snap.exists() ? ([uid, snap.val() as OrgProfile] as const) : null;
-        } catch {
-          return null;
-        }
-      }),
-    );
-    const map = new Map<string, OrgProfile>();
-    for (const entry of results) {
-      if (entry) map.set(entry[0], entry[1]);
+  async function loadCoOrgProfile(uid: string) {
+    if (coOrgFetchAttempted.has(uid)) return;
+    coOrgFetchAttempted.add(uid);
+    try {
+      const db = getDatabase(firebaseApp());
+      const snap = await get(ref(db, `organiserProfiles/${uid}`));
+      if (snap.exists()) {
+        coOrgProfiles = { ...coOrgProfiles, [uid]: snap.val() as OrgProfile };
+      }
+      // If no organiserProfile, the name comes from tournament.coOrgNames (public, already loaded).
+    } catch {
+      // Silently ignore — name falls back to coOrgNames from tournament record.
     }
-    coOrgProfiles = map;
   }
   // Re-run only if profile not yet loaded (onMount beat the store, or createdBy changed).
   $effect(() => {
     const uid = tournament?.createdBy;
     if (uid && !orgProfile) void loadOrgProfile(uid);
   });
-  // Load co-org profiles once when the tournament's coOrganisers list is known.
+  // Kick off co-org profile fetches for logo URLs when tournament loads.
   $effect(() => {
     const coOrgs = tournament?.coOrganisers;
     if (!coOrgs) return;
-    const uids = Object.keys(coOrgs);
-    if (uids.length === 0) return;
-    const missing = uids.filter((u) => !coOrgProfiles.has(u));
-    if (missing.length > 0) void loadCoOrgProfiles(uids);
+    for (const uid of Object.keys(coOrgs)) {
+      void loadCoOrgProfile(uid);
+    }
   });
 
-  // All logo-bearing organisers: creator first, then co-orgs that have a profile.
-  const logoOptions = $derived.by(() => {
-    const t = tournament;
-    if (!t) return [] as { uid: string; label: string; logoUrl: string | null }[];
-    const options: { uid: string; label: string; logoUrl: string | null }[] = [];
-    // Creator
-    const creatorLabel =
-      orgProfile?.orgName || orgProfile?.displayName || t.organizerName || 'Creator';
-    options.push({ uid: t.createdBy ?? '', label: creatorLabel, logoUrl: orgProfile?.logoUrl ?? t.logoUrl ?? null });
-    // Co-orgs
+  // Logo options list: one entry per organiser that could supply a logo.
+  // Rebuilds whenever orgProfile, coOrgProfiles, or tournament changes.
+  type LogoOption = { uid: string; label: string; logoUrl: string | null };
+
+  function buildLogoOptions(
+    t: typeof tournament,
+    op: typeof orgProfile,
+    cop: typeof coOrgProfiles,
+  ): LogoOption[] {
+    if (!t) return [];
+    const options: LogoOption[] = [];
+    const creatorLabel = op?.orgName || op?.displayName || t.organizerName || 'Organiser';
+    options.push({ uid: t.createdBy ?? '', label: creatorLabel, logoUrl: op?.logoUrl ?? t.logoUrl ?? null });
     for (const uid of Object.keys(t.coOrganisers ?? {})) {
-      const p = coOrgProfiles.get(uid);
-      const label = p?.orgName || p?.displayName || uid.slice(0, 8) + '…';
+      const p = cop[uid];
+      const label = p?.orgName || p?.displayName || t.coOrgNames?.[uid] || uid.slice(0, 8) + '…';
       options.push({ uid, label, logoUrl: p?.logoUrl ?? null });
     }
     return options;
+  }
+
+  // Reactive logo options — reads all three state values so it re-runs on any change.
+  let logoOptions = $state<LogoOption[]>([]);
+  $effect(() => {
+    logoOptions = buildLogoOptions(tournament, orgProfile, coOrgProfiles);
   });
 
-  // Active profile for printing — follows selectedLogoUid, defaults to creator.
-  const activeLogoOption = $derived.by(() => {
+  // Active logo option — whichever uid is selected, or first by default.
+  const activeLogoOption = $derived.by<LogoOption | null>(() => {
     if (logoOptions.length === 0) return null;
-    if (selectedLogoUid) {
-      const found = logoOptions.find((o) => o.uid === selectedLogoUid);
-      if (found) return found;
-    }
-    return logoOptions[0] ?? null;
+    const uid = selectedLogoUid;
+    return logoOptions.find((o) => o.uid === uid) ?? logoOptions[0] ?? null;
   });
 
   // Derived print values — driven by whichever logo option is selected.
   const printLogoUrl = $derived(activeLogoOption?.logoUrl ?? tournament?.logoUrl ?? null);
-  const printOrganizerName = $derived.by(() => {
-    const label = activeLogoOption?.label;
-    if (label && label !== 'Creator') return label;
-    return orgProfile?.orgName || orgProfile?.displayName || tournament?.organizerName || null;
-  });
+  const printOrganizerName = $derived(
+    activeLogoOption?.label !== 'Organiser' ? (activeLogoOption?.label ?? null) :
+    (orgProfile?.orgName || orgProfile?.displayName || tournament?.organizerName || null)
+  );
 
   // Load assigned-player set once when we have both the tournament
   // and its type. Silent-on-failure: an empty set just hides the

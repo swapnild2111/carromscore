@@ -99,6 +99,13 @@
             ".validate": "!newData.exists() || (newData.isBoolean() && newData.val() == true && $uid.length >= 1 && $uid.length <= 64)"
           }
         },
+        "coOrgNames": {
+          ".read": true,
+          "$uid": {
+            ".write": "auth != null && (root.child('adminRoles').child(auth.uid).val() == 'super' || root.child('tournaments').child($key).child('createdBy').val() == auth.uid)",
+            ".validate": "!newData.exists() || (newData.isString() && newData.val().length >= 1 && newData.val().length <= 120)"
+          }
+        },
         "assignedPlayerIds": {
           "$playerId": {
             ".write": "auth != null && ((root.child('adminRoles').child(auth.uid).val() == 'super') || (root.child('tournaments').child($key).child('createdBy').val() == auth.uid) || (root.child('tournaments').child($key).child('coOrganisers').child(auth.uid).val() == true))",

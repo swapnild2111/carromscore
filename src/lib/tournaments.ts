@@ -113,6 +113,8 @@ export type Tournament = {
    * uid → true. Written by the creator (or super) via /coOrganisers.
    */
   coOrganisers?: Record<string, true>;
+  /** Display names for co-organisers — uid → name. Publicly readable via /tournaments. */
+  coOrgNames?: Record<string, string>;
 };
 
 /**
@@ -623,6 +625,9 @@ function mergeRemote(raw: Record<string, unknown>): void {
     const groups = parseGroups(v.groups);
     const lockedAt = typeof v.lockedAt === 'number' && v.lockedAt > 0 ? v.lockedAt : undefined;
     const coOrganisers = parseCoOrganisers(v.coOrganisers);
+    const coOrgNames = v.coOrgNames && typeof v.coOrgNames === 'object'
+      ? Object.fromEntries(Object.entries(v.coOrgNames as Record<string, unknown>).filter(([, n]) => typeof n === 'string')) as Record<string, string>
+      : undefined;
     const existing = memoryStore.find((t) => t.key === key);
     if (existing) {
       existing.name = name;
@@ -658,6 +663,8 @@ function mergeRemote(raw: Record<string, unknown>): void {
       else delete existing.lockedAt;
       if (coOrganisers) existing.coOrganisers = coOrganisers;
       else delete existing.coOrganisers;
+      if (coOrgNames) existing.coOrgNames = coOrgNames;
+      else delete existing.coOrgNames;
     } else {
       memoryStore.push({
         key,
@@ -679,6 +686,7 @@ function mergeRemote(raw: Record<string, unknown>): void {
         ...(groups ? { groups } : {}),
         ...(lockedAt ? { lockedAt } : {}),
         ...(coOrganisers ? { coOrganisers } : {}),
+        ...(coOrgNames ? { coOrgNames } : {}),
       });
     }
   }
@@ -1531,21 +1539,29 @@ export async function loadOrganisers(key: string): Promise<string[]> {
 export async function addCoOrganiser(
   key: string,
   uid: string,
+  displayName?: string,
 ): Promise<TournamentWriteOutcome> {
   const cleanUid = uid.trim();
   if (!key) return { ok: false, error: 'Missing tournament key' };
   if (!cleanUid || cleanUid.length > 64)
     return { ok: false, error: 'UID must be 1-64 characters' };
   try {
-    const [{ firebaseApp }, { getDatabase, ref, set }] = await Promise.all([
+    const [{ firebaseApp }, { getDatabase, ref, update }] = await Promise.all([
       import('./firebase'),
       import('firebase/database'),
     ]);
     const db = getDatabase(firebaseApp());
-    await set(ref(db, `tournaments/${key}/coOrganisers/${cleanUid}`), true);
+    const writes: Record<string, unknown> = {
+      [`tournaments/${key}/coOrganisers/${cleanUid}`]: true,
+    };
+    if (displayName) {
+      writes[`tournaments/${key}/coOrgNames/${cleanUid}`] = displayName;
+    }
+    await update(ref(db), writes);
     const t = memoryStore.find((x) => x.key === key);
     if (t) {
       t.coOrganisers = { ...(t.coOrganisers ?? {}), [cleanUid]: true };
+      if (displayName) t.coOrgNames = { ...(t.coOrgNames ?? {}), [cleanUid]: displayName };
       notify();
     }
     return { ok: true };
