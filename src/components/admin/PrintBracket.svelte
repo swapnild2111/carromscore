@@ -1206,7 +1206,6 @@
       // ── Player name rows ──
       for (const leaf of d.leaves) {
         const cy = gy + d.rowRelY(leaf.rowIdx);
-        lines.push(`<line x1="${nameX}" y1="${cy}" x2="${nameX + NAME_W}" y2="${cy}" stroke="#ddd" stroke-width="0.75"/>`);
         lines.push(`<text x="${nameX + 5}" y="${cy + 4}" font-size="11" font-family="sans-serif" fill="#222">${clip(esc(leaf.player))}</text>`);
       }
 

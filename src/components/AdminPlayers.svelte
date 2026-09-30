@@ -120,6 +120,7 @@
   let addingPhone = $state('');
   let addingEmail = $state('');
   let addingAddress = $state('');
+  let addingRepresents = $state('');
 
   /** One decision the admin has to make about a candidate name that
    *  matches an existing player. */
@@ -219,6 +220,7 @@
   let editEmail = $state('');
   let editPhone = $state('');
   let editAddress = $state('');
+  let editRepresents = $state('');
 
   function startEdit(p: Player) {
     editingId = p.id;
@@ -229,6 +231,7 @@
     editEmail = p.email ?? '';
     editPhone = p.phone ?? '';
     editAddress = p.address ?? '';
+    editRepresents = p.represents ?? '';
     editAliasBuffer = '';
   }
   function stopEdit() {
@@ -240,6 +243,7 @@
     editEmail = '';
     editPhone = '';
     editAddress = '';
+    editRepresents = '';
     editAliasBuffer = '';
   }
   /** Reactive lookup of the currently-edited player from the store,
@@ -266,8 +270,9 @@
     const dobChanged     = editDob.trim()     !== (p.dob      ?? '');
     const emailChanged   = editEmail.trim()   !== (p.email    ?? '');
     const phoneChanged   = editPhone.trim()   !== (p.phone    ?? '');
-    const addressChanged = editAddress.trim() !== (p.address  ?? '');
-    return nameChanged || countryChanged || genderChanged || dobChanged || emailChanged || phoneChanged || addressChanged;
+    const addressChanged    = editAddress.trim()    !== (p.address    ?? '');
+    const representsChanged = editRepresents.trim() !== (p.represents ?? '');
+    return nameChanged || countryChanged || genderChanged || dobChanged || emailChanged || phoneChanged || addressChanged || representsChanged;
   });
 
   /**
@@ -313,7 +318,8 @@
       if (editDob.trim()   !== (current.dob     ?? '')) { metaPatch.dob     = editDob.trim();     hasMeta = true; }
       if (editEmail.trim() !== (current.email   ?? '')) { metaPatch.email   = editEmail.trim();   hasMeta = true; }
       if (editPhone.trim() !== (current.phone   ?? '')) { metaPatch.phone   = editPhone.trim();   hasMeta = true; }
-      if (editAddress.trim() !== (current.address ?? '')) { metaPatch.address = editAddress.trim(); hasMeta = true; }
+      if (editAddress.trim()    !== (current.address    ?? '')) { metaPatch.address    = editAddress.trim();    hasMeta = true; }
+      if (editRepresents.trim() !== (current.represents ?? '')) { metaPatch.represents = editRepresents.trim(); hasMeta = true; }
       if (hasMeta) {
         const r = await updatePlayerMeta(editingId, metaPatch);
         if (r.ok) {
@@ -463,6 +469,7 @@
     addingPhone = '';
     addingEmail = '';
     addingAddress = '';
+    addingRepresents = '';
     conflicts = [];
     cleanCandidates = [];
     addStep = 'input';
@@ -476,6 +483,7 @@
     addingPhone = '';
     addingEmail = '';
     addingAddress = '';
+    addingRepresents = '';
     conflicts = [];
     cleanCandidates = [];
     addStep = 'input';
@@ -600,6 +608,7 @@
       ...(addingPhone ? { phone: addingPhone } : {}),
       ...(addingEmail ? { email: addingEmail } : {}),
       ...(addingAddress ? { address: addingAddress } : {}),
+      ...(addingRepresents ? { represents: addingRepresents } : {}),
     };
     let created = 0;
     let aliased = 0;
@@ -735,6 +744,7 @@
               title="Sort by name"
             >Name <span class="sort-icon" aria-hidden="true">{sortBy === 'az' ? '↑' : '↓'}</span></th>
             <th class="th-country">Country</th>
+            <th class="th-represents">Represents</th>
             <th class="th-aliases">Aliases</th>
             <th class="th-actions">Actions</th>
           </tr>
@@ -769,6 +779,13 @@
                     {#if flagEmoji(p.country)}<span aria-hidden="true">{flagEmoji(p.country)}</span>{/if}
                     {countryName(p.country)}
                   </span>
+                {:else}
+                  <span class="td-empty">—</span>
+                {/if}
+              </td>
+              <td class="td-represents">
+                {#if p.represents}
+                  <span class="td-represents-text">{p.represents}</span>
                 {:else}
                   <span class="td-empty">—</span>
                 {/if}
@@ -894,6 +911,11 @@
         <label class="edit-field">
           <span>City / Region</span>
           <input type="text" bind:value={editAddress} aria-label="City or region" maxlength="200" placeholder="Copenhagen, Denmark" />
+        </label>
+
+        <label class="edit-field">
+          <span>Represents</span>
+          <input type="text" bind:value={editRepresents} aria-label="Club or association" maxlength="100" placeholder="Carrom Club Copenhagen" />
         </label>
 
         {#if editingPlayer()}
@@ -1072,6 +1094,10 @@
           <label class="add-country-label">
             <span>Address</span>
             <input type="text" bind:value={addingAddress} placeholder="optional" aria-label="Address" />
+          </label>
+          <label class="add-country-label">
+            <span>Represents</span>
+            <input type="text" bind:value={addingRepresents} placeholder="optional" aria-label="Represents" maxlength="100" />
           </label>
           <textarea
             class="add-textarea"
@@ -1329,6 +1355,7 @@
   .sort-icon { font-style: normal; opacity: 0.7; margin-left: 0.2em; }
   .th-check { width: 2rem; padding: 0.55rem 0.4rem; }
   .th-country { width: 9rem; }
+  .th-represents { width: 11rem; }
   .th-aliases { width: 6rem; }
   .th-actions { width: 1%; white-space: nowrap; }
 
@@ -1344,6 +1371,8 @@
   .td-check { width: 2rem; padding: 0.55rem 0.4rem; }
   .td-name { min-width: 12rem; }
   .td-country { white-space: nowrap; }
+  .td-represents { max-width: 11rem; }
+  .td-represents-text { font-size: 0.82rem; color: var(--muted, #9aa0a6); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
   .td-aliases { white-space: nowrap; }
   .td-actions { white-space: nowrap; }
   .td-empty { color: var(--muted); opacity: 0.4; }

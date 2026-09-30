@@ -17,7 +17,7 @@
     loadAssignedPlayers,
   } from '../../lib/tournaments';
   import { loadAll as loadAllPlayers, subscribeStore as subscribePlayerStore } from '../../lib/players';
-  import { subscribePlannedByTournament, deletePlannedMatch, type PlannedMatch } from '../../lib/planned';
+  import { subscribePlannedByTournament, deletePlannedMatch, forfeitDummyMatch, type PlannedMatch } from '../../lib/planned';
   import { loadMatchesByTournamentKey, type MatchRecord } from '../../lib/history';
   import { potSeeding } from '../../lib/league';
   import {
@@ -356,15 +356,22 @@
 
   async function startAllGroupRounds() {
     startingRounds = true;
-    // Read directly from memoryStore (not tournament prop) so freshly-created
-    // rounds are included without waiting for a Svelte re-render cycle.
     const rounds = loadRounds(tournament.key);
     const groupRounds = rounds
       .filter((r) => / — /.test(r.name) && !/^KO —/.test(r.name) && !r.startedAt)
       .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
     // Only start the first (lowest-order) round so players can play it before QF starts.
     if (groupRounds.length > 0) {
-      await startRound(tournament.key, groupRounds[0].key);
+      const firstRound = groupRounds[0]!;
+      await startRound(tournament.key, firstRound.key);
+      // Auto-forfeit any match in this round that has a dummy side (bye).
+      const isDummySide = (m: PlannedMatch) =>
+        /^dummy-\d+$/i.test(m.aResolvedId ?? m.aName ?? '') ||
+        /^dummy-\d+$/i.test(m.bResolvedId ?? m.bName ?? '');
+      const dummyMatches = plannedMatches.filter(
+        (m) => m.roundKey === firstRound.key && isDummySide(m) && !m.completedAt,
+      );
+      await Promise.all(dummyMatches.map((m) => forfeitDummyMatch(m.mid, myUid)));
     }
     startingRounds = false;
   }

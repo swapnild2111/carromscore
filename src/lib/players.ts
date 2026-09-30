@@ -47,6 +47,7 @@ export type Player = {
   email?: string;
   phone?: string;
   address?: string; // free-form, e.g. city/region
+  represents?: string; // club / association / state the player competes for
 };
 
 /**
@@ -63,6 +64,7 @@ export type CreatePlayerMeta = {
   email?: string;
   phone?: string;
   address?: string;
+  represents?: string;
 };
 
 /**
@@ -350,8 +352,9 @@ export async function createPlayer(
     ...(finalCreatedBy ? { createdBy: finalCreatedBy } : {}),
     ...(meta.country ? { country: meta.country } : {}),
     ...(typeof meta.age === 'number' && Number.isFinite(meta.age) ? { age: meta.age } : {}),
-    ...(meta.email ? { email: meta.email } : {}),
-    ...(meta.phone ? { phone: meta.phone } : {}),
+    ...(meta.email      ? { email:      meta.email      } : {}),
+    ...(meta.phone      ? { phone:      meta.phone      } : {}),
+    ...(meta.represents ? { represents: meta.represents } : {}),
   };
   memoryStore.push(p);
   notify();
@@ -501,6 +504,7 @@ function mergeOneRemotePlayer(id: string, val: unknown): void {
   const email = typeof v.email === 'string' ? v.email : undefined;
   const phone = typeof v.phone === 'string' ? v.phone : undefined;
   const address = typeof v.address === 'string' ? v.address : undefined;
+  const represents = typeof v.represents === 'string' ? v.represents : undefined;
   const idx = memoryStore.findIndex((p) => p.id === id);
   if (idx !== -1) {
     // Replace with a fresh object so downstream {#each} keyed
@@ -521,7 +525,8 @@ function mergeOneRemotePlayer(id: string, val: unknown): void {
       ...(age      !== undefined ? { age }      : cur.age      !== undefined ? { age: cur.age } : {}),
       ...(email    !== undefined ? { email }    : cur.email    ? { email:    cur.email    } : {}),
       ...(phone    !== undefined ? { phone }    : cur.phone    ? { phone:    cur.phone    } : {}),
-      ...(address  !== undefined ? { address }  : cur.address  ? { address:  cur.address  } : {}),
+      ...(address    !== undefined ? { address }    : cur.address    ? { address:    cur.address    } : {}),
+      ...(represents !== undefined ? { represents } : cur.represents ? { represents: cur.represents } : {}),
     };
     return;
   }
@@ -531,13 +536,14 @@ function mergeOneRemotePlayer(id: string, val: unknown): void {
     aliases,
     createdAt,
     ...(typeof v.createdBy === 'string' ? { createdBy: v.createdBy } : {}),
-    ...(country ? { country } : {}),
-    ...(gender  ? { gender  } : {}),
-    ...(dob     ? { dob     } : {}),
+    ...(country    ? { country    } : {}),
+    ...(gender     ? { gender     } : {}),
+    ...(dob        ? { dob        } : {}),
     ...(age !== undefined ? { age } : {}),
-    ...(email   ? { email   } : {}),
-    ...(phone   ? { phone   } : {}),
-    ...(address ? { address } : {}),
+    ...(email      ? { email      } : {}),
+    ...(phone      ? { phone      } : {}),
+    ...(address    ? { address    } : {}),
+    ...(represents ? { represents } : {}),
   });
 }
 
@@ -769,10 +775,11 @@ export type PlayerMetaUpdate = {
   email?: string;
   phone?: string;
   address?: string;
+  represents?: string;
 };
 
 /**
- * Update optional metadata fields (gender, dob, email, phone, address).
+ * Update optional metadata fields (gender, dob, email, phone, address, represents).
  * Pass an empty string to clear a field. Country and name have their own
  * dedicated update functions since they need extra logic.
  */
@@ -793,21 +800,23 @@ export async function updatePlayerMeta(
     if (!existing) return { ok: false, error: 'Player not found' };
 
     const patch: Record<string, unknown> = {};
-    if ('gender' in meta)  patch.gender  = meta.gender  || null;
-    if ('dob' in meta)     patch.dob     = meta.dob     || null;
-    if ('email' in meta)   patch.email   = meta.email   || null;
-    if ('phone' in meta)   patch.phone   = meta.phone   || null;
-    if ('address' in meta) patch.address = meta.address || null;
+    if ('gender' in meta)     patch.gender     = meta.gender     || null;
+    if ('dob' in meta)        patch.dob        = meta.dob        || null;
+    if ('email' in meta)      patch.email      = meta.email      || null;
+    if ('phone' in meta)      patch.phone      = meta.phone      || null;
+    if ('address' in meta)    patch.address    = meta.address    || null;
+    if ('represents' in meta) patch.represents = meta.represents || null;
 
     const idx = memoryStore.findIndex((x) => x.id === playerId);
     if (idx !== -1) {
       const cur = memoryStore[idx]!;
       const next: Player = { ...cur };
-      if ('gender' in meta)  { if (meta.gender)  next.gender  = meta.gender as Player['gender']; else delete next.gender; }
-      if ('dob' in meta)     { if (meta.dob)     next.dob     = meta.dob;     else delete next.dob; }
-      if ('email' in meta)   { if (meta.email)   next.email   = meta.email;   else delete next.email; }
-      if ('phone' in meta)   { if (meta.phone)   next.phone   = meta.phone;   else delete next.phone; }
-      if ('address' in meta) { if (meta.address) next.address = meta.address; else delete next.address; }
+      if ('gender' in meta)     { if (meta.gender)     next.gender     = meta.gender as Player['gender']; else delete next.gender; }
+      if ('dob' in meta)        { if (meta.dob)        next.dob        = meta.dob;        else delete next.dob; }
+      if ('email' in meta)      { if (meta.email)      next.email      = meta.email;      else delete next.email; }
+      if ('phone' in meta)      { if (meta.phone)      next.phone      = meta.phone;      else delete next.phone; }
+      if ('address' in meta)    { if (meta.address)    next.address    = meta.address;    else delete next.address; }
+      if ('represents' in meta) { if (meta.represents) next.represents = meta.represents; else delete next.represents; }
       memoryStore[idx] = next;
     }
 

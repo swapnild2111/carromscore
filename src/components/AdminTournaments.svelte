@@ -1740,18 +1740,16 @@
                       disabled={!!t.lockedAt}
                     >Setup</button>
                   {/if}
-                  {#if false /* lock button: hidden until feature is finalized — see pending_features memory */}
-                    {#if canManageTournament(t)}
-                      <button
-                        type="button"
-                        class="btn btn-lock"
-                        class:btn-lock-active={!!t.lockedAt}
-                        onclick={() => toggleLock(t)}
-                        disabled={lockingKey === t.key}
-                        aria-label={t.lockedAt ? 'Unlock tournament' : 'Lock tournament'}
-                        title={t.lockedAt ? 'Locked — click to unlock' : 'Lock tournament (disable editing)'}
-                      >{t.lockedAt ? '🔒' : '🔓'}</button>
-                    {/if}
+                  {#if canManageTournament(t)}
+                    <button
+                      type="button"
+                      class="btn btn-lock"
+                      class:btn-lock-active={!!t.lockedAt}
+                      onclick={() => toggleLock(t)}
+                      disabled={lockingKey === t.key}
+                      aria-label={t.lockedAt ? 'Unlock tournament' : 'Lock tournament'}
+                      title={t.lockedAt ? 'Locked — click to unlock' : 'Lock tournament (disable editing)'}
+                    >{t.lockedAt ? '🔒' : '🔓'}</button>
                   {/if}
                   {#if setupNoPlayersKey === t.key}
                     <span class="setup-no-players-warn">
