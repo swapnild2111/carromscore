@@ -46,6 +46,49 @@
 
   // Onboard-organiser form
   let addEmail = $state('');
+  let addDropdownOpen = $state(false);
+  let addHighlight = $state(-1);
+
+  const addSuggestions = $derived.by(() => {
+    const q = addEmail.trim().toLowerCase();
+    const already = organiserUids;
+    return Object.values(users)
+      .filter((u) => {
+        if (already.has(u.uid ?? '')) return false;
+        if (!q) return true;
+        return (
+          (u.displayName ?? '').toLowerCase().includes(q) ||
+          (u.email ?? '').toLowerCase().includes(q)
+        );
+      })
+      .sort((a, b) => (a.displayName ?? a.email ?? '').localeCompare(b.displayName ?? b.email ?? ''));
+  });
+
+  function pickSuggestion(u: UserRecord) {
+    addEmail = u.email ?? '';
+    addDropdownOpen = false;
+    addHighlight = -1;
+  }
+
+  function onAddKeydown(e: KeyboardEvent) {
+    const open = addDropdownOpen && addSuggestions.length > 0;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (!open) { addDropdownOpen = true; addHighlight = 0; }
+      else addHighlight = Math.min(addHighlight + 1, addSuggestions.length - 1);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      addHighlight = Math.max(addHighlight - 1, 0);
+    } else if (e.key === 'Enter' && open && addHighlight >= 0) {
+      e.preventDefault();
+      const u = addSuggestions[addHighlight];
+      if (u) pickSuggestion(u);
+    } else if (e.key === 'Escape') {
+      addDropdownOpen = false;
+    } else {
+      if (open) addHighlight = 0;
+    }
+  }
   // Per-row revoke confirmation state — reveals a "Confirm" button
   // inline for the uid the super is about to revoke.
   let confirmingRevokeUid = $state<string | null>(null);
@@ -222,23 +265,48 @@
   </p>
   <div class="add-form">
     <label class="add-uid">
-      <span>Email address</span>
-      <input
-        type="email"
-        list="user-suggestions"
-        bind:value={addEmail}
-        placeholder="Type a name or email…"
-        aria-label="Recipient email"
-        maxlength="128"
-        autocomplete="off"
-      />
-      <datalist id="user-suggestions">
-        {#each Object.values(users).sort((a, b) => (a.displayName ?? a.email ?? '').localeCompare(b.displayName ?? b.email ?? '')) as u (u.uid ?? u.email)}
-          {#if u.email}
-            <option value={u.email}>{u.displayName ? `${u.displayName} (${u.email})` : u.email}</option>
-          {/if}
-        {/each}
-      </datalist>
+      <span>Name or email address</span>
+      <div class="user-combo">
+        <input
+          type="text"
+          bind:value={addEmail}
+          placeholder="Type a name or email…"
+          aria-label="Recipient name or email"
+          aria-expanded={addDropdownOpen && addSuggestions.length > 0}
+          aria-autocomplete="list"
+          role="combobox"
+          maxlength="128"
+          autocomplete="off"
+          oninput={() => { addDropdownOpen = true; addHighlight = 0; }}
+          onfocus={() => { addDropdownOpen = true; addHighlight = -1; }}
+          onblur={() => setTimeout(() => { addDropdownOpen = false; }, 200)}
+          onkeydown={onAddKeydown}
+        />
+        {#if addDropdownOpen && addSuggestions.length > 0}
+          <ul class="user-suggest" role="listbox">
+            {#each addSuggestions as u, i (u.uid ?? u.email)}
+              <li role="option" aria-selected={i === addHighlight}>
+                <button
+                  type="button"
+                  class:suggest-active={i === addHighlight}
+                  onmouseenter={() => (addHighlight = i)}
+                  onmousedown={(e) => e.preventDefault()}
+                  onclick={() => pickSuggestion(u)}
+                >
+                  {#if u.displayName}
+                    <span class="u-name">{u.displayName}</span>
+                  {/if}
+                  <span class="u-email">{u.email}</span>
+                </button>
+              </li>
+            {/each}
+          </ul>
+        {:else if addDropdownOpen && addEmail.trim() && addSuggestions.length === 0}
+          <div class="user-suggest user-suggest-empty">
+            No signed-in user found — will onboard as new email
+          </div>
+        {/if}
+      </div>
     </label>
     <button
       type="button"
@@ -510,7 +578,11 @@
     text-transform: uppercase;
     letter-spacing: 0.06em;
   }
-  .add-uid input {
+  .user-combo {
+    position: relative;
+  }
+  .user-combo input {
+    width: 100%;
     background: #0f0f0f;
     color: var(--fg);
     border: 1px solid #2a2a2a;
@@ -518,10 +590,63 @@
     padding: 0.5rem 0.65rem;
     font: inherit;
     font-size: 0.9rem;
+    box-sizing: border-box;
   }
-  .add-uid input:focus {
+  .user-combo input:focus {
     outline: none;
     border-color: var(--accent);
+  }
+  .user-suggest {
+    position: absolute;
+    top: calc(100% + 0.25rem);
+    left: 0;
+    right: 0;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    background: #141414;
+    border: 1px solid #262626;
+    border-radius: 0.5rem;
+    max-height: 14rem;
+    overflow-y: auto;
+    z-index: 20;
+  }
+  .user-suggest button {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    background: transparent;
+    border: 0;
+    color: var(--fg);
+    text-align: left;
+    cursor: pointer;
+    font: inherit;
+    gap: 0.1rem;
+  }
+  .user-suggest button:hover,
+  .user-suggest button.suggest-active {
+    background: #1c1c1c;
+    outline: 2px solid rgba(255, 213, 74, 0.5);
+    outline-offset: -2px;
+  }
+  .u-name { font-size: 0.88rem; font-weight: 600; }
+  .u-email { font-size: 0.75rem; color: var(--muted); }
+  .user-suggest-empty {
+    padding: 0.6rem 0.75rem;
+    font-size: 0.8rem;
+    color: var(--muted);
+    font-style: italic;
+  }
+  /* Keep old .add-uid input style for any remaining bare inputs */
+  .add-uid > input {
+    background: #0f0f0f;
+    color: var(--fg);
+    border: 1px solid #2a2a2a;
+    border-radius: 0.4rem;
+    padding: 0.5rem 0.65rem;
+    font: inherit;
+    font-size: 0.9rem;
   }
   .add-tournaments {
     display: flex;
