@@ -327,22 +327,21 @@
   // Board numbers to print: union of all `board` values across
   // rounds, then filled 1..max so gaps still print a sticker.
   const boards = $derived.by<number[]>(() => {
-    // First: derive from assigned board numbers on planned matches
+    // Derive from assigned board numbers on planned matches
     let max = 0;
     for (const m of plannedMatches) {
       if (m.board && m.board >= 1 && m.board <= 99 && m.board > max) {
         max = m.board;
       }
     }
-    // Fallback: use venueBoards from tournament config so per-board stickers
-    // can be printed even before any match has a board number assigned
-    if (max === 0) {
-      const venue = tournament?.knockoutCfg?.venueBoards
-        ?? tournament?.knockoutCfg?.boardsAvailable
-        ?? tournament?.defaults?.maxBoards
-        ?? 0;
-      max = Math.min(Math.max(0, venue), 99);
-    }
+    // Always also check venueBoards/maxBoards from tournament config — take the
+    // larger of the two so all physical boards get stickers even when only some
+    // rounds have been created (e.g. 32 venue boards but only 6 matches created so far).
+    const venue = tournament?.knockoutCfg?.venueBoards
+      ?? tournament?.knockoutCfg?.boardsAvailable
+      ?? tournament?.defaults?.maxBoards
+      ?? 0;
+    max = Math.min(Math.max(max, Math.max(0, venue)), 99);
     if (max === 0) return [];
     const out: number[] = [];
     for (let i = 1; i <= max; i += 1) out.push(i);
