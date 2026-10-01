@@ -56,6 +56,7 @@
    * Empty string means this match wasn't launched from a bracket QR.
    */
   let plannedMid = $state<string>('');
+  let plannedMatchOrder = $state<number | null>(null);
   let sideA = $state<Side>({ name: 'First Player', note: '', sets: 0, points: 0 });
   let sideB = $state<Side>({ name: 'Second Player', note: '', sets: 0, points: 0 });
   // Which colour token is painted on each seat. Flipped by swapSides().
@@ -573,6 +574,10 @@
     const plannedParam = q.get('planned');
     if (plannedParam && /^[A-Za-z0-9_-]{4,24}$/.test(plannedParam)) {
       plannedMid = plannedParam;
+    }
+    const matchOrderParam = Number(q.get('matchOrder'));
+    if (Number.isFinite(matchOrderParam) && matchOrderParam >= 1) {
+      plannedMatchOrder = matchOrderParam;
     }
     sideA.name = teamLabel(cfg.playerA, cfg.playerA2, cfg.mode) || 'First Player';
     sideB.name = teamLabel(cfg.playerB, cfg.playerB2, cfg.mode) || 'Second Player';
@@ -2255,6 +2260,7 @@
         ...(isPractice && practiceBoards.length > 0
           ? { practiceBoards: practiceBoards.map((row) => [...row]) }
           : {}),
+        ...(plannedMatchOrder != null ? { matchOrder: plannedMatchOrder } : {}),
       };
       // Offline path (v3.0): if we know we can't reach Firebase,
       // don't even try — enqueue directly so the archive syncs

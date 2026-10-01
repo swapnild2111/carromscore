@@ -178,7 +178,11 @@
             "$other": { ".validate": false }
           }
         },
-        "lockedAt":   { ".validate": "!newData.exists() || (newData.isNumber() && newData.val() >= 0)" },
+        "lockedAt":            { ".validate": "!newData.exists() || (newData.isNumber() && newData.val() >= 0)" },
+        "primaryOrganizerUid": {
+          ".write": "auth != null && (root.child('adminRoles').child(auth.uid).val() == 'super' || root.child('tournaments').child($key).child('createdBy').val() == auth.uid)",
+          ".validate": "!newData.exists() || (newData.isString() && newData.val().length >= 1 && newData.val().length <= 64)"
+        },
         "$other":     { ".validate": false }
       }
     },

@@ -124,6 +124,9 @@ export type MatchResultInput = {
    * inner = board. Present only when mode === 'practice'.
    */
   practiceBoards?: number[][];
+  /** Position within the round (1-based). Carried from the planned match so
+   *  the Reports bracket SVG can order slots consistently with the print page. */
+  matchOrder?: number;
 };
 
 /**
@@ -370,6 +373,7 @@ export async function finishMatch(
     endedAt: result.endedAt,
     ...(finalCreatedBy ? { createdBy: finalCreatedBy } : {}),
     ...(finalCreatedByName ? { createdByName: finalCreatedByName } : {}),
+    ...(typeof result.matchOrder === 'number' ? { matchOrder: result.matchOrder } : {}),
   };
 
   try {
@@ -485,6 +489,11 @@ export type MatchRecord = {
   createdByName?: string;
   startedAt?: number;
   endedAt?: number;
+  /** Position within the round (1-based). Present on records written from a
+   *  planned match so the Reports bracket SVG can order slots correctly. */
+  matchOrder?: number;
+  /** True for auto-forfeited dummy-player matches — no boards played, winner by walkover. */
+  forfeit?: boolean;
 };
 
 /**

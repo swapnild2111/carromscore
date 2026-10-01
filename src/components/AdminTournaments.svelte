@@ -32,6 +32,7 @@
     addCoOrganiser,
     removeCoOrganiser,
     loadCoOrganisers,
+    setPrimaryOrganizer,
     assignPlayer,
     unassignPlayer,
     bulkAssignPlayers,
@@ -200,6 +201,8 @@
   let coOrgUids = $state<string[]>([]);
   let coOrgLoading = $state(false);
   let coOrgPickerValue = $state('');
+  // Which UID is the primary organiser for print headers (null = creator is primary)
+  let primaryOrgUid = $state<string | null>(null);
   let superUids = $state<Set<string>>(new Set());
   let saving = $state(false);
   let banner = $state<{ kind: 'ok' | 'err'; message: string } | null>(null);
@@ -442,6 +445,8 @@
   let plannedRaw = $state<Record<string, { tournamentKey?: string; roundKey?: string; round?: string; completedAt?: number; aName?: string; bName?: string }>>({});
   // Set of played name-pairs per tournament+round: key = `${tKey}/${round}/${nameA}|${nameB}`
   let playedPairs = $state<Set<string>>(new Set());
+  // Actual match counts per `${tournamentKey}/${roundKey}` — covers KO bracket matches not in /planned
+  let matchCountByRound = $state<Record<string, number>>({});
   let unsubMatchesGlobal: (() => void) | null = null;
 
   onMount(() => {
@@ -476,20 +481,25 @@
         recomputePlannedCounts();
       });
       unsubMatchesGlobal = onValue(ref(db, 'matches'), (snap) => {
-        const raw = snap.val() as Record<string, { tournamentKey?: string; round?: string; aName?: string; bName?: string }> | null;
+        const raw = snap.val() as Record<string, { tournamentKey?: string; roundKey?: string; round?: string; aName?: string; bName?: string }> | null;
         const pairs = new Set<string>();
+        const mCounts: Record<string, number> = {};
         if (raw) {
           for (const v of Object.values(raw)) {
             if (!v?.tournamentKey || !v.round || !v.aName || !v.bName) continue;
             const a = v.aName.trim().toLowerCase();
             const b = v.bName.trim().toLowerCase();
             const tRound = `${v.tournamentKey}/${v.round}`;
-            // Store both orderings so lookup is O(1)
             pairs.add(`${tRound}/${a}|${b}`);
             pairs.add(`${tRound}/${b}|${a}`);
+            if (v.roundKey) {
+              const rk = `${v.tournamentKey}/${v.roundKey}`;
+              mCounts[rk] = (mCounts[rk] ?? 0) + 1;
+            }
           }
         }
         playedPairs = pairs;
+        matchCountByRound = mCounts;
         recomputePlannedCounts();
       });
     })();
@@ -707,6 +717,7 @@
     const isKoRr = (t.format === 'knockout' || t.format === 'roundrobin');
     coOrgUids = [];
     coOrgPickerValue = '';
+    primaryOrgUid = t.primaryOrganizerUid ?? null;
     coOrgLoading = true;
     if (Object.keys(usersMap).length === 0) void loadUsers();
     Promise.all([
@@ -768,6 +779,7 @@
     editingOriginal = null;
     coOrgUids = [];
     coOrgPickerValue = '';
+    primaryOrgUid = null;
   }
   async function saveEdit() {
     if (!editingKey || !editingOriginal) return;
@@ -1091,8 +1103,25 @@
     saving = false;
     if (outcome.ok) {
       coOrgUids = coOrgUids.filter((u) => u !== uid);
+      // If removed co-org was primary, reset to creator
+      if (primaryOrgUid === uid) {
+        primaryOrgUid = null;
+        await setPrimaryOrganizer(editingKey, null);
+      }
     } else {
       flash('err', `Could not remove co-organiser (${outcome.error})`);
+    }
+  }
+
+  async function makeOrgPrimary(uid: string | null) {
+    if (!editingKey) return;
+    saving = true;
+    const outcome = await setPrimaryOrganizer(editingKey, uid);
+    saving = false;
+    if (outcome.ok) {
+      primaryOrgUid = uid;
+    } else {
+      flash('err', `Could not set primary organiser (${outcome.error})`);
     }
   }
 
@@ -2208,14 +2237,45 @@
 
         <fieldset class="edit-fieldset">
           <legend>Co-organisers</legend>
-          <p class="fieldset-hint">Co-organisers can edit matches in this tournament.</p>
+          <p class="fieldset-hint">Co-organisers can edit matches. The <strong>Primary</strong> organiser's logo appears in print headers.</p>
           {#if coOrgLoading}
             <p class="empty">Loading…</p>
           {:else}
             <ul class="uid-list">
+              <!-- Creator row (always shown so they can be set back as primary) -->
+              {#if editingTournament?.createdBy}
+                {@const creatorUid = editingTournament.createdBy}
+                {@const isCreatorPrimary = !primaryOrgUid || primaryOrgUid === creatorUid}
+                <li class="uid-row uid-row-creator">
+                  <span class="uid-label">{coOrgLabelForUid(creatorUid)} <em class="uid-role-tag">creator</em></span>
+                  {#if isCreatorPrimary}
+                    <span class="chip chip-primary" title="This organiser's logo appears in print headers">★ Primary</span>
+                  {:else}
+                    <button
+                      type="button"
+                      class="btn btn-sm"
+                      onclick={() => makeOrgPrimary(null)}
+                      disabled={saving}
+                      title="Set as primary organiser for print headers"
+                    >Make Primary</button>
+                  {/if}
+                </li>
+              {/if}
               {#each coOrgUids as uid (uid)}
+                {@const isPrimary = primaryOrgUid === uid}
                 <li class="uid-row">
                   <span class="uid-label">{coOrgLabelForUid(uid)}</span>
+                  {#if isPrimary}
+                    <span class="chip chip-primary" title="This organiser's logo appears in print headers">★ Primary</span>
+                  {:else}
+                    <button
+                      type="button"
+                      class="btn btn-sm"
+                      onclick={() => makeOrgPrimary(uid)}
+                      disabled={saving}
+                      title="Set as primary organiser for print headers"
+                    >Make Primary</button>
+                  {/if}
                   <button
                     type="button"
                     class="btn btn-danger btn-sm"
@@ -3004,7 +3064,7 @@
                         <span class="chip chip-running" title="Running — umpires can start matches under this round">
                           RUNNING
                         </span>
-                      {:else if !plannedCountByRound[`${roundsKey}/${r.key}`]}
+                      {:else if !plannedCountByRound[`${roundsKey}/${r.key}`] && !matchCountByRound[`${roundsKey}/${r.key}`]}
                         <span class="chip chip-awaiting" title="Add at least one bracket match before starting">
                           AWAITING BRACKETS
                         </span>
@@ -3031,9 +3091,9 @@
                       type="button"
                       class="btn btn-icon btn-round-start"
                       onclick={() => startSelectedRound(r)}
-                      disabled={roundsSaving || !!r.startedAt || r.state === 'closed' || !plannedCountByRound[`${roundsKey}/${r.key}`]}
+                      disabled={roundsSaving || !!r.startedAt || r.state === 'closed' || (!plannedCountByRound[`${roundsKey}/${r.key}`] && !matchCountByRound[`${roundsKey}/${r.key}`])}
                       aria-label="Start round"
-                      title={r.state === 'closed' ? 'Round is closed — reopen first' : r.startedAt ? 'Round already started' : !plannedCountByRound[`${roundsKey}/${r.key}`] ? 'Add bracket matches before starting the round' : 'Start round — umpires can score under it now'}
+                      title={r.state === 'closed' ? 'Round is closed — reopen first' : r.startedAt ? 'Round already started' : (!plannedCountByRound[`${roundsKey}/${r.key}`] && !matchCountByRound[`${roundsKey}/${r.key}`]) ? 'Add bracket matches before starting the round' : 'Start round — umpires can score under it now'}
                     >▶</button>
                     {#if r.state !== 'closed'}
                       <button
@@ -4552,6 +4612,27 @@
     color: var(--fg);
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .uid-row-creator {
+    border: 1px solid rgba(255, 213, 74, 0.15);
+  }
+  .uid-role-tag {
+    font-size: 0.72rem;
+    color: var(--muted, #9aa0a6);
+    margin-left: 0.2rem;
+  }
+  .chip-primary {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
+    padding: 0.15rem 0.55rem;
+    background: rgba(255, 213, 74, 0.15);
+    border: 1px solid rgba(255, 213, 74, 0.5);
+    color: #ffd54a;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
     white-space: nowrap;
   }
   .uid-add {

@@ -39,6 +39,7 @@ export type ReportRow = {
   winner: 'A' | 'B' | 'Draw' | '';
   recordedBy: string;
   matchOrder?: number;  // from match record — used to order bracket slots
+  forfeit?: boolean;    // true for auto-forfeited dummy matches
 };
 
 /**
@@ -204,6 +205,7 @@ export function buildReportRows(matches: MatchRecord[]): ReportRow[] {
       winner,
       recordedBy: m.createdByName ?? '',
       ...(typeof (m as any).matchOrder === 'number' ? { matchOrder: (m as any).matchOrder } : {}),
+      ...(m.forfeit ? { forfeit: true } : {}),
     });
   }
   rows.sort((a, b) => b.endedAtRaw - a.endedAtRaw);

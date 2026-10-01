@@ -88,6 +88,7 @@
     | { kind: 'loaded'; mid: string };
   let plannedState = $state<PlannedState>({ kind: 'idle' });
   let plannedMid = $state<string>('');
+  let plannedMatchOrder = $state<number | null>(null);
   // Board-scan pending state: when the URL carries
   // `?tournament=<key>&board=<N>` (the stable per-board sticker), we
   // resolve to a concrete mid in an effect below, then hand off to
@@ -194,6 +195,7 @@
         if (resB) match = { ...match, bName: resB.name, bResolvedId: resB.resolvedId ?? match.bResolvedId };
       }
       applyPlannedToCfg(match);
+      if (typeof match.matchOrder === 'number') plannedMatchOrder = match.matchOrder;
       // Claim happens at start() — not here. Loading the setup screen
       // should not flip the bracket row to "scoring"; only actually
       // tapping Start should do that.
@@ -328,6 +330,7 @@
     const uid = currentUser()?.uid;
     if (!uid) return;
     applyPlannedToCfg(match);
+    if (typeof match.matchOrder === 'number') plannedMatchOrder = match.matchOrder;
     void claimPlannedMatch(mid, uid);
     plannedState = { kind: 'loaded', mid };
   }
@@ -1289,7 +1292,9 @@
     const uid = currentUser()?.uid ?? '';
     const effectiveMid = plannedMid || resolvedBracketMid;
     if (effectiveMid) void claimPlannedMatch(effectiveMid, uid);
-    const plannedSuffix = effectiveMid ? `&planned=${encodeURIComponent(effectiveMid)}` : '';
+    const plannedSuffix = effectiveMid
+      ? `&planned=${encodeURIComponent(effectiveMid)}${plannedMatchOrder != null ? `&matchOrder=${plannedMatchOrder}` : ''}`
+      : '';
     const scoreUrl = `${base}score/?${encodeConfig(cfg)}${plannedSuffix}`;
     saveResume({
       mid: cfg.mid,

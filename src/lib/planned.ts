@@ -363,11 +363,34 @@ export async function forfeitDummyMatch(
     const result = { setsA: winner === 'a' ? setsNeeded : 0, setsB: winner === 'b' ? setsNeeded : 0, winner };
 
     const effectiveUid = uid || currentUser()?.uid || '';
+    const ts = Date.now();
     await update(ref(db, `planned/${mid}`), {
-      completedAt: Date.now(),
+      completedAt: ts,
       completedBy: effectiveUid || null,
       result,
     });
+
+    // Write a history record so the forfeit appears in Reports
+    if (val.tournamentKey && val.roundKey) {
+      const { push, ref: dbRef } = await import('firebase/database');
+      const histRecord: Record<string, unknown> = {
+        aName: val.aName ?? '', bName: val.bName ?? '',
+        playerAId: val.aResolvedId ?? '', playerBId: val.bResolvedId ?? '',
+        round: val.round ?? val.roundKey, roundKey: val.roundKey,
+        ...(typeof val.matchOrder === 'number' ? { matchOrder: val.matchOrder } : {}),
+        tournament: val.tournamentKey, tournamentKey: val.tournamentKey,
+        mode: 'singles', createdBy: effectiveUid || 'system-forfeit',
+        startedAt: ts, endedAt: ts, forfeit: true,
+        result: {
+          winner, boardCount: 0,
+          setsA: result.setsA, setsB: result.setsB,
+          finalPointsA: 0, finalPointsB: 0,
+        },
+        setWinners: [winner],
+        boardLog: [],
+      };
+      void push(dbRef(db, 'matches'), histRecord).catch(() => {});
+    }
 
     // Propagate winner into next bracket round (async, silent-on-failure)
     void propagateBracketWinner(mid, winner);
@@ -725,7 +748,17 @@ export async function propagateBracketWinner(
       } else if (bIsReal && !aIsReal) {
         targetSide = 'a';
       } else if (!aIsReal && !bIsReal) {
-        targetSide = matchOrder % 2 === 1 ? 'a' : 'b';
+        // When both sides are empty, try matching by group name stored in aName/bName
+        // (the KO Final slot starts with aName="G1", bName="G2" before any propagation).
+        // This prevents a race where G2's group Final completes first and incorrectly
+        // claims the 'a' side (meant for G1) via matchOrder parity.
+        if (groupName && targetSlotFallback.aName === groupName) {
+          targetSide = 'a';
+        } else if (groupName && targetSlotFallback.bName === groupName) {
+          targetSide = 'b';
+        } else {
+          targetSide = matchOrder % 2 === 1 ? 'a' : 'b';
+        }
       } else {
         // Both sides already have real players — nothing to fill
         return;

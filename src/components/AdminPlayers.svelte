@@ -56,13 +56,15 @@
   let tick = $state(0);
   let query = $state('');
   let filterCountry = $state('');
+  let filterRepresents = $state('');
   let sortBy = $state<'az' | 'za'>('az');
 
-  const isFiltered = $derived(query.trim() !== '' || filterCountry !== '' || sortBy !== 'az');
+  const isFiltered = $derived(query.trim() !== '' || filterCountry !== '' || filterRepresents !== '' || sortBy !== 'az');
 
   function resetFilters() {
     query = '';
     filterCountry = '';
+    filterRepresents = '';
     sortBy = 'az';
   }
 
@@ -73,6 +75,15 @@
       if (p.country) codes.add(p.country);
     }
     return [...codes].sort((a, b) => countryName(a).localeCompare(countryName(b)));
+  });
+
+  const representsOptions = $derived(() => {
+    void tick;
+    const vals = new Set<string>();
+    for (const p of loadAll()) {
+      if (p.represents?.trim()) vals.add(p.represents.trim());
+    }
+    return [...vals].sort((a, b) => a.localeCompare(b));
   });
 
   let renamingId = $state<string | null>(null);
@@ -176,6 +187,7 @@
     }
     if (q) all = all.filter((p) => p.canonicalName.toLowerCase().includes(q));
     if (filterCountry) all = all.filter((p) => p.country === filterCountry);
+    if (filterRepresents) all = all.filter((p) => p.represents?.trim() === filterRepresents);
     all = all.slice(0, 200);
     if (sortBy === 'za') {
       all = [...all].sort((a, b) => b.canonicalName.localeCompare(a.canonicalName));
@@ -711,6 +723,14 @@
         {/each}
       </select>
     {/if}
+    {#if representsOptions().length > 0}
+      <select class="filter-select" bind:value={filterRepresents} aria-label="Filter by represents">
+        <option value="">All clubs/orgs</option>
+        {#each representsOptions() as r (r)}
+          <option value={r}>{r}</option>
+        {/each}
+      </select>
+    {/if}
     <span class="count">{filtered().length}</span>
     {#if isFiltered}
       <button class="reset-filters" onclick={resetFilters} aria-label="Clear filters">✕ Reset</button>
@@ -719,7 +739,7 @@
 
   {#if filtered().length === 0}
     <p class="empty">
-      {query || filterCountry ? 'No players match that filter.' : 'No players yet.'}
+      {query || filterCountry || filterRepresents ? 'No players match that filter.' : 'No players yet.'}
     </p>
   {:else}
     <div class="tbl-wrap">

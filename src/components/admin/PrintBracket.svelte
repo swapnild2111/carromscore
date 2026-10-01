@@ -213,8 +213,6 @@
   // Co-org profiles: uid → profile. Loaded once when tournament has coOrganisers.
   // Plain object (not Map) so Svelte's $state proxy tracks field additions reactively.
   let coOrgProfiles = $state<Record<string, OrgProfile>>({});
-  // Which organiser's logo/name to print. Defaults to the creator; user can switch.
-  let selectedLogoUid = $state<string | null>(null);
   // Track which co-org profile fetches have been attempted (avoid re-fetching).
   const coOrgFetchAttempted = new Set<string>();
 
@@ -260,12 +258,13 @@
       // Silently ignore — name falls back to coOrgNames from tournament record.
     }
   }
-  // Re-run only if profile not yet loaded (onMount beat the store, or createdBy changed).
+  // Re-run profile load whenever the primary organiser UID changes.
   $effect(() => {
-    const uid = tournament?.createdBy;
-    if (uid && !orgProfile) void loadOrgProfile(uid);
+    const uid = tournament?.primaryOrganizerUid ?? tournament?.createdBy;
+    if (uid) void loadOrgProfile(uid);
   });
-  // Kick off co-org profile fetches for logo URLs when tournament loads.
+  // Kick off co-org profile fetches for logo URLs when tournament loads
+  // (needed so we can fall back to a co-org logo if that co-org is primary).
   $effect(() => {
     const coOrgs = tournament?.coOrganisers;
     if (!coOrgs) return;
@@ -301,14 +300,18 @@
     logoOptions = buildLogoOptions(tournament, orgProfile, coOrgProfiles);
   });
 
-  // Active logo option — whichever uid is selected, or first by default.
+  // Active logo option — driven by primaryOrganizerUid from the tournament record.
   const activeLogoOption = $derived.by<LogoOption | null>(() => {
     if (logoOptions.length === 0) return null;
-    const uid = selectedLogoUid;
-    return logoOptions.find((o) => o.uid === uid) ?? logoOptions[0] ?? null;
+    const primaryUid = tournament?.primaryOrganizerUid;
+    if (primaryUid) {
+      const found = logoOptions.find((o) => o.uid === primaryUid);
+      if (found) return found;
+    }
+    return logoOptions[0] ?? null;
   });
 
-  // Derived print values — driven by whichever logo option is selected.
+  // Derived print values — driven by the primary organiser.
   const printLogoUrl = $derived(activeLogoOption?.logoUrl ?? tournament?.logoUrl ?? null);
   const printOrganizerName = $derived(
     activeLogoOption?.label !== 'Organiser' ? (activeLogoOption?.label ?? null) :
@@ -1545,12 +1548,14 @@
       for (const m of (roundMap.get(r) ?? [])) {
         const h = findHistEntry(histKOMap, r, m.aName, m.bName, slots.length);
         const isDone = !!m.completedAt || !!h;
-        const isKOPlaceholder = (n: string) => /(?:Winner|Finalist)\s+\d+|KO Qualifier/i.test(n);
+        const groupNameSet = new Set(Object.values(tournament?.groups ?? {}).map((g) => g.name));
+        const isKOPlaceholder = (n: string, hasId: boolean) =>
+          !hasId && (/(?:Winner|Finalist)\s+\d+|KO Qualifier|KO Winner|Pre-QF Winner/i.test(n) || groupNameSet.has(n));
         slots.push({
           aId: m.aResolvedId,
-          aName: m.aResolvedId ? (resolvedName(m.aResolvedId, m.aName)) : (isKOPlaceholder(m.aName) ? '' : m.aName),
+          aName: m.aResolvedId ? (resolvedName(m.aResolvedId, m.aName)) : (isKOPlaceholder(m.aName, false) ? '' : m.aName),
           bId: m.bResolvedId,
-          bName: m.bResolvedId ? (resolvedName(m.bResolvedId, m.bName)) : (isKOPlaceholder(m.bName) ? '' : m.bName),
+          bName: m.bResolvedId ? (resolvedName(m.bResolvedId, m.bName)) : (isKOPlaceholder(m.bName, false) ? '' : m.bName),
           isDone,
           winner: m.result?.winner === 'a' ? 'a' : m.result?.winner === 'b' ? 'b'
             : h?.winner === 'a' ? 'a' : h?.winner === 'b' ? 'b' : undefined,
@@ -1718,22 +1723,6 @@
                 aria-pressed={qrMode === 'match'}
                 onclick={() => setQrMode('match')}
               >Per match</button>
-            </div>
-          </div>
-        {/if}
-        {#if logoOptions.length > 1}
-          <div class="qr-type-group" role="group" aria-label="Logo">
-            <span class="qr-type-label">Logo</span>
-            <div class="seg-ctrl">
-              {#each logoOptions as opt (opt.uid)}
-                <button
-                  type="button"
-                  class="seg-btn"
-                  class:seg-active={activeLogoOption?.uid === opt.uid}
-                  aria-pressed={activeLogoOption?.uid === opt.uid}
-                  onclick={() => (selectedLogoUid = opt.uid)}
-                >{opt.label}</button>
-              {/each}
             </div>
           </div>
         {/if}

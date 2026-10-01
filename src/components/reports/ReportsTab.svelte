@@ -31,6 +31,7 @@
     loadRounds,
     normalizeKey,
   } from '../../lib/tournaments';
+  import { loadPendingPlannedByTournament, type PlannedMatch } from '../../lib/planned';
   import { BRACKET_ROUND_RX } from '../../lib/bracket';
   import MatchPopup from '../MatchPopup.svelte';
   // BarChart removed v3.4.12 — the two horizontal bar rows above the
@@ -142,28 +143,90 @@
     return findByKey(normalizeKey(selection));
   });
 
+  // For groupknockout tournaments: planned KO matches loaded so the Combined KO
+  // bracket appears in the per-round breakdown even before those matches are played.
+  let koPlannedMatches = $state<PlannedMatch[]>([]);
+  $effect(() => {
+    const rec = currentTournamentRecord;
+    const fmt = rec?.format;
+    // groupknockout (or knockout tournaments that use group+KO round naming)
+    if (fmt !== 'groupknockout' && fmt !== 'knockout') { koPlannedMatches = []; return; }
+    const tk = rec!.key;
+    if (!tk) return;
+    void loadPendingPlannedByTournament(tk).then((ms) => {
+      const ko = ms.filter((m) => /^KO\b/i.test(m.round ?? ''));
+      koPlannedMatches = ko;
+    });
+  });
+
   // Pre-computed flight groups with bracket SVGs. Memoized as a $derived so
   // SVG string building (expensive for large tournaments) only runs when
   // matches or the report actually changes — not on every template render.
   type FlightGroup = ReturnType<typeof groupNonGroupRounds>[number];
   const flightGroups = $derived.by<FlightGroup[]>(() => {
     const r = report;
-    if (!r?.roundReports || r.roundReports.length === 0) return [];
     const fmt = currentTournamentRecord?.format;
     const isLeague = fmt === 'league';
     const isKnockout = fmt === 'knockout';
     const isRoundRobin = fmt === 'roundrobin';
+    const isGroupKO = fmt === 'groupknockout';
+
+    // For groupknockout (or knockout tournaments that use G1/G2 + KO round naming):
+    // build synthetic round reports from planned KO matches so the Combined KO
+    // bracket shows even before those matches are played.
+    const hasKOPlanned = koPlannedMatches.length > 0;
+    const isEffectiveGroupKO = isGroupKO || (isKnockout && hasKOPlanned);
+    const syntheticKORounds: RoundReport[] = [];
+    if (isEffectiveGroupKO && hasKOPlanned) {
+      const byRound = new Map<string, PlannedMatch[]>();
+      for (const m of koPlannedMatches) {
+        const rn = m.round ?? '';
+        if (!byRound.has(rn)) byRound.set(rn, []);
+        byRound.get(rn)!.push(m);
+      }
+      for (const [roundName, ms] of byRound) {
+        // Only include if no history round report exists for this round
+        const alreadyInHistory = r?.roundReports?.some((rr) => rr.roundName === roundName);
+        if (alreadyInHistory) continue;
+        ms.sort((a, b) => (a.matchOrder ?? 0) - (b.matchOrder ?? 0));
+        const rows: ReportRow[] = ms.map((m) => ({
+          sideA: m.aResolvedId ? (m.aName ?? '') : (m.aName ?? ''),
+          sideB: m.bResolvedId ? (m.bName ?? '') : (m.bName ?? ''),
+          winner: '' as 'A' | 'B' | 'Draw' | '',
+          setsA: 0, setsB: 0, pointsA: 0, pointsB: 0,
+          boardsWonA: 0, boardsWonB: 0, boardCount: 0,
+          endedAt: '', endedAtRaw: 0, recordedBy: '',
+          matchOrder: m.matchOrder,
+          _matchId: '',
+        }));
+        syntheticKORounds.push({
+          roundName,
+          roundKey: ms[0].roundKey ?? normalizeKey(roundName),
+          matches: rows.length,
+          rows,
+          playerSummary: [],
+        });
+      }
+    }
+
+    if (!r?.roundReports || r.roundReports.length === 0) {
+      if (syntheticKORounds.length === 0) return [];
+      return groupNonGroupRounds(syntheticKORounds, buildSetScoresMap(matches));
+    }
     // For non-roundrobin formats keep the original <= 1 guard (summary card already shows single-round data)
-    if (!isRoundRobin && r.roundReports.length <= 1) return [];
+    if (!isRoundRobin && !isEffectiveGroupKO && r.roundReports.length <= 1) return [];
     const nonGroupRounds = isLeague
       ? r.roundReports.filter((rr) => !/^group /i.test(rr.roundName))
       : isRoundRobin
         ? r.roundReports.filter((rr) => rr.roundName === 'Group RR' || BRACKET_ROUND_RX.test(rr.roundName))
-        : isKnockout
-          ? r.roundReports.filter((rr) => BRACKET_ROUND_RX.test(rr.roundName))
-          : r.roundReports;
-    if (nonGroupRounds.length === 0) return [];
-    return groupNonGroupRounds(nonGroupRounds, buildSetScoresMap(matches));
+        : isEffectiveGroupKO
+          ? r.roundReports  // include all rounds: G1/G2 groups + KO rounds
+          : isKnockout
+            ? r.roundReports.filter((rr) => BRACKET_ROUND_RX.test(rr.roundName))
+            : r.roundReports;
+    const allRounds = [...nonGroupRounds, ...syntheticKORounds];
+    if (allRounds.length === 0) return [];
+    return groupNonGroupRounds(allRounds, buildSetScoresMap(matches));
   });
 
   // Trophy winners for league format: 1st + 2nd per flight, from Final matches.
@@ -190,11 +253,12 @@
     });
   });
 
-  // Organiser profile for print header — loaded when tournament's createdBy changes.
+  // Organiser profile for print header — uses primaryOrganizerUid if set, else createdBy.
   type OrgProfile = { displayName?: string; orgName?: string; logoUrl?: string };
   let orgProfile = $state<OrgProfile | null>(null);
   $effect(() => {
-    const uid = currentTournamentRecord?.createdBy;
+    const rec = currentTournamentRecord;
+    const uid = rec?.primaryOrganizerUid ?? rec?.createdBy;
     if (!uid) { orgProfile = null; return; }
     void (async () => {
       try {
@@ -719,7 +783,7 @@
   type SetScore = { set: number; board: number; a: number; b: number };
   type BracketRound = { roundName: string; matches: Array<{ sideA: string; sideB: string; winner: 'A' | 'B' | 'Draw' | ''; setsA: number; setsB: number; pointsA: number; pointsB: number; setScores: SetScore[]; matchOrder?: number }> };
 
-  const BRACKET_SUB_ORDER = ['R32', 'R16', 'Round of 16', 'QF', 'SF', 'Final'];
+  const BRACKET_SUB_ORDER = ['Pre-qualify', 'Pre-QF', 'R32', 'R16', 'Round of 16', 'QF', 'Quarter Finals', 'SF', 'Semi Finals', 'Final'];
 
   function bracketSubSortKey(name: string): number {
     for (let i = 0; i < BRACKET_SUB_ORDER.length; i++) {
@@ -728,8 +792,8 @@
     return 99;
   }
 
-  function buildFlightBracketSVG(bracketRounds: BracketRound[]): string {
-    if (bracketRounds.length < 2) return '';
+  function buildFlightBracketSVG(bracketRounds: BracketRound[], allowSingleCol = false, theme: 'light' | 'dark' = 'light'): string {
+    if (bracketRounds.length < 2 && !allowSingleCol) return '';
 
     const sorted = [...bracketRounds].sort(
       (a, b) => bracketSubSortKey(a.roundName) - bracketSubSortKey(b.roundName),
@@ -738,9 +802,11 @@
     // Merge rounds sharing the same stage label (e.g. QF Match 1–4 → one QF column)
     function stageLabel(name: string): string {
       const n = name.replace(/^.*?—\s*/, ''); // strip "Bronze League — " prefix
-      if (n.includes('Final')) return 'Finals';
-      if (n.includes('SF')) return 'Semi Finals';
-      if (n.includes('QF')) return 'Quarter Finals';
+      if (n.includes('Pre-qualify') || n.includes('Pre-QF')) return 'PRE-QUALIFY';
+      // Check SF/Semi before Final to avoid "Semi Finals".includes('Final') matching
+      if (n.includes('SF') || /semi.finals?/i.test(n)) return 'Semi Finals';
+      if (n.includes('QF') || /quarter.finals?/i.test(n)) return 'Quarter Finals';
+      if (/\bfinals?\b/i.test(n)) return 'Finals';
       if (n.includes('R16') || n.includes('Round of 16')) return 'Rounds';
       if (n.includes('R32')) return 'Rounds';
       return n;
@@ -756,6 +822,7 @@
     // After merging multi-round stages (e.g. "QF Match 1" + "QF Match 2" → "Quarter Finals"),
     // re-sort each merged bucket by matchOrder so slot positions align with connector lines.
     for (const r of mergedMap.values()) {
+      // Sort ASC so matchOrder=1 appears at the top — matches print-page bracket order.
       r.matches.sort((a, b) =>
         a.matchOrder != null && b.matchOrder != null ? a.matchOrder - b.matchOrder : 0
       );
@@ -767,6 +834,22 @@
     const MATCH_H = 56;
     const SLOT_PAD = 10;
     const NAME_MAX = 22;
+
+    // Theme-aware colors
+    const isDark = theme === 'dark';
+    const T = {
+      bg:          isDark ? '#1a1a1a' : '#fff',
+      slotFill:    isDark ? '#2a2a2a' : '#fff',
+      slotStroke:  isDark ? '#444'    : '#bbb',
+      divider:     isDark ? '#383838' : '#ebebeb',
+      connector:   isDark ? '#555'    : '#bbb',
+      labelFill:   isDark ? '#ffd54a' : '#555',
+      textWinner:  isDark ? '#ffd54a' : '#000',
+      textNormal:  isDark ? '#e0e0e0' : '#333',
+      pillFill:    isDark ? '#333'    : '#f5f5f5',
+      pillStroke:  isDark ? '#555'    : '#e0e0e0',
+      pillText:    isDark ? '#ffd54a' : '#444',
+    };
 
     function clip(s: string): string {
       return s.length > NAME_MAX ? s.slice(0, NAME_MAX - 1) + '…' : s;
@@ -799,10 +882,10 @@
         const lastSrc = Math.round((ni + 1) * feedRatio) - 1;
         for (let si = firstSrc; si <= lastSrc && si < currCount; si++) {
           const cy1 = slotCY(si, currCount);
-          lines.push(`<line x1="${x1}" y1="${cy1}" x2="${xMid}" y2="${cy1}" stroke="var(--bracket-conn, rgba(255,255,255,0.15))" stroke-width="1.5"/>`);
-          lines.push(`<line x1="${xMid}" y1="${cy1}" x2="${xMid}" y2="${cy2}" stroke="var(--bracket-conn, rgba(255,255,255,0.15))" stroke-width="1.5"/>`);
+          lines.push(`<line x1="${x1}" y1="${cy1}" x2="${xMid}" y2="${cy1}" stroke="${T.connector}" stroke-width="1.25"/>`);
+          lines.push(`<line x1="${xMid}" y1="${cy1}" x2="${xMid}" y2="${cy2}" stroke="${T.connector}" stroke-width="1.25"/>`);
         }
-        lines.push(`<line x1="${xMid}" y1="${cy2}" x2="${x2}" y2="${cy2}" stroke="var(--bracket-conn, rgba(255,255,255,0.15))" stroke-width="1.5"/>`);
+        lines.push(`<line x1="${xMid}" y1="${cy2}" x2="${x2}" y2="${cy2}" stroke="${T.connector}" stroke-width="1.25"/>`);
       }
     }
 
@@ -811,11 +894,11 @@
       const round = merged[ci];
       const slotCount = round.matches.length;
       const x = colX(ci);
-      // Column label — roundName is already the short stage label after merging
+      // Column label
       const labelX = x + COL_W / 2;
       const labelY = -4;
       const shortLabel = round.roundName;
-      lines.push(`<text x="${labelX}" y="${labelY}" text-anchor="middle" font-size="11" font-weight="700" fill="var(--bracket-label, #ffd54a)" font-family="sans-serif" letter-spacing="0.06em">${shortLabel}</text>`);
+      lines.push(`<text x="${labelX}" y="${labelY}" text-anchor="middle" font-size="11" font-weight="700" fill="${T.labelFill}" font-family="sans-serif" letter-spacing="0.06em">${shortLabel}</text>`);
 
       for (let mi = 0; mi < slotCount; mi++) {
         const m = round.matches[mi];
@@ -829,16 +912,20 @@
         const aIsWinner = m.winner === 'A';
         const bIsWinner = m.winner === 'B';
 
-        const aFill = aIsWinner ? 'var(--bracket-winner, #ffd54a)' : 'var(--bracket-text, #f0f0f0)';
-        const bFill = bIsWinner ? 'var(--bracket-winner, #ffd54a)' : 'var(--bracket-text, #f0f0f0)';
+        const aFill = aIsWinner ? T.textWinner : T.textNormal;
+        const bFill = bIsWinner ? T.textWinner : T.textNormal;
+        const aWeight = aIsWinner ? '700' : '400';
+        const bWeight = bIsWinner ? '700' : '400';
+        const aOpacity = isDone && !aIsWinner ? '0.38' : '1';
+        const bOpacity = isDone && !bIsWinner ? '0.38' : '1';
         lines.push(`
-          <rect x="${x}" y="${sy}" width="${COL_W}" height="${slotH}" rx="5" fill="var(--bracket-fill, #141414)" stroke="var(--bracket-border, rgba(255,255,255,0.08))" stroke-width="1"/>
-          <line x1="${x + 1}" y1="${sy + slotH / 2}" x2="${x + COL_W - 1}" y2="${sy + slotH / 2}" stroke="var(--bracket-divider, rgba(255,255,255,0.07))" stroke-width="0.75"/>
-          <text x="${x + 10}" y="${sy + 16}" font-size="12" font-weight="${aIsWinner ? '700' : '400'}"
-                opacity="${isDone && !aIsWinner ? '0.38' : '1'}" font-family="sans-serif"
+          <rect x="${x}" y="${sy}" width="${COL_W}" height="${slotH}" rx="5" fill="${T.slotFill}" stroke="${T.slotStroke}" stroke-width="1"/>
+          <line x1="${x + 1}" y1="${sy + slotH / 2}" x2="${x + COL_W - 1}" y2="${sy + slotH / 2}" stroke="${T.divider}" stroke-width="0.75"/>
+          <text x="${x + 10}" y="${sy + 16}" font-size="11" font-weight="${aWeight}"
+                opacity="${aOpacity}" font-family="sans-serif"
                 fill="${aFill}">${aName}</text>
-          <text x="${x + 10}" y="${sy + slotH - 7}" font-size="12" font-weight="${bIsWinner ? '700' : '400'}"
-                opacity="${isDone && !bIsWinner ? '0.38' : '1'}" font-family="sans-serif"
+          <text x="${x + 10}" y="${sy + slotH - 7}" font-size="11" font-weight="${bWeight}"
+                opacity="${bOpacity}" font-family="sans-serif"
                 fill="${bFill}">${bName}</text>
         `);
 
@@ -846,10 +933,8 @@
           const totalSets = m.setsA + m.setsB;
           let scoreLine = '';
           if (totalSets <= 1) {
-            // Single set — show total points
             scoreLine = `${m.pointsA}–${m.pointsB}`;
           } else {
-            // Multiple sets — show set count e.g. 2–1
             scoreLine = `${m.setsA}–${m.setsB}`;
           }
 
@@ -858,9 +943,9 @@
           const px = x + COL_W - pillW - 4;
           const py = cy - pillH / 2;
 
-          lines.push(`<rect x="${px}" y="${py}" width="${pillW}" height="${pillH}" rx="8" fill="var(--bracket-pill, rgba(255,255,255,0.06))"/>`);
+          lines.push(`<rect x="${px}" y="${py}" width="${pillW}" height="${pillH}" rx="8" fill="${T.pillFill}" stroke="${T.pillStroke}" stroke-width="0.75"/>`);
           lines.push(`<text x="${px + pillW / 2}" y="${py + 12}" text-anchor="middle" font-size="9.5"
-                font-family="sans-serif" fill="var(--bracket-pill-text, #c8c8c8)" font-weight="600">${scoreLine}</text>`);
+                font-family="sans-serif" fill="${T.pillText}" font-weight="600">${scoreLine}</text>`);
         }
       }
     }
@@ -869,7 +954,7 @@
     const svgPadT = 24; // room for column labels above viewBox
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-8 -${svgPadT} ${totalW + 16} ${svgH + svgPadT + 8}"
       width="${totalW + 16}" height="${svgH + svgPadT + 8}" style="max-width:100%;height:auto;display:block">
-      <rect x="-8" y="-${svgPadT}" width="${totalW + 16}" height="${svgH + svgPadT + 8}" fill="var(--bracket-bg, transparent)" rx="0"/>
+      <rect x="-8" y="-${svgPadT}" width="${totalW + 16}" height="${svgH + svgPadT + 8}" fill="${T.bg}" rx="4"/>
       ${lines.join('\n')}
     </svg>`;
   }
@@ -930,7 +1015,7 @@
     return m;
   }
 
-  function groupNonGroupRounds(rounds: RoundReport[], setScoresMap: Map<string, SetScore[]>): Array<{ flightName: string; rounds: RoundReport[]; stageGroups: StageGroup[]; bracketSVG: string }> {
+  function groupNonGroupRounds(rounds: RoundReport[], setScoresMap: Map<string, SetScore[]>): Array<{ flightName: string; rounds: RoundReport[]; stageGroups: StageGroup[]; bracketSVG: string; bracketSVGPrint: string }> {
     const flightMap = new Map<string, RoundReport[]>();
     for (const rr of rounds) {
       const sep = rr.roundName.indexOf(' — ');
@@ -969,7 +1054,13 @@
               : 0
           ),
       }));
-      return { flightName, rounds: flightRounds, stageGroups, bracketSVG: buildFlightBracketSVG(bracketRounds) };
+      // KO flight (Combined KO) may have only 1 column (Final only) — allow single col
+      const allowSingle = /^KO$/i.test(flightName);
+      return {
+        flightName, rounds: flightRounds, stageGroups,
+        bracketSVG: buildFlightBracketSVG(bracketRounds, allowSingle, 'dark'),
+        bracketSVGPrint: buildFlightBracketSVG(bracketRounds, allowSingle, 'light'),
+      };
     });
   }
 </script>
@@ -1307,19 +1398,20 @@
         </thead>
         <tbody>
           {#each sortedMatches as r (r._matchId)}
-            <tr class="match-row-clickable" onclick={() => openMatchDetail(r)} title="Tap to see set-by-set breakdown">
+            <tr class="match-row-clickable" class:match-row-forfeit={r.forfeit} onclick={() => openMatchDetail(r)} title="Tap to see set-by-set breakdown">
               <td>{r.endedAt}</td>
-              <td>{r.mode}</td>
+              <td>{r.forfeit ? 'Forfeit' : r.mode}</td>
               <td class="col-name">{r.sideA}</td>
               <td class="col-name">{r.sideB}</td>
-              <td>{r.setsA}</td>
-              <td>{r.setsB}</td>
-              <td>{r.boardsWonA}</td>
-              <td>{r.boardsWonB}</td>
-              <td>{r.pointsA}</td>
-              <td>{r.pointsB}</td>
+              <td>{r.forfeit ? '—' : r.setsA}</td>
+              <td>{r.forfeit ? '—' : r.setsB}</td>
+              <td>{r.forfeit ? '—' : r.boardsWonA}</td>
+              <td>{r.forfeit ? '—' : r.boardsWonB}</td>
+              <td>{r.forfeit ? '—' : r.pointsA}</td>
+              <td>{r.forfeit ? '—' : r.pointsB}</td>
               <td class="winner-cell">
-                {#if r.winner === 'Draw'}<span class="winner-tag winner-draw">Draw</span>
+                {#if r.forfeit}<span class="winner-tag winner-forfeit">W/O</span>
+                {:else if r.winner === 'Draw'}<span class="winner-tag winner-draw">Draw</span>
                 {:else if r.winner === 'A'}<span class="winner-tag winner-a">A</span>
                 {:else if r.winner === 'B'}<span class="winner-tag winner-b">B</span>
                 {/if}
@@ -1419,7 +1511,9 @@
               </button>
               <div class="flight-section-body">
                 {#if fg.bracketSVG}
-                  <div class="flight-bracket-svg">{@html fg.bracketSVG}</div>
+                  <!-- Screen: dark-theme SVG; Print: light-theme SVG (hidden on screen) -->
+                  <div class="flight-bracket-svg flight-bracket-svg-screen">{@html fg.bracketSVG}</div>
+                  <div class="flight-bracket-svg flight-bracket-svg-print">{@html fg.bracketSVGPrint}</div>
                 {/if}
                 <div class="flight-stage-list">
                   {#each fg.stageGroups as sg (sg.stageKey)}
@@ -1509,19 +1603,20 @@
                                   </thead>
                                   <tbody>
                                     {#each rrMatchesSorted as r (r._matchId)}
-                                      <tr class="match-row-clickable" onclick={() => openMatchDetail(r)} title="Tap to see set-by-set breakdown">
+                                      <tr class="match-row-clickable" class:match-row-forfeit={r.forfeit} onclick={() => openMatchDetail(r)} title="Tap to see set-by-set breakdown">
                                         <td>{r.endedAt}</td>
-                                        <td>{r.mode}</td>
+                                        <td>{r.forfeit ? 'Forfeit' : r.mode}</td>
                                         <td class="col-name">{r.sideA}</td>
                                         <td class="col-name">{r.sideB}</td>
-                                        <td>{r.setsA}</td>
-                                        <td>{r.setsB}</td>
-                                        <td>{r.boardsWonA}</td>
-                                        <td>{r.boardsWonB}</td>
-                                        <td>{r.pointsA}</td>
-                                        <td>{r.pointsB}</td>
+                                        <td>{r.forfeit ? '—' : r.setsA}</td>
+                                        <td>{r.forfeit ? '—' : r.setsB}</td>
+                                        <td>{r.forfeit ? '—' : r.boardsWonA}</td>
+                                        <td>{r.forfeit ? '—' : r.boardsWonB}</td>
+                                        <td>{r.forfeit ? '—' : r.pointsA}</td>
+                                        <td>{r.forfeit ? '—' : r.pointsB}</td>
                                         <td class="winner-cell">
-                                          {#if r.winner === 'Draw'}<span class="winner-tag winner-draw">Draw</span>
+                                          {#if r.forfeit}<span class="winner-tag winner-forfeit">W/O</span>
+                                          {:else if r.winner === 'Draw'}<span class="winner-tag winner-draw">Draw</span>
                                           {:else if r.winner === 'A'}<span class="winner-tag winner-a">A</span>
                                           {:else if r.winner === 'B'}<span class="winner-tag winner-b">B</span>
                                           {/if}
@@ -1679,6 +1774,7 @@
   .rep-print:hover { background: rgba(255, 213, 74, 0.08); }
   @media print {
     @page { size: A4 landscape; margin: 1.5cm 1.2cm; }
+    * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
 
     /* ── Hide all chrome except the report body ── */
     :global(.offline-banner),
@@ -1845,15 +1941,18 @@
     }
     .tbl-hdr { margin-bottom: 0.3rem !important; }
 
-    /* ── Both tables: clean black-on-white ── */
+    /* ── Both tables: clean black-on-white, full-width block ── */
     .tbl-scroll,
     .tbl-scroll-leaderboard,
-    .summary-scroll {
+    .summary-scroll,
+    .group-tbl-scroll {
       overflow: visible !important;
       max-height: none !important;
       background: transparent !important;
       border: none !important;
       border-radius: 0 !important;
+      display: block !important;
+      width: 100% !important;
     }
     .leaderboard-tbl,
     .summary-tbl,
@@ -1861,7 +1960,10 @@
       min-width: 0 !important;
       width: 100% !important;
       border-collapse: collapse !important;
+      border-spacing: 0 !important;
       font-size: 0.8rem !important;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
     }
     .leaderboard-tbl th,
     .leaderboard-tbl td,
@@ -1870,19 +1972,33 @@
     .matches-tbl th,
     .matches-tbl td {
       padding: 0.28rem 0.5rem !important;
-      border: 1px solid #ddd !important;
+      border-top: 1px solid #999 !important;
+      border-right: 1px solid #999 !important;
+      border-bottom: 1px solid #999 !important;
+      border-left: 1px solid #999 !important;
       color: #111 !important;
       background: #fff !important;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
     }
     .leaderboard-tbl th,
     .summary-tbl th,
     .matches-tbl th {
-      background: #f5f5f5 !important;
+      background: #e8e8e8 !important;
       font-size: 0.68rem !important;
-      color: #444 !important;
+      color: #111 !important;
+      font-weight: 700 !important;
       text-transform: uppercase !important;
       letter-spacing: 0.05em !important;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
     }
+    /* Override any interactive sort-highlight colour in print */
+    .leaderboard-tbl th.hist-th-sorted,
+    .summary-tbl th.hist-th-sorted,
+    .matches-tbl th.hist-th-sorted { color: #111 !important; }
+    /* Hide sort carets — not useful in print */
+    .sort-caret { display: none !important; }
     /* Top leaderboard row: gold tint */
     .leaderboard-tbl tr.leaderboard-top td {
       background: #fffbe6 !important;
@@ -1932,11 +2048,15 @@
       border: none !important;
       border-top: 2px solid #000 !important;
       border-radius: 0 !important;
-      break-before: page;
-      page-break-before: always;
       break-inside: auto;
       page-break-inside: auto;
       margin-bottom: 0.5rem !important;
+    }
+    /* Only flights after the first get a forced page-break — keeps
+       the "Per-round breakdown" heading on the same page as G1. */
+    .flight-section + .flight-section {
+      break-before: page;
+      page-break-before: always;
     }
     .flight-section-hdr {
       background: transparent !important;
@@ -1946,7 +2066,28 @@
       pointer-events: none;
     }
     .flight-section-name { color: #111 !important; }
-    .flight-section-body { padding: 0 0 0.5rem !important; }
+    .flight-section-body {
+      display: block !important;
+      padding: 0 0 0.5rem !important;
+    }
+    /* Bracket SVG: full width, block, natural height */
+    .flight-bracket-svg-print {
+      outline: none !important;
+      break-inside: avoid;
+      page-break-inside: avoid;
+      display: block !important;
+      width: 100% !important;
+      max-width: 100% !important;
+      overflow: visible !important;
+      margin-bottom: 0.6rem !important;
+    }
+    /* SVG element itself: scale to fit, height follows aspect ratio */
+    .flight-bracket-svg-print svg {
+      display: block !important;
+      width: 100% !important;
+      max-width: 100% !important;
+      height: auto !important;
+    }
 
     /* ── Per-round accordion: print all open, remove chrome ── */
     .rounds-section { margin-top: 0.8rem !important; }
@@ -1960,9 +2101,16 @@
       page-break-inside: auto;
       margin-bottom: 0.5rem !important;
     }
-    /* Keep thead attached to the first body row; allow break after header row */
-    .matches-tbl thead { display: table-header-group !important; }
-    .matches-tbl tbody tr { break-inside: avoid; page-break-inside: avoid; }
+    /* Table layout for print: keep thead + first body row together to avoid orphan headers */
+    .matches-tbl,
+    .leaderboard-tbl,
+    .summary-tbl { break-inside: auto !important; }
+    .matches-tbl thead tr,
+    .leaderboard-tbl thead tr,
+    .summary-tbl thead tr { break-after: avoid; page-break-after: avoid; }
+    .matches-tbl tbody tr,
+    .leaderboard-tbl tbody tr,
+    .summary-tbl tbody tr { break-inside: avoid; page-break-inside: avoid; }
     .round-report-hdr {
       background: transparent !important;
       padding: 0.35rem 0 !important;
@@ -1971,13 +2119,13 @@
       pointer-events: none;
     }
     .round-report-caret { display: none !important; }
+    /* Force all sections open when printing — stack vertically */
     .round-report-body {
-      display: flex !important;
+      display: block !important;
       padding: 0 0 0.5rem !important;
     }
-    /* Force all sections open when printing */
-    .round-folded .round-report-body { display: flex !important; }
-    .round-folded > .flight-section-body { display: flex !important; }
+    .round-folded .round-report-body { display: block !important; }
+    .round-folded > .flight-section-body { display: block !important; }
     .round-folded > .round-report-body-wrap { display: block !important; }
     .round-report-count {
       background: transparent !important;
@@ -2501,6 +2649,13 @@
     color: #c9a56f;
     border: 1px solid rgba(201, 165, 111, 0.35);
   }
+  .winner-forfeit {
+    background: rgba(150, 150, 150, 0.12);
+    color: #999;
+    border: 1px solid rgba(150, 150, 150, 0.3);
+    font-style: italic;
+  }
+  .match-row-forfeit td { opacity: 0.6; }
 
   /* ─── Per-round accordion (v3.2) ─────────────────────────────── */
   .rounds-section {
@@ -2707,42 +2862,16 @@
   .flight-bracket-svg {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
-    /* Dark-first defaults — match the app's dark theme */
-    --bracket-bg: transparent;
-    --bracket-fill: #141414;
-    --bracket-border: rgba(255, 255, 255, 0.08);
-    --bracket-divider: rgba(255, 255, 255, 0.05);
-    --bracket-text: #d8d8d8;
-    --bracket-winner: #ffd54a;
-    --bracket-label: rgba(255, 213, 74, 0.65);
-    --bracket-conn: rgba(255, 255, 255, 0.15);
-    --bracket-pill: rgba(255, 255, 255, 0.06);
-    --bracket-pill-text: #c8c8c8;
+    border-radius: 6px;
+    margin-bottom: 0.4rem;
   }
-  /* Light theme overrides */
-  @media (prefers-color-scheme: light) {
-    :global(:root:not([data-theme='dark'])) .flight-bracket-svg {
-      --bracket-fill: #ffffff;
-      --bracket-border: #c0a020;
-      --bracket-divider: #ebebeb;
-      --bracket-text: #1a1a1a;
-      --bracket-winner: #b07800;
-      --bracket-label: #8a6000;
-      --bracket-conn: #c0a020;
-      --bracket-pill: #fff3cc;
-      --bracket-pill-text: #7a5500;
-    }
-  }
-  :global([data-theme='light']) .flight-bracket-svg {
-    --bracket-fill: #ffffff;
-    --bracket-border: #c0a020;
-    --bracket-divider: #ebebeb;
-    --bracket-text: #1a1a1a;
-    --bracket-winner: #b07800;
-    --bracket-label: #8a6000;
-    --bracket-conn: #c0a020;
-    --bracket-pill: #fff3cc;
-    --bracket-pill-text: #7a5500;
+  /* Screen: show dark SVG, hide light print SVG */
+  .flight-bracket-svg-print { display: none; }
+  .flight-bracket-svg-screen { outline: 1px solid rgba(255, 255, 255, 0.12); }
+
+  @media print {
+    .flight-bracket-svg-screen { display: none !important; }
+    .flight-bracket-svg-print  { display: block !important; outline: none !important; }
   }
 
 </style>

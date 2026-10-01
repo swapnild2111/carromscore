@@ -115,6 +115,8 @@ export type Tournament = {
   coOrganisers?: Record<string, true>;
   /** Display names for co-organisers — uid → name. Publicly readable via /tournaments. */
   coOrgNames?: Record<string, string>;
+  /** UID of the organiser whose logo/name appears in print headers. Defaults to createdBy when absent. */
+  primaryOrganizerUid?: string;
 };
 
 /**
@@ -628,6 +630,8 @@ function mergeRemote(raw: Record<string, unknown>): void {
     const coOrgNames = v.coOrgNames && typeof v.coOrgNames === 'object'
       ? Object.fromEntries(Object.entries(v.coOrgNames as Record<string, unknown>).filter(([, n]) => typeof n === 'string')) as Record<string, string>
       : undefined;
+    const primaryOrganizerUid = typeof v.primaryOrganizerUid === 'string' && v.primaryOrganizerUid.trim()
+      ? v.primaryOrganizerUid.trim() : undefined;
     const existing = memoryStore.find((t) => t.key === key);
     if (existing) {
       existing.name = name;
@@ -665,6 +669,8 @@ function mergeRemote(raw: Record<string, unknown>): void {
       else delete existing.coOrganisers;
       if (coOrgNames) existing.coOrgNames = coOrgNames;
       else delete existing.coOrgNames;
+      if (primaryOrganizerUid) existing.primaryOrganizerUid = primaryOrganizerUid;
+      else delete existing.primaryOrganizerUid;
     } else {
       memoryStore.push({
         key,
@@ -687,6 +693,7 @@ function mergeRemote(raw: Record<string, unknown>): void {
         ...(lockedAt ? { lockedAt } : {}),
         ...(coOrganisers ? { coOrganisers } : {}),
         ...(coOrgNames ? { coOrgNames } : {}),
+        ...(primaryOrganizerUid ? { primaryOrganizerUid } : {}),
       });
     }
   }
@@ -1597,6 +1604,36 @@ export async function removeCoOrganiser(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return { ok: false, error: msg || 'Remove co-organiser failed' };
+  }
+}
+
+/** Set (or clear) the primary organiser UID for print headers. Pass null to reset to creator. */
+export async function setPrimaryOrganizer(
+  key: string,
+  uid: string | null,
+): Promise<TournamentWriteOutcome> {
+  if (!key) return { ok: false, error: 'Missing tournament key' };
+  try {
+    const [{ firebaseApp }, { getDatabase, ref, update, remove }] = await Promise.all([
+      import('./firebase'),
+      import('firebase/database'),
+    ]);
+    const db = getDatabase(firebaseApp());
+    if (uid) {
+      await update(ref(db), { [`tournaments/${key}/primaryOrganizerUid`]: uid });
+    } else {
+      await remove(ref(db, `tournaments/${key}/primaryOrganizerUid`));
+    }
+    const t = memoryStore.find((x) => x.key === key);
+    if (t) {
+      if (uid) t.primaryOrganizerUid = uid;
+      else delete t.primaryOrganizerUid;
+      notify();
+    }
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg || 'Set primary organiser failed' };
   }
 }
 
