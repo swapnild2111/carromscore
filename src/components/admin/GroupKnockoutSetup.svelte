@@ -231,6 +231,21 @@
     groupsDirty = true;
   }
 
+  function removeGroupByKey(gKey: string) {
+    const group = localGroups[gKey];
+    if (!group) return;
+    if (group.playerIds.length > 0) {
+      removeGroupError = `Move all players out of ${group.name} first`;
+      return;
+    }
+    if (Object.keys(localGroups).length <= 1) return;
+    removeGroupError = '';
+    const next = { ...localGroups };
+    delete next[gKey];
+    localGroups = next;
+    groupsDirty = true;
+  }
+
   let redrawing = $state(false);
 
   // ─── Phase 1 generation ──────────────────────────────────────────────────────
@@ -588,50 +603,15 @@
 
     <!-- ─── Groups & Draw ─────────────────────────────────────────────────────── -->
     <div class="ls-body">
-        <div class="draw-controls">
-          {#if !roundsStarted}
-            <div class="group-count-row">
-              <span class="group-count-label">Groups</span>
-              <div class="group-count-stepper">
-                <button
-                  type="button"
-                  class="stepper-btn"
-                  aria-label="Remove group"
-                  disabled={manualGroupCount <= 1 || redrawing || generating}
-                  onclick={removeLastGroup}
-                >−</button>
-                <span class="stepper-value">{manualGroupCount}</span>
-                <button
-                  type="button"
-                  class="stepper-btn"
-                  aria-label="Add group"
-                  disabled={roundsStarted}
-                  onclick={addGroup}
-                >+</button>
-              </div>
-              {#if removeGroupError}
-                <span class="group-count-hint group-count-error">{removeGroupError}</span>
-              {/if}
-            </div>
-          {/if}
-          {#if !roundsStarted}
-            <button
-              type="button"
-              class="btn btn-secondary btn-sm add-dummy-btn"
-              onclick={addDummy}
-              disabled={redrawing || generating}
-            >+ Add Dummy</button>
-          {/if}
-          {#if roundsStarted}
+        {#if roundsStarted}
+          <div class="draw-controls">
             <span class="draw-locked-hint">🔒 Groups locked — rounds in progress</span>
-          {:else if groupsLocked && !groupsDirty}
+          </div>
+        {:else if groupsLocked && !groupsDirty}
+          <div class="draw-controls">
             <span class="draw-auto-hint">Drag players to adjust, then re-generate</span>
-          {/if}
-          {#if unassignedPlayers.length > 0}
-            <span class="draw-warn">⚠ {unassignedPlayers.length} player{unassignedPlayers.length !== 1 ? 's' : ''} unassigned</span>
-          {/if}
-        </div>
-
+          </div>
+        {/if}
 
         <!-- 3-panel area: pools on left, groups on right -->
         <div class="draw-area">
@@ -647,7 +627,10 @@
                 ondragover={(e) => e.preventDefault()}
                 ondrop={() => onDrop('__unassigned__')}
               >
-                <div class="pool-pane-header">Unassigned players <span class="pool-pane-count">{unassignedPlayers.length}</span></div>
+                <div class="pool-pane-header">
+                  <span>Unassigned players</span>
+                  <span class="pool-pane-count">{unassignedPlayers.length}</span>
+                </div>
                 <div class="pool-pane-scroll">
                   {#each unassignedPlayers as pid, i (pid)}
                     <div
@@ -662,7 +645,7 @@
             {/if}
 
             <!-- Dummy pool — shown when any dummies exist and not started -->
-            {#if dummyIds.length > 0 && !roundsStarted}
+            {#if !roundsStarted}
               <div
                 class="pool-pane pool-pane-dummy"
                 role="list"
@@ -670,28 +653,42 @@
                 ondragover={(e) => e.preventDefault()}
                 ondrop={() => onDrop('__dummies__')}
               >
-                <div class="pool-pane-header">Dummies <span class="pool-pane-count">{unassignedDummies.length}/{dummyIds.length}</span></div>
-                <div class="pool-pane-scroll">
-                  {#each unassignedDummies as did, i (did)}
-                    <div
-                      class="player-chip player-chip-dummy"
-                      draggable={true}
-                      role="listitem"
-                      ondragstart={(e) => onDragStart(e, '__dummies__', i, playerName(did))}
-                    >
-                      <span class="chip-name">{playerName(did)}</span>
-                      <button
-                        type="button"
-                        class="dummy-remove-btn"
-                        aria-label="Remove {playerName(did)}"
-                        onclick={(e) => { e.stopPropagation(); removeDummyFromGroups(did); }}
-                      >×</button>
-                    </div>
-                  {/each}
-                  {#if unassignedDummies.length === 0}
-                    <div class="pool-empty">All dummies assigned</div>
-                  {/if}
+                <div class="pool-pane-header">
+                  <span>Dummies</span>
+                  <div class="dummy-stepper">
+                    <button
+                      type="button"
+                      class="dummy-stepper-btn"
+                      aria-label="Remove dummy"
+                      disabled={dummyCount <= 0}
+                      onclick={() => { if (dummyCount > 0) removeDummyFromGroups(`dummy-${dummyCount}`); }}
+                    >−</button>
+                    <span class="dummy-stepper-val">{dummyCount}</span>
+                    <button
+                      type="button"
+                      class="dummy-stepper-btn"
+                      aria-label="Add dummy"
+                      onclick={addDummy}
+                    >+</button>
+                  </div>
                 </div>
+                {#if dummyCount > 0}
+                  <div class="pool-pane-scroll">
+                    {#each unassignedDummies as did, i (did)}
+                      <div
+                        class="player-chip player-chip-dummy"
+                        draggable={true}
+                        role="listitem"
+                        ondragstart={(e) => onDragStart(e, '__dummies__', i, playerName(did))}
+                      >
+                        <span class="chip-name">{playerName(did)}</span>
+                      </div>
+                    {/each}
+                    {#if unassignedDummies.length === 0}
+                      <div class="pool-empty">All dummies assigned</div>
+                    {/if}
+                  </div>
+                {/if}
               </div>
             {/if}
           </div>
@@ -705,25 +702,37 @@
                 {@const byeCount = group.playerIds.length - pqCount}
                 {@const r2SlotCount = byeCount + Math.floor(pqCount / 2)}
                 {@const hasOdd = r2SlotCount % 2 !== 0 && group.playerIds.length > 1}
+                {@const isEmpty = group.playerIds.length === 0}
                 <div
                   class="group-col"
                   class:group-col-locked={roundsStarted}
                   class:group-col-done={roundsStarted && status.done}
+                  class:group-col-warn={hasOdd && !roundsStarted}
                   role="list"
                   aria-label="Group {group.name}"
                   ondragover={roundsStarted ? undefined : (e) => e.preventDefault()}
                   ondrop={roundsStarted ? undefined : () => onDrop(gKey)}
                 >
                   <div class="group-col-header">
-                    <span>{group.name}</span>
+                    <span class="group-col-name">{group.name}</span>
                     {#if hasOdd && !roundsStarted}
-                      <span class="odd-warn" title="Odd number of players — one gets a bye">⚠ Odd</span>
+                      <span class="group-col-warn-icon" title="Odd number of players — one gets a bye">⚠</span>
                     {/if}
                     <div class="group-col-header-right">
                       {#if roundsStarted}
                         <span class="group-match-status" class:group-match-done={status.done}>{status.label}</span>
                       {:else}
                         <span class="group-count">{group.playerIds.length}</span>
+                        {#if sortedGroups.length > 1}
+                          <button
+                            type="button"
+                            class="group-remove-btn"
+                            aria-label="Remove {group.name}"
+                            title={isEmpty ? `Remove ${group.name}` : `Move players out of ${group.name} first`}
+                            disabled={!isEmpty}
+                            onclick={() => removeGroupByKey(gKey)}
+                          >−</button>
+                        {/if}
                       {/if}
                     </div>
                   </div>
@@ -769,7 +778,23 @@
                   {/if}
                 </div>
               {/each}
+
+              <!-- Add group card — dashed, + in center -->
+              {#if !roundsStarted}
+                <button
+                  type="button"
+                  class="group-add-card"
+                  aria-label="Add group"
+                  onclick={addGroup}
+                >
+                  <span class="group-add-icon">+</span>
+                  <span class="group-add-label">Add group</span>
+                </button>
+              {/if}
             </div>
+            {#if removeGroupError}
+              <p class="group-remove-error">{removeGroupError}</p>
+            {/if}
           </div>
 
         </div><!-- /draw-area -->
@@ -971,10 +996,6 @@
     color: var(--muted, #9aa0a6);
     font-style: italic;
   }
-  .group-count-error {
-    color: #e57373;
-    font-style: normal;
-  }
 
   /* Stale-config warning banner */
   .config-stale-banner {
@@ -1147,6 +1168,117 @@
     border-color: rgba(86, 203, 130, 0.3);
     background: rgba(86, 203, 130, 0.04);
   }
+  .group-col-warn {
+    border-color: rgba(248, 113, 113, 0.4);
+  }
+  .group-col-name {
+    flex: 1;
+    min-width: 0;
+  }
+  .group-col-warn-icon {
+    color: #f87171;
+    font-size: 0.85rem;
+    margin: 0 0.2rem;
+    flex-shrink: 0;
+    cursor: help;
+  }
+  .group-remove-btn {
+    flex-shrink: 0;
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: var(--muted, #9aa0a6);
+    border-radius: 3px;
+    width: 18px;
+    height: 18px;
+    font-size: 0.9rem;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0;
+    transition: all 0.15s;
+  }
+  .group-remove-btn:hover:not(:disabled) {
+    background: rgba(248, 113, 113, 0.15);
+    border-color: rgba(248, 113, 113, 0.5);
+    color: #f87171;
+  }
+  .group-remove-btn:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+  }
+  .group-remove-error {
+    font-size: 0.75rem;
+    color: #f87171;
+    margin: 0.25rem 0 0.5rem;
+  }
+
+  /* Add-group dashed card */
+  .group-add-card {
+    border: 2px dashed rgba(255, 255, 255, 0.18);
+    border-radius: 0.5rem;
+    min-height: 4rem;
+    background: transparent;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.2rem;
+    color: rgba(255, 255, 255, 0.35);
+    transition: all 0.18s;
+    padding: 0.5rem;
+  }
+  .group-add-card:hover {
+    border-color: rgba(255, 213, 74, 0.45);
+    color: rgba(255, 213, 74, 0.7);
+    background: rgba(255, 213, 74, 0.04);
+  }
+  .group-add-icon {
+    font-size: 1.4rem;
+    line-height: 1;
+    font-weight: 300;
+  }
+  .group-add-label {
+    font-size: 0.65rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  /* Dummy stepper in pool header */
+  .dummy-stepper {
+    display: flex;
+    align-items: center;
+    gap: 0.2rem;
+    margin-left: auto;
+  }
+  .dummy-stepper-btn {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    color: inherit;
+    border-radius: 3px;
+    width: 20px;
+    height: 20px;
+    font-size: 0.9rem;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0;
+  }
+  .dummy-stepper-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.16); }
+  .dummy-stepper-btn:disabled { opacity: 0.3; cursor: default; }
+  .dummy-stepper-val {
+    min-width: 1.1rem;
+    text-align: center;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: rgba(160, 200, 255, 0.9);
+  }
+
   .player-chip {
     background: rgba(255, 255, 255, 0.06);
     border: 1px solid rgba(255, 255, 255, 0.08);
