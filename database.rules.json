@@ -139,7 +139,7 @@
         "knockoutCfg": {
           ".write": "auth != null && ((root.child('adminRoles').child(auth.uid).val() == 'super') || (root.child('tournaments').child($key).child('createdBy').val() == auth.uid) || (root.child('tournaments').child($key).child('coOrganisers').child(auth.uid).val() == true))",
           ".validate": "!newData.exists() || newData.hasChildren(['participantCount'])",
-          "participantCount": { ".validate": "newData.isNumber() && newData.val() >= 2 && newData.val() <= 256" },
+          "participantCount": { ".validate": "newData.isNumber() && newData.val() >= 2 && newData.val() <= 1024" },
           "advanceCount":     { ".validate": "newData.isNumber() && newData.val() >= 2 && newData.val() <= 64" },
           "boardsAvailable":  { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 99" },
           "venueBoards":      { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 99" },
