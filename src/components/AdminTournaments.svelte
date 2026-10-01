@@ -1341,7 +1341,12 @@
           Number(addingDefaultPointsTarget) || FALLBACK_TOURNAMENT_DEFAULTS.pointsTarget;
         cfg.walkovers = { phantomScore };
       }
-      await updateLeagueCfg(outcome.record.key, cfg);
+      const leagueResult = await updateLeagueCfg(outcome.record.key, cfg);
+      if (!leagueResult.ok) {
+        saving = false;
+        flash('err', `League config failed: ${leagueResult.error}`);
+        return;
+      }
     } else if (addingFormat === 'knockout') {
       const participantCount = Math.max(2, Number(addingKnockoutPlayers) || 8);
       const flightNames = addingKnockoutRewards.length > 0 ? addingKnockoutRewards : undefined;
