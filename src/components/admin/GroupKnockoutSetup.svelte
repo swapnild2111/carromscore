@@ -693,7 +693,6 @@
                         {#if activeWarnKey === gKey}
                           <div class="group-warn-dialog" role="tooltip">
                             <span class="group-warn-dialog-caret"></span>
-                            <span class="group-warn-dialog-icon">⚠</span>
                             <span class="group-warn-dialog-msg">{groupWarnMsg}</span>
                           </div>
                         {/if}
@@ -1163,43 +1162,50 @@
   }
   .group-warn-dialog {
     position: absolute;
-    top: calc(100% + 8px);
+    top: calc(100% + 10px);
     left: 50%;
     transform: translateX(-50%);
-    background: #1e1414;
-    border: 1px solid #f87171;
-    border-radius: 0.45rem;
-    padding: 0.55rem 0.75rem;
-    display: flex;
-    align-items: flex-start;
-    gap: 0.4rem;
-    min-width: 180px;
-    max-width: 240px;
-    z-index: 50;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+    background: #1c1616;
+    border: 1px solid rgba(248, 113, 113, 0.5);
+    border-radius: 6px;
+    padding: 0.5rem 0.7rem;
+    width: max-content;
+    max-width: 200px;
+    z-index: 100;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.6);
     pointer-events: none;
+    text-transform: none;
+    letter-spacing: normal;
   }
   .group-warn-dialog-caret {
     position: absolute;
-    top: -6px;
+    top: -5px;
     left: 50%;
     transform: translateX(-50%);
-    width: 10px;
-    height: 6px;
-    background: #1e1414;
-    clip-path: polygon(50% 0%, 0% 100%, 100% 100%);
-    border-top: 1px solid #f87171;
+    width: 0;
+    height: 0;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-bottom: 5px solid rgba(248, 113, 113, 0.5);
   }
-  .group-warn-dialog-icon {
-    color: #f87171;
-    font-size: 0.85rem;
-    flex-shrink: 0;
-    margin-top: 0.05rem;
+  .group-warn-dialog-caret::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: -4px;
+    width: 0;
+    height: 0;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-bottom: 4px solid #1c1616;
   }
   .group-warn-dialog-msg {
     color: #fca5a5;
-    font-size: 0.8rem;
-    line-height: 1.4;
+    font-size: 0.78rem;
+    font-weight: 400;
+    line-height: 1.45;
+    text-transform: none;
+    letter-spacing: normal;
   }
   .group-remove-btn {
     flex-shrink: 0;
