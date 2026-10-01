@@ -265,10 +265,8 @@
   let assignLoading = $state(false);
   let assignSaving = $state(false);
   let assignFilter = $state('');
-  /** When true, the assignment dialog hides players whose country
-   *  doesn't match the tournament's. Off shows every player (guest
-   *  cases). Defaults on for closed tournaments with a country set. */
-  let assignFilterByCountry = $state(true);
+  let assignFilterCountry = $state('');
+  let assignFilterRepresents = $state('');
 
   /** Bump on the identity-store change, so the assignment dialog's
    *  filtered player list re-renders when a player is added elsewhere. */
@@ -1377,9 +1375,8 @@
   async function startAssign(t: Tournament) {
     assignKey = t.key;
     assignFilter = '';
-    // Default to country-filtering if the tournament has a country
-    // configured; otherwise show all.
-    assignFilterByCountry = !!t.country;
+    assignFilterCountry = t.country ?? '';
+    assignFilterRepresents = '';
     assignOpen = true;
     assignLoading = true;
     try {
@@ -1418,6 +1415,8 @@
     assignKey = null;
     assignedIds = new Set();
     assignFilter = '';
+    assignFilterCountry = '';
+    assignFilterRepresents = '';
   }
   async function togglePlayerAssignment(playerId: string) {
     if (!assignKey) return;
@@ -1512,17 +1511,32 @@
   const assignCandidates = $derived(() => {
     void playersTick;
     if (!assignKey) return [] as Player[];
-    const tournament = list().find((t) => t.key === assignKey);
-    const country = tournament?.country;
     const q = assignFilter.trim().toLowerCase();
     return loadAllPlayers()
       .filter((p) => {
-        if (assignFilterByCountry && country) {
-          if (p.country !== country) return false;
-        }
-        if (!q) return true;
-        return p.canonicalName.toLowerCase().includes(q);
-      })
+        if (assignFilterCountry && p.country !== assignFilterCountry) return false;
+        if (assignFilterRepresents && (p.represents ?? '') !== assignFilterRepresents) return false;
+        if (q && !p.canonicalName.toLowerCase().includes(q)) return false;
+        return true;
+      });
+  });
+
+  const assignCountryOptions = $derived(() => {
+    void playersTick;
+    const seen = new Set<string>();
+    for (const p of loadAllPlayers()) {
+      if (p.country) seen.add(p.country);
+    }
+    return [...seen].sort();
+  });
+
+  const assignRepresentsOptions = $derived(() => {
+    void playersTick;
+    const seen = new Set<string>();
+    for (const p of loadAllPlayers()) {
+      if (p.represents) seen.add(p.represents);
+    }
+    return [...seen].sort((a, b) => a.localeCompare(b));
   });
 
   const allAssignCandidatesSelected = $derived(() => {
@@ -2858,10 +2872,20 @@
             placeholder="Search players…"
             aria-label="Search players"
           />
-          <label class="assign-country-filter">
-            <input type="checkbox" bind:checked={assignFilterByCountry} />
-            Match country only
-          </label>
+          <div class="assign-filters">
+            <select class="assign-filter-select" bind:value={assignFilterCountry} aria-label="Filter by country">
+              <option value="">All countries</option>
+              {#each assignCountryOptions() as cc}
+                <option value={cc}>{flagEmoji(cc)} {countryName(cc)}</option>
+              {/each}
+            </select>
+            <select class="assign-filter-select" bind:value={assignFilterRepresents} aria-label="Filter by club">
+              <option value="">All clubs</option>
+              {#each assignRepresentsOptions() as r}
+                <option value={r}>{r}</option>
+              {/each}
+            </select>
+          </div>
         </div>
         {#if assignLoading}
           <p class="empty">Loading assigned players…</p>
@@ -2890,9 +2914,12 @@
                     onchange={() => togglePlayerAssignment(p.id)}
                   />
                   <span class="assign-name">{p.canonicalName}</span>
+                  {#if p.represents}
+                    <span class="assign-represents">{p.represents}</span>
+                  {/if}
                   {#if p.country}
                     <span class="assign-country" title={countryName(p.country)}>
-                      {flagEmoji(p.country)} {countryName(p.country)}
+                      {flagEmoji(p.country)}
                     </span>
                   {/if}
                 </label>
@@ -4135,14 +4162,12 @@
   /* Assigned Players dialog */
   .assign-controls {
     display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-    align-items: center;
+    flex-direction: column;
+    gap: 0.4rem;
     margin: 0.5rem 0;
   }
   .assign-search {
-    flex: 1;
-    min-width: 12rem;
+    width: 100%;
     background: #0f0f0f;
     color: var(--fg);
     border: 1px solid #2a2a2a;
@@ -4151,12 +4176,21 @@
     font: inherit;
     font-size: 0.85rem;
   }
-  .assign-country-filter {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-    color: var(--muted);
-    font-size: 0.8rem;
+  .assign-filters {
+    display: flex;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+  }
+  .assign-filter-select {
+    flex: 1;
+    min-width: 8rem;
+    background: #0f0f0f;
+    color: var(--fg);
+    border: 1px solid #2a2a2a;
+    border-radius: 0.4rem;
+    padding: 0.35rem 0.5rem;
+    font: inherit;
+    font-size: 0.82rem;
     cursor: pointer;
   }
   .assign-select-all {
@@ -4200,6 +4234,17 @@
     cursor: pointer;
   }
   .assign-name { flex: 1; }
+  .assign-represents {
+    color: var(--muted);
+    font-size: 0.75rem;
+    background: rgba(255,255,255,0.06);
+    border-radius: 3px;
+    padding: 0.05rem 0.3rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 10rem;
+  }
   .assign-country {
     color: var(--muted);
     font-size: 0.75rem;
