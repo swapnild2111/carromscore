@@ -35,11 +35,12 @@
   import AdminLiveCleanup from './AdminLiveCleanup.svelte';
   import AdminHistoryCleanup from './AdminHistoryCleanup.svelte';
   import AdminAuditLog from './AdminAuditLog.svelte';
+  import AdminDbStats from './AdminDbStats.svelte';
   import AdminRoles from './AdminRoles.svelte';
   import AdminProfile from './AdminProfile.svelte';
   import { logScreen } from '../lib/analytics';
 
-  type Tab = 'profile' | 'players' | 'tournaments' | 'live' | 'history' | 'roles' | 'audit';
+  type Tab = 'profile' | 'players' | 'tournaments' | 'live' | 'history' | 'roles' | 'audit' | 'dbstats';
 
   const base: string = import.meta.env.BASE_URL;
   let user = $state<AuthUser | null>(null);
@@ -66,7 +67,7 @@
    */
   const visibleTabs = $derived<Tab[]>(
     role?.isSuper
-      ? ['profile', 'roles', 'players', 'tournaments', 'live', 'history', 'audit']
+      ? ['profile', 'roles', 'players', 'tournaments', 'live', 'history', 'audit', 'dbstats']
       : ['profile', 'players', 'tournaments', 'live', 'history'],
   );
 
@@ -260,6 +261,16 @@
           onclick={() => (tab = 'audit')}
         >Audit log</button>
       {/if}
+      {#if visibleTabs.includes('dbstats')}
+        <button
+          type="button"
+          role="tab"
+          class="tab"
+          class:tab-active={tab === 'dbstats'}
+          aria-selected={tab === 'dbstats'}
+          onclick={() => (tab = 'dbstats')}
+        >DB Stats</button>
+      {/if}
     </div>
 
     <div class="panel" role="tabpanel">
@@ -277,6 +288,8 @@
         <AdminRoles />
       {:else if tab === 'audit' && visibleTabs.includes('audit')}
         <AdminAuditLog />
+      {:else if tab === 'dbstats' && visibleTabs.includes('dbstats')}
+        <AdminDbStats />
       {/if}
     </div>
   {/if}
