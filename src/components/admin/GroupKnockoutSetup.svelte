@@ -759,7 +759,7 @@
         <div class="ls-body stage2-section">
           <div class="stage2-header">
             <strong class="stage2-title">Combined Knockout seeding</strong>
-            <span class="stage2-hint">Drag to reorder — top vs bottom, 2nd vs 3rd, etc.</span>
+            <span class="stage2-hint">Drag to reorder — brackets are generated top to bottom in this sequence.</span>
           </div>
           <div class="ko-seed-list">
             {#each koSeedGroups as [gKey, g], idx (gKey)}
