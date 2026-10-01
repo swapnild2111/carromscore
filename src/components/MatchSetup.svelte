@@ -292,6 +292,14 @@
     resolvedPlayerIds.playerA2 = m.a2ResolvedId ?? null;
     resolvedPlayerIds.playerB = m.bResolvedId ?? null;
     resolvedPlayerIds.playerB2 = m.b2ResolvedId ?? null;
+    // Seed country + represents from the identity store for pre-filled players.
+    const allP = loadAllPlayers();
+    const pA = m.aResolvedId ? allP.find((p) => p.id === m.aResolvedId) : null;
+    const pB = m.bResolvedId ? allP.find((p) => p.id === m.bResolvedId) : null;
+    if (pA?.country) resolvedPlayerCountries.playerA = pA.country;
+    if (pB?.country) resolvedPlayerCountries.playerB = pB.country;
+    if (pA?.represents && !cfg.noteA) cfg.noteA = pA.represents;
+    if (pB?.represents && !cfg.noteB) cfg.noteB = pB.represents;
   }
 
   /**
@@ -948,12 +956,24 @@
    * new text is an exact-normalised match, auto-resolve to that player.
    * Fuzzy hits do NOT auto-resolve — the user has to tap the chip.
    */
+  /** Maps a player slot key to its side's note key. */
+  function noteKeyFor(key: keyof MatchConfig): 'noteA' | 'noteB' {
+    return (key === 'playerA' || key === 'playerA2') ? 'noteA' : 'noteB';
+  }
+
+  /** Auto-fills the note (Represents) from a player's profile if the note is currently empty. */
+  function autofillRepresents(key: keyof MatchConfig, represents: string | undefined): void {
+    const nk = noteKeyFor(key);
+    if (!cfg[nk] && represents) (cfg[nk] as string) = represents;
+  }
+
   function onNameInput(key: keyof MatchConfig, text: string): void {
     (cfg[key] as string) = text;
     const h = topHit(text);
     if (h && h.rank === 'exact') {
       resolvedPlayerIds[key as string] = h.player.id;
       resolvedPlayerCountries[key as string] = h.player.country ?? '';
+      autofillRepresents(key, h.player.represents);
     } else {
       resolvedPlayerIds[key as string] = null;
       resolvedPlayerCountries[key as string] = '';
@@ -970,6 +990,7 @@
     addAlias(hit.player.id, typed);
     resolvedPlayerIds[key as string] = hit.player.id;
     resolvedPlayerCountries[key as string] = hit.player.country ?? '';
+    autofillRepresents(key, hit.player.represents);
   }
 
   function pick(key: keyof MatchConfig, row: PlayerRow) {
@@ -997,12 +1018,14 @@
       );
       if (byCountry) {
         resolvedPlayerIds[key as string] = byCountry.id;
+        autofillRepresents(key, byCountry.represents);
         return;
       }
     }
     const hits = rankMatches(loadAllPlayers(), q, 1);
     const h = hits[0];
     resolvedPlayerIds[key as string] = h && h.rank === 'exact' ? h.player.id : null;
+    if (h && h.rank === 'exact') autofillRepresents(key, h.player.represents);
   }
 
   /**
