@@ -134,9 +134,11 @@
           "$other":        { ".validate": false }
         },
         "format": {
+          ".write": "auth != null && ((root.child('adminRoles').child(auth.uid).val() == 'super') || (data.parent().child('createdBy').val() == auth.uid) || (data.parent().child('coOrganisers').child(auth.uid).val() == true))",
           ".validate": "newData.isString() && (newData.val() == 'standard' || newData.val() == 'league' || newData.val() == 'knockout' || newData.val() == 'roundrobin' || newData.val() == 'groupknockout')"
         },
         "knockoutCfg": {
+          ".write": "auth != null && ((root.child('adminRoles').child(auth.uid).val() == 'super') || (data.parent().child('createdBy').val() == auth.uid) || (data.parent().child('coOrganisers').child(auth.uid).val() == true))",
           ".validate": "!newData.exists() || newData.hasChildren(['participantCount'])",
           "participantCount": { ".validate": "newData.isNumber() && newData.val() >= 2 && newData.val() <= 256" },
           "advanceCount":     { ".validate": "newData.isNumber() && newData.val() >= 2 && newData.val() <= 64" },
@@ -178,7 +180,14 @@
             "$other": { ".validate": false }
           }
         },
-        "lockedAt":            { ".validate": "!newData.exists() || (newData.isNumber() && newData.val() >= 0)" },
+        "lastActive": {
+          ".write": "auth != null && ((root.child('adminRoles').child(auth.uid).val() == 'super') || (data.parent().child('createdBy').val() == auth.uid) || (data.parent().child('coOrganisers').child(auth.uid).val() == true))",
+          ".validate": "newData.isNumber()"
+        },
+        "lockedAt": {
+          ".write": "auth != null && ((root.child('adminRoles').child(auth.uid).val() == 'super') || (data.parent().child('createdBy').val() == auth.uid) || (data.parent().child('coOrganisers').child(auth.uid).val() == true))",
+          ".validate": "!newData.exists() || (newData.isNumber() && newData.val() >= 0)"
+        },
         "primaryOrganizerUid": {
           ".write": "auth != null && (root.child('adminRoles').child(auth.uid).val() == 'super' || root.child('tournaments').child($key).child('createdBy').val() == auth.uid)",
           ".validate": "!newData.exists() || (newData.isString() && newData.val().length >= 1 && newData.val().length <= 64)"
