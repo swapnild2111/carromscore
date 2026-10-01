@@ -1523,7 +1523,6 @@
         if (!q) return true;
         return p.canonicalName.toLowerCase().includes(q);
       })
-      .slice(0, 200);
   });
 
   const allAssignCandidatesSelected = $derived(() => {

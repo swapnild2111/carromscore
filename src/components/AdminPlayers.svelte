@@ -188,7 +188,6 @@
     if (q) all = all.filter((p) => p.canonicalName.toLowerCase().includes(q));
     if (filterCountry) all = all.filter((p) => p.country === filterCountry);
     if (filterRepresents) all = all.filter((p) => p.represents?.trim() === filterRepresents);
-    all = all.slice(0, 200);
     if (sortBy === 'za') {
       all = [...all].sort((a, b) => b.canonicalName.localeCompare(a.canonicalName));
     } else {
