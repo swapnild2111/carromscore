@@ -121,8 +121,21 @@
   // ─── Drag state ──────────────────────────────────────────────────────────────
   let dragSrc = $state<{ fromGroup: string | '__unassigned__' | '__dummies__'; playerIdx: number } | null>(null);
 
-  function onDragStart(fromGroup: string | '__unassigned__' | '__dummies__', playerIdx: number) {
+  function onDragStart(e: DragEvent, fromGroup: string | '__unassigned__' | '__dummies__', playerIdx: number, label: string) {
     dragSrc = { fromGroup, playerIdx };
+    // Compact drag ghost: small pill so it doesn't stretch across the screen
+    const ghost = document.createElement('div');
+    ghost.textContent = label;
+    ghost.style.cssText = [
+      'position:fixed', 'top:-9999px', 'left:-9999px',
+      'background:#333', 'color:#f5f5f5', 'border:1px solid rgba(255,255,255,0.25)',
+      'border-radius:999px', 'padding:3px 10px', 'font-size:0.78rem',
+      'white-space:nowrap', 'max-width:180px', 'overflow:hidden',
+      'text-overflow:ellipsis', 'pointer-events:none',
+    ].join(';');
+    document.body.appendChild(ghost);
+    e.dataTransfer?.setDragImage(ghost, ghost.offsetWidth / 2, ghost.offsetHeight / 2);
+    setTimeout(() => ghost.remove(), 0);
   }
 
   // dropTargetIdx: the chip index being hovered over (for within-group reorder highlight)
@@ -182,11 +195,10 @@
   let removeGroupError = $state('');
 
   function initGroups() {
-    const allIds = [...assignedPlayerIds, ...dummyIds.filter((id) => !assignedPlayerIds.includes(id))];
     localGroups = {
-      g1: { name: 'G1', order: 1, playerIds: allIds },
+      g1: { name: 'G1', order: 1, playerIds: [] },
     };
-    groupsDirty = true;
+    groupsDirty = false;
   }
 
   function addGroup() {
@@ -593,7 +605,7 @@
                   type="button"
                   class="stepper-btn"
                   aria-label="Add group"
-                  disabled={redrawing || generating}
+                  disabled={roundsStarted}
                   onclick={addGroup}
                 >+</button>
               </div>
@@ -621,133 +633,146 @@
         </div>
 
 
-        <!-- Dummy pool — only shown when there are unassigned dummies -->
-        {#if unassignedDummies.length > 0 && !roundsStarted}
-          <div
-            class="group-col unassigned-col dummy-pool"
-            role="list"
-            aria-label="Dummy slots"
-            ondragover={(e) => e.preventDefault()}
-            ondrop={() => onDrop('__dummies__')}
-          >
-            <div class="group-col-header">Dummy slots <span class="dummy-hint">(drag into group)</span></div>
-            {#each unassignedDummies as did, i (did)}
+        <!-- 3-panel area: pools on left, groups on right -->
+        <div class="draw-area">
+
+          <!-- Left: pools column -->
+          <div class="pools-col">
+            <!-- Players pool — hidden when all assigned -->
+            {#if unassignedPlayers.length > 0 && !roundsStarted}
               <div
-                class="player-chip player-chip-dummy"
-                draggable={true}
-                role="listitem"
-                ondragstart={() => onDragStart('__dummies__', i)}
+                class="pool-pane"
+                role="list"
+                aria-label="Unassigned players"
+                ondragover={(e) => e.preventDefault()}
+                ondrop={() => onDrop('__unassigned__')}
               >
-                <span class="chip-name">{playerName(did)}</span>
-                <button
-                  type="button"
-                  class="dummy-remove-btn"
-                  aria-label="Remove {playerName(did)}"
-                  onclick={(e) => { e.stopPropagation(); removeDummyFromGroups(did); }}
-                >×</button>
+                <div class="pool-pane-header">Unassigned players <span class="pool-pane-count">{unassignedPlayers.length}</span></div>
+                <div class="pool-pane-scroll">
+                  {#each unassignedPlayers as pid, i (pid)}
+                    <div
+                      class="player-chip"
+                      draggable={true}
+                      role="listitem"
+                      ondragstart={(e) => onDragStart(e, '__unassigned__', i, playerName(pid))}
+                    ><span class="chip-name">{playerName(pid)}</span></div>
+                  {/each}
+                </div>
               </div>
-            {/each}
-            {#if unassignedDummies.length === 0}
-              <div class="group-empty">All dummies assigned</div>
             {/if}
-          </div>
-        {/if}
 
-        <!-- Unassigned pool -->
-        {#if unassignedPlayers.length > 0}
-          <div
-            class="group-col unassigned-col"
-            role="list"
-            aria-label="Unassigned players"
-            ondragover={roundsStarted ? undefined : (e) => e.preventDefault()}
-            ondrop={roundsStarted ? undefined : () => onDrop('__unassigned__')}
-          >
-            <div class="group-col-header">Unassigned</div>
-            {#each unassignedPlayers as pid, i (pid)}
+            <!-- Dummy pool — shown when any dummies exist and not started -->
+            {#if dummyIds.length > 0 && !roundsStarted}
               <div
-                class="player-chip"
-                class:player-chip-locked={roundsStarted}
-                draggable={!roundsStarted}
-                role="listitem"
-                ondragstart={roundsStarted ? undefined : () => onDragStart('__unassigned__', i)}
-              >{playerName(pid)}</div>
-            {/each}
-          </div>
-        {/if}
-
-        <!-- Group grid -->
-        <div class="groups-grid" style="grid-template-columns: repeat({Math.min(sortedGroups.length, 6)}, 1fr)">
-          {#each sortedGroups as [gKey, group] (gKey)}
-            {@const status = groupMatchStatus(gKey, group.name)}
-            {@const pqCount = group.playerIds.filter((pid) => preQualified.has(pid)).length}
-            {@const byeCount = group.playerIds.length - pqCount}
-            {@const r2SlotCount = byeCount + Math.floor(pqCount / 2)}
-            {@const hasOdd = r2SlotCount % 2 !== 0 && group.playerIds.length > 1}
-            <div
-              class="group-col"
-              class:group-col-locked={roundsStarted}
-              class:group-col-done={roundsStarted && status.done}
-              role="list"
-              aria-label="Group {group.name}"
-              ondragover={roundsStarted ? undefined : (e) => e.preventDefault()}
-              ondrop={roundsStarted ? undefined : () => onDrop(gKey)}
-            >
-              <div class="group-col-header">
-                <span>{group.name}</span>
-                {#if hasOdd && !roundsStarted}
-                  <span class="odd-warn" title="Odd number of players — one player will get a bye. Add a player, dummy, or adjust Pre-qualify markings.">⚠ Odd number of players</span>
-                {/if}
-                <div class="group-col-header-right">
-                  {#if roundsStarted}
-                    <span class="group-match-status" class:group-match-done={status.done}>{status.label}</span>
-                  {:else}
-                    <span class="group-count">{group.playerIds.length}</span>
+                class="pool-pane pool-pane-dummy"
+                role="list"
+                aria-label="Dummy slots"
+                ondragover={(e) => e.preventDefault()}
+                ondrop={() => onDrop('__dummies__')}
+              >
+                <div class="pool-pane-header">Dummies <span class="pool-pane-count">{unassignedDummies.length}/{dummyIds.length}</span></div>
+                <div class="pool-pane-scroll">
+                  {#each unassignedDummies as did, i (did)}
+                    <div
+                      class="player-chip player-chip-dummy"
+                      draggable={true}
+                      role="listitem"
+                      ondragstart={(e) => onDragStart(e, '__dummies__', i, playerName(did))}
+                    >
+                      <span class="chip-name">{playerName(did)}</span>
+                      <button
+                        type="button"
+                        class="dummy-remove-btn"
+                        aria-label="Remove {playerName(did)}"
+                        onclick={(e) => { e.stopPropagation(); removeDummyFromGroups(did); }}
+                      >×</button>
+                    </div>
+                  {/each}
+                  {#if unassignedDummies.length === 0}
+                    <div class="pool-empty">All dummies assigned</div>
                   {/if}
                 </div>
               </div>
-              {#each group.playerIds as pid, i (pid)}
-                {@const isPreQualify = preQualified.has(pid)}
+            {/if}
+          </div>
+
+          <!-- Right: groups grid -->
+          <div class="groups-scroll">
+            <div class="groups-grid">
+              {#each sortedGroups as [gKey, group] (gKey)}
+                {@const status = groupMatchStatus(gKey, group.name)}
+                {@const pqCount = group.playerIds.filter((pid) => preQualified.has(pid)).length}
+                {@const byeCount = group.playerIds.length - pqCount}
+                {@const r2SlotCount = byeCount + Math.floor(pqCount / 2)}
+                {@const hasOdd = r2SlotCount % 2 !== 0 && group.playerIds.length > 1}
                 <div
-                  class="player-chip"
-                  class:player-chip-locked={roundsStarted}
-                  class:player-chip-dummy={isDummy(pid)}
-                  class:player-chip-drop-above={dropTargetGroup === gKey && dropTargetIdx === i}
-                  draggable={!roundsStarted}
-                  role="listitem"
-                  ondragstart={roundsStarted ? undefined : () => onDragStart(gKey, i)}
-                  ondragover={roundsStarted ? undefined : (e) => { e.preventDefault(); dropTargetGroup = gKey; dropTargetIdx = i; }}
-                  ondragleave={roundsStarted ? undefined : () => { if (dropTargetGroup === gKey && dropTargetIdx === i) { dropTargetGroup = null; dropTargetIdx = null; } }}
-                  ondrop={roundsStarted ? undefined : (e) => { e.stopPropagation(); onDrop(gKey, i); }}
+                  class="group-col"
+                  class:group-col-locked={roundsStarted}
+                  class:group-col-done={roundsStarted && status.done}
+                  role="list"
+                  aria-label="Group {group.name}"
+                  ondragover={roundsStarted ? undefined : (e) => e.preventDefault()}
+                  ondrop={roundsStarted ? undefined : () => onDrop(gKey)}
                 >
-                  <span class="chip-name">{playerName(pid)}</span>
-                  {#if !roundsStarted}
-                    <button
-                      type="button"
-                      class="prequalify-btn"
-                      class:prequalify-active={isPreQualify}
-                      aria-label="{isPreQualify ? 'Unmark' : 'Mark'} {playerName(pid)} as pre-qualifier"
-                      title="{isPreQualify ? 'Pre-qualify Round 1 (click to unmark)' : 'Mark as pre-qualifier (plays Round 1)'}"
-                      onclick={(e) => { e.stopPropagation(); togglePreQualify(pid); }}
-                    >Pre-qualify</button>
-                  {:else if isPreQualify}
-                    <span class="prequalify-badge">Pre-qualify</span>
-                  {/if}
-                  {#if isDummy(pid) && !roundsStarted}
-                    <button
-                      type="button"
-                      class="dummy-remove-btn"
-                      aria-label="Remove {playerName(pid)}"
-                      onclick={(e) => { e.stopPropagation(); removeDummyFromGroups(pid); }}
-                    >×</button>
+                  <div class="group-col-header">
+                    <span>{group.name}</span>
+                    {#if hasOdd && !roundsStarted}
+                      <span class="odd-warn" title="Odd number of players — one gets a bye">⚠ Odd</span>
+                    {/if}
+                    <div class="group-col-header-right">
+                      {#if roundsStarted}
+                        <span class="group-match-status" class:group-match-done={status.done}>{status.label}</span>
+                      {:else}
+                        <span class="group-count">{group.playerIds.length}</span>
+                      {/if}
+                    </div>
+                  </div>
+                  {#each group.playerIds as pid, i (pid)}
+                    {@const isPreQualify = preQualified.has(pid)}
+                    <div
+                      class="player-chip"
+                      class:player-chip-locked={roundsStarted}
+                      class:player-chip-dummy={isDummy(pid)}
+                      class:player-chip-drop-above={dropTargetGroup === gKey && dropTargetIdx === i}
+                      draggable={!roundsStarted}
+                      role="listitem"
+                      ondragstart={roundsStarted ? undefined : (e) => onDragStart(e, gKey, i, playerName(pid))}
+                      ondragover={roundsStarted ? undefined : (e) => { e.preventDefault(); dropTargetGroup = gKey; dropTargetIdx = i; }}
+                      ondragleave={roundsStarted ? undefined : () => { if (dropTargetGroup === gKey && dropTargetIdx === i) { dropTargetGroup = null; dropTargetIdx = null; } }}
+                      ondrop={roundsStarted ? undefined : (e) => { e.stopPropagation(); onDrop(gKey, i); }}
+                    >
+                      <span class="chip-name">{playerName(pid)}</span>
+                      {#if !roundsStarted}
+                        <button
+                          type="button"
+                          class="prequalify-btn"
+                          class:prequalify-active={isPreQualify}
+                          aria-label="{isPreQualify ? 'Unmark' : 'Mark'} {playerName(pid)} as pre-qualifier"
+                          title="{isPreQualify ? 'Pre-qualify Round 1 (click to unmark)' : 'Mark as pre-qualifier (plays Round 1)'}"
+                          onclick={(e) => { e.stopPropagation(); togglePreQualify(pid); }}
+                        >PQ</button>
+                      {:else if isPreQualify}
+                        <span class="prequalify-badge">PQ</span>
+                      {/if}
+                      {#if isDummy(pid) && !roundsStarted}
+                        <button
+                          type="button"
+                          class="dummy-remove-btn"
+                          aria-label="Remove {playerName(pid)}"
+                          onclick={(e) => { e.stopPropagation(); removeDummyFromGroups(pid); }}
+                        >×</button>
+                      {/if}
+                    </div>
+                  {/each}
+                  {#if group.playerIds.length === 0}
+                    <div class="group-empty">Drop players here</div>
                   {/if}
                 </div>
               {/each}
-              {#if group.playerIds.length === 0}
-                <div class="group-empty">Drop players here</div>
-              {/if}
             </div>
-          {/each}
-        </div>
+          </div>
+
+        </div><!-- /draw-area -->
 
       </div>
 
@@ -990,17 +1015,92 @@
     font-style: italic;
   }
 
-  /* Groups grid */
+  /* 3-panel draw layout */
+  .draw-area {
+    display: flex;
+    gap: 0.75rem;
+    align-items: flex-start;
+    min-height: 0;
+  }
+  .pools-col {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    flex-shrink: 0;
+    width: 180px;
+  }
+  .pool-pane {
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 0.5rem;
+    background: rgba(255, 255, 255, 0.02);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .pool-pane-dummy {
+    border-color: rgba(120, 180, 255, 0.25);
+    background: rgba(80, 140, 240, 0.04);
+  }
+  .pool-pane-header {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--accent, #ffd54a);
+    padding: 0.35rem 0.5rem 0.3rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    flex-shrink: 0;
+  }
+  .pool-pane-dummy .pool-pane-header {
+    color: rgba(120, 180, 255, 0.8);
+  }
+  .pool-pane-count {
+    font-weight: 400;
+    color: var(--muted, #9aa0a6);
+    font-style: normal;
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 0.68rem;
+  }
+  .pool-pane-scroll {
+    overflow-y: auto;
+    max-height: 256px; /* ~8 chips visible */
+    padding: 0.35rem;
+  }
+  .pool-empty {
+    font-size: 0.72rem;
+    color: var(--muted, #9aa0a6);
+    font-style: italic;
+    padding: 0.25rem 0;
+    text-align: center;
+  }
+
+  /* Groups scrollable area + grid */
+  .groups-scroll {
+    flex: 1;
+    overflow-y: auto;
+    min-width: 0;
+  }
   .groups-grid {
     display: grid;
+    grid-template-columns: repeat(4, 1fr);
     gap: 0.75rem;
     margin-bottom: 1rem;
   }
+  @media (max-width: 60rem) {
+    .draw-area { flex-direction: column; }
+    .pools-col { flex-direction: row; width: 100%; }
+    .pool-pane { flex: 1; }
+  }
   @media (max-width: 40rem) {
-    .groups-grid { grid-template-columns: 1fr 1fr !important; }
+    .groups-grid { grid-template-columns: 1fr 1fr; }
   }
   @media (max-width: 28rem) {
-    .groups-grid { grid-template-columns: 1fr !important; }
+    .groups-grid { grid-template-columns: 1fr; }
+    .pools-col { flex-direction: column; }
   }
 
   .group-col {
@@ -1048,12 +1148,6 @@
     border-color: rgba(86, 203, 130, 0.3);
     background: rgba(86, 203, 130, 0.04);
   }
-  .unassigned-col {
-    border-color: rgba(229, 166, 35, 0.25);
-    margin-bottom: 0.75rem;
-  }
-  .unassigned-col .group-col-header { color: #e5a623; }
-
   .player-chip {
     background: rgba(255, 255, 255, 0.06);
     border: 1px solid rgba(255, 255, 255, 0.08);
