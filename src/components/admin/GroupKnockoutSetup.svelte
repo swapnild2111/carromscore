@@ -838,13 +838,7 @@
     overflow-y: auto;
   }
   .gko-card {
-    /* Force dark theme regardless of OS/browser light mode.
-       Windows Chrome in light mode ignores the global color-scheme:dark
-       on :root for fixed/overlay elements. Explicit color-scheme +
-       hardcoded dark bg ensures the modal is always readable. */
-    color-scheme: dark;
-    background: #1e1e1e;
-    color: #f5f5f5;
+    background: var(--surface, #1e1e1e);
     border-radius: 0.75rem;
     border: 1px solid rgba(255, 255, 255, 0.1);
     width: 100%;
@@ -1583,6 +1577,27 @@
     :root:not([data-theme="dark"]) .prequalify-btn.prequalify-active { color: #fff; background: #007a8a; border-color: #007a8a; }
     :root:not([data-theme="dark"]) .prequalify-badge { color: #fff; background: #007a8a; border-color: #007a8a; }
     :root:not([data-theme="dark"]) .odd-warn { color: #dc2626; }
+    /* pool panes */
+    :root:not([data-theme="dark"]) .pool-pane { background: rgba(0,0,0,0.03); border-color: rgba(0,0,0,0.12); }
+    :root:not([data-theme="dark"]) .pool-pane-dummy { background: rgba(50,100,220,0.04); border-color: rgba(50,100,220,0.2); }
+    :root:not([data-theme="dark"]) .pool-pane-header { border-bottom-color: rgba(0,0,0,0.06); }
+    :root:not([data-theme="dark"]) .pool-pane-dummy .pool-pane-header { color: #2255bb; }
+    /* dummy stepper */
+    :root:not([data-theme="dark"]) .dummy-stepper-btn { background: rgba(0,0,0,0.06); border-color: rgba(0,0,0,0.15); color: #111; }
+    :root:not([data-theme="dark"]) .dummy-stepper-btn:hover:not(:disabled) { background: rgba(0,0,0,0.12); }
+    :root:not([data-theme="dark"]) .dummy-stepper-val { color: #2255bb; }
+    /* group remove btn */
+    :root:not([data-theme="dark"]) .group-remove-btn { border-color: rgba(0,0,0,0.15); color: rgba(0,0,0,0.45); }
+    :root:not([data-theme="dark"]) .group-remove-btn:hover:not(:disabled) { background: rgba(220,38,38,0.1); border-color: rgba(220,38,38,0.4); color: #dc2626; }
+    /* add-group dashed card */
+    :root:not([data-theme="dark"]) .group-add-card { border-color: rgba(0,0,0,0.2); color: rgba(0,0,0,0.3); }
+    :root:not([data-theme="dark"]) .group-add-card:hover { border-color: rgba(180,120,0,0.5); color: rgba(150,100,0,0.8); background: rgba(255,213,74,0.06); }
+    /* spinner */
+    :root:not([data-theme="dark"]) .spinner { border-color: rgba(0,0,0,0.12); border-top-color: #b8860b; }
+    /* stage2 */
+    :root:not([data-theme="dark"]) .ko-seed-chip { background: rgba(0,0,0,0.04); border-color: rgba(0,0,0,0.12); }
+    :root:not([data-theme="dark"]) .ko-seed-chip:hover { background: rgba(0,0,0,0.08); }
+    :root:not([data-theme="dark"]) .stage2-section { border-top-color: rgba(0,0,0,0.08); }
   }
   :root[data-theme="light"] .gko-card { background: #fff; border-color: rgba(0, 0, 0, 0.1); color: #111; }
   :root[data-theme="light"] .ls-header { border-bottom-color: rgba(0, 0, 0, 0.08); }
@@ -1614,5 +1629,20 @@
   :root[data-theme="light"] .prequalify-btn:hover { color: #005f70; border-color: rgba(0, 120, 140, 0.5); background: rgba(0, 120, 140, 0.08); }
   :root[data-theme="light"] .prequalify-btn.prequalify-active { color: #fff; background: #007a8a; border-color: #007a8a; }
   :root[data-theme="light"] .prequalify-badge { color: #fff; background: #007a8a; border-color: #007a8a; }
+  :root[data-theme="light"] .pool-pane { background: rgba(0,0,0,0.03); border-color: rgba(0,0,0,0.12); }
+  :root[data-theme="light"] .pool-pane-dummy { background: rgba(50,100,220,0.04); border-color: rgba(50,100,220,0.2); }
+  :root[data-theme="light"] .pool-pane-header { border-bottom-color: rgba(0,0,0,0.06); }
+  :root[data-theme="light"] .pool-pane-dummy .pool-pane-header { color: #2255bb; }
+  :root[data-theme="light"] .dummy-stepper-btn { background: rgba(0,0,0,0.06); border-color: rgba(0,0,0,0.15); color: #111; }
+  :root[data-theme="light"] .dummy-stepper-btn:hover:not(:disabled) { background: rgba(0,0,0,0.12); }
+  :root[data-theme="light"] .dummy-stepper-val { color: #2255bb; }
+  :root[data-theme="light"] .group-remove-btn { border-color: rgba(0,0,0,0.15); color: rgba(0,0,0,0.45); }
+  :root[data-theme="light"] .group-remove-btn:hover:not(:disabled) { background: rgba(220,38,38,0.1); border-color: rgba(220,38,38,0.4); color: #dc2626; }
+  :root[data-theme="light"] .group-add-card { border-color: rgba(0,0,0,0.2); color: rgba(0,0,0,0.3); }
+  :root[data-theme="light"] .group-add-card:hover { border-color: rgba(180,120,0,0.5); color: rgba(150,100,0,0.8); background: rgba(255,213,74,0.06); }
+  :root[data-theme="light"] .spinner { border-color: rgba(0,0,0,0.12); border-top-color: #b8860b; }
+  :root[data-theme="light"] .ko-seed-chip { background: rgba(0,0,0,0.04); border-color: rgba(0,0,0,0.12); }
+  :root[data-theme="light"] .ko-seed-chip:hover { background: rgba(0,0,0,0.08); }
+  :root[data-theme="light"] .stage2-section { border-top-color: rgba(0,0,0,0.08); }
   :root[data-theme="light"] .odd-warn { color: #dc2626; }
 </style>
