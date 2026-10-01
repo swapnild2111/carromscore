@@ -129,6 +129,10 @@
   <header class="hdr">
     <a class="back" href={base}>← Home</a>
     <h1>Admin</h1>
+    <a class="lobby-cta" href={`${base}live/`} aria-label="Open the lobby">
+      <span class="lobby-dot" aria-hidden="true"></span>
+      <span class="lobby-lbl">Lobby</span>
+    </a>
     <!--
       Header used to carry a signed-in avatar chip. Moved to the
       new footer below (2026-08-11) so admin, home, and lobby all
@@ -354,6 +358,49 @@
     font-size: 1.35rem;
     font-weight: 700;
     letter-spacing: -0.01em;
+  }
+  .lobby-cta {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.45rem 0.75rem;
+    background: rgba(239, 83, 80, 0.1);
+    border: 1px solid rgba(239, 83, 80, 0.5);
+    border-radius: 999px;
+    color: #ef5350;
+    font-weight: 700;
+    font-size: 0.82rem;
+    letter-spacing: 0.04em;
+    text-decoration: none;
+    transition: background 0.15s, border-color 0.15s, transform 0.1s;
+    flex-shrink: 0;
+  }
+  .lobby-cta:hover {
+    background: rgba(239, 83, 80, 0.18);
+    border-color: rgba(239, 83, 80, 0.8);
+  }
+  .lobby-cta:active { transform: scale(0.97); }
+  .lobby-dot {
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    background: #ef5350;
+    box-shadow: 0 0 8px rgba(239, 83, 80, 0.9);
+    animation: lobbyPulse 1.6s ease-in-out infinite;
+  }
+  @keyframes lobbyPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+  :global(body[data-offline="true"]) .lobby-cta {
+    color: var(--muted, #9aa0a6);
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.14);
+  }
+  :global(body[data-offline="true"]) .lobby-dot {
+    background: var(--muted, #9aa0a6);
+    box-shadow: none;
+    animation: none;
   }
   .back {
     color: var(--accent, #ffd54a);
