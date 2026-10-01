@@ -262,7 +262,6 @@
 
   async function lockAndGenerate() {
     if (generating) return;
-    if (groupWarnings.some((w) => w.includes('needs at least'))) return;
     generating = true;
     generateError = '';
     generateResult = null;
@@ -661,11 +660,15 @@
                 {@const r2SlotCount = byeCount + Math.floor(pqCount / 2)}
                 {@const hasOdd = r2SlotCount % 2 !== 0 && group.playerIds.length > 1}
                 {@const isEmpty = group.playerIds.length === 0}
+                {@const groupWarnMsg = group.playerIds.length === 0 ? 'Group is empty — add at least 2 players'
+                  : group.playerIds.length === 1 ? 'Only 1 player — add at least one more'
+                  : hasOdd ? 'Odd bracket slots — one player will get a bye'
+                  : ''}
                 <div
                   class="group-col"
                   class:group-col-locked={roundsStarted}
                   class:group-col-done={roundsStarted && status.done}
-                  class:group-col-warn={hasOdd && !roundsStarted}
+                  class:group-col-warn={groupWarnMsg !== '' && !roundsStarted}
                   role="list"
                   aria-label="Group {group.name}"
                   ondragover={roundsStarted ? undefined : (e) => e.preventDefault()}
@@ -673,8 +676,8 @@
                 >
                   <div class="group-col-header">
                     <span class="group-col-name">{group.name}</span>
-                    {#if hasOdd && !roundsStarted}
-                      <span class="group-col-warn-icon" title="Odd number of players — one gets a bye">⚠</span>
+                    {#if groupWarnMsg && !roundsStarted}
+                      <span class="group-col-warn-icon" title={groupWarnMsg}>⚠</span>
                     {/if}
                     <div class="group-col-header-right">
                       {#if roundsStarted}
@@ -810,25 +813,21 @@
           </div>
         {:else}
           {@const hasGroupRounds = (tournament.rounds ?? []).some((r) => / — /.test(r.name) && !/^KO —/.test(r.name))}
+          {@const hasBlockingWarnings = groupWarnings.some((w) => w.includes('needs at least'))}
           {#if hasGroupRounds}
             <button
               type="button"
               class="btn btn-secondary"
               onclick={lockAndGenerate}
-              disabled={sortedGroups.length === 0}
+              disabled={sortedGroups.length === 0 || hasBlockingWarnings}
             >Re-generate brackets</button>
           {:else}
             <button
               type="button"
               class="btn btn-primary"
               onclick={lockAndGenerate}
-              disabled={sortedGroups.length === 0}
+              disabled={sortedGroups.length === 0 || hasBlockingWarnings}
             >Generate brackets</button>
-          {/if}
-          {#if !roundsStarted && groupWarnings.length > 0}
-            <ul class="ls-group-warnings">
-              {#each groupWarnings as w}<li>⚠ {w}</li>{/each}
-            </ul>
           {/if}
         {/if}
       </div>
@@ -1380,17 +1379,6 @@
   }
   .ls-error-footer {
     padding: 0.5rem 1.25rem 0;
-  }
-  .ls-group-warnings {
-    margin: 0;
-    padding: 0;
-    list-style: none;
-    font-size: 0.83rem;
-    color: #c8961a;
-    align-self: center;
-  }
-  .ls-group-warnings li {
-    margin: 0.15rem 0;
   }
   .generate-result-footer {
     padding: 0.5rem 1.25rem 0;
