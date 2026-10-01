@@ -27,7 +27,7 @@
     { path: '/matches',     label: 'Matches' },
     { path: '/planned',     label: 'Planned matches' },
     { path: '/adminRoles',  label: 'Admin roles' },
-    { path: '/auditLog',    label: 'Audit log entries' },
+    { path: '/audit',       label: 'Audit log entries' },
   ];
 
   async function getIdToken(): Promise<string> {
