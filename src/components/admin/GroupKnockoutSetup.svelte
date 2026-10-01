@@ -880,8 +880,7 @@
     max-width: 1100px;
     display: flex;
     flex-direction: column;
-    max-height: 90vh;
-    overflow: hidden;
+    /* No max-height — overlay scrolls the whole card on small screens */
   }
   .ls-header {
     display: flex;
@@ -909,8 +908,6 @@
 
   .ls-body {
     padding: 1rem 1.25rem;
-    overflow-y: auto;
-    flex: 1;
   }
 
   /* Boards input + recommendation */
@@ -1027,7 +1024,7 @@
     flex-direction: column;
     gap: 0.5rem;
     flex-shrink: 0;
-    width: 180px;
+    width: 200px;
   }
   .pool-pane {
     border: 1px solid rgba(255, 255, 255, 0.1);
@@ -1067,8 +1064,11 @@
   }
   .pool-pane-scroll {
     overflow-y: auto;
-    max-height: 256px; /* ~8 chips visible */
+    max-height: 480px; /* ~15 chips visible */
     padding: 0.35rem;
+  }
+  .pool-pane-dummy .pool-pane-scroll {
+    max-height: 160px; /* ~5 dummies visible */
   }
   .pool-empty {
     font-size: 0.72rem;
@@ -1081,7 +1081,6 @@
   /* Groups scrollable area + grid */
   .groups-scroll {
     flex: 1;
-    overflow-y: auto;
     min-width: 0;
   }
   .groups-grid {
