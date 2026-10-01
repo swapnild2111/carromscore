@@ -533,6 +533,12 @@
 
   // ─── Lifecycle ────────────────────────────────────────────────────────────────
   onMount(() => {
+    const closeWarn = () => { if (activeWarnKey !== null) activeWarnKey = null; };
+    document.addEventListener('click', closeWarn);
+    return () => document.removeEventListener('click', closeWarn);
+  });
+
+  onMount(() => {
     unsubPlayers = subscribePlayerStore(() => { players = loadAllPlayers(); });
     (async () => {
       const assigned = await loadAssignedPlayers(tournament.key);
@@ -685,7 +691,11 @@
                           onclick={(e) => { e.stopPropagation(); activeWarnKey = activeWarnKey === gKey ? null : gKey; }}
                         >⚠</button>
                         {#if activeWarnKey === gKey}
-                          <span class="group-col-warn-tooltip">{groupWarnMsg}</span>
+                          <div class="group-warn-dialog" role="tooltip">
+                            <span class="group-warn-dialog-caret"></span>
+                            <span class="group-warn-dialog-icon">⚠</span>
+                            <span class="group-warn-dialog-msg">{groupWarnMsg}</span>
+                          </div>
                         {/if}
                       </span>
                     {/if}
@@ -1151,20 +1161,45 @@
     padding: 0;
     line-height: 1;
   }
-  .group-col-warn-tooltip {
+  .group-warn-dialog {
     position: absolute;
-    top: calc(100% + 4px);
+    top: calc(100% + 8px);
     left: 50%;
     transform: translateX(-50%);
-    background: #2a1f1f;
+    background: #1e1414;
     border: 1px solid #f87171;
-    color: #f87171;
-    font-size: 0.78rem;
-    padding: 0.3rem 0.6rem;
-    border-radius: 0.3rem;
-    white-space: nowrap;
+    border-radius: 0.45rem;
+    padding: 0.55rem 0.75rem;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.4rem;
+    min-width: 180px;
+    max-width: 240px;
     z-index: 50;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.5);
     pointer-events: none;
+  }
+  .group-warn-dialog-caret {
+    position: absolute;
+    top: -6px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 10px;
+    height: 6px;
+    background: #1e1414;
+    clip-path: polygon(50% 0%, 0% 100%, 100% 100%);
+    border-top: 1px solid #f87171;
+  }
+  .group-warn-dialog-icon {
+    color: #f87171;
+    font-size: 0.85rem;
+    flex-shrink: 0;
+    margin-top: 0.05rem;
+  }
+  .group-warn-dialog-msg {
+    color: #fca5a5;
+    font-size: 0.8rem;
+    line-height: 1.4;
   }
   .group-remove-btn {
     flex-shrink: 0;
