@@ -292,9 +292,12 @@
       groupSize: Math.ceil(assignedPlayerIds.length / Math.max(1, sortedGroups.length)),
     };
     const cfgOutcome = await updateKnockoutCfg(tournament.key, cfg, 'knockout');
-    if (!cfgOutcome.ok && (cfgOutcome.error ?? '').includes('PERMISSION_DENIED') && !groupsLocked) {
+    if (!cfgOutcome.ok && !groupsLocked) {
       generating = false;
-      generateError = 'Permission denied — you can only edit tournaments you created.';
+      const raw = cfgOutcome.error ?? '';
+      generateError = raw.includes('PERMISSION_DENIED')
+        ? `Permission denied saving config (${raw})`
+        : raw || 'Failed to save knockout config';
       return;
     }
 
