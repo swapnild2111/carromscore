@@ -1064,7 +1064,7 @@
   }
   .pool-pane-scroll {
     overflow-y: auto;
-    max-height: 480px; /* ~15 chips visible */
+    max-height: 320px; /* ~10 chips visible */
     padding: 0.35rem;
   }
   .pool-pane-dummy .pool-pane-scroll {
