@@ -902,7 +902,7 @@
       }
       if (formatChanged || knockoutCfgChanged) {
         if (editingFormat === 'knockout' || editingFormat === 'roundrobin') {
-          const parsedPlayers = parseIntField(editingKnockoutPlayers, 2, 256, 'Total players');
+          const parsedPlayers = parseIntField(editingKnockoutPlayers, 2, 5000, 'Total players');
           if (parsedPlayers === undefined) return;
           const parsedBoards = parseIntField(editingBoardsAvailable, 1, 99, 'Boards available');
           if (parsedBoards === undefined) return;
@@ -2122,7 +2122,7 @@
               <input
                 type="number"
                 min="2"
-                max="256"
+                max="5000"
                 step="1"
                 bind:value={editingKnockoutPlayers}
                 disabled={saving || schedLocked}
@@ -2611,7 +2611,7 @@
               <input
                 type="number"
                 min="2"
-                max="256"
+                max="5000"
                 step="1"
                 bind:value={addingKnockoutPlayers}
                 disabled={saving}
@@ -2675,7 +2675,7 @@
               <input
                 type="number"
                 min="4"
-                max="256"
+                max="5000"
                 step="1"
                 bind:value={addingTotalPlayers}
                 disabled={saving}
