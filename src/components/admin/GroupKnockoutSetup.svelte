@@ -285,24 +285,18 @@
     );
     await Promise.all(existingGroupRounds.map((r) => deleteRound(tournament.key, r.key)));
 
-    // Save knockoutCfg only on first generate (not re-generate) — writing the
-    // tournament root requires being the creator; groups sub-path is separate.
-    if (!groupsLocked) {
-      const cfg: KnockoutCfg = {
-        participantCount: assignedPlayerIds.length,
-        venueBoards,
-        groupCount: sortedGroups.length,
-        groupSize: Math.ceil(assignedPlayerIds.length / Math.max(1, sortedGroups.length)),
-      };
-      const cfgOutcome = await updateKnockoutCfg(tournament.key, cfg, 'knockout');
-      if (!cfgOutcome.ok) {
-        generating = false;
-        const raw = cfgOutcome.error ?? '';
-        generateError = raw.includes('PERMISSION_DENIED')
-          ? 'Permission denied — you can only edit tournaments you created.'
-          : raw || 'Failed to save config';
-        return;
-      }
+    // Save knockoutCfg — requires being the creator; ignore permission errors on re-generate.
+    const cfg: KnockoutCfg = {
+      participantCount: assignedPlayerIds.length,
+      venueBoards,
+      groupCount: sortedGroups.length,
+      groupSize: Math.ceil(assignedPlayerIds.length / Math.max(1, sortedGroups.length)),
+    };
+    const cfgOutcome = await updateKnockoutCfg(tournament.key, cfg, 'knockout');
+    if (!cfgOutcome.ok && (cfgOutcome.error ?? '').includes('PERMISSION_DENIED') && !groupsLocked) {
+      generating = false;
+      generateError = 'Permission denied — you can only edit tournaments you created.';
+      return;
     }
 
     // Merge pre-qualify markings into groups before saving
@@ -605,11 +599,7 @@
     <div class="ls-body">
         {#if roundsStarted}
           <div class="draw-controls">
-            <span class="draw-locked-hint">🔒 Groups locked — rounds in progress</span>
-          </div>
-        {:else if groupsLocked && !groupsDirty}
-          <div class="draw-controls">
-            <span class="draw-auto-hint">Drag players to adjust, then re-generate</span>
+            <span class="draw-locked-hint">🔒 Rounds in progress — re-generate to update brackets</span>
           </div>
         {/if}
 
@@ -845,41 +835,37 @@
         </div>
       {/if}
       <div class="ls-actions ls-actions-footer">
-        {#if roundsStarted}
-          <!-- no actions — groups locked, rounds in progress -->
-        {:else if generating}
+        {#if generating}
           <div class="generating-indicator">
             <span class="spinner" aria-hidden="true"></span>
             <span>Generating brackets…</span>
           </div>
-        {:else if groupsLocked}
-          <button
-            type="button"
-            class="btn btn-secondary"
-            onclick={lockAndGenerate}
-            disabled={sortedGroups.length === 0}
-          >Re-generate brackets</button>
-          {#if (tournament.rounds ?? []).some((r) => / — /.test(r.name) && !/^KO —/.test(r.name) && !r.startedAt)}
+        {:else}
+          {@const hasGroupRounds = (tournament.rounds ?? []).some((r) => / — /.test(r.name) && !/^KO —/.test(r.name))}
+          {@const hasUnstartedRounds = (tournament.rounds ?? []).some((r) => / — /.test(r.name) && !/^KO —/.test(r.name) && !r.startedAt)}
+          {#if hasGroupRounds}
+            <button
+              type="button"
+              class="btn btn-secondary"
+              onclick={lockAndGenerate}
+              disabled={sortedGroups.length === 0}
+            >Re-generate brackets</button>
+            {#if hasUnstartedRounds}
+              <button
+                type="button"
+                class="btn btn-primary"
+                onclick={startAllGroupRounds}
+                disabled={startingRounds}
+              >{startingRounds ? 'Starting…' : '▶ Start first round'}</button>
+            {/if}
+          {:else}
             <button
               type="button"
               class="btn btn-primary"
-              onclick={startAllGroupRounds}
-              disabled={startingRounds}
-            >{startingRounds ? 'Starting…' : '▶ Start first round'}</button>
+              onclick={lockAndGenerate}
+              disabled={sortedGroups.length === 0}
+            >Generate brackets</button>
           {/if}
-        {:else if groupsDirty}
-          <button
-            type="button"
-            class="btn btn-primary"
-            onclick={lockAndGenerate}
-            disabled={sortedGroups.length === 0}
-          >Lock groups &amp; generate brackets</button>
-        {:else if !groupsLocked && sortedGroups.length > 0}
-          <button
-            type="button"
-            class="btn btn-primary"
-            onclick={lockAndGenerate}
-          >Generate brackets</button>
         {/if}
       </div>
   </div>
