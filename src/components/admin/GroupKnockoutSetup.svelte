@@ -10,14 +10,13 @@
   import {
     updateLeagueGroups,
     updateKnockoutCfg,
-    startRound,
     deleteRound,
     clearAllRoundsAndPlanned,
     loadRounds,
     loadAssignedPlayers,
   } from '../../lib/tournaments';
   import { loadAll as loadAllPlayers, subscribeStore as subscribePlayerStore } from '../../lib/players';
-  import { subscribePlannedByTournament, deletePlannedMatch, forfeitDummyMatch, loadPendingPlannedByTournament, type PlannedMatch } from '../../lib/planned';
+  import { subscribePlannedByTournament, deletePlannedMatch, type PlannedMatch } from '../../lib/planned';
   import { loadMatchesByTournamentKey, type MatchRecord } from '../../lib/history';
   import {
     generateGroupPhase,
@@ -350,42 +349,6 @@
     }
   }
 
-  // ─── Start first group round ──────────────────────────────────────────────────
-
-  let startingRounds = $state(false);
-
-  async function startAllGroupRounds() {
-    startingRounds = true;
-    const rounds = loadRounds(tournament.key);
-    const allGroupRounds = rounds
-      .filter((r) => / — /.test(r.name) && !/^KO —/.test(r.name) && !r.startedAt)
-      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-
-    // Find the first (lowest-order) round for each group prefix (e.g. "G1", "G2")
-    const firstRoundPerGroup = new Map<string, typeof allGroupRounds[0]>();
-    for (const r of allGroupRounds) {
-      const prefix = r.name.split(' — ')[0]!;
-      if (!firstRoundPerGroup.has(prefix)) firstRoundPerGroup.set(prefix, r);
-    }
-    const firstRounds = [...firstRoundPerGroup.values()];
-
-    if (firstRounds.length > 0) {
-      await Promise.all(firstRounds.map((r) => startRound(tournament.key, r.key)));
-      // Auto-forfeit dummy-side matches. Fetch fresh from Firebase rather than
-      // reading reactive plannedMatches, which may not have propagated yet.
-      const isDummySide = (m: PlannedMatch) =>
-        /^dummy-\d+$/i.test(m.aResolvedId ?? m.aName ?? '') ||
-        /^dummy-\d+$/i.test(m.bResolvedId ?? m.bName ?? '');
-      const startedKeys = new Set(firstRounds.map((r) => r.key));
-      const freshMatches = await loadPendingPlannedByTournament(tournament.key);
-      const dummyMatches = freshMatches.filter(
-        (m) => startedKeys.has(m.roundKey ?? '') && isDummySide(m) && !m.completedAt,
-      );
-      await Promise.all(dummyMatches.map((m) => forfeitDummyMatch(m.mid, myUid)));
-    }
-    startingRounds = false;
-    onClose();
-  }
 
   // ─── Phase 2: combined knockout ───────────────────────────────────────────────
 
@@ -842,7 +805,6 @@
           </div>
         {:else}
           {@const hasGroupRounds = (tournament.rounds ?? []).some((r) => / — /.test(r.name) && !/^KO —/.test(r.name))}
-          {@const hasUnstartedRounds = (tournament.rounds ?? []).some((r) => / — /.test(r.name) && !/^KO —/.test(r.name) && !r.startedAt)}
           {#if hasGroupRounds}
             <button
               type="button"
@@ -850,14 +812,6 @@
               onclick={lockAndGenerate}
               disabled={sortedGroups.length === 0}
             >Re-generate brackets</button>
-            {#if hasUnstartedRounds}
-              <button
-                type="button"
-                class="btn btn-primary"
-                onclick={startAllGroupRounds}
-                disabled={startingRounds}
-              >{startingRounds ? 'Starting…' : '▶ Start first round'}</button>
-            {/if}
           {:else}
             <button
               type="button"
