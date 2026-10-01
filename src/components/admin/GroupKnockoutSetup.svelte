@@ -251,6 +251,7 @@
 
   let generating = $state(false);
   let generateError = $state('');
+  let activeWarnKey = $state<string | null>(null);
   let generateResult = $state<{ matchesCreated: number; errors: string[] } | null>(null);
   let groupsLocked = $state(Object.keys(tournament.groups ?? {}).length > 0);
   let groupsDirty = $state(false);
@@ -677,7 +678,16 @@
                   <div class="group-col-header">
                     <span class="group-col-name">{group.name}</span>
                     {#if groupWarnMsg && !roundsStarted}
-                      <span class="group-col-warn-icon" title={groupWarnMsg}>⚠</span>
+                      <span class="group-col-warn-wrap">
+                        <button
+                          type="button"
+                          class="group-col-warn-icon"
+                          onclick={(e) => { e.stopPropagation(); activeWarnKey = activeWarnKey === gKey ? null : gKey; }}
+                        >⚠</button>
+                        {#if activeWarnKey === gKey}
+                          <span class="group-col-warn-tooltip">{groupWarnMsg}</span>
+                        {/if}
+                      </span>
                     {/if}
                     <div class="group-col-header-right">
                       {#if roundsStarted}
@@ -1124,12 +1134,37 @@
     flex: 1;
     min-width: 0;
   }
+  .group-col-warn-wrap {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+  }
   .group-col-warn-icon {
     color: #f87171;
     font-size: 0.85rem;
     margin: 0 0.2rem;
     flex-shrink: 0;
-    cursor: help;
+    cursor: pointer;
+    background: none;
+    border: none;
+    padding: 0;
+    line-height: 1;
+  }
+  .group-col-warn-tooltip {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: #2a1f1f;
+    border: 1px solid #f87171;
+    color: #f87171;
+    font-size: 0.78rem;
+    padding: 0.3rem 0.6rem;
+    border-radius: 0.3rem;
+    white-space: nowrap;
+    z-index: 50;
+    pointer-events: none;
   }
   .group-remove-btn {
     flex-shrink: 0;
