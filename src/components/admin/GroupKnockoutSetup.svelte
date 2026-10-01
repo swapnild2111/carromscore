@@ -262,8 +262,7 @@
 
   async function lockAndGenerate() {
     if (generating) return;
-    const blockingWarning = groupWarnings.find((w) => w.includes('needs at least'));
-    if (blockingWarning) { generateError = blockingWarning; return; }
+    if (groupWarnings.some((w) => w.includes('needs at least'))) return;
     generating = true;
     generateError = '';
     generateResult = null;
