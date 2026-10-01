@@ -262,17 +262,8 @@
 
   async function lockAndGenerate() {
     if (generating) return;
-    // Validate
-    for (const [, g] of sortedGroups) {
-      if (g.playerIds.length < 2) {
-        generateError = `Group ${g.name} needs at least 2 players`;
-        return;
-      }
-      if (g.playerIds.length === 1) {
-        generateError = `Group ${g.name} has 1 player — move them to another group`;
-        return;
-      }
-    }
+    const blockingWarning = groupWarnings.find((w) => w.includes('needs at least'));
+    if (blockingWarning) { generateError = blockingWarning; return; }
     generating = true;
     generateError = '';
     generateResult = null;
@@ -426,8 +417,7 @@
       const byeCount = g.playerIds.length - pqCount;
       const r2SlotCount = byeCount + Math.floor(pqCount / 2);
       const hasOdd = r2SlotCount % 2 !== 0 && g.playerIds.length > 1;
-      if (g.playerIds.length === 0) warnings.push(`${g.name} is empty`);
-      else if (g.playerIds.length === 1) warnings.push(`${g.name} has only 1 player`);
+      if (g.playerIds.length < 2) warnings.push(`Group ${g.name} needs at least 2 players`);
       else if (hasOdd) warnings.push(`${g.name} has an odd bracket slot — one player will get a bye`);
     }
     return warnings;
