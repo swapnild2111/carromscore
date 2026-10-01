@@ -73,7 +73,7 @@
       ".read": true,
       ".indexOn": ["lastActive"],
       "$key": {
-        ".write": "$key.length >= 1 && $key.length <= 60 && auth != null && ((root.child('adminRoles').child(auth.uid).val() == 'super') || (!data.exists() && newData.exists() && root.child('organiserRoles').child(auth.uid).val() == true && newData.child('createdBy').val() == auth.uid) || (data.exists() && data.child('createdBy').val() == auth.uid))",
+        ".write": "$key.length >= 1 && $key.length <= 60 && auth != null && ((root.child('adminRoles').child(auth.uid).val() == 'super') || (!data.exists() && newData.exists() && root.child('organiserRoles').child(auth.uid).val() == true && newData.child('createdBy').val() == auth.uid) || (data.exists() && data.child('createdBy').val() == auth.uid) || (data.exists() && root.child('tournaments').child($key).child('coOrganisers').child(auth.uid).val() == true))",
         ".validate": "newData.hasChildren(['name', 'createdAt', 'lastActive']) && newData.child('name').isString() && newData.child('name').val().length >= 1 && newData.child('name').val().length <= 60 && newData.child('createdAt').isNumber() && newData.child('lastActive').isNumber() && newData.child('lastActive').val() <= now && (data.exists() || newData.child('lastActive').val() > now - 300000)",
         "name":       { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 60" },
         "createdAt":  { ".validate": "newData.isNumber()" },
