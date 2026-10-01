@@ -790,11 +790,6 @@
       {/if}
 
       <!-- ─── Action buttons (always at card bottom) ───────────────────────────── -->
-      {#if !roundsStarted && groupWarnings.length > 0}
-        <ul class="ls-group-warnings">
-          {#each groupWarnings as w}<li>⚠ {w}</li>{/each}
-        </ul>
-      {/if}
       {#if generateError}
         <p class="ls-error ls-error-footer">{generateError}</p>
       {/if}
@@ -830,6 +825,11 @@
               onclick={lockAndGenerate}
               disabled={sortedGroups.length === 0}
             >Generate brackets</button>
+          {/if}
+          {#if !roundsStarted && groupWarnings.length > 0}
+            <ul class="ls-group-warnings">
+              {#each groupWarnings as w}<li>⚠ {w}</li>{/each}
+            </ul>
           {/if}
         {/if}
       </div>
@@ -1383,11 +1383,12 @@
     padding: 0.5rem 1.25rem 0;
   }
   .ls-group-warnings {
-    margin: 0.5rem 1.25rem 0;
+    margin: 0;
     padding: 0;
     list-style: none;
     font-size: 0.83rem;
     color: #c8961a;
+    align-self: center;
   }
   .ls-group-warnings li {
     margin: 0.15rem 0;
