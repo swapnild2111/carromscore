@@ -6,7 +6,7 @@
  *
  * Phase 2: combined knockout drawn with cross-pairing:
  *   match k pairs A[k] vs B[G+1-k]  (1-indexed)
- * Same-group players can only meet in the Final for G ≤ 4.
+ * Same-group players can only meet in the Final (cross-pairing property holds for any G).
  */
 
 import type { LeagueGroup } from './tournaments';
@@ -38,7 +38,7 @@ export function recommendGroups(
 ): { groupCount: number; groupSize: number } {
   if (totalPlayers < 2) return { groupCount: 1, groupSize: totalPlayers };
 
-  const MAX_GROUPS = 4; // guarantees same-group players only meet in Final
+  const MAX_GROUPS = 16;
   const candidates: Array<{ groupCount: number; groupSize: number; score: number }> = [];
 
   for (let g = 2; g <= Math.min(MAX_GROUPS, Math.floor(totalPlayers / 2)); g++) {

@@ -600,6 +600,7 @@ async function writePlayerToFirebase(p: Player): Promise<PlayerFirebaseWriteOutc
       ...(p.email ? { email: p.email } : {}),
       ...(p.phone ? { phone: p.phone } : {}),
       ...(p.address ? { address: p.address } : {}),
+      ...(p.represents ? { represents: p.represents } : {}),
       aliases: { ...p.aliases },
       normalisedIndex: normalisedIndex(p),
     });

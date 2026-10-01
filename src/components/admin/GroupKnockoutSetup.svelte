@@ -19,9 +19,7 @@
   import { loadAll as loadAllPlayers, subscribeStore as subscribePlayerStore } from '../../lib/players';
   import { subscribePlannedByTournament, deletePlannedMatch, forfeitDummyMatch, loadPendingPlannedByTournament, type PlannedMatch } from '../../lib/planned';
   import { loadMatchesByTournamentKey, type MatchRecord } from '../../lib/history';
-  import { potSeeding } from '../../lib/league';
   import {
-    recommendGroups,
     generateGroupPhase,
     generateCombinedKnockout,
   } from '../../lib/groupknockout';
@@ -45,47 +43,15 @@
 
   const venueBoards = $derived(Math.max(1, koCfg?.venueBoards ?? koCfg?.boardsAvailable ?? 4));
 
-  // ─── Group count (configurable) ──────────────────────────────────────────────
-
-  const recommendedGroupCount = $derived(
-    recommendGroups(assignedPlayerIds.length, venueBoards).groupCount
-  );
-
-  // Read knockoutCfg directly (not via $derived) so it's available at $state init time.
-  const initKoCfg = tournament.knockoutCfg;
-  const initBoards = Math.max(1, initKoCfg?.venueBoards ?? initKoCfg?.boardsAvailable ?? 4);
-
-  // If groups already exist, use their count as ground truth (beats any saved/recommended value).
-  const initSavedGroupCount = Object.keys(tournament.groups ?? {}).length;
-
-  // Organizer can override; prefer actual saved group count, then explicit cfg, then recommendation.
-  // Note: assignedPlayerIds isn't populated yet at init, so use groups as proxy for player count.
-  let manualGroupCount = $state<number>(
-    initSavedGroupCount > 0
-      ? initSavedGroupCount
-      : (initKoCfg?.groupCount ?? recommendGroups(
-          Object.values(tournament.groups ?? {}).flatMap((g) => g.playerIds).length || 0,
-          initBoards
-        ).groupCount)
-  );
-
-  // Track whether the organizer has manually touched the stepper this session.
-  let groupCountManuallySet = $state(initSavedGroupCount > 0 || initKoCfg?.groupCount != null);
-
-  // When no groups are saved yet AND organizer hasn't manually set a count, follow recommendation
-  // once player list loads. Never clobber a manual choice.
-  const hasExistingGroupsSaved = $derived(Object.keys(tournament.groups ?? {}).length > 0);
-
-  $effect(() => {
-    if (!hasExistingGroupsSaved && !groupCountManuallySet) {
-      manualGroupCount = recommendedGroupCount;
-    }
-  });
-
   // ─── Group draw state ────────────────────────────────────────────────────────
   let localGroups = $state<Record<string, LeagueGroup>>(
     tournament.groups ? JSON.parse(JSON.stringify(tournament.groups)) : {}
   );
+
+  // ─── Group count ─────────────────────────────────────────────────────────────
+  // Derived from actual localGroups — stepper adds/removes groups directly.
+  const manualGroupCount = $derived(Object.keys(localGroups).length);
+  let groupCountManuallySet = $state(Object.keys(tournament.groups ?? {}).length > 0);
 
   let assignedPlayerIds = $state<string[]>([]);
 
@@ -211,34 +177,49 @@
     dropTargetIdx = null;
   }
 
-  // ─── Random draw ─────────────────────────────────────────────────────────────
+  // ─── Group add / remove ───────────────────────────────────────────────────────
 
-  function doRandomDraw() {
-    const playerName = (id: string) => players.find((p) => p.id === id)?.canonicalName ?? id;
-    const playerNames = new Map(assignedPlayerIds.map((id) => [id, playerName(id)]));
-    const potScores = new Map<string, number>();
-    localGroups = potSeeding(assignedPlayerIds, playerNames, potScores, manualGroupCount);
-    groupsDirty = false;
+  let removeGroupError = $state('');
+
+  function initGroups() {
+    const allIds = [...assignedPlayerIds, ...dummyIds.filter((id) => !assignedPlayerIds.includes(id))];
+    localGroups = {
+      g1: { name: 'G1', order: 1, playerIds: allIds },
+    };
+    groupsDirty = true;
+  }
+
+  function addGroup() {
+    const maxOrder = Object.values(localGroups).reduce((m, g) => Math.max(m, g.order), 0);
+    const nextN = maxOrder + 1;
+    // Find a key that doesn't already exist
+    let gKey = `g${nextN}`;
+    let n = nextN;
+    while (localGroups[gKey]) { n++; gKey = `g${n}`; }
+    localGroups = {
+      ...localGroups,
+      [gKey]: { name: `G${nextN}`, order: nextN, playerIds: [] },
+    };
+    groupsDirty = true;
+    removeGroupError = '';
+  }
+
+  function removeLastGroup() {
+    const entries = Object.entries(localGroups).sort(([, a], [, b]) => b.order - a.order);
+    if (entries.length <= 1) return;
+    const [lastKey, lastGroup] = entries[0]!;
+    if (lastGroup.playerIds.length > 0) {
+      removeGroupError = `Move all players out of ${lastGroup.name} first`;
+      return;
+    }
+    removeGroupError = '';
+    const next = { ...localGroups };
+    delete next[lastKey];
+    localGroups = next;
+    groupsDirty = true;
   }
 
   let redrawing = $state(false);
-
-  async function doRedraw() {
-    if (redrawing || generating) return;
-    redrawing = true;
-    // Bulk-delete ALL rounds + planned matches directly from Firebase —
-    // bypasses memoryStore so no stale-snapshot duplicates.
-    await clearAllRoundsAndPlanned(tournament.key);
-
-    // Keep the current stepper count — don't reset to recommendation on re-generate.
-    groupCountManuallySet = true;
-    doRandomDraw();
-    generateResult = null;
-    groupsLocked = false;
-    await lockAndGenerate();
-    await startAllGroupRounds();
-    redrawing = false;
-  }
 
   // ─── Phase 1 generation ──────────────────────────────────────────────────────
 
@@ -340,8 +321,6 @@
     generateResult = { matchesCreated: result.matchesCreated, errors: result.errors };
     groupsDirty = false;
     generating = false;
-    // Freeze stepper to the count we just saved so the $effect doesn't clobber it.
-    manualGroupCount = sortedGroups.length;
     groupCountManuallySet = true;
 
     // Auto-generate combined KO when there are multiple groups
@@ -578,7 +557,7 @@
       archivedMatches = await loadMatchesByTournamentKey(tournament.key);
 
       if (assignedPlayerIds.length > 0 && Object.keys(localGroups).length === 0) {
-        doRandomDraw();
+        initGroups();
       }
     })();
     return () => {
@@ -605,23 +584,21 @@
                 <button
                   type="button"
                   class="stepper-btn"
-                  aria-label="Fewer groups"
+                  aria-label="Remove group"
                   disabled={manualGroupCount <= 1 || redrawing || generating}
-                  onclick={() => { groupCountManuallySet = true; manualGroupCount = Math.max(1, manualGroupCount - 1); doRandomDraw(); }}
+                  onclick={removeLastGroup}
                 >−</button>
                 <span class="stepper-value">{manualGroupCount}</span>
                 <button
                   type="button"
                   class="stepper-btn"
-                  aria-label="More groups"
-                  disabled={manualGroupCount >= 4 || manualGroupCount >= Math.floor(assignedPlayerIds.length / 2) || redrawing || generating}
-                  onclick={() => { groupCountManuallySet = true; manualGroupCount = Math.min(4, manualGroupCount + 1); doRandomDraw(); }}
+                  aria-label="Add group"
+                  disabled={redrawing || generating}
+                  onclick={addGroup}
                 >+</button>
               </div>
-              {#if recommendedGroupCount !== manualGroupCount}
-                <span class="group-count-hint">recommended: {recommendedGroupCount}</span>
-              {:else}
-                <span class="group-count-hint">recommended</span>
+              {#if removeGroupError}
+                <span class="group-count-hint group-count-error">{removeGroupError}</span>
               {/if}
             </div>
           {/if}
@@ -699,7 +676,7 @@
         {/if}
 
         <!-- Group grid -->
-        <div class="groups-grid" style="grid-template-columns: repeat({Math.min(sortedGroups.length, 4)}, 1fr)">
+        <div class="groups-grid" style="grid-template-columns: repeat({Math.min(sortedGroups.length, 6)}, 1fr)">
           {#each sortedGroups as [gKey, group] (gKey)}
             {@const status = groupMatchStatus(gKey, group.name)}
             {@const pqCount = group.playerIds.filter((pid) => preQualified.has(pid)).length}
@@ -971,6 +948,10 @@
     font-size: 0.7rem;
     color: var(--muted, #9aa0a6);
     font-style: italic;
+  }
+  .group-count-error {
+    color: #e57373;
+    font-style: normal;
   }
 
   /* Stale-config warning banner */
