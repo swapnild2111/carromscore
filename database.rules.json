@@ -165,6 +165,7 @@
           "$other": { ".validate": false }
         },
         "groups": {
+          ".write": "auth != null && ((root.child('adminRoles').child(auth.uid).val() == 'super') || (root.child('tournaments').child($key).child('createdBy').val() == auth.uid) || (root.child('tournaments').child($key).child('coOrganisers').child(auth.uid).val() == true))",
           "$groupKey": {
             ".write": "$groupKey.length >= 1 && $groupKey.length <= 60 && auth != null && ((root.child('adminRoles').child(auth.uid).val() == 'super') || (root.child('tournaments').child($key).child('createdBy').val() == auth.uid) || (root.child('tournaments').child($key).child('coOrganisers').child(auth.uid).val() == true))",
             ".validate": "!newData.exists() || newData.hasChildren(['name', 'order'])",
