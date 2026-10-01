@@ -77,7 +77,6 @@
         ".validate": "newData.hasChildren(['name', 'createdAt', 'lastActive']) && newData.child('name').isString() && newData.child('name').val().length >= 1 && newData.child('name').val().length <= 60 && newData.child('createdAt').isNumber() && newData.child('lastActive').isNumber() && newData.child('lastActive').val() <= now && (data.exists() || newData.child('lastActive').val() > now - 300000)",
         "name":       { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 60" },
         "createdAt":  { ".validate": "newData.isNumber()" },
-        "lastActive": { ".validate": "newData.isNumber()" },
         "createdBy":  { ".validate": "newData.isString() && newData.val().length <= 64" },
         "type":       { ".validate": "newData.isString() && (newData.val() == 'open' || newData.val() == 'closed')" },
         "country":       { ".validate": "newData.isString() && newData.val().length <= 40" },
