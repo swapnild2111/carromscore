@@ -1089,7 +1089,7 @@
     padding: 0.35rem;
   }
   .pool-pane-dummy .pool-pane-scroll {
-    max-height: 160px; /* ~5 dummies visible */
+    max-height: 96px; /* ~3 dummies visible */
   }
   .pool-empty {
     font-size: 0.72rem;
