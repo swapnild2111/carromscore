@@ -901,7 +901,7 @@
         }
       }
       if (formatChanged || knockoutCfgChanged) {
-        if (editingFormat === 'knockout' || editingFormat === 'roundrobin') {
+        if (editingFormat === 'knockout' || editingFormat === 'roundrobin' || editingFormat === 'groupknockout') {
           const parsedPlayers = parseIntField(editingKnockoutPlayers, 2, 2048, 'Total players');
           if (parsedPlayers === undefined) return;
           const parsedBoards = parseIntField(editingBoardsAvailable, 1, 99, 'Boards available');
@@ -914,7 +914,7 @@
             ...(editingFormat === 'knockout' && editingGroupCount > 0 ? { groupCount: editingGroupCount } : {}),
             ...(editingKnockoutRewards.length > 0 ? { flightNames: editingKnockoutRewards } : {}),
           };
-          const r = await updateKnockoutCfg(editingKey, cfg, editingFormat as 'knockout' | 'roundrobin');
+          const r = await updateKnockoutCfg(editingKey, cfg, editingFormat as 'knockout' | 'roundrobin' | 'groupknockout');
           if (!r.ok) { flash('err', r.error); return; }
         } else {
           const r = await updateTournamentFormat(editingKey, editingFormat);

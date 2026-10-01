@@ -1048,7 +1048,7 @@ export async function updateLeagueCfg(
 export async function updateKnockoutCfg(
   key: string,
   cfg: KnockoutCfg,
-  format: 'knockout' | 'roundrobin' = 'knockout',
+  format: 'knockout' | 'roundrobin' | 'groupknockout' = 'knockout',
 ): Promise<TournamentWriteOutcome> {
   if (!key) return { ok: false, error: 'Missing tournament key' };
   const t = memoryStore.find((x) => x.key === key);
