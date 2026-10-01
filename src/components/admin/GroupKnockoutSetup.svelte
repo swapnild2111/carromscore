@@ -419,6 +419,20 @@
     totalGroupMatches > 0 && completedGroupMatches === totalGroupMatches
   );
 
+  const groupWarnings = $derived.by(() => {
+    const warnings: string[] = [];
+    for (const [, g] of sortedGroups) {
+      const pqCount = g.playerIds.filter((pid) => preQualified.has(pid)).length;
+      const byeCount = g.playerIds.length - pqCount;
+      const r2SlotCount = byeCount + Math.floor(pqCount / 2);
+      const hasOdd = r2SlotCount % 2 !== 0 && g.playerIds.length > 1;
+      if (g.playerIds.length === 0) warnings.push(`${g.name} is empty`);
+      else if (g.playerIds.length === 1) warnings.push(`${g.name} has only 1 player`);
+      else if (hasOdd) warnings.push(`${g.name} has an odd bracket slot — one player will get a bye`);
+    }
+    return warnings;
+  });
+
   // Per-group final status: did the group produce a champion + runner-up?
   const groupFinalCounts = $derived.by(() => {
     const counts = new Map<string, { total: number; completed: number }>();
@@ -786,6 +800,11 @@
       {/if}
 
       <!-- ─── Action buttons (always at card bottom) ───────────────────────────── -->
+      {#if !roundsStarted && groupWarnings.length > 0}
+        <ul class="ls-group-warnings">
+          {#each groupWarnings as w}<li>⚠ {w}</li>{/each}
+        </ul>
+      {/if}
       {#if generateError}
         <p class="ls-error ls-error-footer">{generateError}</p>
       {/if}
@@ -1372,6 +1391,16 @@
   }
   .ls-error-footer {
     padding: 0.5rem 1.25rem 0;
+  }
+  .ls-group-warnings {
+    margin: 0.5rem 1.25rem 0;
+    padding: 0;
+    list-style: none;
+    font-size: 0.83rem;
+    color: #c8961a;
+  }
+  .ls-group-warnings li {
+    margin: 0.15rem 0;
   }
   .generate-result-footer {
     padding: 0.5rem 1.25rem 0;
