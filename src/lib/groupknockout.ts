@@ -62,6 +62,7 @@ export type GroupPhaseParams = {
   tournamentName: string;
   groups: Record<string, LeagueGroup>;
   playerNames: Map<string, string>;
+  venueBoards: number;
   defaults: {
     mode: 'singles' | 'doubles';
     bestOf: number;
@@ -91,7 +92,7 @@ export async function generateGroupPhase(
   const { addRound, normalizeKey } = await import('./tournaments');
   const { createPlannedMatch } = await import('./planned');
 
-  const { tournamentKey, tournamentName, groups, playerNames, defaults, myUid } = params;
+  const { tournamentKey, tournamentName, groups, playerNames, venueBoards, defaults, myUid } = params;
   const result: GroupPhaseResult = { roundsCreated: [], matchesCreated: 0, errors: [] };
 
   const cfg = {
@@ -259,7 +260,7 @@ export async function generateGroupPhase(
   }
   const boardAssignment = new Map<MatchDef, number>();
   for (const matches of bySuffix.values()) {
-    const boards = shuffleBoards(matches.length);
+    const boards = shuffleBoards(matches.length, venueBoards);
     matches.forEach((m, i) => boardAssignment.set(m, boards[i]!));
   }
 
@@ -389,6 +390,7 @@ export type CombinedKOParams = {
   groups: Record<string, LeagueGroup>; // used for naming only
   groupCount: number;
   groupNames?: string[]; // ordered list of group names for KO seeding (e.g. ["G1","G2","G3","G4"])
+  venueBoards: number;
   defaults: {
     mode: 'singles' | 'doubles';
     bestOf: number;
@@ -414,7 +416,7 @@ export async function generateCombinedKnockout(
   const { addRound, normalizeKey } = await import('./tournaments');
   const { createPlannedMatch } = await import('./planned');
 
-  const { tournamentKey, tournamentName, groupCount, groupNames, defaults, myUid } = params;
+  const { tournamentKey, tournamentName, groupCount, groupNames, venueBoards, defaults, myUid } = params;
   const result: CombinedKOResult = { roundsCreated: [], matchesCreated: 0, errors: [] };
 
   const cfg = {
@@ -464,6 +466,8 @@ export async function generateCombinedKnockout(
   const firstRd = roundDefs[0]!;
   const firstRdKey = roundKeys[0]!;
 
+  const cycleBoard = (i: number) => (i % venueBoards) + 1;
+
   if (needsPreQF) {
     // Odd groupCount: the middle seed plays a Pre-QF against one of the lower seeds.
     // firstRoundPairs already has the right pairings; byeSeed advances straight to next round.
@@ -471,7 +475,7 @@ export async function generateCombinedKnockout(
       const pair = firstRoundPairs[i]!;
       await createPlannedMatch({
         mode: defaults.mode, tournament: tournamentName, tournamentKey,
-        round: firstRd.label, roundKey: firstRdKey, matchOrder: i + 1, board: i + 1,
+        round: firstRd.label, roundKey: firstRdKey, matchOrder: i + 1, board: cycleBoard(i),
         aName: pair.aSlot, bName: pair.bSlot, cfg, createdBy: myUid,
       });
       result.matchesCreated++;
@@ -485,7 +489,7 @@ export async function generateCombinedKnockout(
       const mo = matchOrder++;
       await createPlannedMatch({
         mode: defaults.mode, tournament: tournamentName, tournamentKey,
-        round: nextRd.label, roundKey: nextRdKey, matchOrder: mo, board: mo,
+        round: nextRd.label, roundKey: nextRdKey, matchOrder: mo, board: cycleBoard(mo - 1),
         aName: byeSeed, bName: `Pre-QF Winner 1`, cfg, createdBy: myUid,
       });
       result.matchesCreated++;
@@ -494,7 +498,7 @@ export async function generateCombinedKnockout(
       const mo = matchOrder++;
       await createPlannedMatch({
         mode: defaults.mode, tournament: tournamentName, tournamentKey,
-        round: nextRd.label, roundKey: nextRdKey, matchOrder: mo, board: mo,
+        round: nextRd.label, roundKey: nextRdKey, matchOrder: mo, board: cycleBoard(mo - 1),
         aName: `KO Winner ${i * 2 + 1}`, bName: `KO Winner ${i * 2 + 2}`, cfg, createdBy: myUid,
       });
       result.matchesCreated++;
@@ -509,7 +513,7 @@ export async function generateCombinedKnockout(
       for (let i = 0; i < slotCount; i++) {
         await createPlannedMatch({
           mode: defaults.mode, tournament: tournamentName, tournamentKey,
-          round: rd.label, roundKey: rKey, matchOrder: i + 1, board: i + 1,
+          round: rd.label, roundKey: rKey, matchOrder: i + 1, board: cycleBoard(i),
           aName: `KO Winner ${i * 2 + 1}`, bName: `KO Winner ${i * 2 + 2}`, cfg, createdBy: myUid,
         });
         result.matchesCreated++;
@@ -522,7 +526,7 @@ export async function generateCombinedKnockout(
       const pair = firstRoundPairs[i]!;
       await createPlannedMatch({
         mode: defaults.mode, tournament: tournamentName, tournamentKey,
-        round: firstRd.label, roundKey: firstRdKey, matchOrder: i + 1, board: i + 1,
+        round: firstRd.label, roundKey: firstRdKey, matchOrder: i + 1, board: cycleBoard(i),
         aName: pair.aSlot, bName: pair.bSlot, cfg, createdBy: myUid,
       });
       result.matchesCreated++;
@@ -537,7 +541,7 @@ export async function generateCombinedKnockout(
       for (let i = 0; i < slotCount; i++) {
         await createPlannedMatch({
           mode: defaults.mode, tournament: tournamentName, tournamentKey,
-          round: rd.label, roundKey: rKey, matchOrder: i + 1, board: i + 1,
+          round: rd.label, roundKey: rKey, matchOrder: i + 1, board: cycleBoard(i),
           aName: `KO Winner ${i * 2 + 1}`, bName: `KO Winner ${i * 2 + 2}`, cfg, createdBy: myUid,
         });
         result.matchesCreated++;
@@ -583,8 +587,8 @@ function seededPairs(ids: string[]): [string, string][] {
  * Used so each round's matches are assigned to different boards each time,
  * preventing the same player from always playing on board 1.
  */
-function shuffleBoards(count: number): number[] {
-  const boards = Array.from({ length: count }, (_, i) => i + 1);
+function shuffleBoards(count: number, venueBoards: number): number[] {
+  const boards = Array.from({ length: count }, (_, i) => (i % venueBoards) + 1);
   for (let i = boards.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [boards[i], boards[j]] = [boards[j]!, boards[i]!];

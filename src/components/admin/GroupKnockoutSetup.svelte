@@ -313,10 +313,7 @@
     const saveOutcome = await updateLeagueGroups(tournament.key, groupsToSave);
     if (!saveOutcome.ok) {
       generating = false;
-      const raw = saveOutcome.error ?? '';
-      generateError = raw.includes('PERMISSION_DENIED')
-        ? 'Permission denied — you can only edit tournaments you created.'
-        : raw || 'Failed to save groups';
+      generateError = saveOutcome.error || 'Failed to save groups';
       return;
     }
     groupsLocked = true;
@@ -332,6 +329,7 @@
       tournamentName: tournament.name,
       groups: groupsToSave,
       playerNames,
+      venueBoards,
       defaults: {
         mode: tournament.defaults?.mode ?? 'singles',
         bestOf: tournament.defaults?.bestOf ?? 3,
@@ -456,6 +454,7 @@
       groups: localGroups,
       groupCount: sortedGroups.length,
       groupNames: orderedGroupNames,
+      venueBoards,
       defaults: {
         mode: tournament.defaults?.mode ?? 'singles',
         bestOf: tournament.defaults?.bestOf ?? 3,
