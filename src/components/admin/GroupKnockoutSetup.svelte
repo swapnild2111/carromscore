@@ -838,7 +838,13 @@
     overflow-y: auto;
   }
   .gko-card {
-    background: var(--surface, #1e1e1e);
+    /* Force dark theme regardless of OS/browser light mode.
+       Windows Chrome in light mode ignores the global color-scheme:dark
+       on :root for fixed/overlay elements. Explicit color-scheme +
+       hardcoded dark bg ensures the modal is always readable. */
+    color-scheme: dark;
+    background: #1e1e1e;
+    color: #f5f5f5;
     border-radius: 0.75rem;
     border: 1px solid rgba(255, 255, 255, 0.1);
     width: 100%;
