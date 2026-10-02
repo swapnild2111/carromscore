@@ -666,7 +666,7 @@
       if (ag && bg) {
         const sp = stagePriority(a.displayName) - stagePriority(b.displayName);
         if (sp !== 0) return sp;
-        return a.displayName.localeCompare(b.displayName);
+        return a.displayName.localeCompare(b.displayName, undefined, { numeric: true });
       }
       return a.order - b.order;
     });
