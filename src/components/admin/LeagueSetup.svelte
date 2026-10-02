@@ -700,16 +700,6 @@
           </div>
         </div>
 
-        {#if !roundsStarted && !generating}
-          {#if draftStatus === 'saving'}
-            <p class="draft-hint draft-hint-saving">Saving draft…</p>
-          {:else if draftStatus === 'saved'}
-            <p class="draft-hint draft-hint-saved">Draft saved at {draftSavedAt}</p>
-          {:else if groupsDirty}
-            <p class="draft-hint">Draft saved locally — click Generate to lock and create schedule</p>
-          {/if}
-        {/if}
-
         {#if generateError}
           <p class="ls-error">{generateError}</p>
         {/if}
@@ -749,6 +739,15 @@
               onclick={lockAndGenerate}
               disabled={hasBlockingWarnings}
             >{groupsLocked ? '↺ Re-generate schedule' : 'Generate schedule'}</button>
+          {/if}
+          {#if !roundsStarted && !generating}
+            {#if draftStatus === 'saving'}
+              <span class="draft-status draft-status-saving">Saving draft…</span>
+            {:else if draftStatus === 'saved'}
+              <span class="draft-status draft-status-saved">Draft saved at {draftSavedAt}</span>
+            {:else if groupsDirty}
+              <span class="draft-status">Draft saved locally</span>
+            {/if}
           {/if}
         </div>
       </div>
@@ -1300,28 +1299,29 @@
     font-style: italic;
   }
 
-  /* Draft hint */
-  .draft-hint {
-    font-size: 0.75rem;
-    color: var(--muted, #9aa0a6);
-    font-style: italic;
-    margin: 0.5rem 0 0;
-  }
-  .draft-hint-saving {
-    color: #e5a623;
-    font-style: normal;
-  }
-  .draft-hint-saved {
-    color: #56cb82;
-    font-style: normal;
-  }
 
   /* Actions */
   .ls-actions {
     margin-top: 1rem;
     display: flex;
+    align-items: center;
+    justify-content: space-between;
     gap: 0.75rem;
     flex-wrap: wrap;
+  }
+  .draft-status {
+    font-size: 0.75rem;
+    color: var(--muted, #9aa0a6);
+    font-style: italic;
+    margin-left: auto;
+  }
+  .draft-status-saving {
+    color: #e5a623;
+    font-style: normal;
+  }
+  .draft-status-saved {
+    color: #56cb82;
+    font-style: normal;
   }
   .ls-error {
     color: #e05c5c;
