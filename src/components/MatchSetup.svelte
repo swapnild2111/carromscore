@@ -1967,8 +1967,8 @@
   {#if swJustUpdated}
     <!--
       Web-layer refresh detected via service-worker controllerchange.
-      Shown as a "What's new" popup with RELEASE_NOTES bullet points.
-      Tap Restart to reload, or dismiss to stay on the page.
+      New code is already active — shown as a "What's new" popup.
+      Tap OK to dismiss.
     -->
     <div class="sw-update-backdrop" role="dialog" aria-modal="true" aria-label="App updated">
       <div class="sw-update-card">
@@ -1987,11 +1987,8 @@
           </ul>
         {/if}
         <div class="sw-update-actions">
-          <button type="button" class="sw-update-btn sw-update-restart" onclick={restartApp}>
-            Restart now
-          </button>
-          <button type="button" class="sw-update-btn sw-update-dismiss" onclick={() => { swJustUpdated = false; }}>
-            Later
+          <button type="button" class="sw-update-btn sw-update-restart" onclick={() => { swJustUpdated = false; }}>
+            OK
           </button>
         </div>
       </div>
