@@ -70,8 +70,8 @@
 
   function addDummy() {
     dummyCount += 1;
-    // New dummy appears in the unassigned dummy pool (unassignedDummies derived)
     groupsDirty = true;
+    saveDraft();
   }
 
   function isDummy(id: string): boolean {
@@ -163,6 +163,7 @@
         ids.splice(toIdx, 0, pid);
         localGroups[toGroup] = { ...localGroups[toGroup]!, playerIds: ids };
         groupsDirty = true;
+        saveDraft();
       }
     } else {
       // Move between groups (or back to a pool)
@@ -182,6 +183,7 @@
         localGroups[toGroup] = { ...localGroups[toGroup]!, playerIds: ids };
       }
       groupsDirty = true;
+      saveDraft();
     }
 
     dragSrc = null;
@@ -203,7 +205,6 @@
   function addGroup() {
     const maxOrder = Object.values(localGroups).reduce((m, g) => Math.max(m, g.order), 0);
     const nextN = maxOrder + 1;
-    // Find a key that doesn't already exist
     let gKey = `g${nextN}`;
     let n = nextN;
     while (localGroups[gKey]) { n++; gKey = `g${n}`; }
@@ -213,6 +214,7 @@
     };
     groupsDirty = true;
     removeGroupError = '';
+    saveDraft();
   }
 
   function removeLastGroup() {
@@ -228,6 +230,7 @@
     delete next[lastKey];
     localGroups = next;
     groupsDirty = true;
+    saveDraft();
   }
 
   function removeGroupByKey(gKey: string) {
@@ -243,6 +246,7 @@
     delete next[gKey];
     localGroups = next;
     groupsDirty = true;
+    saveDraft();
   }
 
   let redrawing = $state(false);
@@ -255,6 +259,43 @@
   let generateResult = $state<{ matchesCreated: number; errors: string[] } | null>(null);
   let groupsLocked = $state(Object.keys(tournament.groups ?? {}).length > 0);
   let groupsDirty = $state(false);
+
+  // ─── Draft (localStorage) ─────────────────────────────────────────────────
+  const DRAFT_KEY = `gko-draft-${tournament.key}`;
+  let draftStatus = $state<'idle' | 'saving' | 'saved'>('idle');
+  let draftSavedAt = $state('');
+  let draftSaveTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function saveDraft() {
+    draftStatus = 'saving';
+    try {
+      localStorage.setItem(DRAFT_KEY, JSON.stringify({ groups: localGroups, dummyCount }));
+      const now = new Date();
+      draftSavedAt = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+      draftStatus = 'saved';
+    } catch { draftStatus = 'idle'; }
+    if (draftSaveTimer) clearTimeout(draftSaveTimer);
+    draftSaveTimer = setTimeout(() => { draftStatus = 'idle'; }, 4000);
+  }
+
+  function loadDraft(): boolean {
+    try {
+      const raw = localStorage.getItem(DRAFT_KEY);
+      if (!raw) return false;
+      const parsed = JSON.parse(raw);
+      if (parsed?.groups && Object.keys(parsed.groups).length > 0) {
+        localGroups = parsed.groups;
+        dummyCount = parsed.dummyCount ?? countSavedDummies(parsed.groups);
+        return true;
+      }
+    } catch {}
+    return false;
+  }
+
+  function clearDraft() {
+    try { localStorage.removeItem(DRAFT_KEY); } catch {}
+    draftStatus = 'idle';
+  }
 
   const roundsStarted = $derived(
     (tournament.rounds ?? []).some((r) => / — /.test(r.name) && !/^KO —/.test(r.name) && r.startedAt)
@@ -333,6 +374,7 @@
     groupsDirty = false;
     generating = false;
     groupCountManuallySet = true;
+    clearDraft();
 
     // Auto-generate combined KO when there are multiple groups
     if (sortedGroups.length > 1) {
@@ -520,6 +562,7 @@
       dummyCount -= 1;
     }
     groupsDirty = true;
+    saveDraft();
   }
 
   function groupMatchStatus(gKey: string, gName: string) {
@@ -552,7 +595,7 @@
       archivedMatches = await loadMatchesByTournamentKey(tournament.key);
 
       if (assignedPlayerIds.length > 0 && Object.keys(localGroups).length === 0) {
-        initGroups();
+        if (!loadDraft()) initGroups();
       }
     })();
     return () => {
@@ -848,6 +891,13 @@
               disabled={sortedGroups.length === 0 || hasBlockingWarnings}
             >Generate brackets</button>
           {/if}
+        {/if}
+        {#if draftStatus === 'saving'}
+          <span class="draft-status draft-status-saving">Saving draft…</span>
+        {:else if draftStatus === 'saved'}
+          <span class="draft-status draft-status-saved">Draft saved at {draftSavedAt}</span>
+        {:else if groupsDirty && !roundsStarted}
+          <span class="draft-status">Draft saved locally</span>
         {/if}
       </div>
   </div>
@@ -1626,5 +1676,15 @@
   }
   .btn-primary:hover:not(:disabled) { background: #ffe07a; }
   .btn-secondary { background: rgba(255, 255, 255, 0.07); }
+
+  .draft-status {
+    font-size: 0.75rem;
+    color: var(--muted, #9aa0a6);
+    font-style: italic;
+    margin-left: auto;
+    align-self: center;
+  }
+  .draft-status-saving { color: #e5a623; }
+  .draft-status-saved { color: #56cb82; }
 
 </style>
