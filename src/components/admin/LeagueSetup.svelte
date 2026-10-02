@@ -116,12 +116,7 @@
 
   // ─── Dynamic group management ─────────────────────────────────────────────────
   function initEmptyGroups() {
-    const gc = groupCount;
-    const groups: Record<string, LeagueGroup> = {};
-    for (let i = 1; i <= gc; i++) {
-      groups[`g${i}`] = { name: `G${i}`, order: i, playerIds: [] };
-    }
-    localGroups = groups;
+    localGroups = { g1: { name: 'G1', order: 1, playerIds: [] } };
   }
 
   function addGroup() {
@@ -169,6 +164,13 @@
   function clearDraft() {
     try { localStorage.removeItem(DRAFT_KEY); } catch {}
   }
+
+  // ─── Warning tooltip state ────────────────────────────────────────────────────
+  let activeWarnKey = $state<string | null>(null);
+
+  const hasBlockingWarnings = $derived(
+    sortedGroups.some(([, g]) => g.playerIds.filter((id) => !isDummy(id)).length < 2)
+  );
 
   // ─── Drag state ──────────────────────────────────────────────────────────────
   let dragSrc = $state<{ fromGroup: string | '__unassigned__' | '__dummies__'; playerIdx: number } | null>(null);
@@ -225,12 +227,7 @@
 
   async function lockAndGenerate() {
     if (generating) return;
-    for (const [, g] of sortedGroups) {
-      if (g.playerIds.filter((id) => !isDummy(id)).length < 2) {
-        generateError = `Group ${g.name} needs at least 2 real players`;
-        return;
-      }
-    }
+    if (hasBlockingWarnings) return;
     generating = true;
     generateError = '';
     generateResult = null;
@@ -441,6 +438,12 @@
 
   // ─── Lifecycle ────────────────────────────────────────────────────────────────
   onMount(() => {
+    const closeWarn = () => { if (activeWarnKey !== null) activeWarnKey = null; };
+    document.addEventListener('click', closeWarn);
+    return () => document.removeEventListener('click', closeWarn);
+  });
+
+  onMount(() => {
     window.addEventListener('beforeunload', saveDraft);
     unsubPlayers = subscribePlayerStore(() => { players = loadAllPlayers(); });
     (async () => {
@@ -597,8 +600,13 @@
             <div class="groups-grid">
               {#each sortedGroups as [gKey, group] (gKey)}
                 {@const status = groupMatchStatus(gKey, group.name)}
+                {@const realCount = group.playerIds.filter((id) => !isDummy(id)).length}
+                {@const groupWarnMsg = realCount === 0 ? 'Group is empty — add at least 2 players'
+                  : realCount === 1 ? 'Only 1 real player — add at least one more'
+                  : ''}
                 <div
                   class="group-col"
+                  class:group-col-warn={groupWarnMsg !== '' && !roundsStarted}
                   class:group-col-locked={roundsStarted}
                   class:group-col-done={roundsStarted && status.done}
                   role="list"
@@ -607,7 +615,23 @@
                   ondrop={roundsStarted ? undefined : () => onDrop(gKey)}
                 >
                   <div class="group-col-header">
-                    <span>{group.name}</span>
+                    <span class="group-col-name">{group.name}</span>
+                    {#if groupWarnMsg && !roundsStarted}
+                      <span class="group-col-warn-wrap">
+                        <button
+                          type="button"
+                          class="group-col-warn-icon"
+                          onclick={(e) => { e.stopPropagation(); activeWarnKey = activeWarnKey === gKey ? null : gKey; }}
+                          aria-label="Warning for group {group.name}"
+                        >⚠</button>
+                        {#if activeWarnKey === gKey}
+                          <div class="group-warn-dialog" role="tooltip">
+                            <span class="group-warn-dialog-caret"></span>
+                            <span class="group-warn-dialog-msg">{groupWarnMsg}</span>
+                          </div>
+                        {/if}
+                      </span>
+                    {/if}
                     <div class="group-col-header-right">
                       {#if roundsStarted}
                         <span class="group-match-status" class:group-match-done={status.done}>{status.label}</span>
@@ -704,6 +728,7 @@
               type="button"
               class="btn btn-primary"
               onclick={lockAndGenerate}
+              disabled={hasBlockingWarnings}
             >{groupsLocked ? '↺ Re-generate schedule' : 'Generate schedule'}</button>
           {/if}
         </div>
@@ -1048,6 +1073,9 @@
   .group-col:focus-within {
     border-color: rgba(255, 213, 74, 0.3);
   }
+  .group-col-warn {
+    border-color: rgba(248, 113, 113, 0.4);
+  }
   .group-col-header {
     display: flex;
     justify-content: space-between;
@@ -1085,6 +1113,74 @@
   .group-col-done {
     border-color: rgba(86, 203, 130, 0.3);
     background: rgba(86, 203, 130, 0.04);
+  }
+  .group-col-name {
+    flex: 1;
+    min-width: 0;
+  }
+  .group-col-warn-wrap {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+  }
+  .group-col-warn-icon {
+    color: #f87171;
+    font-size: 0.85rem;
+    margin: 0 0.2rem;
+    flex-shrink: 0;
+    cursor: pointer;
+    background: none;
+    border: none;
+    padding: 0;
+    line-height: 1;
+  }
+  .group-warn-dialog {
+    position: absolute;
+    top: calc(100% + 10px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: #1c1616;
+    border: 1px solid rgba(248, 113, 113, 0.5);
+    border-radius: 6px;
+    padding: 0.5rem 0.7rem;
+    width: max-content;
+    max-width: 200px;
+    z-index: 100;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.6);
+    pointer-events: none;
+    text-transform: none;
+    letter-spacing: normal;
+  }
+  .group-warn-dialog-caret {
+    position: absolute;
+    top: -5px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 0;
+    height: 0;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-bottom: 5px solid rgba(248, 113, 113, 0.5);
+  }
+  .group-warn-dialog-caret::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: -4px;
+    width: 0;
+    height: 0;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-bottom: 4px solid #1c1616;
+  }
+  .group-warn-dialog-msg {
+    color: #fca5a5;
+    font-size: 0.78rem;
+    font-weight: 400;
+    line-height: 1.45;
+    text-transform: none;
+    letter-spacing: normal;
   }
   .group-remove-btn {
     background: none;
