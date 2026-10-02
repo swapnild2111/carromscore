@@ -2063,12 +2063,12 @@
       </section>
     {:else if qrMode === 'match' || boards.length === 0}
       <!-- ─── PER-MATCH QR CARDS (one QR per planned match) ─────────── -->
-      {#each schedule as round, ri (round.roundKey)}
+      {#each mergedSchedule as round, ri (round.key)}
         <section class="page qr-grid-page">
           <div class="qr-grid-hdr">
             <div class="qr-grid-hdr-main">
               <p class="brand">Carromscore</p>
-              <p class="qr-grid-title">{tournamentName} — Match QR Cards — {round.roundName}</p>
+              <p class="qr-grid-title">{tournamentName} — Match QR Cards — {round.displayName}</p>
               {#if printOrganizerName}
                 <p class="bracket-organizer">Organised by {printOrganizerName}</p>
               {/if}
@@ -2080,7 +2080,7 @@
           </div>
           <div class="match-qr-grid">
             {#each round.matches as m, mi (m.mid)}
-              {@const matchNum = schedule.slice(0, ri).reduce((acc, r) => acc + r.matches.length, 0) + mi + 1}
+              {@const matchNum = mergedSchedule.slice(0, ri).reduce((acc, r) => acc + r.matches.length, 0) + mi + 1}
               {@const mqrNames = resolvedPlannedNames.get(m.mid)}
               <div class="match-qr-cell">
                 <p class="mqr-board">Match {matchNum}</p>
