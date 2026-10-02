@@ -140,11 +140,22 @@
 
   // ─── Save Draft (localStorage) ────────────────────────────────────────────────
   const DRAFT_KEY = `league-draft-${tournament.key}`;
+  let draftStatus = $state<'idle' | 'saving' | 'saved'>('idle');
+  let draftSavedAt = $state('');
+  let draftSaveTimer: ReturnType<typeof setTimeout> | null = null;
 
   function saveDraft() {
+    draftStatus = 'saving';
     try {
       localStorage.setItem(DRAFT_KEY, JSON.stringify({ groups: localGroups, dummyCount }));
-    } catch {}
+      const now = new Date();
+      draftSavedAt = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+      draftStatus = 'saved';
+    } catch {
+      draftStatus = 'idle';
+    }
+    if (draftSaveTimer) clearTimeout(draftSaveTimer);
+    draftSaveTimer = setTimeout(() => { draftStatus = 'idle'; }, 4000);
   }
 
   function loadDraft(): boolean {
@@ -163,6 +174,8 @@
 
   function clearDraft() {
     try { localStorage.removeItem(DRAFT_KEY); } catch {}
+    draftStatus = 'idle';
+    if (draftSaveTimer) clearTimeout(draftSaveTimer);
   }
 
   // ─── Warning tooltip state ────────────────────────────────────────────────────
@@ -687,8 +700,14 @@
           </div>
         </div>
 
-        {#if groupsDirty && !roundsStarted && !generating}
-          <p class="draft-hint">Draft saved locally — click Generate to lock and create schedule</p>
+        {#if !roundsStarted && !generating}
+          {#if draftStatus === 'saving'}
+            <p class="draft-hint draft-hint-saving">Saving draft…</p>
+          {:else if draftStatus === 'saved'}
+            <p class="draft-hint draft-hint-saved">Draft saved at {draftSavedAt}</p>
+          {:else if groupsDirty}
+            <p class="draft-hint">Draft saved locally — click Generate to lock and create schedule</p>
+          {/if}
         {/if}
 
         {#if generateError}
@@ -1287,6 +1306,14 @@
     color: var(--muted, #9aa0a6);
     font-style: italic;
     margin: 0.5rem 0 0;
+  }
+  .draft-hint-saving {
+    color: #e5a623;
+    font-style: normal;
+  }
+  .draft-hint-saved {
+    color: #56cb82;
+    font-style: normal;
   }
 
   /* Actions */
