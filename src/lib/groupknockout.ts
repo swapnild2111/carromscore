@@ -434,22 +434,21 @@ export async function generateCombinedKnockout(
   const gName = (k: number) => groupNames?.[k] ?? groupLabel(k);
 
   // Each group contributes 1 qualifier (the group Final winner).
-  // Cross-pairing: seed[k] vs seed[G-1-k] so same-group players can only meet in the Final.
   const totalQualifiers = groupCount; // 1 per group
   const needsPreQF = !isPowerOfTwo(totalQualifiers);
   const preQFCount = needsPreQF ? totalQualifiers - nextPowerOfTwo(Math.ceil(totalQualifiers / 2)) : 0;
   const mainBracketSize = needsPreQF ? nextPowerOfTwo(Math.ceil(totalQualifiers / 2)) : Math.ceil(totalQualifiers / 2);
 
-  // Cross-pairing: pair first vs last, second vs second-last, etc.
-  // For odd count the middle seed gets a bye into the next round.
+  // Sequential pairing: G1 vs G2, G3 vs G4, etc. (in organiser's seed order).
+  // For odd count the last seed gets a bye into the next round.
   const firstRoundPairs: Array<{ aSlot: string; bSlot: string }> = [];
-  for (let k = 0; k < Math.floor(groupCount / 2); k++) {
+  for (let k = 0; k + 1 < groupCount; k += 2) {
     firstRoundPairs.push({
       aSlot: gName(k),
-      bSlot: gName(groupCount - 1 - k),
+      bSlot: gName(k + 1),
     });
   }
-  const byeSeed = groupCount % 2 === 1 ? gName(Math.floor(groupCount / 2)) : null;
+  const byeSeed = groupCount % 2 === 1 ? gName(groupCount - 1) : null;
 
   const roundDefs = buildCombinedRoundDefs(mainBracketSize, needsPreQF, preQFCount);
 
