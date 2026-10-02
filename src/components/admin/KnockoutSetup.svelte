@@ -74,20 +74,61 @@
     const next = new Set(selectedIds);
     next.add(id);
     selectedIds = next;
+    saveDraft(next, seedList);
   }
 
   function removeFromBracket(id: string) {
     const next = new Set(selectedIds);
     next.delete(id);
     selectedIds = next;
+    saveDraft(next, seedList);
   }
 
   function addAllToBracket() {
     selectedIds = new Set(availablePlayerIds);
+    saveDraft(selectedIds, seedList);
   }
 
   function clearBracket() {
     selectedIds = new Set();
+    saveDraft(selectedIds, seedList);
+  }
+
+  // ─── Draft (localStorage) ─────────────────────────────────────────────────
+  const DRAFT_KEY = `ko-draft-${tournament.key}`;
+  let draftStatus = $state<'idle' | 'saving' | 'saved'>('idle');
+  let draftSavedAt = $state('');
+  let draftSaveTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function saveDraft(ids: Set<string>, seeds: string[]) {
+    draftStatus = 'saving';
+    try {
+      localStorage.setItem(DRAFT_KEY, JSON.stringify({ selectedIds: [...ids], seedList: seeds }));
+      const now = new Date();
+      draftSavedAt = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+      draftStatus = 'saved';
+    } catch { draftStatus = 'idle'; }
+    if (draftSaveTimer) clearTimeout(draftSaveTimer);
+    draftSaveTimer = setTimeout(() => { draftStatus = 'idle'; }, 4000);
+  }
+
+  function loadDraft(): boolean {
+    try {
+      const raw = localStorage.getItem(DRAFT_KEY);
+      if (!raw) return false;
+      const parsed = JSON.parse(raw);
+      if (parsed?.selectedIds?.length > 0) {
+        selectedIds = new Set(parsed.selectedIds as string[]);
+        seedList = parsed.seedList ?? parsed.selectedIds;
+        return true;
+      }
+    } catch {}
+    return false;
+  }
+
+  function clearDraft() {
+    try { localStorage.removeItem(DRAFT_KEY); } catch {}
+    draftStatus = 'idle';
   }
 
   // ─── Seed list — flat array derived from selectedIds for generation ──────────
@@ -114,11 +155,11 @@
   }
 
   function doRandomDraw() {
-    // Shuffle all available into the bracket pane
     const shuffled = shuffleArray([...availablePlayerIds]);
     selectedIds = new Set(shuffled);
     seedList = shuffled;
     bracketLocked = false;
+    saveDraft(selectedIds, seedList);
   }
 
   // ─── Bracket generation (knockout) ──────────────────────────────────────────
@@ -148,7 +189,10 @@
       myUid,
     });
     generateResult = result;
-    if (result.errors.length === 0) bracketLocked = true;
+    if (result.errors.length === 0) {
+      bracketLocked = true;
+      clearDraft();
+    }
     // Start any generated rounds
     for (const rName of result.roundsCreated) {
       const round = tournament.rounds?.find((r) => r.name === rName);
@@ -288,8 +332,10 @@
         selectedIds = new Set([...assigned]);
         seedList = [...assigned];
       } else {
-        selectedIds = new Set();
-        seedList = [];
+        if (!loadDraft()) {
+          selectedIds = new Set();
+          seedList = [];
+        }
       }
 
       unsubPlanned = await subscribePlannedByTournament(tournament.key, (arr) => {
@@ -478,6 +524,13 @@
                 onclick={() => doGenerateBracket()}
                 disabled={selectedIds.size < 2}
               >Generate bracket →</button>
+            {/if}
+            {#if draftStatus === 'saving'}
+              <span class="draft-status draft-status-saving">Saving draft…</span>
+            {:else if draftStatus === 'saved'}
+              <span class="draft-status draft-status-saved">Draft saved at {draftSavedAt}</span>
+            {:else if selectedIds.size > 0 && !bracketLocked}
+              <span class="draft-status">Draft saved locally</span>
             {/if}
           </div>
 
@@ -1205,5 +1258,14 @@
   .btn-primary:hover:not(:disabled) { background: #ffe07a; }
   .btn-secondary { background: rgba(255, 255, 255, 0.07); }
 
+  .draft-status {
+    font-size: 0.75rem;
+    color: var(--muted, #9aa0a6);
+    font-style: italic;
+    margin-left: auto;
+    align-self: center;
+  }
+  .draft-status-saving { color: #e5a623; }
+  .draft-status-saved { color: #56cb82; }
 
 </style>
