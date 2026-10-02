@@ -646,7 +646,30 @@
         out.set(sr.roundKey, { key: sr.roundKey, displayName, matches: sr.matches, order: sr.order });
       }
     }
-    return [...out.values()].sort((a, b) => a.order - b.order);
+    // For group-phase rounds (e.g. "G1 — Pre-qualify", "G3 — Rounds", "G2 — QF"),
+    // sort by stage first (Pre-qualify < Rounds < QF < SF < Final) then by group name,
+    // so all Pre-qualify rounds print together, then all Rounds, etc.
+    const stagePriority = (name: string): number => {
+      const s = name.replace(/^.*?—\s*/, '').toLowerCase();
+      if (s.includes('pre-qualify') || s.includes('pre qualify')) return 0;
+      if (s.includes('round') && !s.includes('final')) return 1;
+      if (s.includes('r16') || s.includes('r32') || s.includes('r64') || s.includes('r128')) return 1;
+      if (s.includes('qf') || s.includes('quarter')) return 2;
+      if (s.includes('sf') || s.includes('semi')) return 3;
+      if (s.includes('final')) return 4;
+      return 5;
+    };
+    const isGroupRound = (name: string) => / — /.test(name) && !/^KO —/.test(name);
+    return [...out.values()].sort((a, b) => {
+      const ag = isGroupRound(a.displayName);
+      const bg = isGroupRound(b.displayName);
+      if (ag && bg) {
+        const sp = stagePriority(a.displayName) - stagePriority(b.displayName);
+        if (sp !== 0) return sp;
+        return a.displayName.localeCompare(b.displayName);
+      }
+      return a.order - b.order;
+    });
   });
 
   // Canonical stage label shared by SVG builder and template header chips
