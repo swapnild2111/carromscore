@@ -1936,7 +1936,7 @@
               <td class="td-actions">
                 {#if canManageTournament(t)}
                   <div class="row-actions">
-                    {#if t.type === 'closed' || t.format === 'knockout' || t.format === 'roundrobin'}
+                    {#if t.type === 'closed' || t.format === 'knockout' || t.format === 'roundrobin' || t.format === 'league' || t.format === 'groupknockout'}
                       <button
                         type="button"
                         class="btn"
