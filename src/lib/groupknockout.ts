@@ -259,9 +259,13 @@ export async function generateGroupPhase(
     bySuffix.set(m.roundSuffix, list);
   }
   const boardAssignment = new Map<MatchDef, number>();
+  const matchOrderAssignment = new Map<MatchDef, number>();
   for (const matches of bySuffix.values()) {
     const boards = shuffleBoards(matches.length, venueBoards);
-    matches.forEach((m, i) => boardAssignment.set(m, boards[i]!));
+    matches.forEach((m, i) => {
+      boardAssignment.set(m, boards[i]!);
+      matchOrderAssignment.set(m, i + 1); // global sequential order within the round type
+    });
   }
 
   // ── Pass 2: create all matches with assigned boards ───────────────────────
@@ -269,7 +273,7 @@ export async function generateGroupPhase(
     await createPlannedMatch({
       mode: defaults.mode, tournament: tournamentName, tournamentKey,
       round: m.roundLabel, roundKey: m.roundKey,
-      matchOrder: m.matchOrder, board: boardAssignment.get(m) ?? m.matchOrder,
+      matchOrder: matchOrderAssignment.get(m) ?? m.matchOrder, board: boardAssignment.get(m) ?? m.matchOrder,
       aName: m.aName, ...(m.aResolvedId ? { aResolvedId: m.aResolvedId } : {}),
       bName: m.bName, ...(m.bResolvedId ? { bResolvedId: m.bResolvedId } : {}),
       cfg, createdBy: myUid,
