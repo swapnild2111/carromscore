@@ -1,12 +1,4 @@
 <script lang="ts">
-  /**
-   * League Setup admin screen (v4.0).
-   *
-   * Stage 1 tab: player draw → group assignment → schedule generation.
-   * Stage 2 tab: group standings → flight generation (knockout sub-tournaments).
-   *
-   * Props: same contract as TournamentBracket.svelte.
-   */
   import { onMount } from 'svelte';
   import type { Tournament } from '../../lib/tournaments';
   import {
@@ -19,8 +11,6 @@
   import { subscribePlannedByTournament, deletePlannedMatch, type PlannedMatch } from '../../lib/planned';
   import { loadMatchesByTournamentKey, type MatchRecord } from '../../lib/history';
   import {
-    potSeeding,
-    shuffleArray,
     computeGroupStandings,
     redistributeToFlights,
     generateLeagueSchedule,
@@ -47,7 +37,7 @@
   let unsubPlayers: (() => void) | null = null;
   let unsubPlanned: (() => void) | null = null;
 
-  // ─── Group draw state ────────────────────────────────────────────────────────
+  // ─── Group state ─────────────────────────────────────────────────────────────
   const leagueCfg = $derived(tournament.leagueCfg);
   const groupCount = $derived(leagueCfg?.groupCount ?? 8);
   const playersPerGroup = $derived(leagueCfg?.playersPerGroup ?? 6);
@@ -60,72 +50,165 @@
   // Loaded async from Firebase — falls back to all players for open tournaments
   let assignedPlayerIds = $state<string[]>([]);
 
-  // Players not yet in any group
   const assignedToGroup = $derived(
     new Set(Object.values(localGroups).flatMap((g) => g.playerIds))
   );
   const unassignedPlayers = $derived(
-    assignedPlayerIds.filter((id) => !assignedToGroup.has(id))
+    assignedPlayerIds.filter((id) => !assignedToGroup.has(id) && !isDummy(id))
   );
 
-  // Sorted groups for display
   const sortedGroups = $derived(
     Object.entries(localGroups).sort(([, a], [, b]) => a.order - b.order)
   );
 
-  // ─── Drag state ──────────────────────────────────────────────────────────────
-  let dragSrc = $state<{ fromGroup: string | '__unassigned__'; playerIdx: number } | null>(null);
+  // ─── Dummy provision ─────────────────────────────────────────────────────────
+  function countSavedDummies(): number {
+    let max = 0;
+    for (const g of Object.values(localGroups)) {
+      for (const id of g.playerIds) {
+        const m = id.match(/^dummy-(\d+)$/);
+        if (m) max = Math.max(max, Number(m[1]));
+      }
+    }
+    return max;
+  }
 
-  function onDragStart(fromGroup: string | '__unassigned__', playerIdx: number) {
+  let dummyCount = $state(countSavedDummies());
+  const dummyIds = $derived(
+    Array.from({ length: dummyCount }, (_, i) => `dummy-${i + 1}`)
+  );
+  const isDummy = (id: string) => /^dummy-\d+$/.test(id);
+
+  const unassignedDummies = $derived(
+    dummyIds.filter((id) => !assignedToGroup.has(id))
+  );
+
+  function addDummy() {
+    dummyCount++;
+    groupsDirty = true;
+    saveDraft();
+  }
+
+  function removeDummyFromGroups(dummyId: string) {
+    const num = Number(dummyId.match(/^dummy-(\d+)$/)![1]);
+    for (const gKey of Object.keys(localGroups)) {
+      localGroups[gKey] = {
+        ...localGroups[gKey]!,
+        playerIds: localGroups[gKey]!.playerIds
+          .filter((id) => id !== dummyId)
+          .map((id) => {
+            const m = id.match(/^dummy-(\d+)$/);
+            if (m && Number(m[1]) > num) return `dummy-${Number(m[1]) - 1}`;
+            return id;
+          }),
+      };
+    }
+    dummyCount--;
+    groupsDirty = true;
+    saveDraft();
+  }
+
+  function decrementDummy() {
+    if (dummyCount === 0) return;
+    // Remove the highest-numbered dummy from wherever it is
+    removeDummyFromGroups(`dummy-${dummyCount}`);
+  }
+
+  // ─── Dynamic group management ─────────────────────────────────────────────────
+  function initEmptyGroups() {
+    const gc = groupCount;
+    const groups: Record<string, LeagueGroup> = {};
+    for (let i = 1; i <= gc; i++) {
+      groups[`g${i}`] = { name: `G${i}`, order: i, playerIds: [] };
+    }
+    localGroups = groups;
+  }
+
+  function addGroup() {
+    const maxOrder = Math.max(0, ...Object.values(localGroups).map((g) => g.order));
+    const n = Object.keys(localGroups).length + 1;
+    let key = `g${n}`;
+    while (localGroups[key]) key = `g${n}_${Date.now()}`;
+    localGroups[key] = { name: `G${n}`, order: maxOrder + 1, playerIds: [] };
+    groupsDirty = true;
+    saveDraft();
+  }
+
+  function removeGroupByKey(gKey: string) {
+    if (Object.keys(localGroups).length <= 1) return;
+    if ((localGroups[gKey]?.playerIds ?? []).length > 0) return;
+    const { [gKey]: _removed, ...rest } = localGroups;
+    localGroups = rest;
+    groupsDirty = true;
+    saveDraft();
+  }
+
+  // ─── Save Draft (localStorage) ────────────────────────────────────────────────
+  const DRAFT_KEY = `league-draft-${tournament.key}`;
+
+  function saveDraft() {
+    try {
+      localStorage.setItem(DRAFT_KEY, JSON.stringify({ groups: localGroups, dummyCount }));
+    } catch {}
+  }
+
+  function loadDraft(): boolean {
+    try {
+      const raw = localStorage.getItem(DRAFT_KEY);
+      if (!raw) return false;
+      const parsed = JSON.parse(raw);
+      if (parsed?.groups && typeof parsed.groups === 'object') {
+        localGroups = parsed.groups;
+        dummyCount = parsed.dummyCount ?? countSavedDummies();
+        return true;
+      }
+    } catch {}
+    return false;
+  }
+
+  function clearDraft() {
+    try { localStorage.removeItem(DRAFT_KEY); } catch {}
+  }
+
+  // ─── Drag state ──────────────────────────────────────────────────────────────
+  let dragSrc = $state<{ fromGroup: string | '__unassigned__' | '__dummies__'; playerIdx: number } | null>(null);
+
+  function onDragStart(fromGroup: string | '__unassigned__' | '__dummies__', playerIdx: number) {
     dragSrc = { fromGroup, playerIdx };
   }
 
-  function onDrop(toGroup: string | '__unassigned__') {
+  function onDrop(toGroup: string | '__unassigned__' | '__dummies__') {
     if (!dragSrc) return;
     const { fromGroup, playerIdx } = dragSrc;
     if (fromGroup === toGroup) { dragSrc = null; return; }
 
-    const srcIds = fromGroup === '__unassigned__'
-      ? [...unassignedPlayers]
+    const srcIds =
+      fromGroup === '__unassigned__' ? [...unassignedPlayers]
+      : fromGroup === '__dummies__' ? [...unassignedDummies]
       : [...(localGroups[fromGroup]?.playerIds ?? [])];
     const pid = srcIds[playerIdx];
     if (!pid) { dragSrc = null; return; }
 
-    // Remove from source
-    if (fromGroup !== '__unassigned__' && localGroups[fromGroup]) {
+    // Remove from source group (pool sources are derived — removing from group is enough)
+    if (fromGroup !== '__unassigned__' && fromGroup !== '__dummies__' && localGroups[fromGroup]) {
       localGroups[fromGroup] = {
         ...localGroups[fromGroup]!,
         playerIds: localGroups[fromGroup]!.playerIds.filter((id) => id !== pid),
       };
     }
+
     // Add to destination
-    if (toGroup !== '__unassigned__' && localGroups[toGroup]) {
+    if (toGroup !== '__unassigned__' && toGroup !== '__dummies__' && localGroups[toGroup]) {
       localGroups[toGroup] = {
         ...localGroups[toGroup]!,
         playerIds: [...localGroups[toGroup]!.playerIds, pid],
       };
     }
+    // Dropping back to a pool: remove from source group (already done above) — derived pools auto-update
+
     dragSrc = null;
     groupsDirty = true;
-  }
-
-  // ─── Random draw ─────────────────────────────────────────────────────────────
-
-  function doRandomDraw() {
-    const gc = groupCount;
-    const playerName = (id: string) => players.find((p) => p.id === id)?.canonicalName ?? id;
-    const playerNames = new Map(assignedPlayerIds.map((id) => [id, playerName(id)]));
-    const potScores = new Map<string, number>();
-    localGroups = potSeeding(assignedPlayerIds, playerNames, potScores, gc);
-    groupsDirty = false;
-  }
-
-  async function doRedraw() {
-    doRandomDraw();
-    generateResult = null;
-    groupsLocked = false;
-    await lockAndGenerate();
-    await startAllGroupRounds();
+    saveDraft();
   }
 
   // ─── Schedule generation ─────────────────────────────────────────────────────
@@ -134,20 +217,17 @@
   let generateError = $state('');
   let generateResult = $state<{ groupsCreated: number; matchesCreated: number; errors: string[] } | null>(null);
   let groupsLocked = $state(Object.keys(tournament.groups ?? {}).length > 0);
-  // True once user has dragged a player — shows the manual lock button
   let groupsDirty = $state(false);
 
-  // True once any group round has been started — locks drag-and-drop
   const roundsStarted = $derived(
     (tournament.rounds ?? []).some((r) => /^group /i.test(r.name) && r.startedAt)
   );
 
   async function lockAndGenerate() {
     if (generating) return;
-    // Validate
     for (const [, g] of sortedGroups) {
-      if (g.playerIds.length < 2) {
-        generateError = `Group ${g.name} needs at least 2 players`;
+      if (g.playerIds.filter((id) => !isDummy(id)).length < 2) {
+        generateError = `Group ${g.name} needs at least 2 real players`;
         return;
       }
     }
@@ -155,8 +235,6 @@
     generateError = '';
     generateResult = null;
 
-    // Delete ALL existing planned matches for this tournament's group rounds before
-    // re-generating — including completed ones — so re-draws don't accumulate stale matches.
     const existingGroupMatches = plannedMatches.filter((m) => /^group /i.test(m.round));
     await Promise.all(existingGroupMatches.map((m) => deletePlannedMatch(m.mid)));
 
@@ -168,18 +246,23 @@
     }
     groupsLocked = true;
 
-    const playerName = (id: string) => players.find((p) => p.id === id)?.canonicalName ?? id;
-    const playerNames = new Map(assignedPlayerIds.map((id) => [id, playerName(id)]));
+    const pName = (id: string) => players.find((p) => p.id === id)?.canonicalName ?? id;
+    const playerNames = new Map(assignedPlayerIds.map((id) => [id, pName(id)]));
+    for (const id of dummyIds) {
+      const num = id.match(/^dummy-(\d+)$/)![1];
+      playerNames.set(id, `Dummy ${num}`);
+    }
 
     const cfg = leagueCfg ?? { groupCount: groupCount, playersPerGroup: playersPerGroup, boardsPerGroup: 2, flightNames: ['Flight A', 'Flight B', 'Flight C'] };
 
+    const allIds = [...assignedPlayerIds, ...dummyIds];
     const result = await generateLeagueSchedule({
       tournamentKey: tournament.key,
       tournamentName: tournament.name,
       groups: localGroups,
       leagueCfg: cfg,
       playerNames,
-      playerResolvedIds: new Map(assignedPlayerIds.map((id) => [id, id])),
+      playerResolvedIds: new Map(allIds.map((id) => [id, id])),
       defaults: {
         mode: tournament.defaults?.mode ?? 'singles',
         bestOf: tournament.defaults?.bestOf ?? 3,
@@ -191,6 +274,7 @@
     generateResult = result;
     groupsDirty = false;
     generating = false;
+    clearDraft();
   }
 
   // ─── Start all group rounds ───────────────────────────────────────────────────
@@ -218,7 +302,6 @@
   const defaultFlightCfgEdit = (): FlightCfgEdit => ({ bestOf: '', pointsTarget: '', maxBoards: '', timerDuration: '' });
   let flightCfgEdits = $state<Record<string, FlightCfgEdit>>({});
 
-  // Recomputes automatically whenever plannedMatches or groups change
   const standings = $derived.by<GroupStandings[]>(() => {
     if (sortedGroups.length === 0) return [];
     const summaries = buildStandingsFromPlanned();
@@ -256,49 +339,25 @@
     const map = new Map<string, PlayerSummary>();
     const ensurePlayer = (id: string, name: string) => {
       if (!map.has(id)) {
-        map.set(id, {
-          playerId: id,
-          name,
-          matches: 0,
-          wins: 0,
-          losses: 0,
-          draws: 0,
-          boardsWon: 0,
-          pointsScored: 0,
-          strikePoints: 0,
-          netPoints: 0,
-        });
+        map.set(id, { playerId: id, name, matches: 0, wins: 0, losses: 0, draws: 0, boardsWon: 0, pointsScored: 0, strikePoints: 0, netPoints: 0 });
       }
       return map.get(id)!;
     };
 
     for (const m of plannedMatches) {
       if (!m.completedAt || !m.result) continue;
-      const aId = m.aResolvedId;
-      const bId = m.bResolvedId;
+      const aId = m.aResolvedId; const bId = m.bResolvedId;
       if (!aId || !bId) continue;
-      const a = ensurePlayer(aId, m.aName);
-      const b = ensurePlayer(bId, m.bName);
+      const a = ensurePlayer(aId, m.aName); const b = ensurePlayer(bId, m.bName);
       const { setsA, setsB, winner } = m.result;
-      a.matches++;
-      b.matches++;
-      if (winner === 'a') {
-        a.wins++; a.strikePoints += 2;
-        b.losses++;
-      } else if (winner === 'b') {
-        b.wins++; b.strikePoints += 2;
-        a.losses++;
-      } else {
-        a.draws++; a.strikePoints += 1;
-        b.draws++; b.strikePoints += 1;
-      }
-      a.boardsWon += setsA;
-      b.boardsWon += setsB;
-      a.netPoints += setsA - setsB;
-      b.netPoints += setsB - setsA;
+      a.matches++; b.matches++;
+      if (winner === 'a') { a.wins++; a.strikePoints += 2; b.losses++; }
+      else if (winner === 'b') { b.wins++; b.strikePoints += 2; a.losses++; }
+      else { a.draws++; a.strikePoints += 1; b.draws++; b.strikePoints += 1; }
+      a.boardsWon += setsA; b.boardsWon += setsB;
+      a.netPoints += setsA - setsB; b.netPoints += setsB - setsA;
     }
 
-    // Also process archived matches (completed matches moved from /planned to /matches)
     const seenMids = new Set(plannedMatches.map((m) => m.mid));
     for (const m of archivedMatches) {
       if (!m.round || !/^Group /i.test(m.round)) continue;
@@ -307,24 +366,13 @@
       const a = ensurePlayer(m.playerAId, m.aName ?? m.playerAId);
       const b = ensurePlayer(m.playerBId, m.bName ?? m.playerBId);
       const { setsA, setsB, winner } = m.result;
-      a.matches++;
-      b.matches++;
-      if (winner === 'a') {
-        a.wins++; a.strikePoints += 2;
-        b.losses++;
-      } else if (winner === 'b') {
-        b.wins++; b.strikePoints += 2;
-        a.losses++;
-      } else {
-        a.draws++; a.strikePoints += 1;
-        b.draws++; b.strikePoints += 1;
-      }
-      a.boardsWon += setsA;
-      b.boardsWon += setsB;
-      a.netPoints += setsA - setsB;
-      b.netPoints += setsB - setsA;
+      a.matches++; b.matches++;
+      if (winner === 'a') { a.wins++; a.strikePoints += 2; b.losses++; }
+      else if (winner === 'b') { b.wins++; b.strikePoints += 2; a.losses++; }
+      else { a.draws++; a.strikePoints += 1; b.draws++; b.strikePoints += 1; }
+      a.boardsWon += setsA; b.boardsWon += setsB;
+      a.netPoints += setsA - setsB; b.netPoints += setsB - setsA;
     }
-
     return [...map.values()].filter((s) => s.playerId !== PHANTOM_ID);
   }
 
@@ -341,12 +389,11 @@
       cfg.flightNames,
     );
 
-    const playerName = (id: string) => players.find((p) => p.id === id)?.canonicalName ?? id;
+    const pName = (id: string) => players.find((p) => p.id === id)?.canonicalName ?? id;
     const playerNames = new Map(
-      [...flightSeeds.values()].flat().map((id) => [id, playerName(id)])
+      [...flightSeeds.values()].flat().map((id) => [id, pName(id)])
     );
 
-    // Build per-flight cfg from UI edits
     const flightCfg: Record<string, { bestOf?: number; pointsTarget?: number; maxBoards?: number; timerDuration?: number }> = {};
     for (const [fname, edit] of Object.entries(flightCfgEdits)) {
       const entry: { bestOf?: number; pointsTarget?: number; maxBoards?: number; timerDuration?: number } = {};
@@ -357,7 +404,6 @@
       if (Object.keys(entry).length > 0) flightCfg[fname] = entry;
     }
 
-    // Delete any existing planned matches for these flights before re-seeding
     const flightNameSet = new Set(cfg.flightNames);
     const existingFlightMatches = plannedMatches.filter((m) => {
       const dashIdx = m.round?.indexOf(' — ');
@@ -386,14 +432,18 @@
 
   // ─── Player name helper ───────────────────────────────────────────────────────
   function playerName(id: string): string {
+    if (isDummy(id)) {
+      const n = id.match(/^dummy-(\d+)$/)![1];
+      return `Dummy ${n}`;
+    }
     return players.find((p) => p.id === id)?.canonicalName ?? id;
   }
 
   // ─── Lifecycle ────────────────────────────────────────────────────────────────
   onMount(() => {
+    window.addEventListener('beforeunload', saveDraft);
     unsubPlayers = subscribePlayerStore(() => { players = loadAllPlayers(); });
     (async () => {
-      // Load assigned players first — open tournaments fall back to all players
       const assigned = await loadAssignedPlayers(tournament.key);
       assignedPlayerIds = assigned.size > 0
         ? [...assigned]
@@ -403,25 +453,26 @@
         plannedMatches = arr;
       });
       archivedMatches = await loadMatchesByTournamentKey(tournament.key);
-      // Auto-draw and generate if players are assigned but no groups exist yet
-      if (assignedPlayerIds.length > 0 && Object.keys(localGroups).length === 0) {
-        doRandomDraw();
-        await lockAndGenerate();
-        await startAllGroupRounds();
+
+      // If no saved groups in Firebase, try draft restore then fall back to empty groups
+      if (Object.keys(localGroups).length === 0) {
+        if (!loadDraft()) {
+          initEmptyGroups();
+        }
       }
     })();
     return () => {
+      window.removeEventListener('beforeunload', saveDraft);
       unsubPlayers?.();
       unsubPlanned?.();
     };
   });
 
   // ─── Per-group match counts display ──────────────────────────────────────────
-  function groupMatchStatus(gKey: string, gName: string) {
+  function groupMatchStatus(gKey: string, _gName: string) {
     const counts = groupMatchCounts().get(gKey);
     if (!counts || counts.total === 0) {
-      const expectedMatches = matchesPerGroup;
-      return { label: `0 / ${expectedMatches} scheduled`, done: false };
+      return { label: `0 / ${matchesPerGroup} scheduled`, done: false };
     }
     return {
       label: `${counts.completed} / ${counts.total} complete`,
@@ -446,7 +497,7 @@
         role="tab"
         aria-selected={activeTab === 'draw'}
         onclick={() => { activeTab = 'draw'; }}
-      >Groups &amp; Draw</button>
+      >Groups</button>
       <button
         type="button"
         class="ls-tab"
@@ -457,83 +508,164 @@
       >League Matches</button>
     </div>
 
-    <!-- ─── Groups & Draw ───────────────────────────────────────────────────── -->
+    <!-- ─── Groups ───────────────────────────────────────────────────────────── -->
     {#if activeTab === 'draw'}
       <div class="ls-body">
-        <div class="draw-controls">
-          <span class="draw-hint">
-            {assignedPlayerIds.length} players → {groupCount} groups of ~{playersPerGroup}
-          </span>
-          {#if roundsStarted}
+        {#if roundsStarted}
+          <div class="draw-controls">
             <span class="draw-locked-hint">🔒 Groups locked — rounds in progress</span>
-          {:else if groupsLocked && !groupsDirty}
-            <span class="draw-auto-hint">Drag players to adjust, then re-generate</span>
-          {/if}
-          {#if unassignedPlayers.length > 0}
-            <span class="draw-warn">⚠ {unassignedPlayers.length} player{unassignedPlayers.length !== 1 ? 's' : ''} unassigned</span>
-          {/if}
-        </div>
-
-        <!-- Unassigned pool -->
-        {#if unassignedPlayers.length > 0}
-          <div
-            class="group-col unassigned-col"
-            role="list"
-            aria-label="Unassigned players"
-            ondragover={roundsStarted ? undefined : (e) => e.preventDefault()}
-            ondrop={roundsStarted ? undefined : () => onDrop('__unassigned__')}
-          >
-            <div class="group-col-header">Unassigned</div>
-            {#each unassignedPlayers as pid, i (pid)}
-              <div
-                class="player-chip"
-                class:player-chip-locked={roundsStarted}
-                draggable={!roundsStarted}
-                role="listitem"
-                ondragstart={roundsStarted ? undefined : () => onDragStart('__unassigned__', i)}
-              >{playerName(pid)}</div>
-            {/each}
           </div>
         {/if}
 
-        <!-- Group grid -->
-        <div class="groups-grid" style="grid-template-columns: repeat({Math.min(groupCount, 4)}, 1fr)">
-          {#each sortedGroups as [gKey, group] (gKey)}
-            {@const status = groupMatchStatus(gKey, group.name)}
-            <div
-              class="group-col"
-              class:group-col-locked={roundsStarted}
-              class:group-col-done={roundsStarted && status.done}
-              role="list"
-              aria-label="Group {group.name}"
-              ondragover={roundsStarted ? undefined : (e) => e.preventDefault()}
-              ondrop={roundsStarted ? undefined : () => onDrop(gKey)}
-            >
-              <div class="group-col-header">
-                <span>{group.name}</span>
-                <div class="group-col-header-right">
-                  {#if roundsStarted}
-                    <span class="group-match-status" class:group-match-done={status.done}>{status.label}</span>
-                  {:else}
-                    <span class="group-count">{group.playerIds.length}</span>
+        <div class="draw-area">
+          <!-- Left: pools column -->
+          {#if !roundsStarted}
+            <div class="pools-col">
+              <!-- Unassigned players pool -->
+              {#if unassignedPlayers.length > 0}
+                <div
+                  class="pool-pane"
+                  role="list"
+                  aria-label="Unassigned players"
+                  ondragover={(e) => e.preventDefault()}
+                  ondrop={() => onDrop('__unassigned__')}
+                >
+                  <div class="pool-pane-header">
+                    <span>Unassigned</span>
+                    <span class="pool-pane-count">{unassignedPlayers.length}</span>
+                  </div>
+                  <div class="pool-pane-scroll">
+                    {#each unassignedPlayers as pid, i (pid)}
+                      <div
+                        class="player-chip"
+                        draggable="true"
+                        role="listitem"
+                        ondragstart={() => onDragStart('__unassigned__', i)}
+                      >{playerName(pid)}</div>
+                    {/each}
+                  </div>
+                </div>
+              {/if}
+
+              <!-- Dummy pool -->
+              <div
+                class="pool-pane pool-pane-dummy"
+                role="list"
+                aria-label="Dummy players"
+                ondragover={(e) => e.preventDefault()}
+                ondrop={() => onDrop('__dummies__')}
+              >
+                <div class="pool-pane-header">
+                  <span>Dummies</span>
+                  <div class="dummy-stepper">
+                    <button
+                      type="button"
+                      class="dummy-stepper-btn"
+                      onclick={decrementDummy}
+                      disabled={dummyCount === 0}
+                      aria-label="Remove dummy"
+                    >−</button>
+                    <span class="dummy-stepper-val">{dummyCount}</span>
+                    <button
+                      type="button"
+                      class="dummy-stepper-btn"
+                      onclick={addDummy}
+                      aria-label="Add dummy"
+                    >+</button>
+                  </div>
+                </div>
+                {#if unassignedDummies.length > 0}
+                  <div class="pool-pane-scroll">
+                    {#each unassignedDummies as id, i (id)}
+                      <div
+                        class="player-chip player-chip-dummy"
+                        draggable="true"
+                        role="listitem"
+                        ondragstart={() => onDragStart('__dummies__', i)}
+                      >{playerName(id)}</div>
+                    {/each}
+                  </div>
+                {:else if dummyCount === 0}
+                  <p class="pool-pane-empty">Press + to add a dummy slot</p>
+                {/if}
+              </div>
+            </div>
+          {/if}
+
+          <!-- Right: groups grid -->
+          <div class="groups-scroll">
+            <div class="groups-grid">
+              {#each sortedGroups as [gKey, group] (gKey)}
+                {@const status = groupMatchStatus(gKey, group.name)}
+                <div
+                  class="group-col"
+                  class:group-col-locked={roundsStarted}
+                  class:group-col-done={roundsStarted && status.done}
+                  role="list"
+                  aria-label="Group {group.name}"
+                  ondragover={roundsStarted ? undefined : (e) => e.preventDefault()}
+                  ondrop={roundsStarted ? undefined : () => onDrop(gKey)}
+                >
+                  <div class="group-col-header">
+                    <span>{group.name}</span>
+                    <div class="group-col-header-right">
+                      {#if roundsStarted}
+                        <span class="group-match-status" class:group-match-done={status.done}>{status.label}</span>
+                      {:else}
+                        <span class="group-count">{group.playerIds.length}</span>
+                        {#if group.playerIds.length === 0 && sortedGroups.length > 1}
+                          <button
+                            type="button"
+                            class="group-remove-btn"
+                            onclick={(e) => { e.stopPropagation(); removeGroupByKey(gKey); }}
+                            aria-label="Remove group {group.name}"
+                          >−</button>
+                        {/if}
+                      {/if}
+                    </div>
+                  </div>
+                  {#each group.playerIds as pid, i (pid)}
+                    <div
+                      class="player-chip"
+                      class:player-chip-dummy={isDummy(pid)}
+                      class:player-chip-locked={roundsStarted}
+                      draggable={!roundsStarted}
+                      role="listitem"
+                      ondragstart={roundsStarted ? undefined : () => onDragStart(gKey, i)}
+                    >
+                      <span class="chip-label">{playerName(pid)}</span>
+                      {#if isDummy(pid) && !roundsStarted}
+                        <button
+                          type="button"
+                          class="chip-remove"
+                          onclick={(e) => { e.stopPropagation(); removeDummyFromGroups(pid); }}
+                          aria-label="Remove {playerName(pid)}"
+                        >×</button>
+                      {/if}
+                    </div>
+                  {/each}
+                  {#if group.playerIds.length === 0}
+                    <div class="group-empty">Drop players here</div>
                   {/if}
                 </div>
-              </div>
-              {#each group.playerIds as pid, i (pid)}
-                <div
-                  class="player-chip"
-                  class:player-chip-locked={roundsStarted}
-                  draggable={!roundsStarted}
-                  role="listitem"
-                  ondragstart={roundsStarted ? undefined : () => onDragStart(gKey, i)}
-                >{playerName(pid)}</div>
               {/each}
-              {#if group.playerIds.length === 0}
-                <div class="group-empty">Drop players here</div>
+
+              <!-- Add group card -->
+              {#if !roundsStarted}
+                <button
+                  type="button"
+                  class="group-add-card"
+                  onclick={addGroup}
+                  aria-label="Add group"
+                >+ Add group</button>
               {/if}
             </div>
-          {/each}
+          </div>
         </div>
+
+        {#if groupsDirty && !roundsStarted && !generating}
+          <p class="draft-hint">Draft saved locally — click Generate to lock and create schedule</p>
+        {/if}
 
         {#if generateError}
           <p class="ls-error">{generateError}</p>
@@ -557,17 +689,6 @@
 
         <div class="ls-actions">
           {#if roundsStarted}
-            <!-- no actions — groups are locked, rounds in progress -->
-          {:else if generating}
-            <button type="button" class="btn btn-primary" disabled>Generating…</button>
-          {:else if groupsDirty}
-            <button
-              type="button"
-              class="btn btn-primary"
-              onclick={lockAndGenerate}
-              disabled={sortedGroups.length === 0}
-            >Lock groups & generate schedule</button>
-          {:else if groupsLocked}
             {#if (tournament.rounds ?? []).some((r) => /^group /i.test(r.name) && !r.startedAt)}
               <button
                 type="button"
@@ -576,17 +697,14 @@
                 disabled={startingRounds}
               >{startingRounds ? 'Starting…' : '▶ Start all group rounds'}</button>
             {/if}
-            <button
-              type="button"
-              class="btn btn-secondary"
-              onclick={doRedraw}
-            >↺ Re-draw groups</button>
-          {:else if !groupsLocked && sortedGroups.length > 0}
+          {:else if generating}
+            <button type="button" class="btn btn-primary" disabled>Generating…</button>
+          {:else if sortedGroups.length > 0}
             <button
               type="button"
               class="btn btn-primary"
               onclick={lockAndGenerate}
-            >Generate schedule</button>
+            >{groupsLocked ? '↺ Re-generate schedule' : 'Generate schedule'}</button>
           {/if}
         </div>
       </div>
@@ -610,7 +728,6 @@
             {/if}
           </div>
 
-          <!-- Group standings tables -->
           {#if standings.length > 0}
             <div class="standings-grid" style="grid-template-columns: repeat({Math.min(standings.length, 4)}, 1fr)">
               {#each standings as gs (gs.groupKey)}
@@ -730,7 +847,6 @@
     max-width: 1100px;
     display: flex;
     flex-direction: column;
-    max-height: 90vh;
     overflow: hidden;
   }
   .ls-header {
@@ -789,27 +905,13 @@
     flex: 1;
   }
 
-  /* Draw controls */
+  /* Draw controls row */
   .draw-controls {
     display: flex;
     align-items: center;
     gap: 0.75rem;
-    margin-bottom: 1rem;
+    margin-bottom: 0.75rem;
     flex-wrap: wrap;
-  }
-  .draw-hint {
-    font-size: 0.8rem;
-    color: var(--muted, #9aa0a6);
-  }
-  .draw-warn {
-    font-size: 0.8rem;
-    color: #e5a623;
-    font-weight: 600;
-  }
-  .draw-auto-hint {
-    font-size: 0.78rem;
-    color: var(--muted, #9aa0a6);
-    font-style: italic;
   }
   .draw-locked-hint {
     font-size: 0.78rem;
@@ -817,9 +919,110 @@
     font-style: italic;
   }
 
-  /* Groups grid */
+  /* Two-column draw area */
+  .draw-area {
+    display: flex;
+    gap: 0.75rem;
+    align-items: flex-start;
+  }
+
+  /* Left: pools column */
+  .pools-col {
+    width: 200px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .pool-pane {
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 0.5rem;
+    background: rgba(255, 255, 255, 0.02);
+    overflow: hidden;
+  }
+  .pool-pane-dummy {
+    border-color: rgba(160, 200, 255, 0.2);
+    background: rgba(160, 200, 255, 0.03);
+  }
+  .pool-pane-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.35rem 0.6rem;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--accent, #ffd54a);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  }
+  .pool-pane-dummy .pool-pane-header {
+    color: rgba(160, 200, 255, 0.9);
+    border-bottom-color: rgba(160, 200, 255, 0.1);
+  }
+  .pool-pane-count {
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 0.8rem;
+    padding: 0 0.35rem;
+    font-size: 0.65rem;
+    color: var(--muted, #9aa0a6);
+    font-weight: 600;
+  }
+  .pool-pane-scroll {
+    padding: 0.4rem;
+    max-height: 320px;
+    overflow-y: auto;
+  }
+  .pool-pane-empty {
+    font-size: 0.72rem;
+    color: var(--muted, #9aa0a6);
+    font-style: italic;
+    text-align: center;
+    padding: 0.5rem 0.4rem;
+    margin: 0;
+  }
+
+  /* Dummy stepper */
+  .dummy-stepper {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+  }
+  .dummy-stepper-btn {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 0.25rem;
+    color: var(--fg, #f5f5f5);
+    font-size: 0.8rem;
+    font-weight: 700;
+    width: 1.4rem;
+    height: 1.4rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+  }
+  .dummy-stepper-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.15); }
+  .dummy-stepper-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+  .dummy-stepper-val {
+    color: rgba(160, 200, 255, 0.9);
+    font-size: 0.8rem;
+    font-weight: 700;
+    min-width: 1.2rem;
+    text-align: center;
+  }
+
+  /* Right: groups scroll + grid */
+  .groups-scroll {
+    flex: 1;
+    min-width: 0;
+  }
   .groups-grid {
     display: grid;
+    grid-template-columns: repeat(4, 1fr);
     gap: 0.75rem;
     margin-bottom: 1rem;
   }
@@ -829,6 +1032,11 @@
   @media (max-width: 28rem) {
     .groups-grid { grid-template-columns: 1fr !important; }
   }
+  @media (max-width: 48rem) {
+    .draw-area { flex-direction: column; }
+    .pools-col { width: 100%; flex-direction: row; flex-wrap: wrap; }
+    .pool-pane { flex: 1; min-width: 160px; }
+  }
 
   .group-col {
     border: 1px solid rgba(255, 255, 255, 0.1);
@@ -837,8 +1045,7 @@
     min-height: 4rem;
     background: rgba(255, 255, 255, 0.02);
   }
-  .group-col:focus-within,
-  .group-col[aria-dropeffect] {
+  .group-col:focus-within {
     border-color: rgba(255, 213, 74, 0.3);
   }
   .group-col-header {
@@ -873,22 +1080,54 @@
     text-transform: none;
     letter-spacing: 0;
   }
-  .group-match-done {
-    color: #56cb82;
-  }
-  .group-col-locked {
-    cursor: default;
-  }
+  .group-match-done { color: #56cb82; }
+  .group-col-locked { cursor: default; }
   .group-col-done {
     border-color: rgba(86, 203, 130, 0.3);
     background: rgba(86, 203, 130, 0.04);
   }
-  .unassigned-col {
-    border-color: rgba(229, 166, 35, 0.25);
-    margin-bottom: 0.75rem;
+  .group-remove-btn {
+    background: none;
+    border: 1px solid rgba(248, 113, 113, 0.4);
+    border-radius: 0.2rem;
+    color: rgba(248, 113, 113, 0.8);
+    font-size: 0.75rem;
+    font-weight: 700;
+    width: 1.1rem;
+    height: 1.1rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
   }
-  .unassigned-col .group-col-header { color: #e5a623; }
+  .group-remove-btn:hover { background: rgba(248, 113, 113, 0.15); }
 
+  /* Add group dashed card */
+  .group-add-card {
+    border: 2px dashed rgba(255, 255, 255, 0.18);
+    border-radius: 0.5rem;
+    min-height: 4rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--muted, #9aa0a6);
+    cursor: pointer;
+    background: none;
+    transition: border-color 0.15s, color 0.15s, background 0.15s;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+  .group-add-card:hover {
+    border-color: rgba(255, 213, 74, 0.45);
+    color: var(--accent, #ffd54a);
+    background: rgba(255, 213, 74, 0.05);
+  }
+
+  /* Player chips */
   .player-chip {
     background: rgba(255, 255, 255, 0.06);
     border: 1px solid rgba(255, 255, 255, 0.08);
@@ -898,9 +1137,10 @@
     margin-bottom: 0.25rem;
     cursor: grab;
     user-select: none;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.25rem;
   }
   .player-chip:active { cursor: grabbing; }
   .player-chip:hover { background: rgba(255, 255, 255, 0.1); }
@@ -910,6 +1150,32 @@
   }
   .player-chip-locked:active { cursor: default; }
   .player-chip-locked:hover { background: rgba(255, 255, 255, 0.06); }
+  .player-chip-dummy {
+    border-color: rgba(160, 200, 255, 0.25);
+    background: rgba(160, 200, 255, 0.07);
+    color: rgba(160, 200, 255, 0.9);
+    font-style: italic;
+  }
+  .player-chip-dummy:hover { background: rgba(160, 200, 255, 0.12); }
+  .chip-label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .chip-remove {
+    background: none;
+    border: none;
+    color: rgba(248, 113, 113, 0.7);
+    font-size: 0.85rem;
+    font-weight: 700;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+  .chip-remove:hover { color: rgba(248, 113, 113, 1); }
 
   .group-empty {
     color: var(--muted, #9aa0a6);
@@ -917,6 +1183,14 @@
     text-align: center;
     padding: 0.5rem 0;
     font-style: italic;
+  }
+
+  /* Draft hint */
+  .draft-hint {
+    font-size: 0.75rem;
+    color: var(--muted, #9aa0a6);
+    font-style: italic;
+    margin: 0.5rem 0 0;
   }
 
   /* Actions */
@@ -1105,6 +1379,4 @@
   }
   .btn-primary:hover:not(:disabled) { background: #ffe07a; }
   .btn-secondary { background: rgba(255, 255, 255, 0.07); }
-
-
 </style>
