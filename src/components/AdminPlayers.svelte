@@ -45,12 +45,10 @@
    * `/players/{id}` is the actual enforcement; UI gating is UX only.
    */
   let role = $state<Role | null>(null);
-  function canManagePlayer(p: Player): boolean {
+  function canManagePlayer(_p: Player): boolean {
     if (!role) return false;
     if (role.isSuper) return true;
-    if (!role.isOrganiser) return false;
-    const myUid = currentUser()?.uid;
-    return !!(myUid && p.createdBy === myUid);
+    return role.isOrganiser;
   }
 
   let tick = $state(0);
