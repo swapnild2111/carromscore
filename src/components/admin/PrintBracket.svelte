@@ -645,6 +645,11 @@
         // Group / non-bracket round — normalise display names
         const sfx = sr.roundName.replace(/^.*?—\s*/, '').trim();
         const positionalDisplayMap: Record<string, string> = {
+          // New names (pass-through — already correct, but listed for completeness)
+          '3rd & 4th Position': '3rd & 4th Position',
+          '5th & 6th Position': '5th & 6th Position',
+          '7th & 8th Position': '7th & 8th Position',
+          // Old Firebase names (backward compat)
           '3rd': '3rd & 4th Position', '3rd Place': '3rd & 4th Position',
           'L-SF': '5th–8th Position', '5th-8th Place': '5th–8th Position',
           'L-Final': '5th & 6th Position', '5th Place': '5th & 6th Position',
@@ -669,13 +674,13 @@
       if (s.includes('r16') || s.includes('r32') || s.includes('r64') || s.includes('r128')) return 1;
       if (s.includes('qf') || s.includes('quarter')) return 2;
       // Positional rounds from QF losers — interleaved after QF, before SF
-      if (s === 'l-sf' || s.includes('5th-8th') || s.includes('5th–8th')) return 3;
-      if (s === 'l-final' || s === '5th place' || s.includes('5th & 6th')) return 4;
-      if (s === 'l-3rd' || s === '7th place' || s.includes('7th & 8th')) return 5;
+      if (s.includes('7th & 8th') || s === 'l-3rd' || s === '7th place') return 3;
+      if (s.includes('5th & 6th') || s === 'l-final' || s === '5th place') return 4;
+      if (s.includes('5th-8th') || s.includes('5th–8th') || s === 'l-sf') return 4;
       // SF and positional from SF losers
-      if ((s === 'sf' || s === 'semi finals' || s.startsWith('semi')) && !s.startsWith('l-')) return 6;
-      if (s === '3rd' || s === '3rd place' || s.includes('3rd & 4th')) return 7;
-      if (s === 'final' || s === 'finals') return 8;
+      if ((s === 'sf' || s === 'semi finals' || s.startsWith('semi')) && !s.startsWith('l-')) return 5;
+      if (s.includes('3rd & 4th') || s === '3rd' || s === '3rd place') return 6;
+      if (s === 'final' || s === 'finals') return 7;
       return 9;
     };
     const isGroupRound = (name: string) => / — /.test(name) && !/^KO —/.test(name);
@@ -1477,6 +1482,11 @@
 
     // ── Positional bracket (3rd place + 5th–8th) ──────────────────────────────
     const posRoundSuffixes: Array<{ sfx: string; display: string }> = [
+      // New names
+      { sfx: '3rd & 4th Position', display: '3RD & 4TH POSITION' },
+      { sfx: '7th & 8th Position', display: '7TH & 8TH POSITION' },
+      { sfx: '5th & 6th Position', display: '5TH & 6TH POSITION' },
+      // Old Firebase names (backward compat)
       { sfx: '3rd Place',     display: '3RD & 4TH POSITION' },
       { sfx: '3rd',           display: '3RD & 4TH POSITION' },
       { sfx: '5th-8th Place', display: '5TH–8TH POSITION' },
@@ -1590,7 +1600,7 @@
     }
     const matchMap = new Map<string, MatchResult[]>();
     for (const m of plannedMatches) {
-      if (!m.round || !/— (Pre-qualify|R\d+|QF|SF|Final|3rd Place|3rd|5th-8th Place|5th Place|7th Place|L-SF|L-Final|L-3rd)/.test(m.round)) continue;
+      if (!m.round || !/— (Pre-qualify|R\d+|QF|SF|Final|3rd & 4th Position|3rd Place|3rd|5th & 6th Position|5th-8th Place|5th Place|7th & 8th Position|7th Place|L-SF|L-Final|L-3rd)/.test(m.round)) continue;
       const arr = matchMap.get(m.round) ?? [];
       const aName = m.aResolvedId ? (byId.get(m.aResolvedId) ?? m.aName) : m.aName;
       const bName = m.bResolvedId ? (byId.get(m.bResolvedId) ?? m.bName) : m.bName;

@@ -844,10 +844,9 @@ async function propagateBracketLoser(
   if (!pfx) return;
 
   const sfx = roundSuffix(roundLabel);
-  const isQF  = /^(QF|Quarter Finals)$/i.test(sfx);
-  const isSF  = /^(SF|Semi Finals)$/i.test(sfx);
-  const isLSF = sfx === '5th-8th Place';
-  if (!isQF && !isSF && !isLSF) return;
+  const isQF = /^(QF|Quarter Finals)$/i.test(sfx);
+  const isSF = /^(SF|Semi Finals)$/i.test(sfx);
+  if (!isQF && !isSF) return;
 
   const loserName     = winner === 'a' ? slot.bName      : slot.aName;
   const loserResolved = winner === 'a' ? slot.bResolvedId : slot.aResolvedId;
@@ -858,10 +857,16 @@ async function propagateBracketLoser(
   const { normalizeKey } = await import('./tournaments');
   const db = getDatabase(firebaseApp());
 
-  // Target loser round (created upfront by generateClassicGroupBracket / generateCombinedKnockout)
-  const targetLabel = isQF  ? `${pfx} — 5th-8th Place`
-                    : isSF  ? `${pfx} — 3rd Place`
-                    :         `${pfx} — 7th Place`;  // 5th-8th Place loser
+  // Target loser round (created upfront by generateGroupPhase / generateCombinedKnockout)
+  // QF losers: matchOrder 1 or 2 → 7th & 8th Position, matchOrder 3 or 4 → 5th & 6th Position
+  let targetLabel: string;
+  if (isQF) {
+    targetLabel = matchOrder <= 2
+      ? `${pfx} — 7th & 8th Position`
+      : `${pfx} — 5th & 6th Position`;
+  } else {
+    targetLabel = `${pfx} — 3rd & 4th Position`;
+  }
   const targetKey = normalizeKey(targetLabel);
 
   // Fetch existing planned slots for the target loser round
@@ -869,8 +874,8 @@ async function propagateBracketLoser(
   const allPlanned = allSnap.val() as Record<string, Omit<PlannedMatch, 'mid'>> | null ?? {};
   const loserSlots = Object.entries(allPlanned).filter(([, v]) => v?.roundKey === targetKey);
 
-  // Place loser using ceil(matchOrder / 2) — same formula as winner propagation
-  const targetOrder = Math.ceil(matchOrder / 2);
+  // Each positional round has exactly 1 match (matchOrder 1)
+  const targetOrder = 1;
   const targetEntry = loserSlots.find(([, v]) => v?.matchOrder === targetOrder);
   if (!targetEntry) return;
 
