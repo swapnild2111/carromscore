@@ -384,6 +384,67 @@ async function generateClassicGroupBracket(opts: {
     result.matchesCreated += slotCount;
     prevCount = slotCount;
   }
+
+  // ── Positional rounds (created upfront so QR codes are printable immediately) ─
+  const hasQF = roundDefs.some((r) => r.label.endsWith('— QF'));
+  const hasSF = roundDefs.some((r) => r.label.endsWith('— SF'));
+
+  if (hasSF) {
+    // 3rd place match for SF losers
+    const label3rd = `${groupName} — 3rd`;
+    const r3rd = await addRound(tournamentKey, label3rd);
+    if (!r3rd.ok) result.errors.push(`${label3rd}: addRound failed`);
+    result.roundsCreated.push(label3rd);
+    pendingMatches.push({
+      roundLabel: label3rd, roundKey: normalizeKey(label3rd), roundSuffix: '3rd',
+      matchOrder: 1,
+      aName: `${groupName} SF Loser 1`, bName: `${groupName} SF Loser 2`,
+    });
+    result.matchesCreated++;
+  }
+
+  if (hasQF) {
+    // L-SF: 2 matches for QF losers (5th–8th semis)
+    const labelLSF = `${groupName} — L-SF`;
+    const rLSF = await addRound(tournamentKey, labelLSF);
+    if (!rLSF.ok) result.errors.push(`${labelLSF}: addRound failed`);
+    result.roundsCreated.push(labelLSF);
+    pendingMatches.push({
+      roundLabel: labelLSF, roundKey: normalizeKey(labelLSF), roundSuffix: 'L-SF',
+      matchOrder: 1,
+      aName: `${groupName} QF Loser 1`, bName: `${groupName} QF Loser 2`,
+    });
+    pendingMatches.push({
+      roundLabel: labelLSF, roundKey: normalizeKey(labelLSF), roundSuffix: 'L-SF',
+      matchOrder: 2,
+      aName: `${groupName} QF Loser 3`, bName: `${groupName} QF Loser 4`,
+    });
+    result.matchesCreated += 2;
+
+    // L-Final: 5th place match for L-SF winners
+    const labelLFinal = `${groupName} — L-Final`;
+    const rLFinal = await addRound(tournamentKey, labelLFinal);
+    if (!rLFinal.ok) result.errors.push(`${labelLFinal}: addRound failed`);
+    result.roundsCreated.push(labelLFinal);
+    pendingMatches.push({
+      roundLabel: labelLFinal, roundKey: normalizeKey(labelLFinal), roundSuffix: 'L-Final',
+      matchOrder: 1,
+      aName: `${groupName} L-SF Winner 1`, bName: `${groupName} L-SF Winner 2`,
+    });
+    result.matchesCreated++;
+
+    // L-3rd: 7th place match for L-SF losers
+    const labelL3rd = `${groupName} — L-3rd`;
+    const rL3rd = await addRound(tournamentKey, labelL3rd);
+    if (!rL3rd.ok) result.errors.push(`${labelL3rd}: addRound failed`);
+    result.roundsCreated.push(labelL3rd);
+    pendingMatches.push({
+      roundLabel: labelL3rd, roundKey: normalizeKey(labelL3rd), roundSuffix: 'L-3rd',
+      matchOrder: 1,
+      aName: `${groupName} L-SF Loser 1`, bName: `${groupName} L-SF Loser 2`,
+    });
+    result.matchesCreated++;
+  }
 }
 
 // ─── Phase 2: combined knockout ───────────────────────────────────────────────
@@ -551,6 +612,63 @@ export async function generateCombinedKnockout(
       }
       prevCount = slotCount;
     }
+  }
+
+  // ── Positional rounds (upfront so QR codes are printable immediately) ─────────
+  const hasKOQF  = roundDefs.some((r) => r.label === 'KO — Quarter Finals');
+  const hasKOSF  = roundDefs.some((r) => r.label === 'KO — Semi Finals');
+
+  if (hasKOSF) {
+    const label3rd = 'KO — 3rd';
+    const r3rd = await addRound(tournamentKey, label3rd);
+    if (!r3rd.ok) result.errors.push(`${label3rd}: addRound failed`);
+    result.roundsCreated.push(label3rd);
+    await createPlannedMatch({
+      mode: defaults.mode, tournament: tournamentName, tournamentKey,
+      round: label3rd, roundKey: normalizeKey(label3rd), matchOrder: 1, board: cycleBoard(0),
+      aName: 'KO SF Loser 1', bName: 'KO SF Loser 2', cfg, createdBy: myUid,
+    });
+    result.matchesCreated++;
+  }
+
+  if (hasKOQF) {
+    const labelLSF = 'KO — L-SF';
+    const rLSF = await addRound(tournamentKey, labelLSF);
+    if (!rLSF.ok) result.errors.push(`${labelLSF}: addRound failed`);
+    result.roundsCreated.push(labelLSF);
+    await createPlannedMatch({
+      mode: defaults.mode, tournament: tournamentName, tournamentKey,
+      round: labelLSF, roundKey: normalizeKey(labelLSF), matchOrder: 1, board: cycleBoard(0),
+      aName: 'KO QF Loser 1', bName: 'KO QF Loser 2', cfg, createdBy: myUid,
+    });
+    await createPlannedMatch({
+      mode: defaults.mode, tournament: tournamentName, tournamentKey,
+      round: labelLSF, roundKey: normalizeKey(labelLSF), matchOrder: 2, board: cycleBoard(1),
+      aName: 'KO QF Loser 3', bName: 'KO QF Loser 4', cfg, createdBy: myUid,
+    });
+    result.matchesCreated += 2;
+
+    const labelLFinal = 'KO — L-Final';
+    const rLFinal = await addRound(tournamentKey, labelLFinal);
+    if (!rLFinal.ok) result.errors.push(`${labelLFinal}: addRound failed`);
+    result.roundsCreated.push(labelLFinal);
+    await createPlannedMatch({
+      mode: defaults.mode, tournament: tournamentName, tournamentKey,
+      round: labelLFinal, roundKey: normalizeKey(labelLFinal), matchOrder: 1, board: cycleBoard(0),
+      aName: 'KO L-SF Winner 1', bName: 'KO L-SF Winner 2', cfg, createdBy: myUid,
+    });
+    result.matchesCreated++;
+
+    const labelL3rd = 'KO — L-3rd';
+    const rL3rd = await addRound(tournamentKey, labelL3rd);
+    if (!rL3rd.ok) result.errors.push(`${labelL3rd}: addRound failed`);
+    result.roundsCreated.push(labelL3rd);
+    await createPlannedMatch({
+      mode: defaults.mode, tournament: tournamentName, tournamentKey,
+      round: labelL3rd, roundKey: normalizeKey(labelL3rd), matchOrder: 1, board: cycleBoard(1),
+      aName: 'KO L-SF Loser 1', bName: 'KO L-SF Loser 2', cfg, createdBy: myUid,
+    });
+    result.matchesCreated++;
   }
 
   return result;
