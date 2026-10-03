@@ -781,16 +781,11 @@ async function renameTournamentInPlace(
   trimmed: string,
   oldName: string,
 ): Promise<void> {
-  const { ref, get, update } = await import('firebase/database');
+  const { ref, update } = await import('firebase/database');
   await update(ref(db, `tournaments/${key}`), {
     name: trimmed,
     lastActive: Date.now(),
   });
-  const matchesSnap = await get(ref(db, 'matches'));
-  const matches =
-    (matchesSnap.val() as Record<string, Record<string, unknown>> | null) ?? {};
-  const { rewrites } = buildTournamentMatchRewrites(matches, oldName, trimmed);
-  if (Object.keys(rewrites).length > 0) await update(ref(db, '/'), rewrites);
   const local = memoryStore.find((t) => t.key === key);
   if (local) local.name = trimmed;
   notify();
@@ -800,6 +795,22 @@ async function renameTournamentInPlace(
     before: { name: oldName },
     after: { name: trimmed },
   });
+  // Backfill the display name on historical matches — best-effort,
+  // fire-and-forget. This can fail for non-super-admin users (RTDB
+  // rules only allow organisers to update match.tournament when it
+  // doesn't change) and is non-blocking by design. The authoritative
+  // link is tournamentKey, not the display name.
+  void (async () => {
+    try {
+      const { get, query, orderByChild, equalTo } = await import('firebase/database');
+      const snap = await get(query(ref(db, 'matches'), orderByChild('tournament'), equalTo(oldName)));
+      const all = (snap.val() as Record<string, Record<string, unknown>> | null) ?? {};
+      const { rewrites } = buildTournamentMatchRewrites(all, oldName, trimmed);
+      if (Object.keys(rewrites).length > 0) await update(ref(db, '/'), rewrites);
+    } catch {
+      // Non-blocking — organiser may lack permission; tournamentKey is authoritative.
+    }
+  })();
 }
 
 /**
@@ -817,33 +828,48 @@ async function renameTournamentToNewKey(
   oldRec: Record<string, unknown>,
   oldName: string,
 ): Promise<number> {
-  const { ref, get, update, remove } = await import('firebase/database');
+  const { ref, set, update, remove } = await import('firebase/database');
   const now = Date.now();
-  const nextRec = {
+  // Copy the full old record to the new key, updating only name + lastActive.
+  // Using set() so all existing sub-trees (rounds, groups, defaults, format,
+  // knockoutCfg, coOrganisers, assignedPlayerIds, …) are preserved.
+  const nextRec: Record<string, unknown> = {
+    ...oldRec,
     name: trimmed,
-    createdAt: typeof oldRec.createdAt === 'number' ? oldRec.createdAt : now,
     lastActive: now,
-    ...(typeof oldRec.createdBy === 'string' ? { createdBy: oldRec.createdBy } : {}),
-    ...(oldRec.organisers ? { organisers: oldRec.organisers } : {}),
   };
-  const matchesSnap = await get(ref(db, 'matches'));
-  const matches =
-    (matchesSnap.val() as Record<string, Record<string, unknown>> | null) ?? {};
-  const { rewrites, matchCount } = buildTournamentMatchRewrites(matches, oldName, trimmed);
-  rewrites[`tournaments/${newKey}`] = nextRec;
-  await update(ref(db, '/'), rewrites);
+  // Create the new tournament record and delete the old one.
+  // Match display-name rewrites are handled separately (fire-and-forget)
+  // because the RTDB rule requires super-admin to change match.tournament —
+  // mixing them in one multi-path update would cause the entire write to fail.
+  await set(ref(db, `tournaments/${newKey}`), nextRec);
   await remove(ref(db, `tournaments/${oldKey}`));
 
   memoryStore = memoryStore.filter((t) => t.key !== oldKey);
   memoryStore.push({
     key: newKey,
     name: trimmed,
-    createdAt: nextRec.createdAt,
-    lastActive: nextRec.lastActive,
-    ...(nextRec.createdBy ? { createdBy: nextRec.createdBy } : {}),
+    createdAt: typeof nextRec.createdAt === 'number' ? nextRec.createdAt : now,
+    lastActive: now,
+    ...(typeof nextRec.createdBy === 'string' ? { createdBy: nextRec.createdBy } : {}),
   });
   notify();
-  return matchCount;
+
+  // Backfill match display names — best-effort, non-blocking.
+  void (async () => {
+    try {
+      const { get, query, orderByChild, equalTo } = await import('firebase/database');
+      const snap = await get(query(ref(db, 'matches'), orderByChild('tournament'), equalTo(oldName)));
+      const all = (snap.val() as Record<string, Record<string, unknown>> | null) ?? {};
+      const { rewrites, matchCount: mc } = buildTournamentMatchRewrites(all, oldName, trimmed);
+      if (Object.keys(rewrites).length > 0) await update(ref(db, '/'), rewrites);
+      void mc;
+    } catch {
+      // Non-blocking — super-admin only; organiser lacks permission.
+    }
+  })();
+
+  return 0; // match count no longer awaited; caller only uses it for audit logging
 }
 
 /**
