@@ -757,8 +757,17 @@ export async function propagateBracketWinner(
           targetSide = matchOrder % 2 === 1 ? 'a' : 'b';
         }
       } else {
-        // Both sides already have real players — nothing to fill
-        return;
+        // Both sides have real players — check if the correct winner is already on the right side.
+        // If not, overwrite the side that matches by matchOrder parity (same logic as the empty case).
+        const aMatch = winnerResolved
+          ? targetSlotFallback.aResolvedId === winnerResolved
+          : targetSlotFallback.aName === winnerName;
+        const bMatch = winnerResolved
+          ? targetSlotFallback.bResolvedId === winnerResolved
+          : targetSlotFallback.bName === winnerName;
+        if (aMatch || bMatch) return; // already correct
+        // Wrong player on the expected side — overwrite it
+        targetSide = matchOrder % 2 === 1 ? 'a' : 'b';
       }
     }
 
