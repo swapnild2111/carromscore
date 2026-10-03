@@ -791,7 +791,7 @@
       flash('err', 'Invite-only tournaments must have a country');
       return;
     }
-    const nameChanged = trimmedName !== editingOriginal.name;
+    const nameChanged = false; // rename disabled — name field is read-only in Edit
     const typeChanged = editingType !== editingOriginal.type;
     // Compare against the empty-string sentinel for "no country".
     const countryNext = editingCountry;
@@ -2003,13 +2003,13 @@
           <legend class="legend-hidden">Tournament Details</legend>
 
           <label class="edit-field">
-            <span>Name</span>
+            <span>Name <em class="hint-inline">(contact support to rename)</em></span>
             <input
               type="text"
-              bind:value={editingName}
+              value={editingName}
               aria-label="Tournament name"
               maxlength="60"
-              disabled={saving}
+              disabled
             />
           </label>
 

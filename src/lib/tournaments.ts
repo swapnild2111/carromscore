@@ -845,14 +845,11 @@ async function renameTournamentToNewKey(
   await set(ref(db, `tournaments/${newKey}`), nextRec);
   await remove(ref(db, `tournaments/${oldKey}`));
 
+  // Remove the old key from local memory immediately. The RTDB subscription
+  // will add the new key when it fires, so we don't push it here — doing so
+  // would produce a duplicate entry (subscription fires before/after our push)
+  // and trigger Svelte's each_key_duplicate error.
   memoryStore = memoryStore.filter((t) => t.key !== oldKey);
-  memoryStore.push({
-    key: newKey,
-    name: trimmed,
-    createdAt: typeof nextRec.createdAt === 'number' ? nextRec.createdAt : now,
-    lastActive: now,
-    ...(typeof nextRec.createdBy === 'string' ? { createdBy: nextRec.createdBy } : {}),
-  });
   notify();
 
   // Backfill match display names — best-effort, non-blocking.
