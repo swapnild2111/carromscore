@@ -1456,12 +1456,66 @@
       }
     }
 
-    const svgH = Math.max(totalH, 120);
+    // ── Positional bracket (3rd place + 5th–8th) ──────────────────────────────
+    const posRoundSuffixes = ['3rd', 'L-SF', 'L-Final', 'L-3rd'];
+    const posRoundLabels: Array<{ label: string; displayLabel: string; matches: MatchInfo[] }> = [];
+    for (const g of groups) {
+      for (const sfx of posRoundSuffixes) {
+        for (const rk of g.matchMap.keys()) {
+          if (rk.replace(/^[^—]+—\s*/, '').trim() !== sfx) continue;
+          const displayMap: Record<string, string> = {
+            '3rd': '3RD PLACE', 'L-SF': '5TH–8TH SEMIS', 'L-Final': '5TH PLACE', 'L-3rd': '7TH PLACE',
+          };
+          posRoundLabels.push({ label: rk, displayLabel: displayMap[sfx] ?? sfx.toUpperCase(), matches: g.matchMap.get(rk) ?? [] });
+        }
+      }
+    }
+    const seenPos = new Set<string>();
+    const uniquePosRounds = posRoundLabels.filter(({ label }) => !seenPos.has(label) && seenPos.add(label) !== undefined);
+
+    let posY = PAD + stackY + (uniquePosRounds.length > 0 ? GRP_PAD : 0);
+    const posLines: string[] = [];
+    if (uniquePosRounds.length > 0) {
+      posLines.push(`<text x="${nameX}" y="${posY - 6}" font-size="10" font-weight="700" font-family="sans-serif" fill="#888" letter-spacing="0.08em">POSITIONAL</text>`);
+      posY += LBL_H;
+    }
+    for (const { displayLabel, matches } of uniquePosRounds) {
+      posLines.push(`<text x="${nameX}" y="${posY + 13}" font-size="9" font-weight="700" font-family="sans-serif" fill="#aaa" letter-spacing="0.06em">${displayLabel}</text>`);
+      const boxStartX = nameX + NAME_W + ARM;
+      for (let mi = 0; mi < matches.length; mi++) {
+        const res = matches[mi]!;
+        const cx = boxStartX + mi * (COL_W + COL_GAP);
+        const cy = posY + LBL_H + BOX_H / 2;
+        const sy = cy - BOX_H / 2;
+        const isDone = res.isDone;
+        const wA = isDone && res.winner === 'a';
+        const wB = isDone && res.winner === 'b';
+        const isPosPlaceholder = (n?: string) => /(?:Pre-qualify Winner|Winner \d+|Finalist \d+|Loser \d+)/i.test(n ?? '');
+        const aN = res.aName ? (isPosPlaceholder(res.aName) ? '' : clip(esc(res.aName))) : 'TBD';
+        const bN = res.bName ? (isPosPlaceholder(res.bName) ? '' : clip(esc(res.bName))) : 'TBD';
+        posLines.push(`<rect x="${cx}" y="${sy}" width="${COL_W}" height="${BOX_H}" rx="5" fill="#fafafa" stroke="#ccc" stroke-width="1"/>`);
+        posLines.push(`<line x1="${cx+1}" y1="${cy}" x2="${cx+COL_W-1}" y2="${cy}" stroke="#ebebeb" stroke-width="0.75"/>`);
+        posLines.push(`<text x="${cx+7}" y="${sy+16}" font-size="11" font-weight="${wA?'700':'400'}" opacity="${isDone&&!wA?'0.38':'1'}" font-family="sans-serif" fill="#333">${aN}</text>`);
+        posLines.push(`<text x="${cx+7}" y="${sy+BOX_H-8}" font-size="11" font-weight="${wB?'700':'400'}" opacity="${isDone&&!wB?'0.38':'1'}" font-family="sans-serif" fill="#333">${bN}</text>`);
+        const s = fmtScore(res);
+        if (s) {
+          const pw = Math.max(32, s.length * 6.5 + 10);
+          const px2 = cx + COL_W - pw - 4; const py2 = cy - 8;
+          posLines.push(`<rect x="${px2}" y="${py2}" width="${pw}" height="16" rx="7" fill="#f5f5f5" stroke="#e0e0e0" stroke-width="0.75"/>`);
+          posLines.push(`<text x="${px2+pw/2}" y="${py2+11}" text-anchor="middle" font-size="9.5" font-family="sans-serif" fill="#444" font-weight="600">${s}</text>`);
+        }
+      }
+      posY += LBL_H + BOX_H + GRP_PAD / 2;
+    }
+
+    const extraH = uniquePosRounds.length > 0 ? posY - (PAD + stackY) : 0;
+    const svgH = Math.max(totalH + extraH, 120);
     const svgPadT = 20;
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-8 -${svgPadT} ${totalW + 16} ${svgH + svgPadT + 8}"
       width="${totalW + 16}" height="${svgH + svgPadT + 8}" style="max-width:100%;height:auto;display:block">
       <rect x="-8" y="-${svgPadT}" width="${totalW + 16}" height="${svgH + svgPadT + 8}" fill="#fff"/>
       ${lines.join('\n')}
+      ${posLines.join('\n')}
     </svg>`;
   }
 
@@ -1511,7 +1565,7 @@
     }
     const matchMap = new Map<string, MatchResult[]>();
     for (const m of plannedMatches) {
-      if (!m.round || !/— (Pre-qualify|R\d+|QF|SF|Final)/.test(m.round)) continue;
+      if (!m.round || !/— (Pre-qualify|R\d+|QF|SF|Final|3rd|L-SF|L-Final|L-3rd)/.test(m.round)) continue;
       const arr = matchMap.get(m.round) ?? [];
       const aName = m.aResolvedId ? (byId.get(m.aResolvedId) ?? m.aName) : m.aName;
       const bName = m.bResolvedId ? (byId.get(m.bResolvedId) ?? m.bName) : m.bName;

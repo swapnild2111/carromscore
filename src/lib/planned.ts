@@ -805,9 +805,168 @@ export async function propagateBracketWinner(
     } catch {
       // silent — auto-advance failure should not block anything
     }
+
+    // 9. Loser propagation — place the loser into the positional bracket.
+    await propagateBracketLoser(
+      winner, slot, tournamentKey, matchOrder, roundLabel, roundsRaw,
+    ).catch(() => { /* silent */ });
   } catch {
     // silent — bracket still works without propagation
   }
+}
+
+// ── Loser-bracket helpers ─────────────────────────────────────────────────────
+
+/** Extract the bracket prefix from a round label: "G1 — QF" → "G1", "KO — Semi Finals" → "KO" */
+function bracketPrefix(roundLabel: string): string | null {
+  return /^([A-Za-z0-9]+)\s*[—-]/.exec(roundLabel)?.[1] ?? null;
+}
+
+/** Round-label suffix after the em-dash separator. */
+function roundSuffix(roundLabel: string): string {
+  return roundLabel.replace(/^[^—]+—\s*/, '').trim();
+}
+
+/**
+ * Propagate the loser of a completed QF/SF/L-SF match into the positional bracket.
+ * Called from propagateBracketWinner after winner propagation succeeds.
+ * Silent-on-failure.
+ */
+async function propagateBracketLoser(
+  winner: 'a' | 'b',
+  slot: Omit<PlannedMatch, 'mid'>,
+  tournamentKey: string,
+  matchOrder: number,
+  roundLabel: string,
+  roundsRaw: Record<string, { order?: number; name?: string }>,
+): Promise<void> {
+  const pfx = bracketPrefix(roundLabel);
+  if (!pfx) return;
+
+  const sfx = roundSuffix(roundLabel);
+  const isQF  = /^(QF|Quarter Finals)$/i.test(sfx);
+  const isSF  = /^(SF|Semi Finals)$/i.test(sfx);
+  const isLSF = sfx === 'L-SF';
+  if (!isQF && !isSF && !isLSF) return;
+
+  const loserName     = winner === 'a' ? slot.bName      : slot.aName;
+  const loserResolved = winner === 'a' ? slot.bResolvedId : slot.aResolvedId;
+  if (!loserName) return;
+
+  const { getDatabase, ref, get, update, set,
+          query: fbq, orderByChild, equalTo } = await import('firebase/database');
+  const { normalizeKey } = await import('./tournaments');
+  const db = getDatabase(firebaseApp());
+
+  // Target loser round
+  const targetLabel = isQF  ? `${pfx} — L-SF`
+                    : isSF  ? `${pfx} — 3rd`
+                    :         `${pfx} — L-3rd`;  // L-SF loser
+  const targetKey = normalizeKey(targetLabel);
+
+  // Determine max round order from Firebase (in-memory store may be empty here)
+  const maxOrder = Math.max(0, ...Object.values(roundsRaw).map((r) => r.order ?? 0));
+
+  // Ensure rounds exist in Firebase (idempotent set — only writes if key absent)
+  const ensureRound = async (label: string, order: number) => {
+    const key = normalizeKey(label);
+    if (roundsRaw[key]) return key; // already exists
+    await set(ref(db, `tournaments/${tournamentKey}/rounds/${key}`), {
+      name: label, order, state: 'open', createdAt: Date.now(),
+    });
+    return key;
+  };
+
+  if (isQF) {
+    await ensureRound(`${pfx} — L-SF`,    maxOrder + 1);
+    await ensureRound(`${pfx} — L-Final`, maxOrder + 2);
+    await ensureRound(`${pfx} — L-3rd`,   maxOrder + 3);
+  } else if (isSF) {
+    await ensureRound(`${pfx} — 3rd`, maxOrder + 1);
+  } else {
+    await ensureRound(`${pfx} — L-3rd`, maxOrder + 1);
+  }
+
+  // Fetch all planned for this tournament (need fresh copy after possible round creation)
+  const allSnap = await get(fbq(ref(db, 'planned'), orderByChild('tournamentKey'), equalTo(tournamentKey)));
+  const allPlanned = allSnap.val() as Record<string, Omit<PlannedMatch, 'mid'>> | null ?? {};
+
+  // Ensure planned slots exist for the target loser round
+  const existingLoserSlots = Object.entries(allPlanned).filter(([, v]) => v?.roundKey === targetKey);
+  if (existingLoserSlots.length === 0) {
+    const base = {
+      mode: slot.mode ?? 'singles',
+      tournament: slot.tournament ?? tournamentKey,
+      tournamentKey,
+      cfg: slot.cfg ?? {},
+      createdBy: slot.createdBy ?? '',
+      createdAt: Date.now(),
+    };
+    if (isQF) {
+      await createPlannedMatch({ ...base, round: targetLabel, roundKey: targetKey,
+        matchOrder: 1, board: 1, aName: `${pfx} QF Loser 1`, bName: `${pfx} QF Loser 2` });
+      await createPlannedMatch({ ...base, round: targetLabel, roundKey: targetKey,
+        matchOrder: 2, board: 2, aName: `${pfx} QF Loser 3`, bName: `${pfx} QF Loser 4` });
+      // Downstream L-Final and L-3rd placeholder slots
+      const lFinalLabel = `${pfx} — L-Final`;
+      const lFinalKey   = normalizeKey(lFinalLabel);
+      const l3rdLabel   = `${pfx} — L-3rd`;
+      const l3rdKey     = normalizeKey(l3rdLabel);
+      await createPlannedMatch({ ...base, round: lFinalLabel, roundKey: lFinalKey,
+        matchOrder: 1, board: 1, aName: `${pfx} L-SF Winner 1`, bName: `${pfx} L-SF Winner 2` });
+      await createPlannedMatch({ ...base, round: l3rdLabel, roundKey: l3rdKey,
+        matchOrder: 1, board: 2, aName: `${pfx} L-SF Loser 1`, bName: `${pfx} L-SF Loser 2` });
+    } else {
+      const [aN, bN] = isSF ? [`${pfx} SF Loser 1`,   `${pfx} SF Loser 2`  ]
+                             : [`${pfx} L-SF Loser 1`, `${pfx} L-SF Loser 2`];
+      await createPlannedMatch({ ...base, round: targetLabel, roundKey: targetKey,
+        matchOrder: 1, board: 1, aName: aN, bName: bN });
+    }
+  }
+
+  // Re-fetch to get the (possibly just-created) loser slots
+  const freshSnap = await get(fbq(ref(db, 'planned'), orderByChild('tournamentKey'), equalTo(tournamentKey)));
+  const fresh = freshSnap.val() as Record<string, Omit<PlannedMatch, 'mid'>> | null ?? {};
+  const loserSlots = Object.entries(fresh).filter(([, v]) => v?.roundKey === targetKey);
+
+  // Place loser using ceil(matchOrder / 2) — same formula as winner propagation
+  const targetOrder = Math.ceil(matchOrder / 2);
+  const targetEntry = loserSlots.find(([, v]) => v?.matchOrder === targetOrder);
+  if (!targetEntry) return;
+
+  const [targetMid, targetSlot] = targetEntry;
+  const aReal = !!targetSlot.aResolvedId;
+  const bReal = !!targetSlot.bResolvedId;
+
+  let side: 'a' | 'b';
+  if (aReal && !bReal)  { side = 'b'; }
+  else if (bReal && !aReal) { side = 'a'; }
+  else if (!aReal && !bReal) { side = matchOrder % 2 === 1 ? 'a' : 'b'; }
+  else {
+    const aMatch = loserResolved ? targetSlot.aResolvedId === loserResolved : targetSlot.aName === loserName;
+    const bMatch = loserResolved ? targetSlot.bResolvedId === loserResolved : targetSlot.bName === loserName;
+    if (aMatch || bMatch) return;
+    side = matchOrder % 2 === 1 ? 'a' : 'b';
+  }
+
+  const patch: Record<string, unknown> = side === 'a'
+    ? { aName: loserName, ...(loserResolved ? { aResolvedId: loserResolved } : {}) }
+    : { bName: loserName, ...(loserResolved ? { bResolvedId: loserResolved } : {}) };
+  await update(ref(db, `planned/${targetMid}`), patch);
+
+  // Auto-start the loser round once all its slots have real players on both sides
+  try {
+    const checkSnap = await get(fbq(ref(db, 'planned'), orderByChild('tournamentKey'), equalTo(tournamentKey)));
+    const checkAll  = checkSnap.val() as Record<string, Omit<PlannedMatch, 'mid'>> | null ?? {};
+    const slots = Object.values(checkAll).filter((v) => v?.roundKey === targetKey);
+    const isPlaceholder = (n?: string) => !n || /Loser \d+|Winner \d+/i.test(n);
+    const allReady = slots.length > 0 &&
+      slots.every((v) => !isPlaceholder(v.aName) && !isPlaceholder(v.bName));
+    if (allReady) {
+      const { startRound } = await import('./tournaments');
+      await startRound(tournamentKey, targetKey);
+    }
+  } catch { /* silent */ }
 }
 
 /**
