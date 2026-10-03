@@ -1466,9 +1466,13 @@
     // ── Positional bracket (3rd place + 5th–8th) ──────────────────────────────
     const posRoundSuffixes: Array<{ sfx: string; display: string }> = [
       { sfx: '3rd Place',     display: '3RD PLACE' },
+      { sfx: '3rd',           display: '3RD PLACE' },
       { sfx: '5th-8th Place', display: '5TH–8TH PLACE' },
+      { sfx: 'L-SF',          display: '5TH–8TH PLACE' },
       { sfx: '5th Place',     display: '5TH PLACE' },
+      { sfx: 'L-Final',       display: '5TH PLACE' },
       { sfx: '7th Place',     display: '7TH PLACE' },
+      { sfx: 'L-3rd',         display: '7TH PLACE' },
     ];
     const posRoundLabels: Array<{ label: string; displayLabel: string; matches: MatchInfo[] }> = [];
     for (const g of groups) {
@@ -1574,7 +1578,7 @@
     }
     const matchMap = new Map<string, MatchResult[]>();
     for (const m of plannedMatches) {
-      if (!m.round || !/— (Pre-qualify|R\d+|QF|SF|Final|3rd Place|5th-8th Place|5th Place|7th Place)/.test(m.round)) continue;
+      if (!m.round || !/— (Pre-qualify|R\d+|QF|SF|Final|3rd Place|3rd|5th-8th Place|5th Place|7th Place|L-SF|L-Final|L-3rd)/.test(m.round)) continue;
       const arr = matchMap.get(m.round) ?? [];
       const aName = m.aResolvedId ? (byId.get(m.aResolvedId) ?? m.aName) : m.aName;
       const bName = m.bResolvedId ? (byId.get(m.bResolvedId) ?? m.bName) : m.bName;
