@@ -168,6 +168,7 @@ export async function finishMatch(
   identity: MatchIdentityInput,
   result: MatchResultInput,
   createdBy?: string,
+  idempotencyKey?: string,
 ): Promise<string | null> {
   const isPractice = result.mode === 'practice';
   // Stamp `createdBy` with the signed-in user's uid when the caller
@@ -383,9 +384,14 @@ export async function finishMatch(
     ]);
     const db = getDatabase(firebaseApp());
     const matchesRef = ref(db, 'matches');
-    const newRef = push(matchesRef);
-    await set(newRef, record);
-    return newRef.key ?? null;
+    // When an idempotencyKey is provided (offline-queue replay), write
+    // to that fixed key so a duplicate flush after a partially-succeeded
+    // first attempt overwrites instead of creating a second record.
+    const targetRef = idempotencyKey
+      ? ref(db, `matches/${idempotencyKey}`)
+      : push(matchesRef);
+    await set(targetRef, record);
+    return (idempotencyKey ?? targetRef.key) ?? null;
   } catch {
     // Firebase unreachable / rules denied / package failed to load.
     // localStorage-only history will be added by the privacy toggle

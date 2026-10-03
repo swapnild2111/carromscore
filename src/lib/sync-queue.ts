@@ -93,6 +93,14 @@ export type QueuedMatchWrite = {
    * `currentUser()` returns then (usually still null → anonymous).
    */
   createdByAtEnqueue: string | null;
+  /**
+   * Deterministic Firebase key for this match archive. Generated once
+   * at enqueue time from startedAt so that flush replays are
+   * idempotent: if the original finishMatch() write partially succeeded
+   * (network dropped after the server wrote but before the ack arrived),
+   * the flush re-writes to the same key — overwrite instead of duplicate.
+   */
+  idempotencyKey: string;
   enqueuedAt: number;
 };
 
@@ -159,12 +167,19 @@ export function enqueueLive(item: Omit<QueuedLiveWrite, 'kind' | 'enqueuedAt'>):
 
 /**
  * Enqueue a finished-match archive write. Append-only.
+ * Generates a deterministic idempotencyKey from startedAt so that
+ * flush replays write to the same Firebase key and never duplicate.
  */
 export function enqueueMatch(
-  item: Omit<QueuedMatchWrite, 'kind' | 'enqueuedAt'>,
+  item: Omit<QueuedMatchWrite, 'kind' | 'enqueuedAt' | 'idempotencyKey'>,
 ): void {
   const q = readQueue();
-  q.match.push({ kind: 'match', enqueuedAt: Date.now(), ...item });
+  // Build a stable key: "m" + zero-padded base36 of startedAt (13 digits
+  // covers ~3.5 trillion ms, enough for any real timestamp). Firebase key
+  // rules allow alphanumeric characters; base36 is safe.
+  const ts = item.result.startedAt ?? Date.now();
+  const idempotencyKey = 'm' + ts.toString(36).padStart(13, '0');
+  q.match.push({ kind: 'match', enqueuedAt: Date.now(), idempotencyKey, ...item });
   writeQueue(q);
 }
 
@@ -300,6 +315,7 @@ export async function flushQueue(): Promise<FlushResult> {
         item.identity,
         item.result,
         item.createdByAtEnqueue ?? undefined,
+        item.idempotencyKey,
       );
       if (matchId) {
         result.matchOk += 1;
