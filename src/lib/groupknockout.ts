@@ -253,51 +253,51 @@ export async function generateGroupPhase(
     const hasSFpq = mainRoundDefs.some((r) => /— (SF|Semi Finals)$/.test(r.label));
 
     if (hasSFpq) {
-      const label3rd = `${groupName} — 3rd`;
+      const label3rd = `${groupName} — 3rd Place`;
       const r3rd = await addRound(tournamentKey, label3rd);
       if (!r3rd.ok) result.errors.push(`${label3rd}: addRound failed`);
       result.roundsCreated.push(label3rd);
       pendingMatches.push({
-        roundLabel: label3rd, roundKey: normalizeKey(label3rd), roundSuffix: '3rd',
+        roundLabel: label3rd, roundKey: normalizeKey(label3rd), roundSuffix: '3rd Place',
         matchOrder: 1,
         aName: `${groupName} SF Loser 1`, bName: `${groupName} SF Loser 2`,
       });
     }
 
     if (hasQFpq) {
-      const labelLSF = `${groupName} — L-SF`;
+      const labelLSF = `${groupName} — 5th-8th Place`;
       const rLSF = await addRound(tournamentKey, labelLSF);
       if (!rLSF.ok) result.errors.push(`${labelLSF}: addRound failed`);
       result.roundsCreated.push(labelLSF);
       pendingMatches.push({
-        roundLabel: labelLSF, roundKey: normalizeKey(labelLSF), roundSuffix: 'L-SF',
+        roundLabel: labelLSF, roundKey: normalizeKey(labelLSF), roundSuffix: '5th-8th Place',
         matchOrder: 1,
         aName: `${groupName} QF Loser 1`, bName: `${groupName} QF Loser 2`,
       });
       pendingMatches.push({
-        roundLabel: labelLSF, roundKey: normalizeKey(labelLSF), roundSuffix: 'L-SF',
+        roundLabel: labelLSF, roundKey: normalizeKey(labelLSF), roundSuffix: '5th-8th Place',
         matchOrder: 2,
         aName: `${groupName} QF Loser 3`, bName: `${groupName} QF Loser 4`,
       });
 
-      const labelLFinal = `${groupName} — L-Final`;
+      const labelLFinal = `${groupName} — 5th Place`;
       const rLFinal = await addRound(tournamentKey, labelLFinal);
       if (!rLFinal.ok) result.errors.push(`${labelLFinal}: addRound failed`);
       result.roundsCreated.push(labelLFinal);
       pendingMatches.push({
-        roundLabel: labelLFinal, roundKey: normalizeKey(labelLFinal), roundSuffix: 'L-Final',
+        roundLabel: labelLFinal, roundKey: normalizeKey(labelLFinal), roundSuffix: '5th Place',
         matchOrder: 1,
-        aName: `${groupName} L-SF Winner 1`, bName: `${groupName} L-SF Winner 2`,
+        aName: `${groupName} 5th-8th Place Winner 1`, bName: `${groupName} 5th-8th Place Winner 2`,
       });
 
-      const labelL3rd = `${groupName} — L-3rd`;
+      const labelL3rd = `${groupName} — 7th Place`;
       const rL3rd = await addRound(tournamentKey, labelL3rd);
       if (!rL3rd.ok) result.errors.push(`${labelL3rd}: addRound failed`);
       result.roundsCreated.push(labelL3rd);
       pendingMatches.push({
-        roundLabel: labelL3rd, roundKey: normalizeKey(labelL3rd), roundSuffix: 'L-3rd',
+        roundLabel: labelL3rd, roundKey: normalizeKey(labelL3rd), roundSuffix: '7th Place',
         matchOrder: 1,
-        aName: `${groupName} L-SF Loser 1`, bName: `${groupName} L-SF Loser 2`,
+        aName: `${groupName} 5th-8th Place Loser 1`, bName: `${groupName} 5th-8th Place Loser 2`,
       });
     }
   }
@@ -444,12 +444,12 @@ async function generateClassicGroupBracket(opts: {
 
   if (hasSF) {
     // 3rd place match for SF losers
-    const label3rd = `${groupName} — 3rd`;
+    const label3rd = `${groupName} — 3rd Place`;
     const r3rd = await addRound(tournamentKey, label3rd);
     if (!r3rd.ok) result.errors.push(`${label3rd}: addRound failed`);
     result.roundsCreated.push(label3rd);
     pendingMatches.push({
-      roundLabel: label3rd, roundKey: normalizeKey(label3rd), roundSuffix: '3rd',
+      roundLabel: label3rd, roundKey: normalizeKey(label3rd), roundSuffix: '3rd Place',
       matchOrder: 1,
       aName: `${groupName} SF Loser 1`, bName: `${groupName} SF Loser 2`,
     });
@@ -457,44 +457,41 @@ async function generateClassicGroupBracket(opts: {
   }
 
   if (hasQF) {
-    // L-SF: 2 matches for QF losers (5th–8th semis)
-    const labelLSF = `${groupName} — L-SF`;
+    const labelLSF = `${groupName} — 5th-8th Place`;
     const rLSF = await addRound(tournamentKey, labelLSF);
     if (!rLSF.ok) result.errors.push(`${labelLSF}: addRound failed`);
     result.roundsCreated.push(labelLSF);
     pendingMatches.push({
-      roundLabel: labelLSF, roundKey: normalizeKey(labelLSF), roundSuffix: 'L-SF',
+      roundLabel: labelLSF, roundKey: normalizeKey(labelLSF), roundSuffix: '5th-8th Place',
       matchOrder: 1,
       aName: `${groupName} QF Loser 1`, bName: `${groupName} QF Loser 2`,
     });
     pendingMatches.push({
-      roundLabel: labelLSF, roundKey: normalizeKey(labelLSF), roundSuffix: 'L-SF',
+      roundLabel: labelLSF, roundKey: normalizeKey(labelLSF), roundSuffix: '5th-8th Place',
       matchOrder: 2,
       aName: `${groupName} QF Loser 3`, bName: `${groupName} QF Loser 4`,
     });
     result.matchesCreated += 2;
 
-    // L-Final: 5th place match for L-SF winners
-    const labelLFinal = `${groupName} — L-Final`;
+    const labelLFinal = `${groupName} — 5th Place`;
     const rLFinal = await addRound(tournamentKey, labelLFinal);
     if (!rLFinal.ok) result.errors.push(`${labelLFinal}: addRound failed`);
     result.roundsCreated.push(labelLFinal);
     pendingMatches.push({
-      roundLabel: labelLFinal, roundKey: normalizeKey(labelLFinal), roundSuffix: 'L-Final',
+      roundLabel: labelLFinal, roundKey: normalizeKey(labelLFinal), roundSuffix: '5th Place',
       matchOrder: 1,
-      aName: `${groupName} L-SF Winner 1`, bName: `${groupName} L-SF Winner 2`,
+      aName: `${groupName} 5th-8th Place Winner 1`, bName: `${groupName} 5th-8th Place Winner 2`,
     });
     result.matchesCreated++;
 
-    // L-3rd: 7th place match for L-SF losers
-    const labelL3rd = `${groupName} — L-3rd`;
+    const labelL3rd = `${groupName} — 7th Place`;
     const rL3rd = await addRound(tournamentKey, labelL3rd);
     if (!rL3rd.ok) result.errors.push(`${labelL3rd}: addRound failed`);
     result.roundsCreated.push(labelL3rd);
     pendingMatches.push({
-      roundLabel: labelL3rd, roundKey: normalizeKey(labelL3rd), roundSuffix: 'L-3rd',
+      roundLabel: labelL3rd, roundKey: normalizeKey(labelL3rd), roundSuffix: '7th Place',
       matchOrder: 1,
-      aName: `${groupName} L-SF Loser 1`, bName: `${groupName} L-SF Loser 2`,
+      aName: `${groupName} 5th-8th Place Loser 1`, bName: `${groupName} 5th-8th Place Loser 2`,
     });
     result.matchesCreated++;
   }
@@ -672,7 +669,7 @@ export async function generateCombinedKnockout(
   const hasKOSF  = roundDefs.some((r) => r.label === 'KO — Semi Finals');
 
   if (hasKOSF) {
-    const label3rd = 'KO — 3rd';
+    const label3rd = 'KO — 3rd Place';
     const r3rd = await addRound(tournamentKey, label3rd);
     if (!r3rd.ok) result.errors.push(`${label3rd}: addRound failed`);
     result.roundsCreated.push(label3rd);
@@ -685,7 +682,7 @@ export async function generateCombinedKnockout(
   }
 
   if (hasKOQF) {
-    const labelLSF = 'KO — L-SF';
+    const labelLSF = 'KO — 5th-8th Place';
     const rLSF = await addRound(tournamentKey, labelLSF);
     if (!rLSF.ok) result.errors.push(`${labelLSF}: addRound failed`);
     result.roundsCreated.push(labelLSF);
@@ -701,25 +698,25 @@ export async function generateCombinedKnockout(
     });
     result.matchesCreated += 2;
 
-    const labelLFinal = 'KO — L-Final';
+    const labelLFinal = 'KO — 5th Place';
     const rLFinal = await addRound(tournamentKey, labelLFinal);
     if (!rLFinal.ok) result.errors.push(`${labelLFinal}: addRound failed`);
     result.roundsCreated.push(labelLFinal);
     await createPlannedMatch({
       mode: defaults.mode, tournament: tournamentName, tournamentKey,
       round: labelLFinal, roundKey: normalizeKey(labelLFinal), matchOrder: 1, board: cycleBoard(0),
-      aName: 'KO L-SF Winner 1', bName: 'KO L-SF Winner 2', cfg, createdBy: myUid,
+      aName: 'KO 5th-8th Place Winner 1', bName: 'KO 5th-8th Place Winner 2', cfg, createdBy: myUid,
     });
     result.matchesCreated++;
 
-    const labelL3rd = 'KO — L-3rd';
+    const labelL3rd = 'KO — 7th Place';
     const rL3rd = await addRound(tournamentKey, labelL3rd);
     if (!rL3rd.ok) result.errors.push(`${labelL3rd}: addRound failed`);
     result.roundsCreated.push(labelL3rd);
     await createPlannedMatch({
       mode: defaults.mode, tournament: tournamentName, tournamentKey,
       round: labelL3rd, roundKey: normalizeKey(labelL3rd), matchOrder: 1, board: cycleBoard(1),
-      aName: 'KO L-SF Loser 1', bName: 'KO L-SF Loser 2', cfg, createdBy: myUid,
+      aName: 'KO 5th-8th Place Loser 1', bName: 'KO 5th-8th Place Loser 2', cfg, createdBy: myUid,
     });
     result.matchesCreated++;
   }
