@@ -247,6 +247,59 @@ export async function generateGroupPhase(
       }
       prevCount = slotCount;
     }
+
+    // ── Positional rounds (upfront so QR codes are printable immediately) ───────
+    const hasQFpq = mainRoundDefs.some((r) => /— (QF|Quarter Finals)$/.test(r.label));
+    const hasSFpq = mainRoundDefs.some((r) => /— (SF|Semi Finals)$/.test(r.label));
+
+    if (hasSFpq) {
+      const label3rd = `${groupName} — 3rd`;
+      const r3rd = await addRound(tournamentKey, label3rd);
+      if (!r3rd.ok) result.errors.push(`${label3rd}: addRound failed`);
+      result.roundsCreated.push(label3rd);
+      pendingMatches.push({
+        roundLabel: label3rd, roundKey: normalizeKey(label3rd), roundSuffix: '3rd',
+        matchOrder: 1,
+        aName: `${groupName} SF Loser 1`, bName: `${groupName} SF Loser 2`,
+      });
+    }
+
+    if (hasQFpq) {
+      const labelLSF = `${groupName} — L-SF`;
+      const rLSF = await addRound(tournamentKey, labelLSF);
+      if (!rLSF.ok) result.errors.push(`${labelLSF}: addRound failed`);
+      result.roundsCreated.push(labelLSF);
+      pendingMatches.push({
+        roundLabel: labelLSF, roundKey: normalizeKey(labelLSF), roundSuffix: 'L-SF',
+        matchOrder: 1,
+        aName: `${groupName} QF Loser 1`, bName: `${groupName} QF Loser 2`,
+      });
+      pendingMatches.push({
+        roundLabel: labelLSF, roundKey: normalizeKey(labelLSF), roundSuffix: 'L-SF',
+        matchOrder: 2,
+        aName: `${groupName} QF Loser 3`, bName: `${groupName} QF Loser 4`,
+      });
+
+      const labelLFinal = `${groupName} — L-Final`;
+      const rLFinal = await addRound(tournamentKey, labelLFinal);
+      if (!rLFinal.ok) result.errors.push(`${labelLFinal}: addRound failed`);
+      result.roundsCreated.push(labelLFinal);
+      pendingMatches.push({
+        roundLabel: labelLFinal, roundKey: normalizeKey(labelLFinal), roundSuffix: 'L-Final',
+        matchOrder: 1,
+        aName: `${groupName} L-SF Winner 1`, bName: `${groupName} L-SF Winner 2`,
+      });
+
+      const labelL3rd = `${groupName} — L-3rd`;
+      const rL3rd = await addRound(tournamentKey, labelL3rd);
+      if (!rL3rd.ok) result.errors.push(`${labelL3rd}: addRound failed`);
+      result.roundsCreated.push(labelL3rd);
+      pendingMatches.push({
+        roundLabel: labelL3rd, roundKey: normalizeKey(labelL3rd), roundSuffix: 'L-3rd',
+        matchOrder: 1,
+        aName: `${groupName} L-SF Loser 1`, bName: `${groupName} L-SF Loser 2`,
+      });
+    }
   }
 
   // ── Pass 2: assign shuffled boards across all groups per co-running round ────
@@ -386,8 +439,8 @@ async function generateClassicGroupBracket(opts: {
   }
 
   // ── Positional rounds (created upfront so QR codes are printable immediately) ─
-  const hasQF = roundDefs.some((r) => r.label.endsWith('— QF'));
-  const hasSF = roundDefs.some((r) => r.label.endsWith('— SF'));
+  const hasQF = roundDefs.some((r) => /— (QF|Quarter Finals)$/.test(r.label));
+  const hasSF = roundDefs.some((r) => /— (SF|Semi Finals)$/.test(r.label));
 
   if (hasSF) {
     // 3rd place match for SF losers
