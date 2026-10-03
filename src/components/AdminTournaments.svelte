@@ -1271,7 +1271,7 @@
     addingOpen = true;
     addingName = '';
     addingType = 'open';
-    addingFormat = 'standard';
+    addingFormat = 'league';
     addingTotalPlayers = '48';
     addingWantedFlights = 3;
     addingKnockoutRewards = ['Gold', 'Silver', 'Bronze'];
@@ -1293,7 +1293,7 @@
     addingOpen = false;
     addingName = '';
     addingType = 'open';
-    addingFormat = 'standard';
+    addingFormat = 'league';
     addingCountry = '';
     addingDescription = '';
     addingStartDate = '';
@@ -2088,11 +2088,6 @@
           <div class="add-sub-section">
             <span class="field-label-white">Format</span>
             <fieldset class="fmt fmt-format fmt-format-inline">
-              <label class:selected={editingFormat === 'standard'} onclick={() => (editingFormat = 'standard')}>
-                <input type="radio" name="edit-tournament-format" value="standard" bind:group={editingFormat} disabled={saving} />
-                <span class="opt-title">Regular</span>
-                <span class="opt-meta">Ad-hoc matches</span>
-              </label>
               <label class:selected={editingFormat === 'league'} onclick={() => (editingFormat = 'league')}>
                 <input type="radio" name="edit-tournament-format" value="league" bind:group={editingFormat} disabled={saving} />
                 <span class="opt-title">League</span>
@@ -2103,9 +2098,9 @@
                 <span class="opt-title">Knockout</span>
                 <span class="opt-meta">Single elimination</span>
               </label>
-              <label class:selected={editingFormat === 'roundrobin'} onclick={() => (editingFormat = 'roundrobin')}>
-                <input type="radio" name="edit-tournament-format" value="roundrobin" bind:group={editingFormat} disabled={saving} />
-                <span class="opt-title">Round Robin</span>
+              <label class="fmt-disabled" title="Coming soon">
+                <input type="radio" name="edit-tournament-format" value="roundrobin" bind:group={editingFormat} disabled />
+                <span class="opt-title">Round Robin <span class="coming-soon-badge">Soon</span></span>
                 <span class="opt-meta">Everyone plays all</span>
               </label>
             </fieldset>
@@ -2585,11 +2580,6 @@
           <div class="add-sub-section">
             <span class="field-label-white">Format</span>
             <fieldset class="fmt fmt-format fmt-format-inline">
-              <label class:selected={addingFormat === 'standard'} onclick={() => (addingFormat = 'standard')}>
-                <input type="radio" name="add-tournament-format" value="standard" bind:group={addingFormat} />
-                <span class="opt-title">Regular</span>
-                <span class="opt-meta">Ad-hoc matches</span>
-              </label>
               <label class:selected={addingFormat === 'league'} onclick={() => (addingFormat = 'league')}>
                 <input type="radio" name="add-tournament-format" value="league" bind:group={addingFormat} />
                 <span class="opt-title">League</span>
@@ -2600,9 +2590,9 @@
                 <span class="opt-title">Knockout</span>
                 <span class="opt-meta">Single elimination</span>
               </label>
-              <label class:selected={addingFormat === 'roundrobin'} onclick={() => (addingFormat = 'roundrobin')}>
-                <input type="radio" name="add-tournament-format" value="roundrobin" bind:group={addingFormat} />
-                <span class="opt-title">Round Robin</span>
+              <label class="fmt-disabled" title="Coming soon">
+                <input type="radio" name="add-tournament-format" value="roundrobin" bind:group={addingFormat} disabled />
+                <span class="opt-title">Round Robin <span class="coming-soon-badge">Soon</span></span>
                 <span class="opt-meta">Everyone plays all</span>
               </label>
             </fieldset>
@@ -3829,10 +3819,24 @@
     background: #1a1613;
   }
   fieldset.fmt-format label.selected .opt-title { color: var(--accent); }
-  fieldset.fmt-format label.opt-unavailable {
-    opacity: 0.38;
+  fieldset.fmt-format label.opt-unavailable,
+  fieldset.fmt-format label.fmt-disabled {
+    opacity: 0.45;
     cursor: not-allowed;
     pointer-events: none;
+  }
+  .coming-soon-badge {
+    display: inline-block;
+    font-size: 0.6rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    background: var(--accent);
+    color: #fff;
+    border-radius: 3px;
+    padding: 1px 4px;
+    vertical-align: middle;
+    margin-left: 4px;
+    opacity: 0.8;
   }
   fieldset.fmt-format input[type="radio"] {
     opacity: 0;
