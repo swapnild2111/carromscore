@@ -2192,17 +2192,19 @@
             Prefills matches created under this tournament. Umpires
             can still override per match.
           </p>
-          <label class="edit-field">
-            <span>Mode</span>
-            <select
-              bind:value={editingDefaultMode}
-              disabled={saving}
-              aria-label="Default mode"
-            >
-              <option value="singles">Singles</option>
-              <option value="doubles">Doubles</option>
-            </select>
-          </label>
+          <fieldset class="fmt fmt-format defaults-mode-picker">
+            <legend>Mode</legend>
+            <label class:selected={editingDefaultMode === 'singles'} onclick={() => (editingDefaultMode = 'singles')}>
+              <input type="radio" name="edit-default-mode" value="singles" bind:group={editingDefaultMode} disabled={saving} />
+              <span class="opt-title">Singles</span>
+              <span class="opt-meta">1 vs 1</span>
+            </label>
+            <label class:selected={editingDefaultMode === 'doubles'} onclick={() => (editingDefaultMode = 'doubles')}>
+              <input type="radio" name="edit-default-mode" value="doubles" bind:group={editingDefaultMode} disabled={saving} />
+              <span class="opt-title">Doubles</span>
+              <span class="opt-meta">2 vs 2</span>
+            </label>
+          </fieldset>
           <label class="edit-field">
             <span>Best of sets</span>
             <input
@@ -2762,17 +2764,19 @@
 
         <fieldset class="defaults-grid">
           <legend>Match defaults</legend>
-          <label class="edit-field">
-            <span>Mode</span>
-            <select
-              bind:value={addingDefaultMode}
-              disabled={saving}
-              aria-label="Default mode"
-            >
-              <option value="singles">Singles</option>
-              <option value="doubles">Doubles</option>
-            </select>
-          </label>
+          <fieldset class="fmt fmt-format defaults-mode-picker">
+            <legend>Mode</legend>
+            <label class:selected={addingDefaultMode === 'singles'} onclick={() => (addingDefaultMode = 'singles')}>
+              <input type="radio" name="add-default-mode" value="singles" bind:group={addingDefaultMode} disabled={saving} />
+              <span class="opt-title">Singles</span>
+              <span class="opt-meta">1 vs 1</span>
+            </label>
+            <label class:selected={addingDefaultMode === 'doubles'} onclick={() => (addingDefaultMode = 'doubles')}>
+              <input type="radio" name="add-default-mode" value="doubles" bind:group={addingDefaultMode} disabled={saving} />
+              <span class="opt-title">Doubles</span>
+              <span class="opt-meta">2 vs 2</span>
+            </label>
+          </fieldset>
           <label class="edit-field">
             <span>Best of sets</span>
             <input
@@ -4013,6 +4017,11 @@
     text-transform: uppercase;
   }
   .defaults-grid .edit-field { margin: 0.25rem 0; }
+  .defaults-mode-picker {
+    grid-column: 1 / -1;
+    grid-template-columns: 1fr 1fr;
+    margin: 0 0 0.35rem;
+  }
   .defaults-hint {
     grid-column: 1 / -1;
     color: var(--muted, #9aa0a6);
