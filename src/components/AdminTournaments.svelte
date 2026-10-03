@@ -267,6 +267,7 @@
   let assignFilter = $state('');
   let assignFilterCountry = $state('');
   let assignFilterRepresents = $state('');
+  let assignFilterGender = $state('');
 
   /** Bump on the identity-store change, so the assignment dialog's
    *  filtered player list re-renders when a player is added elsewhere. */
@@ -1382,6 +1383,7 @@
     assignFilter = '';
     assignFilterCountry = t.country ?? '';
     assignFilterRepresents = '';
+    assignFilterGender = '';
     assignOpen = true;
     assignLoading = true;
     try {
@@ -1422,6 +1424,7 @@
     assignFilter = '';
     assignFilterCountry = '';
     assignFilterRepresents = '';
+    assignFilterGender = '';
   }
   async function togglePlayerAssignment(playerId: string) {
     if (!assignKey) return;
@@ -1521,6 +1524,7 @@
       .filter((p) => {
         if (assignFilterCountry && p.country !== assignFilterCountry) return false;
         if (assignFilterRepresents && (p.represents ?? '') !== assignFilterRepresents) return false;
+        if (assignFilterGender && (p.gender ?? '') !== assignFilterGender) return false;
         if (q && !p.canonicalName.toLowerCase().includes(q)) return false;
         return true;
       });
@@ -2893,6 +2897,12 @@
               {#each assignRepresentsOptions() as r}
                 <option value={r}>{r}</option>
               {/each}
+            </select>
+            <select class="assign-filter-select" bind:value={assignFilterGender} aria-label="Filter by gender">
+              <option value="">All genders</option>
+              <option value="male">Male</option>
+              <option value="female">Female</option>
+              <option value="other">Other</option>
             </select>
           </div>
         </div>
