@@ -818,6 +818,8 @@ export async function propagateBracketWinnerByNames(
   aName: string,
   bName: string,
   winner: 'a' | 'b' | 'draw',
+  setsA?: number,
+  setsB?: number,
 ): Promise<void> {
   if (!tournamentKey || !roundKey || winner === 'draw') return;
   try {
@@ -833,6 +835,7 @@ export async function propagateBracketWinnerByNames(
     const bN = bName.trim().toLowerCase();
     const entry = Object.entries(all).find(([, v]) => {
       if (v?.roundKey !== roundKey) return false;
+      if (v?.completedAt) return false; // skip already-completed slots
       const vA = (v.aName ?? '').trim().toLowerCase();
       const vB = (v.bName ?? '').trim().toLowerCase();
       return (vA === aN && vB === bN) || (vA === bN && vB === aN);
@@ -843,6 +846,15 @@ export async function propagateBracketWinnerByNames(
     const [mid, slot] = entry;
     const slotA = (slot.aName ?? '').trim().toLowerCase();
     const slotWinner: 'a' | 'b' = slotA === aN ? winner : (winner === 'a' ? 'b' : 'a');
+
+    // Mark the planned slot complete so the bracket reflects the result and
+    // auto-advance can fire. setsA/setsB are caller-supplied; fall back to
+    // a minimal 1-0 result when the caller omits them (enough for the bracket).
+    let finalSetsA: number;
+    let finalSetsB: number;
+    if (typeof setsA === 'number') { finalSetsA = setsA; } else { finalSetsA = slotWinner === 'a' ? 1 : 0; }
+    if (typeof setsB === 'number') { finalSetsB = setsB; } else { finalSetsB = slotWinner === 'b' ? 1 : 0; }
+    await markPlannedComplete(mid, { setsA: finalSetsA, setsB: finalSetsB, winner: slotWinner }, '');
 
     await propagateBracketWinner(mid, slotWinner);
   } catch {

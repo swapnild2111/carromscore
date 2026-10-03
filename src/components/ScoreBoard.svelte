@@ -2326,6 +2326,8 @@
             tKey, rKey,
             cfg.playerA ?? '', cfg.playerB ?? '',
             result,
+            sideA.sets,
+            sideB.sets,
           );
         }
       });

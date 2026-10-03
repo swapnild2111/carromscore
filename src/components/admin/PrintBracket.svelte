@@ -2352,6 +2352,7 @@
   .cover-section-schedule {
     break-before: page;
     margin-top: 0;
+    padding-top: 1.5rem;
   }
   .roster {
     list-style: decimal;
@@ -2732,6 +2733,7 @@
   @media print {
     .bracket-page {
       page-break-before: always;
+      padding-top: 1.5rem;
     }
     .bracket-svg-wrap {
       overflow: visible;

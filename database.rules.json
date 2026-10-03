@@ -65,6 +65,8 @@
         "tournamentKey": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 60" },
         "round":      { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 60" },
         "roundKey":   { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 60" },
+        "matchOrder": { ".validate": "newData.isNumber() && newData.val() >= 1" },
+        "forfeit":    { ".validate": "newData.isBoolean()" },
         "$other":     { ".validate": false }
       }
     },

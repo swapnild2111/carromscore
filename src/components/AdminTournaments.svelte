@@ -2199,10 +2199,10 @@
               <span class="opt-title">Singles</span>
               <span class="opt-meta">1 vs 1</span>
             </label>
-            <label class:selected={editingDefaultMode === 'doubles'} onclick={() => (editingDefaultMode = 'doubles')}>
-              <input type="radio" name="edit-default-mode" value="doubles" bind:group={editingDefaultMode} disabled={saving} />
+            <label class="opt-unavailable">
+              <input type="radio" name="edit-default-mode" value="doubles" disabled />
               <span class="opt-title">Doubles</span>
-              <span class="opt-meta">2 vs 2</span>
+              <span class="opt-meta">Coming soon</span>
             </label>
           </fieldset>
           <label class="edit-field">
@@ -2771,10 +2771,10 @@
               <span class="opt-title">Singles</span>
               <span class="opt-meta">1 vs 1</span>
             </label>
-            <label class:selected={addingDefaultMode === 'doubles'} onclick={() => (addingDefaultMode = 'doubles')}>
-              <input type="radio" name="add-default-mode" value="doubles" bind:group={addingDefaultMode} disabled={saving} />
+            <label class="opt-unavailable">
+              <input type="radio" name="add-default-mode" value="doubles" disabled />
               <span class="opt-title">Doubles</span>
-              <span class="opt-meta">2 vs 2</span>
+              <span class="opt-meta">Coming soon</span>
             </label>
           </fieldset>
           <label class="edit-field">
@@ -3819,6 +3819,11 @@
     background: #1a1613;
   }
   fieldset.fmt-format label.selected .opt-title { color: var(--accent); }
+  fieldset.fmt-format label.opt-unavailable {
+    opacity: 0.38;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
   fieldset.fmt-format input[type="radio"] {
     opacity: 0;
     width: 1px;
