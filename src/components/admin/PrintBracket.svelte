@@ -1020,23 +1020,37 @@
       return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
     });
     const allRoundNames = new Set(sorted.map((r) => r.roundName));
-    const histMap = buildHistByRound(historyMatches, (r) => allRoundNames.has(r));
+    // histMap is keyed by the RESOLVED names (what actually played), so we must
+    // resolve placeholders first and look up history using those real names.
+    const resolvedNames = resolvedPlannedNames;
     const mergedMap = new Map<string, { label: string; slots: BracketSlot[] }>();
     for (const r of sorted) {
       const lbl = stageLabel(r.roundName);
       if (!mergedMap.has(lbl)) mergedMap.set(lbl, { label: lbl, slots: [] });
       const arr = mergedMap.get(lbl)!.slots;
+      // Build histMap after resolving names so history lookup uses real player names.
+      const histMap = buildHistByRound(historyMatches, (rn) => allRoundNames.has(rn));
       for (const m of r.matches) {
-        const h = findHistEntry(histMap, r.roundName, m.aName, m.bName, arr.length);
+        const resolved = resolvedNames.get(m.mid);
+        const aName = resolved?.aName ?? m.aName;
+        const bName = resolved?.bName ?? m.bName;
+        const h = findHistEntry(histMap, r.roundName, aName, bName, arr.length);
         const isDone = !!m.completedAt || !!h;
+        // When history sides are swapped vs planned sides, flip the winner.
+        const hWinnerCorrected = (() => {
+          if (!h) return undefined;
+          const swap = h.aName === bName.trim().toLowerCase() && h.bName === aName.trim().toLowerCase();
+          if (swap) return h.winner === 'a' ? 'b' : h.winner === 'b' ? 'a' : undefined;
+          return h.winner === 'a' ? 'a' : h.winner === 'b' ? 'b' : undefined;
+        })();
         arr.push({
           aId: m.aResolvedId,
-          aName: m.aName,
+          aName,
           bId: m.bResolvedId,
-          bName: m.bName,
+          bName,
           isDone,
           winner: m.result?.winner === 'a' ? 'a' : m.result?.winner === 'b' ? 'b'
-            : h?.winner === 'a' ? 'a' : h?.winner === 'b' ? 'b' : undefined,
+            : hWinnerCorrected,
           setsA: m.result?.setsA ?? h?.setsA,
           setsB: m.result?.setsB ?? h?.setsB,
           pointsA: h?.finalPointsA,
