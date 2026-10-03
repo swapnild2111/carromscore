@@ -1514,12 +1514,12 @@
       posLines.push(`<text x="${nameX}" y="${posY - 6}" font-size="10" font-weight="700" font-family="sans-serif" fill="#888" letter-spacing="0.08em">POSITIONAL</text>`);
       posY += LBL_H;
     }
+    const posCardW = Math.min(COL_W * 2 + COL_GAP, totalW - nameX * 2);
     for (const { displayLabel, matches } of uniquePosRounds) {
       posLines.push(`<text x="${nameX}" y="${posY + 13}" font-size="9" font-weight="700" font-family="sans-serif" fill="#aaa" letter-spacing="0.06em">${displayLabel}</text>`);
-      const boxStartX = nameX + NAME_W + ARM;
       for (let mi = 0; mi < matches.length; mi++) {
         const res = matches[mi]!;
-        const cx = boxStartX + mi * (COL_W + COL_GAP);
+        const cx = nameX + mi * (posCardW + COL_GAP);
         const cy = posY + LBL_H + BOX_H / 2;
         const sy = cy - BOX_H / 2;
         const isDone = res.isDone;
@@ -1528,14 +1528,14 @@
         const isPosPlaceholder = (n?: string) => /(?:Pre-qualify Winner|Winner \d+|Finalist \d+|(?:Loser|Winner) \d+)/i.test(n ?? '');
         const aN = res.aName ? (isPosPlaceholder(res.aName) ? '' : clip(esc(res.aName))) : 'TBD';
         const bN = res.bName ? (isPosPlaceholder(res.bName) ? '' : clip(esc(res.bName))) : 'TBD';
-        posLines.push(`<rect x="${cx}" y="${sy}" width="${COL_W}" height="${BOX_H}" rx="5" fill="#fafafa" stroke="#ccc" stroke-width="1"/>`);
-        posLines.push(`<line x1="${cx+1}" y1="${cy}" x2="${cx+COL_W-1}" y2="${cy}" stroke="#ebebeb" stroke-width="0.75"/>`);
+        posLines.push(`<rect x="${cx}" y="${sy}" width="${posCardW}" height="${BOX_H}" rx="5" fill="#fafafa" stroke="#ccc" stroke-width="1"/>`);
+        posLines.push(`<line x1="${cx+1}" y1="${cy}" x2="${cx+posCardW-1}" y2="${cy}" stroke="#ebebeb" stroke-width="0.75"/>`);
         posLines.push(`<text x="${cx+7}" y="${sy+16}" font-size="11" font-weight="${wA?'700':'400'}" opacity="${isDone&&!wA?'0.38':'1'}" font-family="sans-serif" fill="#333">${aN}</text>`);
         posLines.push(`<text x="${cx+7}" y="${sy+BOX_H-8}" font-size="11" font-weight="${wB?'700':'400'}" opacity="${isDone&&!wB?'0.38':'1'}" font-family="sans-serif" fill="#333">${bN}</text>`);
         const s = fmtScore(res);
         if (s) {
           const pw = Math.max(32, s.length * 6.5 + 10);
-          const px2 = cx + COL_W - pw - 4; const py2 = cy - 8;
+          const px2 = cx + posCardW - pw - 4; const py2 = cy - 8;
           posLines.push(`<rect x="${px2}" y="${py2}" width="${pw}" height="16" rx="7" fill="#f5f5f5" stroke="#e0e0e0" stroke-width="0.75"/>`);
           posLines.push(`<text x="${px2+pw/2}" y="${py2+11}" text-anchor="middle" font-size="9.5" font-family="sans-serif" fill="#444" font-weight="600">${s}</text>`);
         }
