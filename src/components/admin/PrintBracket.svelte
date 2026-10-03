@@ -1047,7 +1047,11 @@
     return [...mergedMap.values()];
   }
 
-  // Per-flight bracket SVGs — keyed by flight name. Uses history data when available.
+  // Per-flight bracket SVGs — keyed by flight name.
+  // Always built from /planned (preserves bracket order + position) enriched with
+  // history results. The history-direct path was removed because it ignored matchOrder,
+  // causing wrong bracket positions (losers shown advancing) and missing future-round
+  // slots when only early rounds had history data.
   // Skipped for standalone KO tournaments (standaloneKOBracketSVG handles those).
   const flightBracketSVGs = $derived.by<Map<string, string>>(() => {
     void tournamentTick;
@@ -1056,27 +1060,18 @@
 
     if (tournament?.format === 'knockout') return out;
 
-    if (historyBracketFlights.length > 0) {
-      // Use history data (has boardLog → per-set scores, deduped rounds)
-      for (const f of historyBracketFlights) {
-        const svg = buildFlightBracketSVG(f.cols);
-        if (svg) out.set(f.name, svg);
-      }
-    } else {
-      // Fallback to /planned data (no boardLog, set counts only)
-      for (const f of plannedBracketFlights) {
-        const cols = plannedFlightToCols(f.rounds);
-        const svg = buildFlightBracketSVG(cols);
-        if (svg) out.set(f.name, svg);
-      }
+    for (const f of plannedBracketFlights) {
+      const cols = plannedFlightToCols(f.rounds);
+      const svg = buildFlightBracketSVG(cols);
+      if (svg) out.set(f.name, svg);
     }
     return out;
   });
 
   // Active flights list — used by the template to decide what to render
   const activeBracketFlights = $derived.by<Array<{ name: string }>>(() => {
-    if (historyBracketFlights.length > 0) {
-      return historyBracketFlights.map((f) => ({ name: f.name }));
+    if (plannedBracketFlights.length > 0) {
+      return plannedBracketFlights.map((f) => ({ name: f.name }));
     }
     return plannedBracketFlights.map((f) => ({ name: f.name }));
   });
