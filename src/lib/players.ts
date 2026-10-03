@@ -1,4 +1,4 @@
-import { currentUser } from './auth';
+import { currentUser, awaitAuthReady } from './auth';
 import { logAudit } from './audit';
 
 /**
@@ -337,6 +337,7 @@ export async function createPlayer(
   if (existing) return { ok: true, player: existing };
   // v3.3 auth guard: fresh creates require a signed-in user so
   // `createdBy` can be stamped and the RTDB rule accepts the write.
+  await awaitAuthReady();
   const finalCreatedBy = meta.createdBy ?? currentUser()?.uid;
   if (!finalCreatedBy) {
     return {

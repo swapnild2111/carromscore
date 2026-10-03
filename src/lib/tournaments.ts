@@ -1,4 +1,4 @@
-import { currentUser } from './auth';
+import { currentUser, awaitAuthReady } from './auth';
 import { logAudit } from './audit';
 
 /**
@@ -319,6 +319,7 @@ export async function createOrTouchTournament(
   if (!key) return { ok: false, record: null, error: 'Name did not produce a valid key' };
   const now = Date.now();
   const existing = memoryStore.find((t) => t.key === key);
+  await awaitAuthReady();
   const creator = currentUser()?.uid;
   // v3.3 auth guard: fresh creates require a signed-in user so
   // `createdBy` gets stamped and the RTDB rule accepts the write.
