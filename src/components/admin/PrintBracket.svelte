@@ -1842,7 +1842,7 @@
       {/if}
 
       {#if mergedSchedule.length > 0}
-        <h2 class="cover-section" style="margin-top:1.4rem">
+        <h2 class="cover-section cover-section-schedule">
           Schedule ({matchCount} {matchCount === 1 ? 'match' : 'matches'})
         </h2>
         {#each mergedSchedule as round, ri (round.key)}
@@ -2348,6 +2348,10 @@
     text-transform: uppercase;
     letter-spacing: 0.06em;
     font-weight: 800;
+  }
+  .cover-section-schedule {
+    break-before: page;
+    margin-top: 0;
   }
   .roster {
     list-style: decimal;
