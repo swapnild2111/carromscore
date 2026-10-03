@@ -542,9 +542,6 @@
     font-size: 0.82rem;
     color: var(--fg);
     white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 16rem;
   }
   .td-players { min-width: 10rem; }
   .players-vs {
