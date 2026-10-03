@@ -2978,9 +2978,6 @@
     font-size: 0.68rem;
     color: var(--accent, #ffd54a);
     font-weight: 700;
-    max-width: 8rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
   .hist-td-name {
     font-weight: 700;
