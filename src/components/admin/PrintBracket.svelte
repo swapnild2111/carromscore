@@ -642,8 +642,17 @@
         // Keep the earliest order for sorting
         if (sr.order < bucket.order) bucket.order = sr.order;
       } else {
-        // Group / non-bracket round — normalise "Group RR" for round-robin
-        const displayName = sr.roundName === 'Group RR' ? 'Round Robin Group' : sr.roundName;
+        // Group / non-bracket round — normalise display names
+        const sfx = sr.roundName.replace(/^.*?—\s*/, '').trim();
+        const positionalDisplayMap: Record<string, string> = {
+          '3rd': '3rd Place', 'L-SF': '5th-8th Place', 'L-Final': '5th Place', 'L-3rd': '7th Place',
+        };
+        const sep = sr.roundName.indexOf(' — ');
+        const flight = sep !== -1 ? sr.roundName.slice(0, sep) : '';
+        const remapped = positionalDisplayMap[sfx];
+        const displayName = sr.roundName === 'Group RR' ? 'Round Robin Group'
+          : remapped ? (flight ? `${flight} — ${remapped}` : remapped)
+          : sr.roundName;
         out.set(sr.roundKey, { key: sr.roundKey, displayName, matches: sr.matches, order: sr.order });
       }
     }
@@ -656,14 +665,14 @@
       if (s.includes('round') && !s.includes('final')) return 1;
       if (s.includes('r16') || s.includes('r32') || s.includes('r64') || s.includes('r128')) return 1;
       if (s.includes('qf') || s.includes('quarter')) return 2;
-      if (s.includes('sf') || s.includes('semi')) return 3;
+      // SF/Semi only — must not match l-sf
+      if ((s === 'sf' || s === 'semi finals' || s.startsWith('semi')) && !s.startsWith('l-')) return 3;
       if (s === 'final' || s === 'finals') return 4;
-      if (s.includes('final')) return 4;
-      // Positional rounds sort after Final
-      if (s === '3rd place') return 5;
-      if (s.includes('5th-8th')) return 6;
-      if (s === '5th place') return 7;
-      if (s === '7th place') return 8;
+      // Positional rounds sort after Final (both old and new names)
+      if (s === '3rd place' || s === '3rd') return 5;
+      if (s.includes('5th-8th') || s === 'l-sf') return 6;
+      if (s === '5th place' || s === 'l-final') return 7;
+      if (s === '7th place' || s === 'l-3rd') return 8;
       return 9;
     };
     const isGroupRound = (name: string) => / — /.test(name) && !/^KO —/.test(name);
