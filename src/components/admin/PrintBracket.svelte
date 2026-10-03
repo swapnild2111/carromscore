@@ -645,7 +645,7 @@
         // Group / non-bracket round — normalise display names
         const sfx = sr.roundName.replace(/^.*?—\s*/, '').trim();
         const positionalDisplayMap: Record<string, string> = {
-          '3rd': '3rd Place', 'L-SF': '5th-8th Semi', 'L-Final': '5th Place', 'L-3rd': '7th Place',
+          '3rd': '3rd Place', 'L-SF': '5th-8th Place', 'L-Final': '5th Place', 'L-3rd': '7th Place',
         };
         const sep = sr.roundName.indexOf(' — ');
         const flight = sep !== -1 ? sr.roundName.slice(0, sep) : '';
@@ -670,7 +670,7 @@
       if (s === 'final' || s === 'finals') return 4;
       // Positional rounds sort after Final (both old and new names)
       if (s === '3rd place' || s === '3rd') return 5;
-      if (s.includes('5th-8th') || s === 'l-sf' || s === '5th-8th semi') return 6;
+      if (s.includes('5th-8th') || s === 'l-sf') return 6;
       if (s === '5th place' || s === 'l-final') return 7;
       if (s === '7th place' || s === 'l-3rd') return 8;
       return 9;
@@ -1476,8 +1476,8 @@
     const posRoundSuffixes: Array<{ sfx: string; display: string }> = [
       { sfx: '3rd Place',     display: '3RD PLACE' },
       { sfx: '3rd',           display: '3RD PLACE' },
-      { sfx: '5th-8th Place', display: '5TH–8TH SEMI' },
-      { sfx: 'L-SF',          display: '5TH–8TH SEMI' },
+      { sfx: '5th-8th Place', display: '5TH–8TH PLACE' },
+      { sfx: 'L-SF',          display: '5TH–8TH PLACE' },
       { sfx: '5th Place',     display: '5TH PLACE' },
       { sfx: 'L-Final',       display: '5TH PLACE' },
       { sfx: '7th Place',     display: '7TH PLACE' },
@@ -1944,15 +1944,12 @@
                 {#each round.matches as m, mi (m.mid)}
                   {@const matchNum = mergedSchedule.slice(0, ri).reduce((acc, r) => acc + r.matches.length, 0) + mi + 1}
                   {@const schedNames = resolvedPlannedNames.get(m.mid)}
-                  {@const isSchedPh = (n?: string) => !n || /(?:Winner|Loser|Finalist)\s+\d+/i.test(n)}
-                  {@const aN = schedNames?.aName ?? resolvedName(m.aResolvedId, m.aName)}
-                  {@const bN = schedNames?.bName ?? resolvedName(m.bResolvedId, m.bName)}
                   <tr>
                     <td class="sched-board">{qrMode === 'match' ? `M${matchNum}` : (m.board ? `B${m.board}` : '—')}</td>
                     <td class="sched-matchup">
-                      <span class="sched-player" class:sched-ph={isSchedPh(aN)}>{aN}{#if m.a2Name} + {resolvedName(m.a2ResolvedId, m.a2Name)}{/if}</span>
+                      <span class="sched-player">{schedNames?.aName ?? resolvedName(m.aResolvedId, m.aName)}{#if m.a2Name} + {resolvedName(m.a2ResolvedId, m.a2Name)}{/if}</span>
                       <span class="sched-vs">vs</span>
-                      <span class="sched-player" class:sched-ph={isSchedPh(bN)}>{bN}{#if m.b2Name} + {resolvedName(m.b2ResolvedId, m.b2Name)}{/if}</span>
+                      <span class="sched-player">{schedNames?.bName ?? resolvedName(m.bResolvedId, m.bName)}{#if m.b2Name} + {resolvedName(m.b2ResolvedId, m.b2Name)}{/if}</span>
                     </td>
                   </tr>
                 {/each}
@@ -2543,11 +2540,6 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     min-width: 0;
-  }
-  .sched-ph {
-    color: #bbb;
-    font-weight: 400;
-    font-style: italic;
   }
   .sched-vs {
     color: #bbb;
