@@ -443,15 +443,12 @@ export async function claimPlannedMatch(
   const effectiveUid = uid || currentUser()?.uid || '';
   if (!effectiveUid) return { ok: false, error: 'no auth uid' };
   try {
-    const [{ getDatabase, ref, get, set }] = await Promise.all([
-      import('firebase/database'),
-    ]);
+    const { getDatabase, ref, get, update } = await import('firebase/database');
     const db = getDatabase(firebaseApp());
     const snap = await get(ref(db, `planned/${mid}`));
     const val = snap.val() as Omit<PlannedMatch, 'mid'> | null;
     if (!val) return { ok: false, error: 'planned match not found' };
-    const next = { ...val, claimedBy: effectiveUid, claimedAt: Date.now() };
-    await set(ref(db, `planned/${mid}`), next);
+    await update(ref(db, `planned/${mid}`), { claimedBy: effectiveUid, claimedAt: Date.now() });
     return { ok: true, mid };
   } catch (err) {
     console.error('[claimPlanned] FAILED:', err);
