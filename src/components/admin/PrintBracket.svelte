@@ -49,7 +49,7 @@
     type Player,
   } from '../../lib/players';
   import { countryName, flagEmoji } from '../../lib/countries';
-  import { BRACKET_ROUND_RX } from '../../lib/bracket';
+  import { BRACKET_ROUND_RX, POSITIONAL_ROUND_RX } from '../../lib/bracket';
   import { koRoundsFromMatches, KO_BRACKET_ROUND_RX } from '../../lib/bracketSvg';
 
   let tournamentKey = $state<string>('');
@@ -622,7 +622,8 @@
   const mergedSchedule = $derived.by<MergedRound[]>(() => {
     const out = new Map<string, MergedRound>();
     for (const sr of schedule) {
-      const isBracket = BRACKET_ROUND_RX.test(sr.roundName);
+      const isPositional = POSITIONAL_ROUND_RX.test(sr.roundName);
+      const isBracket = !isPositional && BRACKET_ROUND_RX.test(sr.roundName);
       if (isBracket) {
         // Build a merge key: flight + stage label
         const sep = sr.roundName.indexOf(' — ');
@@ -656,8 +657,14 @@
       if (s.includes('r16') || s.includes('r32') || s.includes('r64') || s.includes('r128')) return 1;
       if (s.includes('qf') || s.includes('quarter')) return 2;
       if (s.includes('sf') || s.includes('semi')) return 3;
+      if (s === 'final' || s === 'finals') return 4;
       if (s.includes('final')) return 4;
-      return 5;
+      // Positional rounds sort after Final
+      if (s === '3rd place') return 5;
+      if (s.includes('5th-8th')) return 6;
+      if (s === '5th place') return 7;
+      if (s === '7th place') return 8;
+      return 9;
     };
     const isGroupRound = (name: string) => / — /.test(name) && !/^KO —/.test(name);
     return [...out.values()].sort((a, b) => {
@@ -1457,16 +1464,18 @@
     }
 
     // ── Positional bracket (3rd place + 5th–8th) ──────────────────────────────
-    const posRoundSuffixes = ['3rd', 'L-SF', 'L-Final', 'L-3rd'];
+    const posRoundSuffixes: Array<{ sfx: string; display: string }> = [
+      { sfx: '3rd Place',     display: '3RD PLACE' },
+      { sfx: '5th-8th Place', display: '5TH–8TH PLACE' },
+      { sfx: '5th Place',     display: '5TH PLACE' },
+      { sfx: '7th Place',     display: '7TH PLACE' },
+    ];
     const posRoundLabels: Array<{ label: string; displayLabel: string; matches: MatchInfo[] }> = [];
     for (const g of groups) {
-      for (const sfx of posRoundSuffixes) {
+      for (const { sfx, display } of posRoundSuffixes) {
         for (const rk of g.matchMap.keys()) {
           if (rk.replace(/^[^—]+—\s*/, '').trim() !== sfx) continue;
-          const displayMap: Record<string, string> = {
-            '3rd': '3RD PLACE', 'L-SF': '5TH–8TH SEMIS', 'L-Final': '5TH PLACE', 'L-3rd': '7TH PLACE',
-          };
-          posRoundLabels.push({ label: rk, displayLabel: displayMap[sfx] ?? sfx.toUpperCase(), matches: g.matchMap.get(rk) ?? [] });
+          posRoundLabels.push({ label: rk, displayLabel: display, matches: g.matchMap.get(rk) ?? [] });
         }
       }
     }
@@ -1490,7 +1499,7 @@
         const isDone = res.isDone;
         const wA = isDone && res.winner === 'a';
         const wB = isDone && res.winner === 'b';
-        const isPosPlaceholder = (n?: string) => /(?:Pre-qualify Winner|Winner \d+|Finalist \d+|Loser \d+)/i.test(n ?? '');
+        const isPosPlaceholder = (n?: string) => /(?:Pre-qualify Winner|Winner \d+|Finalist \d+|(?:Loser|Winner) \d+)/i.test(n ?? '');
         const aN = res.aName ? (isPosPlaceholder(res.aName) ? '' : clip(esc(res.aName))) : 'TBD';
         const bN = res.bName ? (isPosPlaceholder(res.bName) ? '' : clip(esc(res.bName))) : 'TBD';
         posLines.push(`<rect x="${cx}" y="${sy}" width="${COL_W}" height="${BOX_H}" rx="5" fill="#fafafa" stroke="#ccc" stroke-width="1"/>`);
@@ -1565,7 +1574,7 @@
     }
     const matchMap = new Map<string, MatchResult[]>();
     for (const m of plannedMatches) {
-      if (!m.round || !/— (Pre-qualify|R\d+|QF|SF|Final|3rd|L-SF|L-Final|L-3rd)/.test(m.round)) continue;
+      if (!m.round || !/— (Pre-qualify|R\d+|QF|SF|Final|3rd Place|5th-8th Place|5th Place|7th Place)/.test(m.round)) continue;
       const arr = matchMap.get(m.round) ?? [];
       const aName = m.aResolvedId ? (byId.get(m.aResolvedId) ?? m.aName) : m.aName;
       const bName = m.bResolvedId ? (byId.get(m.bResolvedId) ?? m.bName) : m.bName;

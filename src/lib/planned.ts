@@ -846,7 +846,7 @@ async function propagateBracketLoser(
   const sfx = roundSuffix(roundLabel);
   const isQF  = /^(QF|Quarter Finals)$/i.test(sfx);
   const isSF  = /^(SF|Semi Finals)$/i.test(sfx);
-  const isLSF = sfx === 'L-SF';
+  const isLSF = sfx === '5th-8th Place';
   if (!isQF && !isSF && !isLSF) return;
 
   const loserName     = winner === 'a' ? slot.bName      : slot.aName;
@@ -859,9 +859,9 @@ async function propagateBracketLoser(
   const db = getDatabase(firebaseApp());
 
   // Target loser round (created upfront by generateClassicGroupBracket / generateCombinedKnockout)
-  const targetLabel = isQF  ? `${pfx} — L-SF`
-                    : isSF  ? `${pfx} — 3rd`
-                    :         `${pfx} — L-3rd`;  // L-SF loser
+  const targetLabel = isQF  ? `${pfx} — 5th-8th Place`
+                    : isSF  ? `${pfx} — 3rd Place`
+                    :         `${pfx} — 7th Place`;  // 5th-8th Place loser
   const targetKey = normalizeKey(targetLabel);
 
   // Fetch existing planned slots for the target loser round
@@ -899,7 +899,7 @@ async function propagateBracketLoser(
     const checkSnap = await get(fbq(ref(db, 'planned'), orderByChild('tournamentKey'), equalTo(tournamentKey)));
     const checkAll  = checkSnap.val() as Record<string, Omit<PlannedMatch, 'mid'>> | null ?? {};
     const slots = Object.values(checkAll).filter((v) => v?.roundKey === targetKey);
-    const isPlaceholder = (n?: string) => !n || /Loser \d+|Winner \d+/i.test(n);
+    const isPlaceholder = (n?: string) => !n || /(?:Loser|Winner) \d+/i.test(n);
     const allReady = slots.length > 0 &&
       slots.every((v) => !isPlaceholder(v.aName) && !isPlaceholder(v.bName));
     if (allReady) {
