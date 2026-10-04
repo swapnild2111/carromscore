@@ -218,6 +218,7 @@
   let filterOrganizer = $state('');
   let filterCountry = $state('');
   let sortBy = $state<'recent' | 'oldest' | 'az' | 'za'>('az');
+  let activeTab = $state<'ongoing' | 'archive'>('ongoing');
 
   const isFiltered = $derived(
     query.trim() !== '' || filterType !== 'all' || filterFormat !== 'all' || filterOrganizer !== '' || filterCountry !== '' || sortBy !== 'az'
@@ -595,9 +596,12 @@
     return all.filter((t) => t.createdBy === myUid || !!(t.coOrganisers?.[myUid]));
   });
 
+  const ongoingList = $derived(() => list().filter((t) => !t.lockedAt));
+  const archiveList = $derived(() => list().filter((t) => !!t.lockedAt));
+
   /** Search-filtered, type-filtered, organizer-filtered, sorted view of `list()`. */
   const filtered = $derived(() => {
-    let all = list();
+    let all = activeTab === 'archive' ? archiveList() : ongoingList();
     const q = query.trim().toLowerCase();
     if (q) all = all.filter((t) => t.name.toLowerCase().includes(q) || t.key.toLowerCase().includes(q));
     if (filterType !== 'all') all = all.filter((t) => (t.type ?? 'open') === filterType);
@@ -1788,13 +1792,27 @@
     onClearSelection={clearSelection}
   />
 
-  <div class="topbar">
+  <div class="tab-bar">
     <button
       type="button"
-      class="btn btn-primary"
-      onclick={openAdd}
-      disabled={saving}
-    >+ Add tournament</button>
+      class="tab-btn"
+      class:tab-btn-active={activeTab === 'ongoing'}
+      onclick={() => { activeTab = 'ongoing'; resetFilters(); }}
+    >Ongoing <span class="tab-count">{ongoingList().length}</span></button>
+    <button
+      type="button"
+      class="tab-btn"
+      class:tab-btn-active={activeTab === 'archive'}
+      onclick={() => { activeTab = 'archive'; resetFilters(); }}
+    >Archive <span class="tab-count">{archiveList().length}</span></button>
+    {#if activeTab === 'ongoing'}
+      <button
+        type="button"
+        class="btn btn-primary tab-add-btn"
+        onclick={openAdd}
+        disabled={saving}
+      >+ Add tournament</button>
+    {/if}
   </div>
 
   <div class="controls">
@@ -1844,171 +1862,99 @@
     {/if}
   </div>
 
+  <div class="list">
   {#if filtered().length === 0}
     <p class="empty">
-      {query ? 'No tournaments match that search.' : 'No tournaments yet.'}
+      {query ? 'No tournaments match that search.' : activeTab === 'archive' ? 'No archived tournaments.' : 'No ongoing tournaments.'}
     </p>
   {:else}
-    <div class="tbl-wrap">
-      <table class="tbl">
-        <thead>
-          <tr>
-            <th class="th-check">
-              <label class="sel-all">
-                <input
-                  type="checkbox"
-                  checked={allSelected()}
-                  onchange={toggleSelectAll}
-                  aria-label={allSelected() ? 'Deselect all' : 'Select all'}
-                />
-              </label>
-            </th>
-            <th
-              class="th-sortable"
-              class:th-sort-asc={sortBy === 'az'}
-              class:th-sort-desc={sortBy === 'za'}
-              onclick={() => (sortBy = sortBy === 'az' ? 'za' : 'az')}
-              title="Sort by name"
-            >Name <span class="sort-icon" aria-hidden="true">{sortBy === 'az' ? '↑' : sortBy === 'za' ? '↓' : '↕'}</span></th>
-            <th class="th-actions">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {#each filtered() as t (t.key)}
-            <tr class="trow" class:trow-selected={selected.has(t.key)}>
-              <td class="td-check">
-                {#if canManageTournament(t)}
-                  <label class="row-check">
-                    <input
-                      type="checkbox"
-                      checked={selected.has(t.key)}
-                      onchange={() => toggleSel(t.key)}
-                      aria-label={`Select ${t.name}`}
-                    />
-                  </label>
-                {:else}
-                  <span class="row-check row-check-spacer" aria-hidden="true"></span>
+    <div class="card-grid">
+      {#each filtered() as t (t.key)}
+        <div class="t-card" class:t-card-selected={selected.has(t.key)} class:t-card-locked={!!t.lockedAt}>
+
+          <!-- Top row: name + setup CTA -->
+          <div class="t-card-top">
+            <div class="t-card-name-wrap">
+              {#if canManageTournament(t)}
+                <button
+                  type="button"
+                  class="t-card-name"
+                  onclick={() => !t.lockedAt && startEdit(t)}
+                  title={t.lockedAt ? 'Tournament locked' : 'Rename, change type, edit defaults'}
+                  class:t-card-name-locked={!!t.lockedAt}
+                >{t.name}</button>
+              {:else}
+                <div class="t-card-name t-card-name-static">{t.name}</div>
+              {/if}
+            </div>
+            {#if canManageTournament(t)}
+              <div class="t-card-primary">
+                {#if t.format === 'league'}
+                  <button type="button" class="btn btn-setup btn-league" onclick={() => startSetup(t)} title="League draw and schedule" disabled={!!t.lockedAt}>Setup</button>
+                {:else if t.format === 'knockout'}
+                  <button type="button" class="btn btn-setup btn-knockout" onclick={() => startSetup(t)} title="Knockout groups and bracket" disabled={!!t.lockedAt}>Setup</button>
+                {:else if t.format === 'roundrobin'}
+                  <button type="button" class="btn btn-setup btn-roundrobin" onclick={() => startSetup(t)} title="Round Robin schedule and bracket" disabled={!!t.lockedAt}>Setup</button>
                 {/if}
-              </td>
-              <td class="td-name">
-                <div class="row-name-cell">
-                  {#if canManageTournament(t)}
-                    <button
-                      type="button"
-                      class="row-name-btn"
-                      onclick={() => !t.lockedAt && startEdit(t)}
-                      title={t.lockedAt ? 'Tournament locked' : 'Rename, change type, edit defaults'}
-                      class:row-name-btn-locked={!!t.lockedAt}
-                    >{t.name}</button>
-                  {:else}
-                    <div class="row-name-text">{t.name}</div>
-                  {/if}
-                  {#if t.format === 'league'}
-                    <button
-                      type="button"
-                      class="btn btn-setup btn-league"
-                      onclick={() => startSetup(t)}
-                      title="League draw and schedule"
-                      disabled={!!t.lockedAt}
-                    >Setup</button>
-                  {:else if t.format === 'knockout'}
-                    <button
-                      type="button"
-                      class="btn btn-setup btn-knockout"
-                      onclick={() => startSetup(t)}
-                      title="Knockout groups and bracket"
-                      disabled={!!t.lockedAt}
-                    >Setup</button>
-                  {:else if t.format === 'roundrobin'}
-                    <button
-                      type="button"
-                      class="btn btn-setup btn-roundrobin"
-                      onclick={() => startSetup(t)}
-                      title="Round Robin schedule and bracket"
-                      disabled={!!t.lockedAt}
-                    >Setup</button>
-                  {/if}
-                  {#if canLockTournament(t)}
-                    <button
-                      type="button"
-                      class="btn btn-lock"
-                      class:btn-lock-active={!!t.lockedAt}
-                      onclick={() => toggleLock(t)}
-                      disabled={lockingKey === t.key}
-                      aria-label={t.lockedAt ? 'Unlock tournament' : 'Lock tournament'}
-                      title={t.lockedAt ? 'Locked — click to unlock' : 'Lock tournament (disable editing)'}
-                    >{t.lockedAt ? '🔒 Locked' : '🔓 Lock'}</button>
-                  {/if}
-                  {#if setupNoPlayersKey === t.key}
-                    <span class="setup-no-players-warn">
-                      ⚠ No players assigned — use the Players button first
-                    </span>
-                  {/if}
-                </div>
-                <div class="row-name-meta">
-                  {#if t.format === 'league'}
-                    <span class="chip chip-league" title="League format">LEAGUE</span>
-                  {:else if t.format === 'knockout'}
-                    <span class="chip chip-knockout" title="Knockout format">KNOCKOUT</span>
-                  {:else if t.format === 'roundrobin'}
-                    <span class="chip chip-roundrobin" title="Round Robin format">ROUND ROBIN</span>
-                  {:else}
-                    <span class="chip chip-normal" title="Regular format">REGULAR</span>
-                  {/if}
-                </div>
-              </td>
-              <td class="td-actions">
-                {#if canManageTournament(t)}
-                  <div class="row-actions">
-                    {#if t.type === 'closed' || t.format === 'knockout' || t.format === 'roundrobin' || t.format === 'league' || t.format === 'groupknockout'}
-                      <button
-                        type="button"
-                        class="btn"
-                        onclick={() => startAssign(t)}
-                        title="Assign players to this tournament"
-                        disabled={!!t.lockedAt}
-                      >Players{assignedCountByKey[t.key] !== undefined ? ` (${assignedCountByKey[t.key]})` : ''}</button>
-                    {/if}
-                    <button
-                      type="button"
-                      class="btn"
-                      onclick={() => startRounds(t)}
-                      title="Add / rename rounds"
-                      disabled={!!t.lockedAt}
-                    >Rounds{t.rounds && t.rounds.length > 0 ? ` (${t.rounds.length})` : ''}</button>
-                    <button
-                      type="button"
-                      class="btn"
-                      onclick={() => startBracket(t)}
-                      title="Add matches to bracket"
-                      disabled={!!t.lockedAt}
-                    >Bracket{plannedCountByKey[t.key] !== undefined && plannedCountByKey[t.key] > 0 ? ` (${plannedCountByKey[t.key]})` : ''}</button>
-                    <a
-                      class="btn btn-print"
-                      href={`${import.meta.env.BASE_URL}print-bracket/?tournament=${encodeURIComponent(t.key)}`}
-                      target="_blank"
-                      rel="noopener"
-                      aria-label="Print tournament pack"
-                      title="Print tournament pack (cover sheet + board QR stickers)"
-                    >🖨</a>
-                    {#if !t.lockedAt}
-                      <button
-                        type="button"
-                        class="btn btn-danger btn-delete-x"
-                        onclick={() => startDelete(t.key)}
-                        aria-label="Delete tournament"
-                        title="Delete tournament"
-                      >✕</button>
-                    {/if}
-                  </div>
-                {/if}
-              </td>
-            </tr>
-          {/each}
-        </tbody>
-      </table>
+              </div>
+            {/if}
+          </div>
+
+          <!-- Chips row: format + lock -->
+          <div class="t-card-chips">
+            {#if t.format === 'league'}
+              <span class="chip chip-league" title="League format">LEAGUE</span>
+            {:else if t.format === 'knockout'}
+              <span class="chip chip-knockout" title="Knockout format">KNOCKOUT</span>
+            {:else if t.format === 'roundrobin'}
+              <span class="chip chip-roundrobin" title="Round Robin format">ROUND ROBIN</span>
+            {:else}
+              <span class="chip chip-normal" title="Regular format">REGULAR</span>
+            {/if}
+            {#if canLockTournament(t)}
+              <button
+                type="button"
+                class="lock-chip"
+                class:lock-chip-locked={!!t.lockedAt}
+                onclick={() => toggleLock(t)}
+                disabled={lockingKey === t.key}
+                aria-label={t.lockedAt ? 'Unlock tournament' : 'Lock tournament'}
+                title={t.lockedAt ? 'Locked — click to unlock' : 'Click to lock tournament'}
+              >🔒 {t.lockedAt ? 'Locked' : 'Lock'}</button>
+            {/if}
+          </div>
+
+          {#if setupNoPlayersKey === t.key}
+            <span class="setup-no-players-warn">
+              ⚠ No players assigned — use the Players button first
+            </span>
+          {/if}
+
+          <!-- Action strip -->
+          {#if canManageTournament(t)}
+            <div class="t-card-actions">
+              {#if t.type === 'closed' || t.format === 'knockout' || t.format === 'roundrobin' || t.format === 'league' || t.format === 'groupknockout'}
+                <button type="button" class="act-btn" onclick={() => startAssign(t)} title="Assign players to this tournament" disabled={!!t.lockedAt}>
+                  Players{#if assignedCountByKey[t.key] !== undefined}<span class="act-count">{assignedCountByKey[t.key]}</span>{/if}
+                </button>
+              {/if}
+              <button type="button" class="act-btn" onclick={() => startRounds(t)} title="Add / rename rounds" disabled={!!t.lockedAt}>
+                Rounds{#if t.rounds && t.rounds.length > 0}<span class="act-count">{t.rounds.length}</span>{/if}
+              </button>
+              <button type="button" class="act-btn" onclick={() => startBracket(t)} title="Add matches to bracket" disabled={!!t.lockedAt}>
+                Bracket{#if plannedCountByKey[t.key] !== undefined && plannedCountByKey[t.key] > 0}<span class="act-count">{plannedCountByKey[t.key]}</span>{/if}
+              </button>
+              <a class="act-btn act-btn-print" href={`${import.meta.env.BASE_URL}print-bracket/?tournament=${encodeURIComponent(t.key)}`} target="_blank" rel="noopener" aria-label="Print tournament pack" title="Print tournament pack">🖨 Print</a>
+              {#if !t.lockedAt}
+                <button type="button" class="act-btn act-btn-danger" onclick={() => startDelete(t.key)} aria-label="Delete tournament" title="Delete tournament">Delete</button>
+              {/if}
+            </div>
+          {/if}
+        </div>
+      {/each}
     </div>
   {/if}
+  </div>
 
   <!--
     Edit tournament dialog (v3.2). Consolidates rename + type/state
@@ -2280,6 +2226,7 @@
           {#if coOrgLoading}
             <p class="empty">Loading…</p>
           {:else}
+            {@const canManageCoOrgs = role?.isSuper || editingTournament?.createdBy === currentUser()?.uid}
             <ul class="uid-list">
               <!-- Creator row (always shown so they can be set back as primary) -->
               {#if editingTournament?.createdBy}
@@ -2289,7 +2236,7 @@
                   <span class="uid-label">{coOrgLabelForUid(creatorUid)} <em class="uid-role-tag">creator</em></span>
                   {#if isCreatorPrimary}
                     <span class="chip chip-primary" title="This organiser's logo appears in print headers">★ Primary</span>
-                  {:else}
+                  {:else if canManageCoOrgs}
                     <button
                       type="button"
                       class="btn btn-sm"
@@ -2306,7 +2253,7 @@
                   <span class="uid-label">{coOrgLabelForUid(uid)}</span>
                   {#if isPrimary}
                     <span class="chip chip-primary" title="This organiser's logo appears in print headers">★ Primary</span>
-                  {:else}
+                  {:else if canManageCoOrgs}
                     <button
                       type="button"
                       class="btn btn-sm"
@@ -2315,37 +2262,41 @@
                       title="Set as primary organiser for print headers"
                     >Make Primary</button>
                   {/if}
-                  <button
-                    type="button"
-                    class="btn btn-danger btn-sm"
-                    onclick={() => removeCoOrg(uid)}
-                    disabled={saving}
-                  >Remove</button>
+                  {#if canManageCoOrgs}
+                    <button
+                      type="button"
+                      class="btn btn-danger btn-sm"
+                      onclick={() => removeCoOrg(uid)}
+                      disabled={saving}
+                    >Remove</button>
+                  {/if}
                 </li>
               {/each}
             </ul>
+            {#if canManageCoOrgs}
+              <div class="uid-add">
+                <select
+                  class="user-picker"
+                  bind:value={coOrgPickerValue}
+                  disabled={saving}
+                  aria-label="Pick a co-organiser"
+                >
+                  <option value="">
+                    {#if coOrgLoading || usersLoading}Loading…{:else}Select a user…{/if}
+                  </option>
+                  {#each eligibleCoOrgs() as o (o.uid)}
+                    <option value={o.uid}>{o.name}</option>
+                  {/each}
+                </select>
+                <button
+                  type="button"
+                  class="btn btn-primary"
+                  onclick={addCoOrg}
+                  disabled={saving || !coOrgPickerValue}
+                >Add</button>
+              </div>
+            {/if}
           {/if}
-          <div class="uid-add">
-            <select
-              class="user-picker"
-              bind:value={coOrgPickerValue}
-              disabled={saving}
-              aria-label="Pick a co-organiser"
-            >
-              <option value="">
-                {#if coOrgLoading || usersLoading}Loading…{:else}Select a user…{/if}
-              </option>
-              {#each eligibleCoOrgs() as o (o.uid)}
-                <option value={o.uid}>{o.name}</option>
-              {/each}
-            </select>
-            <button
-              type="button"
-              class="btn btn-primary"
-              onclick={addCoOrg}
-              disabled={saving || !coOrgPickerValue}
-            >Add</button>
-          </div>
         </fieldset>
 
         <div class="dialog-actions">
@@ -3325,10 +3276,55 @@
 
   /* Create-record button lives up top so it stays visible when the
      list is long and the bulk-action bar is sticky above. */
-  .topbar {
+  .tab-bar {
     display: flex;
-    justify-content: flex-end;
-    padding: 0 0.25rem;
+    gap: 0.25rem;
+    margin-top: 0.75rem;
+    border-bottom: 1px solid #2a2a2a;
+    align-items: flex-end;
+  }
+  .tab-add-btn {
+    margin-left: auto;
+    margin-bottom: 0.35rem;
+    font-size: 0.85rem;
+    padding: 0.35rem 0.75rem;
+  }
+  .tab-btn {
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 0.5rem 1rem;
+    margin-bottom: -1px;
+    color: var(--fg-muted, #888);
+    font: inherit;
+    font-size: 0.9rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .tab-btn:hover {
+    color: var(--fg);
+  }
+  .tab-btn-active {
+    color: var(--fg);
+    border-bottom-color: var(--accent);
+    font-weight: 600;
+  }
+  .tab-count {
+    background: #2a2a2a;
+    color: var(--fg-muted, #888);
+    font-size: 0.75rem;
+    font-weight: 500;
+    padding: 0.1rem 0.4rem;
+    border-radius: 99px;
+    min-width: 1.4rem;
+    text-align: center;
+  }
+  .tab-btn-active .tab-count {
+    background: var(--accent);
+    color: #111;
   }
 
   /* Search bar — same treatment as AdminPlayers / AdminHistoryCleanup. */
@@ -3438,65 +3434,144 @@
   }
 
   /* Table layout for Tournaments list */
-  .tbl-wrap {
-    overflow-x: auto;
-    overflow-y: auto;
-    max-height: 70vh;
-    border-radius: 0.5rem;
-    border: 1px solid rgba(255, 255, 255, 0.08);
+  .card-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
   }
-  .tbl {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.88rem;
+  .t-card {
+    background: #141414;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 0.75rem;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    transition: border-color 0.15s, background 0.15s;
   }
-  .tbl thead tr {
-    background: #1a1a1a;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  .t-card:hover {
+    border-color: rgba(255, 255, 255, 0.13);
+    background: #181818;
   }
-  .tbl thead {
-    position: sticky;
-    top: 0;
-    z-index: 2;
+  .t-card-selected {
+    border-color: rgba(255, 213, 74, 0.3) !important;
+    background: rgba(255, 213, 74, 0.03) !important;
   }
-  .tbl th {
-    padding: 0.55rem 0.75rem;
+  .t-card-locked { opacity: 0.72; }
+
+  /* Top row */
+  .t-card-top {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.75rem 1rem 0;
+  }
+  .t-card-check {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+  }
+  .t-card-name-wrap {
+    flex: 1;
+    min-width: 0;
+  }
+  .t-card-name {
+    background: none;
+    border: none;
+    padding: 0;
+    font: inherit;
+    font-weight: 600;
+    font-size: 0.92rem;
+    color: var(--fg);
     text-align: left;
-    font-size: 0.75rem;
-    font-weight: 700;
-    color: var(--muted);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    white-space: nowrap;
-    user-select: none;
-    background: #1a1a1a;
-  }
-  .th-sortable {
     cursor: pointer;
+    word-break: break-word;
+    white-space: normal;
+    line-height: 1.35;
   }
-  .th-sortable:hover { color: var(--fg); }
-  .th-sort-asc, .th-sort-desc { color: var(--accent, #ffd54a); }
-  .sort-icon { font-style: normal; opacity: 0.7; margin-left: 0.2em; }
-  .th-check { width: 2rem; padding: 0.55rem 0.4rem; }
-  .th-actions { width: 1%; white-space: nowrap; }
+  .t-card-name:hover { color: var(--accent); }
+  .t-card-name-static { cursor: default; }
+  .t-card-name-static:hover { color: var(--fg); }
+  .t-card-name-locked { cursor: default; opacity: 0.75; }
+  .t-card-name-locked:hover { color: var(--fg); }
+  .t-card-primary { flex-shrink: 0; }
 
-  .trow {
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-    transition: background 0.1s;
+  /* Chips row */
+  .t-card-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    align-items: center;
+    padding: 0.4rem 1rem 0.6rem;
   }
-  .trow:last-child { border-bottom: none; }
-  .trow:hover { background: rgba(255, 255, 255, 0.02); }
-  .trow-selected { background: rgba(255, 213, 74, 0.06) !important; }
-  .trow-selected td { border-color: rgba(255, 213, 74, 0.15); }
 
-  .tbl td {
-    padding: 0.55rem 0.75rem;
-    vertical-align: middle;
+  /* Action strip */
+  .t-card-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    align-items: center;
+    padding: 0.5rem 0.65rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    background: rgba(0, 0, 0, 0.15);
   }
-  .td-check { width: 2rem; padding: 0.55rem 0.4rem; }
-  .td-name { min-width: 12rem; max-width: 22rem; word-break: break-word; }
-  .td-actions { white-space: nowrap; width: 1%; }
-  .td-empty { color: var(--muted); opacity: 0.4; }
+  .act-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font: inherit;
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: #888;
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 0.45rem;
+    padding: 0.3rem 0.6rem;
+    cursor: pointer;
+    text-decoration: none;
+    transition: color 0.12s, background 0.12s, border-color 0.12s;
+    white-space: nowrap;
+  }
+  .act-btn:hover {
+    color: var(--fg);
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.1);
+  }
+  .act-btn:disabled {
+    opacity: 0.35;
+    cursor: default;
+    pointer-events: none;
+  }
+  .act-btn-icon {
+    padding: 0.3rem 0.5rem;
+    font-size: 0.85rem;
+  }
+  .act-btn-danger { color: #c0524a; }
+  .act-btn-danger:hover {
+    color: #ef4444;
+    background: rgba(239, 68, 68, 0.08);
+    border-color: rgba(239, 68, 68, 0.2);
+  }
+  .act-count {
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: #666;
+    background: rgba(255, 255, 255, 0.07);
+    padding: 0.05rem 0.4rem;
+    border-radius: 99px;
+    font-variant-numeric: tabular-nums;
+  }
+  .act-sep {
+    width: 1px;
+    height: 14px;
+    background: rgba(255, 255, 255, 0.08);
+    flex-shrink: 0;
+    margin: 0 0.1rem;
+  }
+  .act-btn-print {
+    margin-left: auto;
+  }
+
   .row-name-text {
     color: var(--fg);
     font-weight: 600;
@@ -3642,21 +3717,37 @@
     border-color: rgba(220, 60, 60, 0.7);
     background: rgba(220, 60, 60, 0.15);
   }
-  .btn-lock {
-    font-size: 0.9rem;
-    line-height: 1;
-    padding: 0.2rem 0.45rem;
-    opacity: 0.55;
-    border-color: transparent;
-    background: transparent;
-    transition: opacity 0.15s;
+  .lock-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    font: inherit;
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 0.18rem 0.55rem;
+    border-radius: 99px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--muted, #888);
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
   }
-  .btn-lock:hover { opacity: 1; }
-  .btn-lock-active {
-    opacity: 1;
-    color: #f0a020;
-    border-color: rgba(240, 160, 32, 0.35);
-    background: rgba(240, 160, 32, 0.1);
+  .lock-chip:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.18);
+    color: var(--fg);
+  }
+  .lock-chip-locked {
+    background: rgba(255, 213, 74, 0.12);
+    border-color: rgba(255, 213, 74, 0.35);
+    color: var(--accent, #ffd54a);
+  }
+  .lock-chip-locked:hover {
+    background: rgba(255, 213, 74, 0.2);
+    border-color: rgba(255, 213, 74, 0.55);
+    color: var(--accent, #ffd54a);
   }
   .row-name-btn-locked {
     cursor: default;
