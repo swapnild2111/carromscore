@@ -3,7 +3,7 @@
  * appVersionName. The update-check compares this string against the
  * `tag_name` on the latest GitHub Release.
  */
-export const APP_VERSION = '5.2.5';
+export const APP_VERSION = '5.3.0';
 
 /**
  * Short bullet points shown in the "What's new" popup when a service-worker
