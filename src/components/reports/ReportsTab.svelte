@@ -995,6 +995,13 @@
 
   function stageShortLabel(roundName: string): string {
     const n = roundName.replace(/^.*?—\s*/, '');
+    // Positional rounds must be checked before the generic "Final"/"SF" catches
+    // because "L-Final" contains "Final" and would otherwise collapse with "Final".
+    if (/3rd & 4th Position/i.test(n) || /^3rd Place$/i.test(n) || /^3rd$/i.test(n)) return '3rd & 4th Position';
+    if (/5th & 6th Position/i.test(n) || /^5th Place$/i.test(n) || /^L-Final$/i.test(n)) return '5th & 6th Position';
+    if (/7th & 8th Position/i.test(n) || /^7th Place$/i.test(n) || /^L-3rd$/i.test(n)) return '7th & 8th Position';
+    if (/5th.8th Place/i.test(n) || /^L-SF$/i.test(n)) return '5th–8th Position';
+    if (/^Final$/i.test(n) || /^Finals$/i.test(n)) return 'Finals';
     if (n.includes('Final')) return 'Finals';
     if (n.includes('SF')) return 'Semi Finals';
     if (n.includes('QF')) return 'Quarter Finals';
@@ -1038,8 +1045,8 @@
         if (!stageMap.has(label)) stageMap.set(label, []);
         stageMap.get(label)!.push(rr);
       }
-      const stageGroups: StageGroup[] = [...stageMap.entries()].map(([stageName, sRounds]) => ({
-        stageKey: `${flightName.toLowerCase().replace(/\s+/g, '-')}-${stageName}`,
+      const stageGroups: StageGroup[] = [...stageMap.entries()].map(([stageName, sRounds], idx) => ({
+        stageKey: `${flightName.toLowerCase().replace(/\s+/g, '-')}-${idx}-${stageName}`,
         stageName,
         displayName: `${flightName} — ${stageName}`,
         rounds: sRounds,
@@ -1128,7 +1135,7 @@
       aria-label="Tournament"
     >
       <option value="__unset__" disabled selected={selection === undefined}>Select a tournament…</option>
-      {#each options as opt (opt.key ?? '__default__')}
+      {#each options.filter((o, i, a) => a.findIndex(x => (x.key ?? '__default__') === (o.key ?? '__default__')) === i) as opt (opt.key ?? '__default__')}
         <option value={opt.key === null ? '__default__' : opt.key}>{opt.label}</option>
       {/each}
     </select>
@@ -1145,7 +1152,7 @@
         aria-label="Round"
       >
         <option value="__all__">All rounds</option>
-        {#each report.roundReports ?? [] as rr (rr.roundKey)}
+        {#each (report.roundReports ?? []).filter((r, i, a) => a.findIndex(x => x.roundKey === r.roundKey) === i) as rr (rr.roundKey)}
           <option value={rr.roundKey}>{roundDropdownLabel(rr.roundName)}</option>
         {/each}
       </select>
@@ -1455,7 +1462,7 @@
         <div class="rounds-section">
           <h3 class="section-hdr">Group standings</h3>
           <div class="group-grid">
-            {#each groupRounds as rr (rr.roundKey)}
+            {#each groupRounds.filter((r, i, a) => a.findIndex(x => x.roundKey === r.roundKey) === i) as rr (rr.roundKey)}
               <div class="group-card">
                 <div class="group-card-hdr">
                   <span class="group-card-name">{rr.roundName}</span>
