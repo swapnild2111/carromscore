@@ -1395,10 +1395,30 @@
       // them out of both the local Set (so the header size + row
       // count agree) and RTDB (so the ghost doesn't come back on
       // reopen). Fire-and-forget on the deletes.
-      const known = new Set(loadAllPlayers().map((p) => p.id));
+      //
+      // Race-condition guard: a player created by a co-organiser may
+      // not have arrived via the /players onValue subscription yet.
+      // For IDs absent locally, do point-reads against Firebase before
+      // deciding they are ghosts — avoids unassigning real players.
+      const knownLocal = new Set(loadAllPlayers().map((p) => p.id));
+      const unknownIds = [...raw].filter((id) => !knownLocal.has(id));
+      let confirmedGhosts = new Set<string>();
+      if (unknownIds.length > 0) {
+        try {
+          const [{ firebaseApp }, { getDatabase, ref, get }] = await Promise.all([
+            import('../lib/firebase'),
+            import('firebase/database'),
+          ]);
+          const db = getDatabase(firebaseApp());
+          const checks = await Promise.all(
+            unknownIds.map((id) => get(ref(db, `players/${id}`)).then((s) => ({ id, exists: s.exists() })))
+          );
+          confirmedGhosts = new Set(checks.filter((c) => !c.exists).map((c) => c.id));
+        } catch { /* keep unknownIds as non-ghosts on network error */ }
+      }
       const cleaned = new Set<string>();
       for (const id of raw) {
-        if (known.has(id)) {
+        if (!confirmedGhosts.has(id)) {
           cleaned.add(id);
         } else if (assignKey) {
           void unassignPlayer(assignKey, id);
@@ -4056,6 +4076,8 @@
     padding: 0.7rem 0.85rem 0.5rem;
     border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: 0.5rem;
+    min-width: 0;
+    overflow: hidden;
   }
   .edit-fieldset legend {
     padding: 0 0.4rem;
@@ -4474,7 +4496,7 @@
     border-color: rgba(239, 83, 80, 0.4);
   }
   .btn-danger:hover:not(:disabled) { background: rgba(239, 83, 80, 0.22); }
-  .btn-sm { padding: 0.25rem 0.6rem; font-size: 0.75rem; }
+  .btn-sm { padding: 0.25rem 0.6rem; font-size: 0.75rem; flex-shrink: 0; white-space: nowrap; }
   /* Print icon anchor: highlighted accent button so it visibly reads
      as the tournament's primary output action (organiser thinks:
      'I'm ready — print the pack'). Same shape as sibling .btn
@@ -4592,6 +4614,8 @@
     max-width: 28rem;
     width: 100%;
     margin: auto;
+    box-sizing: border-box;
+    min-width: 0;
   }
   .dialog-card-wide {
     max-width: 32rem;
@@ -4672,6 +4696,8 @@
     padding: 0.4rem 0.55rem;
     background: rgba(255, 255, 255, 0.04);
     border-radius: 0.4rem;
+    min-width: 0;
+    overflow: hidden;
   }
   .uid-row code {
     flex: 1;
@@ -4685,6 +4711,7 @@
      replaces the raw uid code once we can resolve it via /users. */
   .uid-label {
     flex: 1;
+    min-width: 0;
     font-size: 0.85rem;
     color: var(--fg);
     overflow: hidden;
@@ -4711,6 +4738,7 @@
     font-size: 0.75rem;
     font-weight: 600;
     white-space: nowrap;
+    flex-shrink: 0;
   }
   .uid-add {
     display: flex;
