@@ -55,6 +55,7 @@
     return Object.values(users)
       .filter((u) => {
         if (already.has(u.uid ?? '')) return false;
+        if (!u.email) return false; // can't onboard without an email
         if (!q) return true;
         return (
           (u.displayName ?? '').toLowerCase().includes(q) ||
@@ -207,508 +208,606 @@
     </div>
   {/if}
 
-  <div class="lead">
-    <p>
-      Two role types: <strong>super-admin</strong> (full CRUD, seeded
-      to the maintainer only) and <strong>organiser</strong> (edit
-      matches tagged to specific tournaments). RTDB rules enforce
-      access; this tab is the maintainer's UI for granting organiser
-      access to teammates.
-    </p>
-    <p class="lead-sub">
-      To grant access: the recipient signs in with Google at
-      <code>/carromscore/</code> once (via Admin in the footer).
-      They'll then appear in the autocomplete below.
-    </p>
-  </div>
-
-  <h3 class="section-hdr">Super-admins</h3>
-  {#if loading}
-    <p class="empty">Loading…</p>
-  {:else if Object.keys(supers).length === 0}
-    <p class="empty">No super-admins recorded.</p>
-  {:else}
-    <ul class="list">
-      {#each Object.keys(supers) as uid (uid)}
-        {@const lbl = userLabel(uid)}
-        <li class="row">
-          <div class="row-name">
-            <div class="row-title">
-              {#if lbl.name}
-                <span class="who-name">{lbl.name}</span>
-              {/if}
-              {#if lbl.email}
-                <span class="who-email">{lbl.email}</span>
-              {:else if !lbl.hasMirror}
-                <code class="uid">{uid}</code>
-              {/if}
-              {#if uid === meUid}<span class="chip chip-you">You</span>{/if}
-            </div>
-          </div>
-          <span class="badge badge-super">SUPER</span>
-        </li>
-      {/each}
-    </ul>
-    <p class="note">
-      Super role is intentionally uneditable from this UI — only the
-      maintainer holds it. To change, edit <code>/adminRoles</code>
-      in the Firebase console directly.
-    </p>
-  {/if}
-
-  <h3 class="section-hdr">Organisers</h3>
-  <p class="lead-sub">
-    Onboard someone as an organiser once. From then on they can
-    create their own tournaments + players and manage what they
-    created. Revoking their role doesn't delete anything they made
-    — those records become super-only from then on.
-  </p>
-  <div class="add-form">
-    <label class="add-uid">
-      <span>Name or email address</span>
-      <div class="user-combo">
-        <input
-          type="text"
-          bind:value={addEmail}
-          placeholder="Type a name or email…"
-          aria-label="Recipient name or email"
-          aria-expanded={addDropdownOpen && addSuggestions.length > 0}
-          aria-autocomplete="list"
-          role="combobox"
-          maxlength="128"
-          autocomplete="off"
-          oninput={() => { addDropdownOpen = true; addHighlight = 0; }}
-          onfocus={() => { addDropdownOpen = true; addHighlight = -1; }}
-          onblur={() => setTimeout(() => { addDropdownOpen = false; }, 200)}
-          onkeydown={onAddKeydown}
-        />
-        {#if addDropdownOpen && addSuggestions.length > 0}
-          <ul class="user-suggest" role="listbox">
-            {#each addSuggestions as u, i (u.uid ?? u.email)}
-              <li role="option" aria-selected={i === addHighlight}>
-                <button
-                  type="button"
-                  class:suggest-active={i === addHighlight}
-                  onmouseenter={() => (addHighlight = i)}
-                  onmousedown={(e) => e.preventDefault()}
-                  onclick={() => pickSuggestion(u)}
-                >
-                  {#if u.displayName}
-                    <span class="u-name">{u.displayName}</span>
-                  {/if}
-                  <span class="u-email">{u.email}</span>
-                </button>
-              </li>
-            {/each}
-          </ul>
-        {:else if addDropdownOpen && addEmail.trim() && addSuggestions.length === 0}
-          <div class="user-suggest user-suggest-empty">
-            No signed-in user found — will onboard as new email
-          </div>
+  <!-- Super-admins -->
+  <div class="section-block">
+    <div class="section-head">
+      <div class="section-head-left">
+        <span class="section-icon section-icon-super">
+          <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14"><path fill-rule="evenodd" d="M9.664 1.319a.75.75 0 01.672 0 41.059 41.059 0 018.198 5.424.75.75 0 01-.254 1.285 31.372 31.372 0 00-7.86 3.83.75.75 0 01-.84 0 31.508 31.508 0 00-2.08-1.287V9.48a31.525 31.525 0 00-2.485.576 41.272 41.272 0 00-.395-5.043A41.073 41.073 0 019.664 1.32zm-4.251 9.04a31.268 31.268 0 01-1.62 1.428A31.532 31.532 0 012.149 12.5a.75.75 0 00-.568 1.37 33.094 33.094 0 013.076 1.484c.5.304.98.608 1.442.912v-.003a32.014 32.014 0 011.1.748 32.14 32.14 0 001.05-.748v.003a32.014 32.014 0 011.442-.912 33.26 33.26 0 013.076-1.484.75.75 0 00-.569-1.37 31.532 31.532 0 01-1.779-.822A31.268 31.268 0 0110 12.44a31.268 31.268 0 01-1.62-1.428 31.268 31.268 0 01-2.967-1.652z" clip-rule="evenodd"/></svg>
+        </span>
+        <h3 class="section-title">Super-admins</h3>
+        {#if !loading}
+          <span class="section-count">{Object.keys(supers).length}</span>
         {/if}
       </div>
-    </label>
-    <button
-      type="button"
-      class="btn btn-primary"
-      onclick={onboardOrganiser}
-      disabled={saving || !addEmail.trim()}
-    >{saving ? 'Onboarding…' : 'Onboard as organiser'}</button>
-  </div>
+    </div>
 
-  {#if loading}
-    <p class="empty">Loading…</p>
-  {:else if organiserUids.size === 0}
-    <p class="empty">No organisers onboarded yet.</p>
-  {:else}
-    <ul class="list">
-      {#each [...organiserUids] as uid (uid)}
-        {@const lbl = userLabel(uid)}
-        <li class="row row-org">
-          <div class="row-name">
-            <div class="row-title">
+    {#if loading}
+      <p class="empty">Loading…</p>
+    {:else if Object.keys(supers).length === 0}
+      <p class="empty">No super-admins recorded.</p>
+    {:else}
+      <ul class="person-list">
+        {#each Object.keys(supers) as uid (uid)}
+          {@const lbl = userLabel(uid)}
+          <li class="person-row">
+            <div class="person-avatar person-avatar-super">
+              {(lbl.name || lbl.email || uid).charAt(0).toUpperCase()}
+            </div>
+            <div class="person-info">
               {#if lbl.name}
-                <span class="who-name">{lbl.name}</span>
+                <span class="person-name">{lbl.name}</span>
               {/if}
               {#if lbl.email}
-                <span class="who-email">{lbl.email}</span>
+                <span class="person-email">{lbl.email}</span>
               {:else if !lbl.hasMirror}
                 <code class="uid">{uid}</code>
               {/if}
-              <span class="badge badge-organiser">ORGANISER</span>
             </div>
-          </div>
-          <div class="row-actions">
-            {#if confirmingRevokeUid === uid}
-              <span class="revoke-hint">Revoke this organiser?</span>
-              <button
-                type="button"
-                class="btn btn-danger"
-                onclick={() => confirmRevoke(uid)}
-                disabled={saving}
-              >{saving ? 'Revoking…' : 'Confirm revoke'}</button>
-              <button
-                type="button"
-                class="btn"
-                onclick={cancelRevoke}
-                disabled={saving}
-              >Cancel</button>
-            {:else}
-              <button
-                type="button"
-                class="btn btn-danger"
-                onclick={() => startRevoke(uid)}
-                disabled={saving}
-              >Revoke</button>
-            {/if}
-          </div>
-        </li>
-      {/each}
-    </ul>
-  {/if}
+            <div class="person-badges">
+              {#if uid === meUid}<span class="chip chip-you">You</span>{/if}
+              <span class="badge badge-super">Super</span>
+            </div>
+          </li>
+        {/each}
+      </ul>
+      <p class="note">
+        Super role is uneditable from this UI — edit <code>/adminRoles</code> in Firebase console directly.
+      </p>
+    {/if}
+  </div>
+
+  <!-- Organisers -->
+  <div class="section-block">
+    <div class="section-head">
+      <div class="section-head-left">
+        <span class="section-icon section-icon-org">
+          <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14"><path d="M10 9a3 3 0 100-6 3 3 0 000 6zM6 8a2 2 0 11-4 0 2 2 0 014 0zM1.49 15.326a.78.78 0 01-.358-.442 3 3 0 014.308-3.516 6.484 6.484 0 00-1.905 3.959c-.023.222-.014.442.025.654a4.97 4.97 0 01-2.07-.655zM16.44 15.98a4.97 4.97 0 002.07-.654.78.78 0 00.357-.442 3 3 0 00-4.308-3.516 6.484 6.484 0 011.907 3.96 2.32 2.32 0 01-.026.654zM18 8a2 2 0 11-4 0 2 2 0 014 0zM5.304 16.19a.844.844 0 01-.277-.71 5 5 0 019.947 0 .843.843 0 01-.277.71A6.975 6.975 0 0110 18a6.974 6.974 0 01-4.696-1.81z"/></svg>
+        </span>
+        <h3 class="section-title">Organisers</h3>
+        {#if !loading}
+          <span class="section-count">{organiserUids.size}</span>
+        {/if}
+      </div>
+    </div>
+
+    <!-- Onboard form -->
+    <div class="onboard-form">
+      <div class="onboard-form-inner">
+        <label class="onboard-label" for="onboard-input">
+          <svg viewBox="0 0 20 20" fill="currentColor" width="13" height="13"><path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z"/></svg>
+          Add organiser
+        </label>
+        <div class="user-combo">
+          <input
+            id="onboard-input"
+            type="text"
+            bind:value={addEmail}
+            placeholder="Search by name or email…"
+            aria-label="Recipient name or email"
+            aria-expanded={addDropdownOpen && addSuggestions.length > 0}
+            aria-autocomplete="list"
+            role="combobox"
+            maxlength="128"
+            autocomplete="off"
+            oninput={() => { addDropdownOpen = !!addEmail.trim(); addHighlight = 0; }}
+            onfocus={() => { if (addEmail.trim()) { addDropdownOpen = true; addHighlight = -1; } }}
+            onblur={() => setTimeout(() => { addDropdownOpen = false; }, 200)}
+            onkeydown={onAddKeydown}
+          />
+          {#if addDropdownOpen && addSuggestions.length > 0}
+            <ul class="user-suggest" role="listbox">
+              {#each addSuggestions as u, i (u.uid ?? u.email)}
+                <li role="option" aria-selected={i === addHighlight}>
+                  <button
+                    type="button"
+                    class:suggest-active={i === addHighlight}
+                    onmouseenter={() => (addHighlight = i)}
+                    onmousedown={(e) => e.preventDefault()}
+                    onclick={() => pickSuggestion(u)}
+                  >
+                    <div class="suggest-avatar">{(u.displayName || u.email || '?').charAt(0).toUpperCase()}</div>
+                    <div class="suggest-text">
+                      {#if u.displayName}<span class="u-name">{u.displayName}</span>{/if}
+                      <span class="u-email">{u.email}</span>
+                    </div>
+                  </button>
+                </li>
+              {/each}
+            </ul>
+          {:else if addDropdownOpen && addEmail.trim() && addSuggestions.length === 0}
+            <div class="user-suggest user-suggest-empty">
+              No signed-in user found — have them visit /admin/ once first
+            </div>
+          {/if}
+        </div>
+        <button
+          type="button"
+          class="btn btn-primary"
+          onclick={onboardOrganiser}
+          disabled={saving || !addEmail.trim()}
+        >
+          {#if saving}
+            Onboarding…
+          {:else}
+            <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm.75-11.25a.75.75 0 00-1.5 0v2.5h-2.5a.75.75 0 000 1.5h2.5v2.5a.75.75 0 001.5 0v-2.5h2.5a.75.75 0 000-1.5h-2.5v-2.5z" clip-rule="evenodd"/></svg>
+            Onboard as organiser
+          {/if}
+        </button>
+      </div>
+    </div>
+
+    {#if loading}
+      <p class="empty">Loading…</p>
+    {:else if organiserUids.size === 0}
+      <p class="empty-state">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="28" height="28"><path stroke-linecap="round" stroke-linejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z"/></svg>
+        No organisers onboarded yet
+      </p>
+    {:else}
+      <ul class="person-list">
+        {#each [...organiserUids] as uid (uid)}
+          {@const lbl = userLabel(uid)}
+          <li class="person-row" class:person-row-confirming={confirmingRevokeUid === uid}>
+            <div class="person-avatar person-avatar-org">
+              {(lbl.name || lbl.email || uid).charAt(0).toUpperCase()}
+            </div>
+            <div class="person-info">
+              {#if lbl.name}
+                <span class="person-name">{lbl.name}</span>
+              {/if}
+              {#if lbl.email}
+                <span class="person-email">{lbl.email}</span>
+              {:else if !lbl.hasMirror}
+                <code class="uid">{uid}</code>
+              {/if}
+            </div>
+            <div class="person-right">
+              <span class="badge badge-organiser">Organiser</span>
+              {#if confirmingRevokeUid === uid}
+                <div class="revoke-confirm">
+                  <span class="revoke-question">Revoke access?</span>
+                  <button type="button" class="btn btn-danger-sm" onclick={() => confirmRevoke(uid)} disabled={saving}>
+                    {saving ? '…' : 'Confirm'}
+                  </button>
+                  <button type="button" class="btn btn-ghost-sm" onclick={cancelRevoke} disabled={saving}>Cancel</button>
+                </div>
+              {:else}
+                <button type="button" class="btn-revoke" onclick={() => startRevoke(uid)} disabled={saving}>
+                  Revoke
+                </button>
+              {/if}
+            </div>
+          </li>
+        {/each}
+      </ul>
+    {/if}
+  </div>
 </section>
 
 <style>
-  .roles { display: flex; flex-direction: column; gap: 0.75rem; }
+  .roles {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+    padding-bottom: 1.5rem;
+  }
 
+  /* Flash banner */
   .banner {
-    padding: 0.5rem 0.75rem;
+    padding: 0.55rem 0.85rem;
     background: rgba(76, 175, 80, 0.12);
-    border: 1px solid rgba(76, 175, 80, 0.4);
+    border: 1px solid rgba(76, 175, 80, 0.35);
     color: #66bb6a;
     border-radius: 0.5rem;
     font-size: 0.85rem;
   }
   .banner-err {
     background: rgba(239, 83, 80, 0.12);
-    border-color: rgba(239, 83, 80, 0.4);
+    border-color: rgba(239, 83, 80, 0.35);
     color: #ef8985;
   }
 
-  .lead p {
-    margin: 0 0 0.4rem;
-    color: var(--muted);
-    font-size: 0.85rem;
-    line-height: 1.55;
+  /* Section card */
+  .section-block {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    background: #141414;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 0.75rem;
   }
-  .lead p strong { color: var(--fg); }
-  .lead p code {
-    background: rgba(255, 255, 255, 0.04);
-    padding: 0.05rem 0.3rem;
-    border-radius: 0.25rem;
-    font-size: 0.85em;
-  }
-  .lead-sub { color: var(--muted); font-size: 0.8rem !important; }
 
-  .section-hdr {
-    margin: 0.75rem 0 0.35rem;
-    color: var(--fg);
+  /* Section header row */
+  .section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 1rem 0.65rem;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    border-radius: 0.75rem 0.75rem 0 0;
+  }
+  .section-head-left {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+  }
+  .section-icon {
+    width: 1.6rem;
+    height: 1.6rem;
+    border-radius: 0.4rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .section-icon-super {
+    background: rgba(255,213,74,0.12);
+    color: var(--accent, #ffd54a);
+  }
+  .section-icon-org {
+    background: rgba(79,195,247,0.12);
+    color: var(--side-a, #4fc3f7);
+  }
+  .section-title {
+    margin: 0;
     font-size: 0.85rem;
     font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
+    color: var(--fg, #f5f5f5);
+    letter-spacing: 0.01em;
+  }
+  .section-count {
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: var(--muted, #888);
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 999px;
+    padding: 0.05rem 0.45rem;
+    font-variant-numeric: tabular-nums;
   }
 
-  .empty { color: var(--muted); text-align: center; padding: 1rem; margin: 0; }
-  .empty-inline { text-align: left; padding: 0; font-size: 0.8rem; }
+  /* Person list */
+  .person-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    border-radius: 0 0 0.75rem 0.75rem;
+    overflow: hidden;
+  }
+  .person-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.7rem 1rem;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    transition: background 0.1s;
+  }
+  .person-row:last-child { border-bottom: none; }
+  .person-row:hover { background: rgba(255,255,255,0.02); }
+  .person-row-confirming { background: rgba(239,83,80,0.04); }
 
+  /* Avatar circle with initial */
+  .person-avatar {
+    width: 2.2rem;
+    height: 2.2rem;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.9rem;
+    font-weight: 700;
+    flex-shrink: 0;
+    letter-spacing: 0;
+  }
+  .person-avatar-super {
+    background: rgba(255,213,74,0.15);
+    color: var(--accent, #ffd54a);
+    border: 1.5px solid rgba(255,213,74,0.25);
+  }
+  .person-avatar-org {
+    background: rgba(79,195,247,0.12);
+    color: var(--side-a, #4fc3f7);
+    border: 1.5px solid rgba(79,195,247,0.2);
+  }
+
+  .person-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+  }
+  .person-name {
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: var(--fg, #f5f5f5);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .person-email {
+    font-size: 0.75rem;
+    color: var(--muted, #888);
+    overflow-wrap: anywhere;
+  }
+
+  .person-badges {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-shrink: 0;
+  }
+  .person-right {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .badge {
+    padding: 0.15rem 0.55rem;
+    border-radius: 999px;
+    font-size: 0.68rem;
+    letter-spacing: 0.04em;
+    font-weight: 700;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .badge-super {
+    color: var(--accent, #ffd54a);
+    background: rgba(255,213,74,0.12);
+    border: 1px solid rgba(255,213,74,0.3);
+  }
+  .badge-organiser {
+    color: var(--side-a, #4fc3f7);
+    background: rgba(79,195,247,0.1);
+    border: 1px solid rgba(79,195,247,0.3);
+  }
+
+  .chip-you {
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: var(--accent, #ffd54a);
+    background: rgba(255,213,74,0.1);
+    border: 1px solid rgba(255,213,74,0.3);
+    padding: 0.1rem 0.45rem;
+    border-radius: 999px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .uid {
+    font-size: 0.72rem;
+    font-family: monospace;
+    background: rgba(255,255,255,0.04);
+    padding: 0.1rem 0.35rem;
+    border-radius: 0.3rem;
+    overflow-wrap: anywhere;
+    color: var(--muted, #888);
+  }
+
+  /* Note below super list */
   .note {
-    color: var(--muted);
+    color: var(--muted, #888);
     font-size: 0.75rem;
     line-height: 1.5;
-    margin: 0.35rem 0 0;
-    padding: 0.4rem 0.6rem;
-    background: rgba(255, 213, 74, 0.05);
-    border-left: 2px solid rgba(255, 213, 74, 0.4);
-    border-radius: 0 0.3rem 0.3rem 0;
+    margin: 0;
+    padding: 0.6rem 1rem;
+    background: rgba(255,213,74,0.04);
+    border-top: 1px solid rgba(255,213,74,0.12);
+    border-radius: 0 0 0.75rem 0.75rem;
   }
   .note code {
     font-family: monospace;
-    background: rgba(255, 255, 255, 0.04);
+    background: rgba(255,255,255,0.05);
     padding: 0.05rem 0.3rem;
     border-radius: 0.25rem;
     font-size: 0.9em;
   }
 
-  .list {
-    list-style: none;
-    padding: 0;
-    margin: 0;
+  /* Onboard form */
+  .onboard-form {
+    padding: 0.85rem 1rem;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    background: rgba(79,195,247,0.025);
+  }
+  .onboard-form-inner {
     display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
+    gap: 0.6rem;
+    align-items: flex-end;
   }
-  .row {
+  .onboard-label {
     display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    padding: 0.55rem 0.75rem;
-    background: rgba(255, 255, 255, 0.02);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 0.5rem;
-  }
-  .row-org { align-items: flex-start; }
-  .row-name { flex: 1; min-width: 0; }
-  .row-title {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.4rem;
-  }
-  .who-name {
-    color: var(--fg);
-    font-weight: 700;
-    font-size: 0.9rem;
-  }
-  .who-email {
-    color: var(--muted);
-    font-size: 0.78rem;
-    overflow-wrap: anywhere;
-  }
-  .uid {
-    color: var(--fg);
-    font-size: 0.72rem;
-    font-family: monospace;
-    background: rgba(255, 255, 255, 0.04);
-    padding: 0.1rem 0.35rem;
-    border-radius: 0.3rem;
-    overflow-wrap: anywhere;
-  }
-  .chip {
-    font-size: 0.7rem;
-    color: var(--muted);
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    padding: 0.1rem 0.4rem;
-    border-radius: 999px;
-  }
-  .chip-you {
-    color: var(--accent);
-    background: rgba(255, 213, 74, 0.1);
-    border-color: rgba(255, 213, 74, 0.3);
-    font-weight: 700;
-  }
-  .badge {
-    padding: 0.1rem 0.5rem;
-    border-radius: 999px;
-    font-size: 0.65rem;
-    letter-spacing: 0.05em;
-    font-weight: 800;
-    text-transform: uppercase;
-  }
-  .badge-super {
-    color: var(--accent);
-    background: rgba(255, 213, 74, 0.14);
-    border: 1px solid rgba(255, 213, 74, 0.4);
-  }
-  .badge-organiser {
-    color: var(--side-a);
-    background: rgba(79, 195, 247, 0.14);
-    border: 1px solid rgba(79, 195, 247, 0.4);
-  }
-
-  /* Per-row Revoke button + inline confirmation strip. Compact and
-     right-aligned to match the AdminPlayers row-actions pattern. */
-  .row-actions {
-    display: flex;
-    gap: 0.4rem;
-    align-items: center;
-    flex-wrap: wrap;
-  }
-  .revoke-hint {
-    font-size: 0.8rem;
-    color: var(--muted, #9aa0a6);
-    padding: 0 0.4rem;
-  }
-
-  .org-tags {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.35rem;
-    margin-top: 0.35rem;
-  }
-  .tag {
-    display: inline-flex;
     align-items: center;
     gap: 0.3rem;
-    padding: 0.15rem 0.15rem 0.15rem 0.5rem;
-    background: rgba(79, 195, 247, 0.08);
-    color: var(--side-a);
-    border: 1px solid rgba(79, 195, 247, 0.3);
-    border-radius: 999px;
-    font-size: 0.75rem;
-    font-weight: 600;
-  }
-  .tag-x {
-    background: transparent;
-    border: none;
-    color: var(--danger);
-    font-size: 0.8rem;
-    cursor: pointer;
-    padding: 0 0.3rem;
-    border-radius: 999px;
-    line-height: 1;
-  }
-  .tag-x:hover:not(:disabled) {
-    background: rgba(239, 83, 80, 0.14);
-  }
-  .tag-x:disabled { opacity: 0.4; cursor: not-allowed; }
-
-  /* Add-organiser form: email + tournament picker + Assign button.
-     Kept in a single panel so the maintainer sees it as one atomic
-     action rather than three separate steps. */
-  .add-form {
-    display: flex;
-    flex-direction: column;
-    gap: 0.6rem;
-    padding: 0.75rem;
-    background: rgba(79, 195, 247, 0.04);
-    border: 1px solid rgba(79, 195, 247, 0.2);
-    border-radius: 0.55rem;
-  }
-  .add-uid {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-  }
-  .add-uid span {
-    color: var(--muted);
     font-size: 0.72rem;
-    font-weight: 700;
+    font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.06em;
+    letter-spacing: 0.07em;
+    color: var(--side-a, #4fc3f7);
+    margin-bottom: 0.3rem;
   }
   .user-combo {
     position: relative;
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
   }
   .user-combo input {
     width: 100%;
-    background: #0f0f0f;
-    color: var(--fg);
-    border: 1px solid #2a2a2a;
-    border-radius: 0.4rem;
-    padding: 0.5rem 0.65rem;
+    background: #0d0d0d;
+    color: var(--fg, #f5f5f5);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 0.45rem;
+    padding: 0.5rem 0.7rem;
     font: inherit;
-    font-size: 0.9rem;
+    font-size: 0.88rem;
     box-sizing: border-box;
+    transition: border-color 0.15s;
   }
   .user-combo input:focus {
     outline: none;
-    border-color: var(--accent);
+    border-color: var(--side-a, #4fc3f7);
+    background: #111;
   }
+
   .user-suggest {
     position: absolute;
-    top: calc(100% + 0.25rem);
+    top: calc(100% + 0.3rem);
     left: 0;
     right: 0;
     margin: 0;
-    padding: 0;
+    padding: 0.3rem;
     list-style: none;
-    background: #141414;
-    border: 1px solid #262626;
-    border-radius: 0.5rem;
+    background: #161616;
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 0.55rem;
     max-height: 14rem;
     overflow-y: auto;
     z-index: 20;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
   }
+  .user-suggest li { list-style: none; }
   .user-suggest button {
     display: flex;
-    flex-direction: column;
+    align-items: center;
+    gap: 0.6rem;
     width: 100%;
-    padding: 0.5rem 0.75rem;
+    padding: 0.5rem 0.6rem;
     background: transparent;
     border: 0;
-    color: var(--fg);
+    border-radius: 0.35rem;
+    color: var(--fg, #f5f5f5);
     text-align: left;
     cursor: pointer;
     font: inherit;
-    gap: 0.1rem;
   }
   .user-suggest button:hover,
   .user-suggest button.suggest-active {
-    background: #1c1c1c;
-    outline: 2px solid rgba(255, 213, 74, 0.5);
-    outline-offset: -2px;
+    background: rgba(79,195,247,0.08);
+    outline: none;
   }
-  .u-name { font-size: 0.88rem; font-weight: 600; }
-  .u-email { font-size: 0.75rem; color: var(--muted); }
+  .suggest-avatar {
+    width: 1.7rem;
+    height: 1.7rem;
+    border-radius: 50%;
+    background: rgba(79,195,247,0.12);
+    color: var(--side-a, #4fc3f7);
+    font-size: 0.78rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .suggest-text { display: flex; flex-direction: column; gap: 0.05rem; min-width: 0; }
+  .u-name { font-size: 0.85rem; font-weight: 600; }
+  .u-email { font-size: 0.73rem; color: var(--muted, #888); }
   .user-suggest-empty {
-    padding: 0.6rem 0.75rem;
+    padding: 0.65rem 0.75rem;
     font-size: 0.8rem;
-    color: var(--muted);
+    color: var(--muted, #888);
     font-style: italic;
   }
-  /* Keep old .add-uid input style for any remaining bare inputs */
-  .add-uid > input {
-    background: #0f0f0f;
-    color: var(--fg);
-    border: 1px solid #2a2a2a;
-    border-radius: 0.4rem;
-    padding: 0.5rem 0.65rem;
-    font: inherit;
-    font-size: 0.9rem;
-  }
-  .add-tournaments {
+
+  /* Empty state */
+  .empty { color: var(--muted, #888); text-align: center; padding: 1.25rem; margin: 0; font-size: 0.85rem; }
+  .empty-state {
     display: flex;
     flex-direction: column;
-    gap: 0.35rem;
-  }
-  .add-tournaments-lbl {
-    color: var(--muted);
-    font-size: 0.72rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-  }
-  .tournament-picker {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.35rem;
-  }
-  /* Picker chip toggles on/off — cyan when on, muted when off. */
-  .chip-pick {
-    display: inline-flex;
     align-items: center;
-    gap: 0.35rem;
-    padding: 0.35rem 0.6rem;
-    background: rgba(255, 255, 255, 0.03);
-    color: var(--muted);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 999px;
+    gap: 0.5rem;
+    padding: 1.75rem 1rem;
+    color: var(--muted, #888);
     font-size: 0.82rem;
-    cursor: pointer;
-    transition: background 0.12s, color 0.12s, border-color 0.12s;
+    text-align: center;
+    margin: 0;
   }
-  .chip-pick input {
-    /* Hide the checkbox — chip appearance IS the checked state. */
-    position: absolute;
-    opacity: 0;
-    pointer-events: none;
+  .empty-state svg { opacity: 0.3; }
+
+  /* Revoke inline confirm */
+  .revoke-confirm {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-wrap: wrap;
   }
-  .chip-pick-on {
-    background: rgba(79, 195, 247, 0.14);
-    color: var(--side-a);
-    border-color: rgba(79, 195, 247, 0.5);
+  .revoke-question {
+    font-size: 0.78rem;
+    color: #ef8985;
   }
 
+  /* Buttons */
   .btn {
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    color: var(--fg);
-    border-radius: 0.4rem;
-    padding: 0.5rem 0.9rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.12);
+    color: var(--fg, #f5f5f5);
+    border-radius: 0.45rem;
+    padding: 0.5rem 1rem;
     font: inherit;
     font-size: 0.85rem;
-    font-weight: 700;
+    font-weight: 600;
     cursor: pointer;
-    align-self: flex-start;
+    white-space: nowrap;
   }
-  .btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.1); }
-  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn:hover:not(:disabled) { background: rgba(255,255,255,0.1); }
+  .btn:disabled { opacity: 0.45; cursor: not-allowed; }
   .btn-primary {
-    background: var(--accent);
-    color: #0b0b0b;
-    border-color: var(--accent);
+    background: var(--side-a, #4fc3f7);
+    color: #0a0a0a;
+    border-color: transparent;
+    font-weight: 700;
+    white-space: nowrap;
   }
-  .btn-primary:hover:not(:disabled) { background: #ffe07a; }
+  .btn-primary:hover:not(:disabled) { filter: brightness(1.1); }
+
+  .btn-revoke {
+    font: inherit;
+    font-size: 0.78rem;
+    font-weight: 600;
+    background: none;
+    border: 1px solid rgba(239,83,80,0.3);
+    color: #ef8985;
+    border-radius: 0.35rem;
+    padding: 0.25rem 0.65rem;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .btn-revoke:hover:not(:disabled) { background: rgba(239,83,80,0.1); }
+  .btn-revoke:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .btn-danger-sm {
+    font: inherit;
+    font-size: 0.78rem;
+    font-weight: 700;
+    background: rgba(239,83,80,0.14);
+    border: 1px solid rgba(239,83,80,0.4);
+    color: #ef5350;
+    border-radius: 0.35rem;
+    padding: 0.25rem 0.6rem;
+    cursor: pointer;
+  }
+  .btn-danger-sm:hover:not(:disabled) { background: rgba(239,83,80,0.22); }
+  .btn-danger-sm:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .btn-ghost-sm {
+    font: inherit;
+    font-size: 0.78rem;
+    font-weight: 600;
+    background: none;
+    border: 1px solid rgba(255,255,255,0.1);
+    color: var(--muted, #888);
+    border-radius: 0.35rem;
+    padding: 0.25rem 0.6rem;
+    cursor: pointer;
+  }
+  .btn-ghost-sm:hover:not(:disabled) { background: rgba(255,255,255,0.05); }
+  .btn-ghost-sm:disabled { opacity: 0.4; cursor: not-allowed; }
 </style>
