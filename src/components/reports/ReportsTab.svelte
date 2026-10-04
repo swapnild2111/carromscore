@@ -186,7 +186,10 @@
       }
       for (const [roundName, ms] of byRound) {
         // Only include if no history round report exists for this round
-        const alreadyInHistory = r?.roundReports?.some((rr) => rr.roundName === roundName);
+        const synthKey = ms[0].roundKey ?? normalizeKey(roundName);
+        const alreadyInHistory = r?.roundReports?.some(
+          (rr) => rr.roundName === roundName || rr.roundKey === synthKey,
+        );
         if (alreadyInHistory) continue;
         ms.sort((a, b) => (a.matchOrder ?? 0) - (b.matchOrder ?? 0));
         const rows: ReportRow[] = ms.map((m) => ({
@@ -201,7 +204,7 @@
         }));
         syntheticKORounds.push({
           roundName,
-          roundKey: ms[0].roundKey ?? normalizeKey(roundName),
+          roundKey: synthKey,
           matches: rows.length,
           rows,
           playerSummary: [],
@@ -224,7 +227,11 @@
           : isKnockout
             ? r.roundReports.filter((rr) => BRACKET_ROUND_RX.test(rr.roundName))
             : r.roundReports;
-    const allRounds = [...nonGroupRounds, ...syntheticKORounds];
+    // Synthetic rounds fill in planned-but-unplayed KO rounds. Prefer history
+    // over synthetic when both exist for the same roundKey.
+    const seenRoundKey = new Set(nonGroupRounds.map((rr) => rr.roundKey));
+    const dedupedSynthetic = syntheticKORounds.filter((rr) => !seenRoundKey.has(rr.roundKey));
+    const allRounds = [...nonGroupRounds, ...dedupedSynthetic];
     if (allRounds.length === 0) return [];
     return groupNonGroupRounds(allRounds, buildSetScoresMap(matches));
   });
