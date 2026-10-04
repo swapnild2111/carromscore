@@ -130,6 +130,7 @@
   let addingEmail = $state('');
   let addingAddress = $state('');
   let addingRepresents = $state('');
+  let addingShowMore = $state(false);
 
   /** One decision the admin has to make about a candidate name that
    *  matches an existing player. */
@@ -230,6 +231,7 @@
   let editPhone = $state('');
   let editAddress = $state('');
   let editRepresents = $state('');
+  let editShowMore = $state(false);
 
   function startEdit(p: Player) {
     editingId = p.id;
@@ -242,6 +244,7 @@
     editAddress = p.address ?? '';
     editRepresents = p.represents ?? '';
     editAliasBuffer = '';
+    editShowMore = !!(p.phone || p.email || p.address || p.gender || p.dob);
   }
   function stopEdit() {
     editingId = null;
@@ -251,6 +254,7 @@
     editDob = '';
     editEmail = '';
     editPhone = '';
+    editShowMore = false;
     editAddress = '';
     editRepresents = '';
     editAliasBuffer = '';
@@ -479,6 +483,7 @@
     addingEmail = '';
     addingAddress = '';
     addingRepresents = '';
+    addingShowMore = false;
     conflicts = [];
     cleanCandidates = [];
     addStep = 'input';
@@ -493,6 +498,7 @@
     addingEmail = '';
     addingAddress = '';
     addingRepresents = '';
+    addingShowMore = false;
     conflicts = [];
     cleanCandidates = [];
     addStep = 'input';
@@ -880,60 +886,58 @@
           <code class="edit-id">{editingPlayer()?.id}</code>
         </p>
 
-        <label class="edit-field">
+        <label class="add-meta-cell add-meta-cell-full">
           <span>Name</span>
-          <input
-            type="text"
-            bind:value={editName}
-            aria-label="Player name"
-            maxlength="60"
-          />
+          <input type="text" bind:value={editName} aria-label="Player name" maxlength="60" />
         </label>
 
-        <label class="edit-field">
-          <span>Country</span>
-          <CountrySelect bind:value={editCountry} ariaLabel="Player country" />
-        </label>
+        <p class="add-section-label" style="margin-top: 0.75rem;">Player details</p>
 
-        <label class="edit-field">
-          <span>Gender</span>
-          <select class="themed-select" bind:value={editGender} aria-label="Gender">
-            <option value="">— not set —</option>
-            <option value="male">Male</option>
-            <option value="female">Female</option>
-            <option value="other">Other</option>
-          </select>
-        </label>
+        <div class="add-primary-row">
+          <label class="add-meta-cell">
+            <span>Country</span>
+            <CountrySelect bind:value={editCountry} ariaLabel="Player country" />
+          </label>
+          <label class="add-meta-cell">
+            <span>Represents</span>
+            <input type="text" bind:value={editRepresents} aria-label="Club or association" maxlength="100" placeholder="club / association" />
+          </label>
+        </div>
 
-        <label class="edit-field">
-          <span>Date of birth</span>
-          <input
-            type="date"
-            bind:value={editDob}
-            aria-label="Date of birth"
-            max={new Date().toISOString().slice(0, 10)}
-          />
-        </label>
-
-        <label class="edit-field">
-          <span>Phone</span>
-          <input type="tel" bind:value={editPhone} aria-label="Phone number" maxlength="32" placeholder="+45 12 34 56 78" />
-        </label>
-
-        <label class="edit-field">
-          <span>Email</span>
-          <input type="email" bind:value={editEmail} aria-label="Email address" maxlength="128" placeholder="player@example.com" />
-        </label>
-
-        <label class="edit-field">
-          <span>City / Region</span>
-          <input type="text" bind:value={editAddress} aria-label="City or region" maxlength="200" placeholder="Copenhagen, Denmark" />
-        </label>
-
-        <label class="edit-field">
-          <span>Represents</span>
-          <input type="text" bind:value={editRepresents} aria-label="Club or association" maxlength="100" placeholder="Carrom Club Copenhagen" />
-        </label>
+        <button type="button" class="add-more-toggle" onclick={() => editShowMore = !editShowMore}>
+          <span class="add-more-chevron" class:add-more-chevron-open={editShowMore}>›</span>
+          More details
+          {#if !editShowMore}<span class="add-more-hint">gender · date of birth · phone · email · address</span>{/if}
+        </button>
+        {#if editShowMore}
+          <div class="add-more-grid">
+            <label class="add-meta-cell">
+              <span>Gender</span>
+              <select class="themed-select" bind:value={editGender} aria-label="Gender">
+                <option value="">— not set —</option>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+                <option value="other">Other</option>
+              </select>
+            </label>
+            <label class="add-meta-cell">
+              <span>Date of birth</span>
+              <input type="date" bind:value={editDob} aria-label="Date of birth" max={new Date().toISOString().slice(0, 10)} />
+            </label>
+            <label class="add-meta-cell">
+              <span>Phone</span>
+              <input type="tel" bind:value={editPhone} aria-label="Phone number" maxlength="32" placeholder="+45 12 34 56 78" />
+            </label>
+            <label class="add-meta-cell">
+              <span>Email</span>
+              <input type="email" bind:value={editEmail} aria-label="Email address" maxlength="128" placeholder="player@example.com" />
+            </label>
+            <label class="add-meta-cell add-meta-cell-full">
+              <span>City / Region</span>
+              <input type="text" bind:value={editAddress} aria-label="City or region" maxlength="200" placeholder="Copenhagen, Denmark" />
+            </label>
+          </div>
+        {/if}
 
         {#if editingPlayer()}
           {@const aliasKeys = Object.keys(editingPlayer()?.aliases ?? {})}
@@ -1068,57 +1072,64 @@
       <div class="dialog-card dialog-card-wide">
         {#if addStep === 'input'}
           <h3 id="add-player-title">Add players</h3>
-          <p>
-            Add one or many players to the shared roster. Enter names
-            <strong>comma-separated</strong> (<code>Ravi K, Priya M, Nirmal S</code>)
-            or one name per line — mix both if it's easier. On the next
-            screen you'll resolve any names that already exist in the
-            roster.
-          </p>
-          <label class="edit-field">
-            <span>Country (applied to every player in this batch)</span>
-            <CountrySelect
-              bind:value={addingCountry}
-              required
-              ariaLabel="Batch country"
-            />
-          </label>
-          <label class="edit-field">
-            <span>Gender</span>
-            <select class="themed-select" bind:value={addingGender} aria-label="Gender">
-              <option value="">— optional —</option>
-              <option value="male">Male</option>
-              <option value="female">Female</option>
-              <option value="other">Other</option>
-            </select>
-          </label>
-          <label class="edit-field">
-            <span>Date of birth</span>
-            <input type="date" bind:value={addingDob} aria-label="Date of birth" />
-          </label>
-          <label class="edit-field">
-            <span>Phone</span>
-            <input type="tel" bind:value={addingPhone} placeholder="optional" aria-label="Phone" />
-          </label>
-          <label class="edit-field">
-            <span>Email</span>
-            <input type="email" bind:value={addingEmail} placeholder="optional" aria-label="Email" />
-          </label>
-          <label class="edit-field">
-            <span>Address</span>
-            <input type="text" bind:value={addingAddress} placeholder="optional" aria-label="Address" />
-          </label>
-          <label class="edit-field">
-            <span>Represents</span>
-            <input type="text" bind:value={addingRepresents} placeholder="optional" aria-label="Represents" maxlength="100" />
-          </label>
+          <p class="add-hint">Enter names comma-separated or one per line. Conflicts are resolved on the next screen.</p>
+
           <textarea
             class="add-textarea"
             bind:value={addingInput}
             placeholder={'Ravi K, Priya M, Nirmal S\nDee K'}
             aria-label="Player names"
-            rows="5"
+            rows="4"
           ></textarea>
+
+          <p class="add-section-label">Apply to all players in this batch</p>
+
+          <div class="add-primary-row">
+            <label class="add-meta-cell">
+              <span>Country <em class="add-required">required</em></span>
+              <CountrySelect bind:value={addingCountry} required ariaLabel="Batch country" />
+            </label>
+            <label class="add-meta-cell">
+              <span>Represents</span>
+              <input type="text" bind:value={addingRepresents} placeholder="club / association" aria-label="Represents" maxlength="100" />
+            </label>
+          </div>
+
+          <button type="button" class="add-more-toggle" onclick={() => addingShowMore = !addingShowMore}>
+            <span class="add-more-chevron" class:add-more-chevron-open={addingShowMore}>›</span>
+            More details
+            {#if !addingShowMore}<span class="add-more-hint">gender · date of birth · phone · email · address</span>{/if}
+          </button>
+          {#if addingShowMore}
+            <div class="add-more-grid">
+              <label class="add-meta-cell">
+                <span>Gender</span>
+                <select class="themed-select" bind:value={addingGender} aria-label="Gender">
+                  <option value="">— optional —</option>
+                  <option value="male">Male</option>
+                  <option value="female">Female</option>
+                  <option value="other">Other</option>
+                </select>
+              </label>
+              <label class="add-meta-cell">
+                <span>Date of birth</span>
+                <input type="date" bind:value={addingDob} aria-label="Date of birth" />
+              </label>
+              <label class="add-meta-cell">
+                <span>Phone</span>
+                <input type="tel" bind:value={addingPhone} placeholder="optional" aria-label="Phone" />
+              </label>
+              <label class="add-meta-cell">
+                <span>Email</span>
+                <input type="email" bind:value={addingEmail} placeholder="optional" aria-label="Email" />
+              </label>
+              <label class="add-meta-cell add-meta-cell-full">
+                <span>Address</span>
+                <input type="text" bind:value={addingAddress} placeholder="optional" aria-label="Address" />
+              </label>
+            </div>
+          {/if}
+
           <div class="dialog-actions">
             <button type="button" class="btn" onclick={closeAdd} disabled={saving}>Cancel</button>
             <button
@@ -1126,7 +1137,7 @@
               class="btn btn-primary"
               onclick={analyseAdd}
               disabled={saving || !addingInput.trim() || !addingCountry}
-            >{saving ? 'Adding…' : 'Add'}</button>
+            >{saving ? 'Adding…' : 'Add players →'}</button>
           </div>
         {:else}
           <h3 id="add-player-title">Resolve conflicts</h3>
@@ -1739,8 +1750,13 @@
     font-weight: 700;
     color: var(--muted);
   }
-  /* Bulk-add textarea. Same visual language as .dialog-card input[type=text];
-     multi-line so it fits comma + newline batches without a scroll bar. */
+  .add-hint {
+    font-size: 0.82rem;
+    color: var(--muted);
+    margin: 0 0 0.65rem;
+  }
+
+  /* Bulk-add textarea — primary input, shown first. */
   .add-textarea {
     width: 100%;
     box-sizing: border-box;
@@ -1748,15 +1764,132 @@
     color: var(--fg);
     border: 1px solid #2a2a2a;
     border-radius: 0.45rem;
-    padding: 0.5rem 0.65rem;
+    padding: 0.6rem 0.75rem;
     font: inherit;
-    font-size: 0.9rem;
+    font-size: 0.92rem;
     resize: vertical;
-    min-height: 5.5rem;
+    min-height: 5rem;
+    margin-bottom: 1rem;
   }
   .add-textarea:focus {
     outline: none;
     border-color: var(--accent);
+  }
+
+  .add-section-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 0.5rem;
+  }
+
+  /* 3-column grid: Country / Gender / DOB */
+  .add-meta-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 0.6rem;
+    margin-bottom: 0.5rem;
+  }
+  @media (max-width: 520px) {
+    .add-meta-grid { grid-template-columns: 1fr; }
+  }
+
+  .add-meta-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    font-size: 0.82rem;
+  }
+  .add-meta-cell > span {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--muted);
+    letter-spacing: 0.03em;
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+  }
+  .add-meta-cell input,
+  .add-meta-cell select {
+    background: #0f0f0f;
+    color: var(--fg);
+    border: 1px solid #2a2a2a;
+    border-radius: 0.4rem;
+    padding: 0.45rem 0.6rem;
+    font: inherit;
+    font-size: 0.85rem;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .add-meta-cell input:focus,
+  .add-meta-cell select:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .add-required {
+    font-style: normal;
+    font-size: 0.65rem;
+    color: var(--accent);
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  /* 2-column row for primary fields: Country + Represents */
+  .add-primary-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.6rem;
+    margin-bottom: 0.25rem;
+  }
+  @media (max-width: 520px) {
+    .add-primary-row { grid-template-columns: 1fr; }
+  }
+
+  .add-more-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    background: none;
+    border: none;
+    border-top: 1px solid rgba(255,255,255,0.06);
+    padding: 0.55rem 0 0.35rem;
+    margin-top: 0.5rem;
+    width: 100%;
+    font: inherit;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--muted, #888);
+    cursor: pointer;
+    text-align: left;
+  }
+  .add-more-toggle:hover { color: var(--fg); }
+  .add-more-chevron {
+    font-size: 1rem;
+    line-height: 1;
+    display: inline-block;
+    transition: transform 0.18s;
+    color: var(--muted, #888);
+  }
+  .add-more-chevron-open { transform: rotate(90deg); }
+  .add-more-hint {
+    font-weight: 400;
+    font-size: 0.73rem;
+    color: var(--muted, #888);
+    opacity: 0.7;
+  }
+  .add-more-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.6rem;
+    margin-top: 0.5rem;
+  }
+  .add-meta-cell-full { grid-column: 1 / -1; }
+  @media (max-width: 520px) {
+    .add-more-grid { grid-template-columns: 1fr; }
+    .add-meta-cell-full { grid-column: 1; }
   }
 
   /* Muted inline hint used in the conflict-screen header. */
