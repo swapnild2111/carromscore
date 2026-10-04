@@ -193,14 +193,14 @@
         if (alreadyInHistory) continue;
         ms.sort((a, b) => (a.matchOrder ?? 0) - (b.matchOrder ?? 0));
         const rows: ReportRow[] = ms.map((m) => ({
-          sideA: m.aResolvedId ? (m.aName ?? '') : (m.aName ?? ''),
-          sideB: m.bResolvedId ? (m.bName ?? '') : (m.bName ?? ''),
+          sideA: m.aName ?? '',
+          sideB: m.bName ?? '',
           winner: '' as 'A' | 'B' | 'Draw' | '',
           setsA: 0, setsB: 0, pointsA: 0, pointsB: 0,
           boardsWonA: 0, boardsWonB: 0, boardCount: 0,
           endedAt: '', endedAtRaw: 0, recordedBy: '',
           matchOrder: m.matchOrder,
-          _matchId: '',
+          _matchId: m.mid ?? `${synthKey}-${m.matchOrder ?? 0}`,
         }));
         syntheticKORounds.push({
           roundName,
@@ -1411,7 +1411,7 @@
           </tr>
         </thead>
         <tbody>
-          {#each sortedMatches as r (r._matchId)}
+          {#each sortedMatches.filter((r, i, a) => a.findIndex(x => x._matchId === r._matchId) === i) as r (r._matchId)}
             <tr class="match-row-clickable" class:match-row-forfeit={r.forfeit} onclick={() => openMatchDetail(r)} title="Tap to see set-by-set breakdown">
               <td>{r.endedAt}</td>
               <td>{r.forfeit ? 'Forfeit' : r.mode}</td>
@@ -1616,7 +1616,7 @@
                                     </tr>
                                   </thead>
                                   <tbody>
-                                    {#each rrMatchesSorted as r (r._matchId)}
+                                    {#each rrMatchesSorted.filter((r, i, a) => a.findIndex(x => x._matchId === r._matchId) === i) as r (r._matchId)}
                                       <tr class="match-row-clickable" class:match-row-forfeit={r.forfeit} onclick={() => openMatchDetail(r)} title="Tap to see set-by-set breakdown">
                                         <td>{r.endedAt}</td>
                                         <td>{r.forfeit ? 'Forfeit' : r.mode}</td>
