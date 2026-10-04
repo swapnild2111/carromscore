@@ -233,25 +233,7 @@
     const dedupedSynthetic = syntheticKORounds.filter((rr) => !seenRoundKey.has(rr.roundKey));
     const allRounds = [...nonGroupRounds, ...dedupedSynthetic];
     if (allRounds.length === 0) return [];
-    // Debug: log any duplicate roundKeys before passing to groupNonGroupRounds
-    const rkSeen = new Set<string>();
-    for (const rr of allRounds) {
-      if (rkSeen.has(rr.roundKey)) console.error('[ReportsTab] duplicate roundKey in allRounds:', rr.roundKey, rr.roundName);
-      rkSeen.add(rr.roundKey);
-    }
-    const result = groupNonGroupRounds(allRounds, buildSetScoresMap(matches));
-    // Debug: log any duplicate flightNames or stageKeys
-    const fnSeen = new Set<string>();
-    for (const fg of result) {
-      if (fnSeen.has(fg.flightName)) console.error('[ReportsTab] duplicate flightName:', fg.flightName);
-      fnSeen.add(fg.flightName);
-      const skSeen = new Set<string>();
-      for (const sg of fg.stageGroups) {
-        if (skSeen.has(sg.stageKey)) console.error('[ReportsTab] duplicate stageKey:', sg.stageKey, 'in flight', fg.flightName);
-        skSeen.add(sg.stageKey);
-      }
-    }
-    return result;
+    return groupNonGroupRounds(allRounds, buildSetScoresMap(matches));
   });
 
   // Trophy winners for league format: 1st + 2nd per flight, from Final matches.
@@ -1241,21 +1223,6 @@
   {:else}
     {@const view = viewReport!}
     {@const stats = summaryStats}
-    {@const _dbg = (() => {
-      // Debug: log duplicate _matchId in sortedMatches
-      const seen = new Set<string>();
-      for (const r of sortedMatches) {
-        if (seen.has(r._matchId)) console.error('[ReportsTab] dup _matchId in sortedMatches:', r._matchId);
-        seen.add(r._matchId);
-      }
-      // Debug: log duplicate playerId in playerSummary
-      const ps = new Set<string>();
-      for (const p of view.playerSummary) {
-        if (ps.has(p.playerId)) console.error('[ReportsTab] dup playerId in playerSummary:', p.playerId);
-        ps.add(p.playerId);
-      }
-      return null;
-    })()}
 
     <div class="print-section-leaderboard">
     {#if stats}
@@ -1566,7 +1533,26 @@
                   {#each fg.stageGroups as sg (sg.stageKey)}
                     {@const open = isRoundOpen(sg.stageKey)}
                     {@const sgAllRows = sg.rounds.flatMap(r => r.rows)}
-                    {@const sgPlayerSummary = sg.rounds.flatMap(r => r.playerSummary)}
+                    {@const sgPlayerSummary = (() => {
+                      // Merge per-round playerSummaries — flatMap duplicates players who
+                      // appear in multiple rounds within the same stage group.
+                      const map = new Map<string, typeof sg.rounds[0]['playerSummary'][0]>();
+                      for (const rr of sg.rounds) {
+                        for (const p of rr.playerSummary) {
+                          const ex = map.get(p.playerId);
+                          if (!ex) { map.set(p.playerId, { ...p }); continue; }
+                          ex.matches      += p.matches;
+                          ex.wins         += p.wins;
+                          ex.losses       += p.losses;
+                          ex.draws        += p.draws;
+                          ex.boardsWon    += p.boardsWon;
+                          ex.pointsScored += p.pointsScored;
+                          ex.strikePoints += p.strikePoints;
+                          ex.netPoints    += p.netPoints;
+                        }
+                      }
+                      return Array.from(map.values());
+                    })()}
                     <section
                       class="round-report round-report-nested"
                       class:round-folded={!open}
