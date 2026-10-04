@@ -101,7 +101,7 @@
     if (role.isSuper) return true;
     if (!role.isOrganiser) return false;
     const myUid = currentUser()?.uid;
-    return !!(myUid && t.createdBy === myUid);
+    return !!(myUid && (t.createdBy === myUid || !!(t.coOrganisers?.[myUid])));
   }
 
   let tick = $state(0);
