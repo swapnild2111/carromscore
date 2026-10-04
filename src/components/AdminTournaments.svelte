@@ -258,6 +258,9 @@
   let addingDefaultPointsTarget = $state<string>(String(FALLBACK_TOURNAMENT_DEFAULTS.pointsTarget));
   let addingDefaultMaxBoards = $state<string>(String(FALLBACK_TOURNAMENT_DEFAULTS.maxBoards));
   let addingDefaultTimerDuration = $state<string>(String(FALLBACK_TOURNAMENT_DEFAULTS.timerDuration));
+  let addingShowAdvanced = $state(false);
+  let editingShowAdvanced = $state(false);
+  let editingShowCoOrgs = $state(false);
 
   /** Per-row "Assigned players" dialog state (closed tournaments). */
   let assignOpen = $state(false);
@@ -696,6 +699,8 @@
   let editingFormat = $state<'standard' | 'league' | 'knockout' | 'roundrobin'>('standard');
 
   function startEdit(t: Tournament) {
+    editingShowAdvanced = false;
+    editingShowCoOrgs = false;
     editingKey = t.key;
     editingName = t.name;
     editingType = t.type ?? 'open';
@@ -780,6 +785,8 @@
     editingDefaultMaxBoards = '';
     editingDefaultTimerDuration = '';
     editingOriginal = null;
+    editingShowAdvanced = false;
+    editingShowCoOrgs = false;
     coOrgUids = [];
     coOrgPickerValue = '';
     primaryOrgUid = null;
@@ -791,13 +798,8 @@
       flash('err', 'Name cannot be blank');
       return;
     }
-    // Invite-only tournaments must have a country per the v3.1 data model.
-    if (editingType === 'closed' && !editingCountry) {
-      flash('err', 'Invite-only tournaments must have a country');
-      return;
-    }
     const nameChanged = false; // rename disabled — name field is read-only in Edit
-    const typeChanged = editingType !== editingOriginal.type;
+    const typeChanged = false; // type field removed (access type decommissioned)
     // Compare against the empty-string sentinel for "no country".
     const countryNext = editingCountry;
     const countryChanged = countryNext !== editingOriginal.country;
@@ -1292,6 +1294,7 @@
     addingDefaultPointsTarget = String(FALLBACK_TOURNAMENT_DEFAULTS.pointsTarget);
     addingDefaultMaxBoards = String(FALLBACK_TOURNAMENT_DEFAULTS.maxBoards);
     addingDefaultTimerDuration = String(FALLBACK_TOURNAMENT_DEFAULTS.timerDuration);
+    addingShowAdvanced = false;
   }
   function closeAdd() {
     addingOpen = false;
@@ -1306,6 +1309,7 @@
     addingDefaultPointsTarget = String(FALLBACK_TOURNAMENT_DEFAULTS.pointsTarget);
     addingDefaultMaxBoards = String(FALLBACK_TOURNAMENT_DEFAULTS.maxBoards);
     addingDefaultTimerDuration = String(FALLBACK_TOURNAMENT_DEFAULTS.timerDuration);
+    addingShowAdvanced = false;
   }
   async function saveAdd() {
     const trimmed = addingName.trim();
@@ -1822,17 +1826,10 @@
       bind:value={query}
       aria-label="Search tournaments"
     />
-    <select class="filter-select" bind:value={filterType} aria-label="Filter by type">
-      <option value="all">All types</option>
-      <option value="open">Open</option>
-      <option value="closed">Invite-only</option>
-    </select>
     <select class="filter-select" bind:value={filterFormat} aria-label="Filter by format">
       <option value="all">All formats</option>
-      <option value="standard">Regular</option>
       <option value="league">League</option>
       <option value="knockout">Knockout</option>
-      <option value="roundrobin">Round Robin</option>
     </select>
     {#if countryOptions().length > 0}
     <select class="filter-select" bind:value={filterCountry} aria-label="Filter by country">
@@ -1956,370 +1953,307 @@
   {/if}
   </div>
 
-  <!--
-    Edit tournament dialog (v3.2). Consolidates rename + type/state
-    + country changes into one modal. Save applies rename first
-    (may change the record key) then the meta patch on the resulting
-    key. Open/Closed radio group is same shape as the add-tournament
-    dialog so the pattern stays consistent.
-  -->
+  <!-- Edit tournament dialog (modern design, matches Add dialog) -->
   {#if editingKey}
     {@const editingTournament = list().find((t) => t.key === editingKey) ?? null}
+    {@const editingTournamentForKO = editingTournament}
+    {@const schedLocked = !!(editingTournamentForKO?.knockoutCfg?.participantCount)}
     <div class="dialog" role="dialog" aria-modal="true" onclick={(e) => { if (e.target === e.currentTarget) cancelEdit(); }}>
-      <div class="dialog-card dialog-card-wide">
-        <h3>Edit tournament</h3>
+      <div class="dialog-card dialog-card-wide add-dialog-modern">
 
-        <fieldset class="add-type add-details-section">
-          <legend class="legend-hidden">Tournament Details</legend>
+        <!-- Header -->
+        <div class="add-dialog-header">
+          <div class="add-dialog-header-icon">
+            <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"/></svg>
+          </div>
+          <h3 class="add-dialog-title">Edit Tournament</h3>
+          <button type="button" class="add-dialog-close" onclick={cancelEdit} aria-label="Close" disabled={saving}>
+            <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16"><path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"/></svg>
+          </button>
+        </div>
 
-          <label class="edit-field">
-            <span>Name <em class="hint-inline">(contact support to rename)</em></span>
-            <input
-              type="text"
-              value={editingName}
-              aria-label="Tournament name"
-              maxlength="60"
-              disabled
-            />
-          </label>
+        <!-- Scrollable body -->
+        <div class="add-dialog-body">
 
-          <label class="edit-field">
-            <span>Description <em class="hint-inline">(optional, shown on print cover)</em></span>
-            <input
-              type="text"
-              bind:value={editingDescription}
-              placeholder="Venue, date range, short blurb…"
-              maxlength="300"
-              disabled={saving}
-              aria-label="Tournament description"
-            />
-          </label>
-
-          <label class="edit-field">
-            <span>Tournament date <em class="hint-inline">(optional)</em></span>
-            <input
-              type="date"
-              bind:value={editingStartDate}
-              disabled={saving}
-              aria-label="Tournament start date"
-            />
-          </label>
-
-          <div class="add-sub-section">
-            <span class="field-label-white">Type</span>
-            <div class="add-type-rows">
-              <label class="add-type-row">
-                <input
-                  type="radio"
-                  name="edit-tournament-type"
-                  value="open"
-                  bind:group={editingType}
-                  disabled={saving}
-                />
-                <span>
-                  <strong>Open</strong>
-                  — casual event, no roster gating.
-                </span>
+          <!-- Basics -->
+          <div class="add-section">
+            <label class="add-field">
+              <span class="add-field-label">Name <span class="add-optional">(contact support to rename)</span></span>
+              <input
+                class="add-input-lg"
+                type="text"
+                value={editingName}
+                aria-label="Tournament name"
+                maxlength="60"
+                disabled
+              />
+            </label>
+            <div class="add-row-2">
+              <label class="add-field">
+                <span class="add-field-label">Date <span class="add-optional">optional</span></span>
+                <input type="date" bind:value={editingStartDate} disabled={saving} aria-label="Tournament start date" />
               </label>
-              <label class="add-type-row">
+              <label class="add-field">
+                <span class="add-field-label">Description <span class="add-optional">optional</span></span>
                 <input
-                  type="radio"
-                  name="edit-tournament-type"
-                  value="closed"
-                  bind:group={editingType}
+                  type="text"
+                  bind:value={editingDescription}
+                  placeholder="Venue, short blurb…"
+                  maxlength="300"
                   disabled={saving}
+                  aria-label="Tournament description"
                 />
-                <span>
-                  <strong>Invite-only</strong>
-                  — country-scoped, players assigned explicitly.
-                </span>
               </label>
             </div>
           </div>
 
-          {#if editingType === 'closed'}
-          <label class="add-country-label">
-            <span class="field-label-white">
-              Country
-              <em class="hint-inline">(required)</em>
-            </span>
-            <CountrySelect
-              bind:value={editingCountry}
-              required={true}
-              ariaLabel="Tournament country"
-            />
-          </label>
-          {/if}
-
-          <div class="add-sub-section">
-            <span class="field-label-white">Format</span>
-            <fieldset class="fmt fmt-format fmt-format-inline">
-              <label class:selected={editingFormat === 'league'} onclick={() => (editingFormat = 'league')}>
+          <!-- Format -->
+          <div class="add-section">
+            <span class="add-section-label">Format</span>
+            <div class="add-format-cards">
+              <label class="add-format-card" class:add-format-card-active={editingFormat === 'league'}>
                 <input type="radio" name="edit-tournament-format" value="league" bind:group={editingFormat} disabled={saving} />
-                <span class="opt-title">League</span>
-                <span class="opt-meta">Groups + flights</span>
+                <span class="add-format-icon">🏆</span>
+                <span class="add-format-title">League</span>
+                <span class="add-format-desc">Groups + flights</span>
               </label>
-              <label class:selected={editingFormat === 'knockout'} onclick={() => (editingFormat = 'knockout')}>
+              <label class="add-format-card" class:add-format-card-active={editingFormat === 'knockout'}>
                 <input type="radio" name="edit-tournament-format" value="knockout" bind:group={editingFormat} disabled={saving} />
-                <span class="opt-title">Knockout</span>
-                <span class="opt-meta">Single elimination</span>
+                <span class="add-format-icon">⚡</span>
+                <span class="add-format-title">Knockout</span>
+                <span class="add-format-desc">Single elimination</span>
               </label>
-              <label class="fmt-disabled" title="Coming soon">
+              <label class="add-format-card add-format-card-disabled" title="Coming soon">
                 <input type="radio" name="edit-tournament-format" value="roundrobin" bind:group={editingFormat} disabled />
-                <span class="opt-title">Round Robin <span class="coming-soon-badge">Soon</span></span>
-                <span class="opt-meta">Everyone plays all</span>
+                <span class="add-format-icon">🔄</span>
+                <span class="add-format-title">Round Robin <span class="coming-soon-badge">Soon</span></span>
+                <span class="add-format-desc">Everyone plays all</span>
               </label>
-            </fieldset>
+            </div>
           </div>
 
-        </fieldset>
-
-        {#if editingFormat === 'knockout' || editingFormat === 'roundrobin'}
-          {@const editingTournamentForKO = list().find((t) => t.key === editingKey) ?? null}
-          {@const schedLocked = !!(editingTournamentForKO?.knockoutCfg?.participantCount)}
-          <fieldset class="league-cfg-grid">
-            <legend>{editingFormat === 'roundrobin' ? 'Round Robin' : 'Knockout'} setup</legend>
-            {#if schedLocked}
-              <p class="cfg-locked-note">🔒 Schedule generated — structural settings are read-only</p>
-            {/if}
-            <label class="edit-field" class:edit-field-locked={schedLocked}>
-              <span>Total players</span>
-              <input
-                type="number"
-                min="2"
-                max="2048"
-                step="1"
-                bind:value={editingKnockoutPlayers}
-                disabled={saving || schedLocked}
-                aria-label="Total players"
-              />
-            </label>
-            <label class="edit-field">
-              <span>Boards available</span>
-              <input
-                type="number"
-                min="1"
-                max="99"
-                step="1"
-                bind:value={editingBoardsAvailable}
-                disabled={saving}
-                aria-label="Boards available"
-              />
-            </label>
-            {#if editingFormat === 'roundrobin'}
-              <label class="edit-field" class:edit-field-locked={schedLocked}>
-                <span>Top N advance to knockout</span>
-                <select bind:value={editingAdvanceCount} disabled={saving || schedLocked}>
-                  {#each [2, 4, 8, 16] as n}
-                    <option value={n}>{n} players</option>
+          <!-- Setup — Knockout/RR -->
+          {#if editingFormat === 'knockout' || editingFormat === 'roundrobin'}
+            <div class="add-section add-section-setup">
+              <span class="add-section-label">{editingFormat === 'roundrobin' ? 'Round Robin' : 'Knockout'} Setup</span>
+              {#if schedLocked}
+                <p class="cfg-locked-note">🔒 Schedule generated — structural settings are read-only</p>
+              {/if}
+              <div class="add-row-2">
+                <label class="add-field" class:edit-field-locked={schedLocked}>
+                  <span class="add-field-label">Total players</span>
+                  <input type="number" min="2" max="2048" step="1" bind:value={editingKnockoutPlayers} disabled={saving || schedLocked} aria-label="Total players" />
+                </label>
+                <label class="add-field">
+                  <span class="add-field-label">Boards available</span>
+                  <input type="number" min="1" max="99" step="1" bind:value={editingBoardsAvailable} disabled={saving} aria-label="Boards available" />
+                </label>
+              </div>
+              {#if editingFormat === 'roundrobin'}
+                <label class="add-field" class:edit-field-locked={schedLocked}>
+                  <span class="add-field-label">Top N advance to knockout</span>
+                  <select bind:value={editingAdvanceCount} disabled={saving || schedLocked}>
+                    {#each [2, 4, 8, 16] as n}
+                      <option value={n}>{n} players</option>
+                    {/each}
+                  </select>
+                </label>
+              {/if}
+              <div class="add-rewards-row">
+                <span class="add-field-label">Rewards</span>
+                <div class="add-rewards-checks-inline">
+                  {#each [['Gold', '🥇'], ['Silver', '🥈'], ['Bronze', '🥉']] as [tier, emoji]}
+                    <label class="add-reward-check">
+                      <input
+                        type="checkbox"
+                        checked={editingKnockoutRewards.includes(tier)}
+                        disabled={saving || schedLocked}
+                        onchange={(e) => {
+                          if ((e.target as HTMLInputElement).checked) {
+                            editingKnockoutRewards = ['Gold', 'Silver', 'Bronze'].filter(
+                              (t) => t === tier || editingKnockoutRewards.includes(t)
+                            );
+                          } else {
+                            editingKnockoutRewards = editingKnockoutRewards.filter((t) => t !== tier);
+                          }
+                        }}
+                      />
+                      <span>{emoji} {tier}</span>
+                    </label>
                   {/each}
-                </select>
-              </label>
-            {/if}
-            <div class="league-cfg-flights-row" class:edit-field-locked={schedLocked}>
-              <span class="league-cfg-flights-label">Rewards</span>
-              <div class="add-rewards-checks">
-                {#each [['Gold', '🥇'], ['Silver', '🥈'], ['Bronze', '🥉']] as [tier, emoji]}
-                  <label class="add-rewards-row">
-                    <input
-                      type="checkbox"
-                      checked={editingKnockoutRewards.includes(tier)}
-                      disabled={saving || schedLocked}
-                      onchange={(e) => {
-                        if ((e.target as HTMLInputElement).checked) {
-                          editingKnockoutRewards = ['Gold', 'Silver', 'Bronze'].filter(
-                            (t) => t === tier || editingKnockoutRewards.includes(t)
-                          );
-                        } else {
-                          editingKnockoutRewards = editingKnockoutRewards.filter((t) => t !== tier);
-                        }
-                      }}
-                    />
-                    <span>{emoji} {tier}</span>
-                  </label>
-                {/each}
+                </div>
               </div>
             </div>
-          </fieldset>
-        {/if}
+          {/if}
 
-        <!--
-          Match defaults (v3.6.1). Each field is optional — leaving it
-          blank falls back to the app-wide defaults (singles / bo1 /
-          target 25 / max 8 boards). Bracket admin uses these to seed
-          new planned matches; MatchSetup uses them to seed the setup
-          form when this tournament is picked. Editable per-match too
-          (mode toggle in the bracket UI, all four in the setup form).
-        -->
-        <fieldset class="defaults-grid">
-          <legend>Match defaults</legend>
-          <p class="defaults-hint">
-            Prefills matches created under this tournament. Umpires
-            can still override per match.
-          </p>
-          <fieldset class="fmt fmt-format defaults-mode-picker">
-            <legend>Mode</legend>
-            <label class:selected={editingDefaultMode === 'singles'} onclick={() => (editingDefaultMode = 'singles')}>
-              <input type="radio" name="edit-default-mode" value="singles" bind:group={editingDefaultMode} disabled={saving} />
-              <span class="opt-title">Singles</span>
-              <span class="opt-meta">1 vs 1</span>
-            </label>
-            <label class="opt-unavailable">
-              <input type="radio" name="edit-default-mode" value="doubles" disabled />
-              <span class="opt-title">Doubles</span>
-              <span class="opt-meta">Coming soon</span>
-            </label>
-          </fieldset>
-          <label class="edit-field">
-            <span>Best of sets</span>
-            <input
-              type="number"
-              min="1"
-              max="15"
-              step="1"
-              bind:value={editingDefaultBestOf}
-              disabled={saving}
-              aria-label="Default best of"
-            />
-          </label>
-          <label class="edit-field">
-            <span>Points target</span>
-            <input
-              type="number"
-              min="1"
-              max="100"
-              step="1"
-              bind:value={editingDefaultPointsTarget}
-              disabled={saving}
-              aria-label="Default points target"
-            />
-          </label>
-          <label class="edit-field">
-            <span>Max boards <em class="hint-inline">(0 = unlimited)</em></span>
-            <input
-              type="number"
-              min="0"
-              max="50"
-              step="1"
-              bind:value={editingDefaultMaxBoards}
-              disabled={saving}
-              aria-label="Default max boards"
-            />
-          </label>
-          <label class="edit-field">
-            <span>Timer <em class="hint-inline">(mins, 0 = off)</em></span>
-            <input
-              type="number"
-              min="0"
-              max="300"
-              step="1"
-              bind:value={editingDefaultTimerDuration}
-              disabled={saving}
-              aria-label="Default timer duration"
-            />
-          </label>
-        </fieldset>
-
-        <fieldset class="edit-fieldset">
-          <legend>Co-organisers</legend>
-          <p class="fieldset-hint">Co-organisers can edit matches. The <strong>Primary</strong> organiser's logo appears in print headers.</p>
-          {#if coOrgLoading}
-            <p class="empty">Loading…</p>
-          {:else}
-            {@const canManageCoOrgs = role?.isSuper || editingTournament?.createdBy === currentUser()?.uid}
-            <ul class="uid-list">
-              <!-- Creator row (always shown so they can be set back as primary) -->
-              {#if editingTournament?.createdBy}
-                {@const creatorUid = editingTournament.createdBy}
-                {@const isCreatorPrimary = !primaryOrgUid || primaryOrgUid === creatorUid}
-                <li class="uid-row uid-row-creator">
-                  <span class="uid-label">{coOrgLabelForUid(creatorUid)} <em class="uid-role-tag">creator</em></span>
-                  {#if isCreatorPrimary}
-                    <span class="chip chip-primary" title="This organiser's logo appears in print headers">★ Primary</span>
-                  {:else if canManageCoOrgs}
-                    <button
-                      type="button"
-                      class="btn btn-sm"
-                      onclick={() => makeOrgPrimary(null)}
-                      disabled={saving}
-                      title="Set as primary organiser for print headers"
-                    >Make Primary</button>
-                  {/if}
-                </li>
-              {/if}
-              {#each coOrgUids as uid (uid)}
-                {@const isPrimary = primaryOrgUid === uid}
-                <li class="uid-row">
-                  <span class="uid-label">{coOrgLabelForUid(uid)}</span>
-                  {#if isPrimary}
-                    <span class="chip chip-primary" title="This organiser's logo appears in print headers">★ Primary</span>
-                  {:else if canManageCoOrgs}
-                    <button
-                      type="button"
-                      class="btn btn-sm"
-                      onclick={() => makeOrgPrimary(uid)}
-                      disabled={saving}
-                      title="Set as primary organiser for print headers"
-                    >Make Primary</button>
-                  {/if}
-                  {#if canManageCoOrgs}
-                    <button
-                      type="button"
-                      class="btn btn-danger btn-sm"
-                      onclick={() => removeCoOrg(uid)}
-                      disabled={saving}
-                    >Remove</button>
-                  {/if}
-                </li>
-              {/each}
-            </ul>
-            {#if canManageCoOrgs}
-              <div class="uid-add">
-                <select
-                  class="user-picker"
-                  bind:value={coOrgPickerValue}
-                  disabled={saving}
-                  aria-label="Pick a co-organiser"
-                >
-                  <option value="">
-                    {#if coOrgLoading || usersLoading}Loading…{:else}Select a user…{/if}
-                  </option>
-                  {#each eligibleCoOrgs() as o (o.uid)}
-                    <option value={o.uid}>{o.name}</option>
+          <!-- Setup — League -->
+          {#if editingFormat === 'league'}
+            <div class="add-section add-section-setup">
+              <span class="add-section-label">League Setup</span>
+              <div class="add-row-2">
+                <label class="add-field">
+                  <span class="add-field-label">Total players</span>
+                  <input type="number" min="4" max="2048" step="1" bind:value={editingKnockoutPlayers} disabled={saving} aria-label="Total players" />
+                </label>
+                <label class="add-field">
+                  <span class="add-field-label">Boards available</span>
+                  <input type="number" min="1" max="99" step="1" bind:value={editingBoardsAvailable} disabled={saving} aria-label="Boards available" />
+                </label>
+              </div>
+              <div class="add-rewards-row">
+                <span class="add-field-label">Rewards</span>
+                <div class="add-rewards-checks-inline">
+                  {#each [['Gold', '🥇'], ['Silver', '🥈'], ['Bronze', '🥉']] as [tier, emoji]}
+                    <label class="add-reward-check">
+                      <input
+                        type="checkbox"
+                        checked={editingKnockoutRewards.includes(tier)}
+                        disabled={saving}
+                        onchange={(e) => {
+                          if ((e.target as HTMLInputElement).checked) {
+                            editingKnockoutRewards = ['Gold', 'Silver', 'Bronze'].filter(
+                              (t) => t === tier || editingKnockoutRewards.includes(t)
+                            );
+                          } else {
+                            editingKnockoutRewards = editingKnockoutRewards.filter((t) => t !== tier);
+                          }
+                        }}
+                      />
+                      <span>{emoji} {tier}</span>
+                    </label>
                   {/each}
-                </select>
-                <button
-                  type="button"
-                  class="btn btn-primary"
-                  onclick={addCoOrg}
-                  disabled={saving || !coOrgPickerValue}
-                >Add</button>
+                </div>
+              </div>
+            </div>
+          {/if}
+
+          <!-- Match defaults — collapsible -->
+          <div class="add-section">
+            <button
+              type="button"
+              class="add-advanced-toggle"
+              onclick={() => (editingShowAdvanced = !editingShowAdvanced)}
+            >
+              <span class="add-advanced-chevron" class:add-advanced-chevron-open={editingShowAdvanced}>›</span>
+              Match defaults
+              {#if !editingShowAdvanced}
+                <span class="add-advanced-summary">Best of {editingDefaultBestOf} · {editingDefaultPointsTarget} pts · {editingDefaultMaxBoards === '0' ? 'unlimited boards' : editingDefaultMaxBoards + ' boards'}</span>
+              {/if}
+            </button>
+            {#if editingShowAdvanced}
+              <div class="add-advanced-grid">
+                <label class="add-field">
+                  <span class="add-field-label">Best of sets</span>
+                  <input type="number" min="1" max="15" step="1" bind:value={editingDefaultBestOf} disabled={saving} aria-label="Default best of" />
+                </label>
+                <label class="add-field">
+                  <span class="add-field-label">Points target</span>
+                  <input type="number" min="1" max="100" step="1" bind:value={editingDefaultPointsTarget} disabled={saving} aria-label="Default points target" />
+                </label>
+                <label class="add-field">
+                  <span class="add-field-label">Max boards <span class="add-optional">0 = unlimited</span></span>
+                  <input type="number" min="0" max="50" step="1" bind:value={editingDefaultMaxBoards} disabled={saving} aria-label="Default max boards" />
+                </label>
+                <label class="add-field">
+                  <span class="add-field-label">Timer <span class="add-optional">mins, 0 = off</span></span>
+                  <input type="number" min="0" max="300" step="1" bind:value={editingDefaultTimerDuration} disabled={saving} aria-label="Default timer duration" />
+                </label>
               </div>
             {/if}
-          {/if}
-        </fieldset>
+          </div>
 
-        <div class="dialog-actions">
+          <!-- Co-organisers — collapsible -->
+          <div class="add-section">
+            <button
+              type="button"
+              class="add-advanced-toggle"
+              onclick={() => (editingShowCoOrgs = !editingShowCoOrgs)}
+            >
+              <span class="add-advanced-chevron" class:add-advanced-chevron-open={editingShowCoOrgs}>›</span>
+              Co-organisers
+              {#if !editingShowCoOrgs}
+                <span class="add-advanced-summary">{coOrgUids.length + (editingTournament?.createdBy ? 1 : 0)} member{coOrgUids.length + (editingTournament?.createdBy ? 1 : 0) === 1 ? '' : 's'}</span>
+              {/if}
+            </button>
+            {#if editingShowCoOrgs}
+              {#if coOrgLoading}
+                <p class="empty">Loading…</p>
+              {:else}
+                {@const canManageCoOrgs = role?.isSuper || editingTournament?.createdBy === currentUser()?.uid}
+                <ul class="corg-list">
+                  {#if editingTournament?.createdBy}
+                    {@const creatorUid = editingTournament.createdBy}
+                    {@const isCreatorPrimary = !primaryOrgUid || primaryOrgUid === creatorUid}
+                    {@const creatorLabel = coOrgLabelForUid(creatorUid)}
+                    <li class="corg-row">
+                      <span class="corg-avatar">{creatorLabel.charAt(0).toUpperCase()}</span>
+                      <span class="corg-name">{creatorLabel}</span>
+                      <span class="corg-tag">creator</span>
+                      {#if isCreatorPrimary}
+                        <span class="corg-primary">★</span>
+                      {:else if canManageCoOrgs}
+                        <button type="button" class="corg-btn-star" onclick={() => makeOrgPrimary(null)} disabled={saving} title="Set as primary">☆</button>
+                      {/if}
+                    </li>
+                  {/if}
+                  {#each coOrgUids as uid (uid)}
+                    {@const isPrimary = primaryOrgUid === uid}
+                    {@const orgLabel = coOrgLabelForUid(uid)}
+                    <li class="corg-row">
+                      <span class="corg-avatar">{orgLabel.charAt(0).toUpperCase()}</span>
+                      <span class="corg-name">{orgLabel}</span>
+                      {#if isPrimary}
+                        <span class="corg-primary">★</span>
+                      {:else if canManageCoOrgs}
+                        <button type="button" class="corg-btn-star" onclick={() => makeOrgPrimary(uid)} disabled={saving} title="Set as primary">☆</button>
+                      {/if}
+                      {#if canManageCoOrgs}
+                        <button type="button" class="corg-btn-remove" onclick={() => removeCoOrg(uid)} disabled={saving} title="Remove">✕</button>
+                      {/if}
+                    </li>
+                  {/each}
+                </ul>
+                {#if canManageCoOrgs}
+                  <div class="corg-add">
+                    <select class="user-picker" bind:value={coOrgPickerValue} disabled={saving} aria-label="Pick a co-organiser">
+                      <option value="">{usersLoading ? 'Loading…' : 'Add co-organiser…'}</option>
+                      {#each eligibleCoOrgs() as o (o.uid)}
+                        <option value={o.uid}>{o.name}</option>
+                      {/each}
+                    </select>
+                    <button type="button" class="btn btn-primary btn-sm" onclick={addCoOrg} disabled={saving || !coOrgPickerValue}>Add</button>
+                  </div>
+                {/if}
+              {/if}
+            {/if}
+          </div>
+
+          <!-- Meta footer -->
+          {#if editingTournament}
+            <div class="add-section edit-meta-section">
+              <span class="edit-meta-line">key: <code>{editingTournament.key}</code></span>
+              <span class="edit-meta-sep">·</span>
+              <span class="edit-meta-line">last active {new Date(editingTournament.lastActive).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+              {#if editingTournament.createdAt}
+                <span class="edit-meta-sep">·</span>
+                <span class="edit-meta-line">created {new Date(editingTournament.createdAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+              {/if}
+            </div>
+          {/if}
+
+        </div><!-- /.add-dialog-body -->
+
+        <!-- Sticky footer -->
+        <div class="add-dialog-footer">
           <button type="button" class="btn" onclick={cancelEdit} disabled={saving}>Cancel</button>
           <button
             type="button"
             class="btn btn-primary"
             onclick={saveEdit}
-            disabled={saving || !editingName.trim() || (editingType === 'closed' && !editingCountry)}
-          >{saving ? 'Saving…' : 'Save'}</button>
+            disabled={saving || !editingName.trim()}
+          >{saving ? 'Saving…' : 'Save changes'}</button>
         </div>
 
-        {#if editingTournament}
-          <footer class="dialog-meta">
-            <span>key: <code>{editingTournament.key}</code></span>
-            <span class="dialog-meta-sep">·</span>
-            <span>last active {new Date(editingTournament.lastActive).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}</span>
-            {#if editingTournament.createdAt}
-              <span class="dialog-meta-sep">·</span>
-              <span>created {new Date(editingTournament.createdAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}</span>
-            {/if}
-          </footer>
-        {/if}
       </div>
     </div>
   {/if}
@@ -2474,337 +2408,212 @@
       aria-labelledby="add-tourn-title"
       onclick={(e) => { if (e.target === e.currentTarget) closeAdd(); }}
     >
-      <div class="dialog-card dialog-card-wide">
-        <h3 id="add-tourn-title">Add tournament</h3>
+      <div class="dialog-card dialog-card-wide add-dialog-modern">
+        <!-- Header -->
+        <div class="add-dialog-header">
+          <div class="add-dialog-header-icon">
+            <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm.75-11.25a.75.75 0 00-1.5 0v2.5h-2.5a.75.75 0 000 1.5h2.5v2.5a.75.75 0 001.5 0v-2.5h2.5a.75.75 0 000-1.5h-2.5v-2.5z" clip-rule="evenodd"/></svg>
+          </div>
+          <h3 id="add-tourn-title" class="add-dialog-title">New Tournament</h3>
+          <button type="button" class="add-dialog-close" onclick={closeAdd} aria-label="Close">
+            <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16"><path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"/></svg>
+          </button>
+        </div>
 
-        <fieldset class="add-type add-details-section">
-          <legend class="legend-hidden">Tournament Details</legend>
-          <label class="edit-field">
-            <span class="field-label-white">Name</span>
-            <input
-              type="text"
-              bind:value={addingName}
-              placeholder="Tournament name"
-              aria-label="Tournament name"
-              maxlength="60"
-            />
-          </label>
-          <label class="edit-field">
-            <span class="field-label-white">Description <em class="hint-inline">(optional)</em></span>
-            <input
-              type="text"
-              bind:value={addingDescription}
-              placeholder="e.g. Season finale knockout — top 8 ranked players"
-              maxlength="300"
-              disabled={saving}
-              aria-label="Tournament description"
-            />
-          </label>
-          <label class="edit-field">
-            <span class="field-label-white">Tournament date <em class="hint-inline">(optional)</em></span>
-            <input
-              type="date"
-              bind:value={addingStartDate}
-              disabled={saving}
-              aria-label="Tournament start date"
-            />
-          </label>
-          <div class="add-sub-section">
-            <span class="field-label-white">Type</span>
-            <div class="add-type-rows">
-              <label class="add-type-row">
+        <div class="add-dialog-body">
+          <!-- Basics -->
+          <div class="add-section">
+            <label class="add-field">
+              <span class="add-field-label">Tournament name</span>
+              <input
+                type="text"
+                bind:value={addingName}
+                placeholder="e.g. Open Championship 2026"
+                aria-label="Tournament name"
+                maxlength="60"
+                class="add-input-lg"
+              />
+            </label>
+            <div class="add-row-2">
+              <label class="add-field">
+                <span class="add-field-label">Date <span class="add-optional">optional</span></span>
                 <input
-                  type="radio"
-                  name="add-tournament-type"
-                  value="open"
-                  bind:group={addingType}
+                  type="date"
+                  bind:value={addingStartDate}
+                  disabled={saving}
+                  aria-label="Tournament start date"
                 />
-                <span>
-                  <strong>Open</strong>
-                  — casual event, no roster gating.
-                </span>
               </label>
-              <label class="add-type-row">
+              <label class="add-field">
+                <span class="add-field-label">Description <span class="add-optional">optional</span></span>
                 <input
-                  type="radio"
-                  name="add-tournament-type"
-                  value="closed"
-                  bind:group={addingType}
+                  type="text"
+                  bind:value={addingDescription}
+                  placeholder="Short description…"
+                  maxlength="300"
+                  disabled={saving}
+                  aria-label="Tournament description"
                 />
-                <span>
-                  <strong>Invite-only</strong>
-                  — country-scoped, players assigned explicitly.
-                </span>
               </label>
             </div>
           </div>
-          {#if addingType === 'closed'}
-            <label class="add-country-label">
-              <span class="field-label-white">Country</span>
-              <CountrySelect
-                bind:value={addingCountry}
-                required={true}
-                ariaLabel="Tournament country"
-              />
-            </label>
-          {/if}
-          <div class="add-sub-section">
-            <span class="field-label-white">Format</span>
-            <fieldset class="fmt fmt-format fmt-format-inline">
-              <label class:selected={addingFormat === 'league'} onclick={() => (addingFormat = 'league')}>
+
+          <!-- Format cards -->
+          <div class="add-section">
+            <span class="add-section-label">Format</span>
+            <div class="add-format-cards">
+              <label class="add-format-card" class:add-format-card-active={addingFormat === 'league'}>
                 <input type="radio" name="add-tournament-format" value="league" bind:group={addingFormat} />
-                <span class="opt-title">League</span>
-                <span class="opt-meta">Groups + flights</span>
+                <span class="add-format-icon">🏆</span>
+                <span class="add-format-title">League</span>
+                <span class="add-format-desc">Groups + flights</span>
               </label>
-              <label class:selected={addingFormat === 'knockout'} onclick={() => (addingFormat = 'knockout')}>
+              <label class="add-format-card" class:add-format-card-active={addingFormat === 'knockout'}>
                 <input type="radio" name="add-tournament-format" value="knockout" bind:group={addingFormat} />
-                <span class="opt-title">Knockout</span>
-                <span class="opt-meta">Single elimination</span>
+                <span class="add-format-icon">⚡</span>
+                <span class="add-format-title">Knockout</span>
+                <span class="add-format-desc">Single elimination</span>
               </label>
-              <label class="fmt-disabled" title="Coming soon">
+              <label class="add-format-card add-format-card-disabled" title="Coming soon">
                 <input type="radio" name="add-tournament-format" value="roundrobin" bind:group={addingFormat} disabled />
-                <span class="opt-title">Round Robin <span class="coming-soon-badge">Soon</span></span>
-                <span class="opt-meta">Everyone plays all</span>
+                <span class="add-format-icon">🔄</span>
+                <span class="add-format-title">Round Robin <span class="coming-soon-badge">Soon</span></span>
+                <span class="add-format-desc">Everyone plays all</span>
               </label>
-            </fieldset>
+            </div>
           </div>
-        </fieldset>
 
-        {#if addingFormat === 'knockout' || addingFormat === 'roundrobin'}
-          <fieldset class="league-cfg-grid">
-            <legend>{addingFormat === 'roundrobin' ? 'Round Robin' : 'Knockout'} setup</legend>
-            <label class="edit-field">
-              <span>Total players</span>
-              <input
-                type="number"
-                min="2"
-                max="2048"
-                step="1"
-                bind:value={addingKnockoutPlayers}
-                disabled={saving}
-                aria-label="Total players"
-              />
-            </label>
-            <label class="edit-field">
-              <span>Boards available</span>
-              <input
-                type="number"
-                min="1"
-                max="99"
-                step="1"
-                bind:value={addingBoardsAvailable}
-                disabled={saving}
-                aria-label="Boards available"
-              />
-            </label>
-            {#if addingFormat === 'roundrobin'}
-              <label class="edit-field">
-                <span>Top N advance to knockout</span>
-                <select bind:value={addingAdvanceCount} disabled={saving}>
-                  {#each [2, 4, 8, 16] as n}
-                    <option value={n}>{n} players</option>
-                  {/each}
-                </select>
-              </label>
-            {/if}
-            <div class="league-cfg-flights-row">
-              <span class="league-cfg-flights-label">Rewards</span>
-              <div class="add-rewards-checks">
-                {#each [['Gold', '🥇'], ['Silver', '🥈'], ['Bronze', '🥉']] as [tier, emoji]}
-                  <label class="add-rewards-row">
-                    <input
-                      type="checkbox"
-                      checked={addingKnockoutRewards.includes(tier)}
-                      disabled={saving}
-                      onchange={(e) => {
-                        if ((e.target as HTMLInputElement).checked) {
-                          addingKnockoutRewards = ['Gold', 'Silver', 'Bronze'].filter(
-                            t => t === tier || addingKnockoutRewards.includes(t)
-                          );
-                        } else {
-                          addingKnockoutRewards = addingKnockoutRewards.filter(t => t !== tier);
-                        }
-                      }}
-                    />
-                    <span>{emoji} {tier}</span>
-                  </label>
-                {/each}
+          <!-- Format-specific setup -->
+          {#if addingFormat === 'knockout' || addingFormat === 'roundrobin'}
+            <div class="add-section add-section-setup">
+              <span class="add-section-label">{addingFormat === 'roundrobin' ? 'Round Robin' : 'Knockout'} Setup</span>
+              <div class="add-row-2">
+                <label class="add-field">
+                  <span class="add-field-label">Total players</span>
+                  <input type="number" min="2" max="2048" step="1" bind:value={addingKnockoutPlayers} disabled={saving} aria-label="Total players" />
+                </label>
+                <label class="add-field">
+                  <span class="add-field-label">Boards available</span>
+                  <input type="number" min="1" max="99" step="1" bind:value={addingBoardsAvailable} disabled={saving} aria-label="Boards available" />
+                </label>
               </div>
-            </div>
-          </fieldset>
-        {/if}
-
-        {#if addingFormat === 'league'}
-          <fieldset class="league-cfg-grid">
-            <legend>League setup</legend>
-            <label class="edit-field">
-              <span>Total players</span>
-              <input
-                type="number"
-                min="4"
-                max="2048"
-                step="1"
-                bind:value={addingTotalPlayers}
-                disabled={saving}
-                aria-label="Total players"
-              />
-            </label>
-            <label class="edit-field">
-              <span>Boards available</span>
-              <input
-                type="number"
-                min="1"
-                max="99"
-                step="1"
-                bind:value={addingBoardCount}
-                disabled={saving}
-                aria-label="Total boards"
-              />
-            </label>
-            <div class="league-cfg-flights-row">
-              <span class="league-cfg-flights-label">Rewards</span>
-              <div class="add-rewards-checks">
-                {#each [['Gold', '🥇'], ['Silver', '🥈'], ['Bronze', '🥉']] as [tier, emoji]}
-                  <label class="add-rewards-row">
-                    <input
-                      type="checkbox"
-                      checked={addingKnockoutRewards.includes(tier)}
-                      disabled={saving}
-                      onchange={(e) => {
-                        if ((e.target as HTMLInputElement).checked) {
-                          addingKnockoutRewards = ['Gold', 'Silver', 'Bronze'].filter(
-                            t => t === tier || addingKnockoutRewards.includes(t)
-                          );
-                        } else {
-                          addingKnockoutRewards = addingKnockoutRewards.filter(t => t !== tier);
-                        }
-                        addingWantedFlights = Math.max(1, addingKnockoutRewards.length) as 1 | 2 | 3;
-                      }}
-                    />
-                    <span>{emoji} {tier}</span>
-                  </label>
-                {/each}
-              </div>
-            </div>
-            {#if true}
-              {@const _total = Math.max(4, Number(addingTotalPlayers) || 48)}
-              {@const _bc = Math.max(1, Number(addingBoardCount) || 16)}
-              {@const _layout = computeLeagueLayout(_total, _bc, Math.max(1, addingKnockoutRewards.length) as 1 | 2 | 3)}
-              <div class="league-cfg-hint">
-                <p>
-                  <strong>{_layout.gc} groups × {_layout.pg} players</strong>
-                  = {_layout.gc * _layout.pg} assigned players.
-                  {_layout.bpg} board{_layout.bpg !== 1 ? 's' : ''}/group.
-                  {(_layout.pg * (_layout.pg - 1)) / 2} matches/group
-                  ({_layout.gc * ((_layout.pg * (_layout.pg - 1)) / 2)} total).
-                </p>
-                {#if _layout.leftovers > 0}
-                  <p class="league-cfg-warn">
-                    ⚠ {_layout.leftovers} player{_layout.leftovers !== 1 ? 's' : ''} won't fit into full groups.
-                  </p>
-                  <label class="league-cfg-phantom-row">
-                    <input type="checkbox" bind:checked={addingUsePhantom} disabled={saving} />
-                    <span>Add Phantom player (others get a walkover win)</span>
-                  </label>
-                  {#if addingUsePhantom}
-                    <label class="edit-field league-cfg-phantom-score">
-                      <span>Walkover score (for the winner)</span>
+              {#if addingFormat === 'roundrobin'}
+                <label class="add-field">
+                  <span class="add-field-label">Top N advance to knockout</span>
+                  <select bind:value={addingAdvanceCount} disabled={saving}>
+                    {#each [2, 4, 8, 16] as n}<option value={n}>{n} players</option>{/each}
+                  </select>
+                </label>
+              {/if}
+              <div class="add-rewards-row">
+                <span class="add-field-label">Rewards</span>
+                <div class="add-rewards-checks-inline">
+                  {#each [['Gold', '🥇'], ['Silver', '🥈'], ['Bronze', '🥉']] as [tier, emoji]}
+                    <label class="add-reward-check">
                       <input
-                        type="number"
-                        min="1"
-                        max="500"
-                        step="1"
-                        placeholder={addingDefaultPointsTarget || '25'}
-                        bind:value={addingPhantomScore}
+                        type="checkbox"
+                        checked={addingKnockoutRewards.includes(tier)}
                         disabled={saving}
-                        aria-label="Phantom walkover score"
+                        onchange={(e) => {
+                          if ((e.target as HTMLInputElement).checked) {
+                            addingKnockoutRewards = ['Gold', 'Silver', 'Bronze'].filter(t => t === tier || addingKnockoutRewards.includes(t));
+                          } else {
+                            addingKnockoutRewards = addingKnockoutRewards.filter(t => t !== tier);
+                          }
+                        }}
                       />
+                      <span>{emoji} {tier}</span>
                     </label>
-                  {/if}
-                {/if}
+                  {/each}
+                </div>
+              </div>
+            </div>
+          {/if}
+
+          {#if addingFormat === 'league'}
+            <div class="add-section add-section-setup">
+              <span class="add-section-label">League Setup</span>
+              <div class="add-row-2">
+                <label class="add-field">
+                  <span class="add-field-label">Total players</span>
+                  <input type="number" min="4" max="2048" step="1" bind:value={addingTotalPlayers} disabled={saving} aria-label="Total players" />
+                </label>
+                <label class="add-field">
+                  <span class="add-field-label">Boards available</span>
+                  <input type="number" min="1" max="99" step="1" bind:value={addingBoardCount} disabled={saving} aria-label="Total boards" />
+                </label>
+              </div>
+              <div class="add-rewards-row">
+                <span class="add-field-label">Rewards</span>
+                <div class="add-rewards-checks-inline">
+                  {#each [['Gold', '🥇'], ['Silver', '🥈'], ['Bronze', '🥉']] as [tier, emoji]}
+                    <label class="add-reward-check">
+                      <input
+                        type="checkbox"
+                        checked={addingKnockoutRewards.includes(tier)}
+                        disabled={saving}
+                        onchange={(e) => {
+                          if ((e.target as HTMLInputElement).checked) {
+                            addingKnockoutRewards = ['Gold', 'Silver', 'Bronze'].filter(t => t === tier || addingKnockoutRewards.includes(t));
+                          } else {
+                            addingKnockoutRewards = addingKnockoutRewards.filter(t => t !== tier);
+                          }
+                          addingWantedFlights = Math.max(1, addingKnockoutRewards.length) as 1 | 2 | 3;
+                        }}
+                      />
+                      <span>{emoji} {tier}</span>
+                    </label>
+                  {/each}
+                </div>
+              </div>
+            </div>
+          {/if}
+
+          <!-- Match defaults — collapsible advanced section -->
+          <div class="add-section">
+            <button
+              type="button"
+              class="add-advanced-toggle"
+              onclick={() => (addingShowAdvanced = !addingShowAdvanced)}
+            >
+              <span class="add-advanced-chevron" class:add-advanced-chevron-open={addingShowAdvanced}>›</span>
+              Match defaults
+              {#if !addingShowAdvanced}
+                <span class="add-advanced-summary">Best of {addingDefaultBestOf} · {addingDefaultPointsTarget} pts · {addingDefaultMaxBoards === '0' ? 'unlimited boards' : addingDefaultMaxBoards + ' boards'}</span>
+              {/if}
+            </button>
+            {#if addingShowAdvanced}
+              <div class="add-advanced-grid">
+                <label class="add-field">
+                  <span class="add-field-label">Best of sets</span>
+                  <input type="number" min="1" max="15" step="1" bind:value={addingDefaultBestOf} disabled={saving} aria-label="Default best of" />
+                </label>
+                <label class="add-field">
+                  <span class="add-field-label">Points target</span>
+                  <input type="number" min="1" max="100" step="1" bind:value={addingDefaultPointsTarget} disabled={saving} aria-label="Default points target" />
+                </label>
+                <label class="add-field">
+                  <span class="add-field-label">Max boards <span class="add-optional">0 = unlimited</span></span>
+                  <input type="number" min="0" max="50" step="1" bind:value={addingDefaultMaxBoards} disabled={saving} aria-label="Default max boards" />
+                </label>
+                <label class="add-field">
+                  <span class="add-field-label">Timer <span class="add-optional">mins, 0 = off</span></span>
+                  <input type="number" min="0" max="300" step="1" bind:value={addingDefaultTimerDuration} disabled={saving} aria-label="Default timer duration" />
+                </label>
               </div>
             {/if}
-          </fieldset>
-        {/if}
+          </div>
+        </div>
 
-        <fieldset class="defaults-grid">
-          <legend>Match defaults</legend>
-          <fieldset class="fmt fmt-format defaults-mode-picker">
-            <legend>Mode</legend>
-            <label class:selected={addingDefaultMode === 'singles'} onclick={() => (addingDefaultMode = 'singles')}>
-              <input type="radio" name="add-default-mode" value="singles" bind:group={addingDefaultMode} disabled={saving} />
-              <span class="opt-title">Singles</span>
-              <span class="opt-meta">1 vs 1</span>
-            </label>
-            <label class="opt-unavailable">
-              <input type="radio" name="add-default-mode" value="doubles" disabled />
-              <span class="opt-title">Doubles</span>
-              <span class="opt-meta">Coming soon</span>
-            </label>
-          </fieldset>
-          <label class="edit-field">
-            <span>Best of sets</span>
-            <input
-              type="number"
-              min="1"
-              max="15"
-              step="1"
-              bind:value={addingDefaultBestOf}
-              disabled={saving}
-              aria-label="Default best of"
-            />
-          </label>
-          <label class="edit-field">
-            <span>Points target</span>
-            <input
-              type="number"
-              min="1"
-              max="100"
-              step="1"
-              bind:value={addingDefaultPointsTarget}
-              disabled={saving}
-              aria-label="Default points target"
-            />
-          </label>
-          <label class="edit-field">
-            <span>Max boards <em class="hint-inline">(0 = unlimited)</em></span>
-            <input
-              type="number"
-              min="0"
-              max="50"
-              step="1"
-              bind:value={addingDefaultMaxBoards}
-              disabled={saving}
-              aria-label="Default max boards"
-            />
-          </label>
-          <label class="edit-field">
-            <span>Timer <em class="hint-inline">(mins, 0 = off)</em></span>
-            <input
-              type="number"
-              min="0"
-              max="300"
-              step="1"
-              bind:value={addingDefaultTimerDuration}
-              disabled={saving}
-              aria-label="Default timer duration"
-            />
-          </label>
-        </fieldset>
-
-        <fieldset class="edit-fieldset">
-          <legend>Co-organisers</legend>
-          <p class="fieldset-hint">Save the tournament first, then open Edit to add co-organisers.</p>
-        </fieldset>
-
-        <div class="dialog-actions">
+        <!-- Sticky footer -->
+        <div class="add-dialog-footer">
           <button type="button" class="btn" onclick={closeAdd} disabled={saving}>Cancel</button>
           <button
             type="button"
             class="btn btn-primary"
             onclick={saveAdd}
-            disabled={saving || !addingName.trim() || (addingType === 'closed' && !addingCountry)}
-          >{saving ? 'Adding…' : 'Add'}</button>
+            disabled={saving || !addingName.trim()}
+          >{saving ? 'Creating…' : 'Create tournament'}</button>
         </div>
       </div>
     </div>
@@ -4712,6 +4521,320 @@
     max-width: 32rem;
     border-color: rgba(255, 213, 74, 0.4);
   }
+
+  /* ── Modern Add Tournament dialog ── */
+  .add-dialog-modern {
+    padding: 0 !important;
+    display: flex;
+    flex-direction: column;
+  }
+  .add-dialog-header {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    padding: 0.9rem 1rem 0.8rem;
+    border-bottom: 1px solid rgba(255,255,255,0.07);
+    flex-shrink: 0;
+    border-radius: 0.6rem 0.6rem 0 0;
+  }
+  .add-dialog-header-icon {
+    width: 1.8rem;
+    height: 1.8rem;
+    border-radius: 0.45rem;
+    background: rgba(255,213,74,0.12);
+    color: var(--accent, #ffd54a);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .add-dialog-title {
+    flex: 1;
+    margin: 0;
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--fg, #f5f5f5);
+    text-transform: none;
+    letter-spacing: 0;
+  }
+  .add-dialog-close {
+    background: none;
+    border: none;
+    color: var(--muted, #888);
+    cursor: pointer;
+    padding: 0.25rem;
+    border-radius: 0.3rem;
+    display: flex;
+    align-items: center;
+  }
+  .add-dialog-close:hover { color: var(--fg, #f5f5f5); background: rgba(255,255,255,0.06); }
+
+  .add-dialog-body {
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.1rem;
+  }
+
+  .add-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .add-section-label {
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted, #888);
+  }
+  .add-section-setup {
+    padding: 0.75rem;
+    background: rgba(255,255,255,0.02);
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 0.6rem;
+  }
+
+  .add-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+  }
+  .add-field-label {
+    font-size: 0.78rem;
+    color: var(--muted, #888);
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+  }
+  .add-optional {
+    font-size: 0.7rem;
+    color: rgba(255,255,255,0.25);
+    font-weight: 400;
+  }
+  .add-field input[type="text"],
+  .add-field input[type="date"],
+  .add-field input[type="number"],
+  .add-field select {
+    background: #0d0d0d;
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 0.45rem;
+    color: var(--fg, #f5f5f5);
+    font: inherit;
+    font-size: 0.88rem;
+    padding: 0.48rem 0.65rem;
+    box-sizing: border-box;
+    width: 100%;
+    color-scheme: dark;
+    transition: border-color 0.15s;
+  }
+  .add-field input:focus,
+  .add-field select:focus {
+    outline: none;
+    border-color: var(--accent, #ffd54a);
+  }
+  .add-input-lg {
+    font-size: 1rem !important;
+    padding: 0.6rem 0.75rem !important;
+  }
+  .add-row-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.65rem;
+  }
+  @media (max-width: 28rem) { .add-row-2 { grid-template-columns: 1fr; } }
+
+  /* Type pill toggle */
+  .add-pill-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+  }
+  .add-pill {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.15rem;
+    padding: 0.6rem 0.75rem;
+    background: rgba(255,255,255,0.03);
+    border: 1.5px solid rgba(255,255,255,0.08);
+    border-radius: 0.55rem;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+    position: relative;
+  }
+  .add-pill input[type="radio"] { position: absolute; opacity: 0; pointer-events: none; }
+  .add-pill svg { color: var(--muted, #888); flex-shrink: 0; }
+  .add-pill-title {
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--fg, #f5f5f5);
+    margin-top: 0.15rem;
+  }
+  .add-pill-desc {
+    font-size: 0.72rem;
+    color: var(--muted, #888);
+  }
+  .add-pill-active {
+    border-color: var(--accent, #ffd54a);
+    background: rgba(255,213,74,0.06);
+  }
+  .add-pill-active svg { color: var(--accent, #ffd54a); }
+  .add-pill-active .add-pill-title { color: var(--accent, #ffd54a); }
+
+  /* Format cards */
+  .add-format-cards {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 0.5rem;
+  }
+  .add-format-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.2rem;
+    padding: 0.7rem 0.5rem;
+    background: rgba(255,255,255,0.03);
+    border: 1.5px solid rgba(255,255,255,0.08);
+    border-radius: 0.55rem;
+    cursor: pointer;
+    text-align: center;
+    transition: border-color 0.15s, background 0.15s;
+    position: relative;
+  }
+  .add-format-card input[type="radio"] { position: absolute; opacity: 0; pointer-events: none; }
+  .add-format-icon { font-size: 1.3rem; line-height: 1; }
+  .add-format-title {
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: var(--fg, #f5f5f5);
+  }
+  .add-format-desc {
+    font-size: 0.68rem;
+    color: var(--muted, #888);
+    line-height: 1.3;
+  }
+  .add-format-card-active {
+    border-color: var(--accent, #ffd54a);
+    background: rgba(255,213,74,0.06);
+  }
+  .add-format-card-active .add-format-title { color: var(--accent, #ffd54a); }
+  .add-format-card-disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+
+  /* Rewards inline checkboxes */
+  .add-rewards-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+  }
+  .add-rewards-checks-inline {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: nowrap;
+  }
+  .add-reward-check {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.82rem;
+    color: var(--fg, #f5f5f5);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .add-reward-check input[type="checkbox"] {
+    width: 1rem;
+    height: 1rem;
+    cursor: pointer;
+    accent-color: var(--accent, #ffd54a);
+    flex-shrink: 0;
+  }
+  .add-reward-check:has(input:disabled) { opacity: 0.5; cursor: not-allowed; }
+
+  /* Match defaults collapsible */
+  .add-advanced-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    background: none;
+    border: none;
+    border-top: 1px solid rgba(255,255,255,0.07);
+    width: 100%;
+    text-align: left;
+    font: inherit;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--muted, #888);
+    cursor: pointer;
+    padding: 0.55rem 0 0;
+    transition: color 0.15s;
+  }
+  .add-advanced-toggle:hover { color: var(--fg, #f5f5f5); }
+  .add-advanced-chevron {
+    display: inline-block;
+    font-style: normal;
+    font-size: 1rem;
+    line-height: 1;
+    transition: transform 0.2s;
+    transform: rotate(0deg);
+  }
+  .add-advanced-chevron-open { transform: rotate(90deg); }
+  .add-advanced-summary {
+    font-size: 0.72rem;
+    font-weight: 400;
+    color: rgba(255,255,255,0.25);
+    margin-left: auto;
+  }
+  .add-advanced-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.6rem;
+    margin-top: 0.5rem;
+  }
+  @media (max-width: 28rem) { .add-advanced-grid { grid-template-columns: 1fr; } }
+
+  .add-dialog-footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+    border-top: 1px solid rgba(255,255,255,0.07);
+    flex-shrink: 0;
+    background: #141414;
+    border-radius: 0 0 0.6rem 0.6rem;
+  }
+  .add-section-hint {
+    margin: 0 0 0.6rem;
+    color: var(--muted);
+    font-size: 0.82rem;
+    line-height: 1.5;
+  }
+  .edit-meta-section {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.25rem 0.45rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid rgba(255,255,255,0.07);
+  }
+  .edit-meta-line {
+    font-size: 0.75rem;
+    color: var(--muted);
+  }
+  .edit-meta-line code {
+    font-family: monospace;
+    font-size: 0.78rem;
+    color: rgba(255,255,255,0.45);
+    background: rgba(255,255,255,0.05);
+    padding: 0.05rem 0.3rem;
+    border-radius: 0.25rem;
+  }
+  .edit-meta-sep { font-size: 0.75rem; color: var(--muted); opacity: 0.35; }
   .dialog-card h3 {
     margin: 0 0 0.5rem;
     text-transform: uppercase;
@@ -4887,4 +5010,89 @@
   .user-picker-toggle-raw {
     margin-top: 0.35rem;
   }
+
+  /* ── Modern co-organiser list (Edit dialog) ── */
+  .corg-list {
+    list-style: none;
+    padding: 0;
+    margin: 0.35rem 0 0.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+  .corg-row {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0.45rem 0.6rem;
+    background: rgba(255,255,255,0.04);
+    border-radius: 0.5rem;
+    min-width: 0;
+  }
+  .corg-avatar {
+    flex-shrink: 0;
+    width: 1.75rem;
+    height: 1.75rem;
+    border-radius: 50%;
+    background: rgba(255,213,74,0.12);
+    color: var(--accent, #ffd54a);
+    font-size: 0.75rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .corg-name {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.85rem;
+    color: var(--fg);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .corg-tag {
+    font-size: 0.7rem;
+    color: var(--muted);
+    font-style: italic;
+    flex-shrink: 0;
+  }
+  .corg-primary {
+    flex-shrink: 0;
+    color: var(--accent, #ffd54a);
+    font-size: 0.9rem;
+    line-height: 1;
+  }
+  .corg-btn-star {
+    flex-shrink: 0;
+    background: none;
+    border: none;
+    padding: 0.1rem 0.2rem;
+    color: var(--muted);
+    font-size: 0.9rem;
+    cursor: pointer;
+    line-height: 1;
+    border-radius: 0.25rem;
+  }
+  .corg-btn-star:hover:not(:disabled) { color: var(--accent, #ffd54a); }
+  .corg-btn-remove {
+    flex-shrink: 0;
+    background: none;
+    border: none;
+    padding: 0.1rem 0.25rem;
+    color: var(--muted);
+    font-size: 0.8rem;
+    cursor: pointer;
+    border-radius: 0.25rem;
+    line-height: 1;
+  }
+  .corg-btn-remove:hover:not(:disabled) { color: var(--danger, #ef5350); }
+  .corg-add {
+    display: flex;
+    gap: 0.35rem;
+    align-items: center;
+    min-width: 0;
+    margin-top: 0.35rem;
+  }
+  .corg-add .user-picker { flex: 1; min-width: 0; }
 </style>
