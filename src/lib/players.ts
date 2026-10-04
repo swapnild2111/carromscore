@@ -572,7 +572,9 @@ export async function ensurePlayerInFirebase(playerId: string): Promise<void> {
   const p = memoryStore.find((x) => x.id === playerId);
   if (!p) return;
   if (p.createdAt !== 0) return;
+  await awaitAuthReady();
   p.createdAt = Date.now();
+  if (!p.createdBy) p.createdBy = currentUser()?.uid;
   await writePlayerToFirebase(p);
 }
 
@@ -622,7 +624,9 @@ async function writeAliasToFirebase(playerId: string, aliasKey: string): Promise
   // full record here first. Bumping createdAt to now() also makes the
   // create-time validation pass ("timestamp within 5 min of server").
   if (p.createdAt === 0) {
+    await awaitAuthReady();
     p.createdAt = Date.now();
+    if (!p.createdBy) p.createdBy = currentUser()?.uid;
     await writePlayerToFirebase(p);
     return;
   }
