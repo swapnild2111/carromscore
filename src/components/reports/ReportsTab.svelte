@@ -154,7 +154,12 @@
     const tk = rec!.key;
     if (!tk) return;
     void loadPendingPlannedByTournament(tk).then((ms) => {
-      const ko = ms.filter((m) => /^KO\b/i.test(m.round ?? ''));
+      // Accept KO-prefixed rounds (groupknockout) OR bracket rounds in any
+      // flight-prefixed naming scheme (e.g. "G1 — QF", "G1 — R32").
+      const ko = ms.filter((m) => {
+        const r = m.round ?? '';
+        return /^KO\b/i.test(r) || BRACKET_ROUND_RX.test(r);
+      });
       koPlannedMatches = ko;
     });
   });
