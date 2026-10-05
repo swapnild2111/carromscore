@@ -2905,7 +2905,7 @@
   }
   /* Screen: show dark SVG, hide light print SVG */
   .flight-bracket-svg-print { display: none; }
-  .flight-bracket-svg-screen { outline: 1px solid rgba(255, 255, 255, 0.12); }
+  .flight-bracket-svg-screen { outline: 1px solid rgba(255, 255, 255, 0.12); background: #1a1a1a; }
 
   @media print {
     .flight-bracket-svg-screen { display: none !important; }
