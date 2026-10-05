@@ -814,8 +814,8 @@
       if (n.includes('SF') || /semi.finals?/i.test(n)) return 'Semi Finals';
       if (n.includes('QF') || /quarter.finals?/i.test(n)) return 'Quarter Finals';
       if (/\bfinals?\b/i.test(n)) return 'Finals';
-      if (n.includes('R16') || n.includes('Round of 16')) return 'Rounds';
-      if (n.includes('R32')) return 'Rounds';
+      if (n.includes('R32')) return 'R32';
+      if (n.includes('R16') || n.includes('Round of 16')) return 'R16';
       return n;
     }
     const mergedMap = new Map<string, BracketRound>();
