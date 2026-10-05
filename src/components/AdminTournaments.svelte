@@ -2032,6 +2032,25 @@
             </div>
           </div>
 
+          <!-- Mode -->
+          <div class="add-section">
+            <span class="add-section-label">Mode</span>
+            <div class="add-format-cards add-mode-cards">
+              <label class="add-format-card" class:add-format-card-active={editingDefaultMode === 'singles'}>
+                <input type="radio" name="edit-tournament-mode" value="singles" bind:group={editingDefaultMode} disabled={saving} />
+                <span class="add-format-icon">👤</span>
+                <span class="add-format-title">Singles</span>
+                <span class="add-format-desc">1v1 matches</span>
+              </label>
+              <label class="add-format-card add-format-card-disabled" title="Coming soon">
+                <input type="radio" name="edit-tournament-mode" value="doubles" bind:group={editingDefaultMode} disabled />
+                <span class="add-format-icon">👥</span>
+                <span class="add-format-title">Doubles <span class="coming-soon-badge">Soon</span></span>
+                <span class="add-format-desc">2v2 matches</span>
+              </label>
+            </div>
+          </div>
+
           <!-- Setup — Knockout/RR -->
           {#if editingFormat === 'knockout' || editingFormat === 'roundrobin'}
             <div class="add-section add-section-setup">
@@ -2479,6 +2498,25 @@
                 <span class="add-format-icon">🔄</span>
                 <span class="add-format-title">Round Robin <span class="coming-soon-badge">Soon</span></span>
                 <span class="add-format-desc">Everyone plays all</span>
+              </label>
+            </div>
+          </div>
+
+          <!-- Mode -->
+          <div class="add-section">
+            <span class="add-section-label">Mode</span>
+            <div class="add-format-cards add-mode-cards">
+              <label class="add-format-card" class:add-format-card-active={addingDefaultMode === 'singles'}>
+                <input type="radio" name="add-tournament-mode" value="singles" bind:group={addingDefaultMode} />
+                <span class="add-format-icon">👤</span>
+                <span class="add-format-title">Singles</span>
+                <span class="add-format-desc">1v1 matches</span>
+              </label>
+              <label class="add-format-card add-format-card-disabled" title="Coming soon">
+                <input type="radio" name="add-tournament-mode" value="doubles" bind:group={addingDefaultMode} disabled />
+                <span class="add-format-icon">👥</span>
+                <span class="add-format-title">Doubles <span class="coming-soon-badge">Soon</span></span>
+                <span class="add-format-desc">2v2 matches</span>
               </label>
             </div>
           </div>
@@ -4687,6 +4725,9 @@
     display: grid;
     grid-template-columns: 1fr 1fr 1fr;
     gap: 0.5rem;
+  }
+  .add-mode-cards {
+    grid-template-columns: 1fr 1fr;
   }
   .add-format-card {
     display: flex;
