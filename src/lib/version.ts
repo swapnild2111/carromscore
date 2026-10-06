@@ -10,12 +10,9 @@ export const APP_VERSION = '5.3.2';
  * update fires. Update alongside APP_VERSION on every release.
  */
 export const RELEASE_NOTES: string[] = [
-  'Edit scores mid-match from the footer',
-  'Queen coin now has a red glow ring',
-  'Footer buttons renamed for clarity',
-  'Offline banner no longer flashes on tab switch',
-  'Scoreboard auto-enters fullscreen on start',
-  'Player first name shown in header to prevent overflow',
+  'Bracket SVG: R32/R16 in separate columns for G1-style tournaments',
+  'Bracket SVG: Quarter Finals, Semi Finals, Finals now shown',
+  'Add/Edit Tournament: Mode selector with Doubles marked Coming Soon',
 ];
 
 const REPO = 'swapnild2111/carromscore';
