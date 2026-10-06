@@ -3,16 +3,14 @@
  * appVersionName. The update-check compares this string against the
  * `tag_name` on the latest GitHub Release.
  */
-export const APP_VERSION = '5.3.2';
+export const APP_VERSION = '5.3.3';
 
 /**
  * Short bullet points shown in the "What's new" popup when a service-worker
  * update fires. Update alongside APP_VERSION on every release.
  */
 export const RELEASE_NOTES: string[] = [
-  'Bracket SVG: R32/R16 in separate columns for G1-style tournaments',
-  'Bracket SVG: Quarter Finals, Semi Finals, Finals now shown',
-  'Add/Edit Tournament: Mode selector with Doubles marked Coming Soon',
+  'Fix: what\'s new popup now shows correct release notes. CI now auto-updates release notes from workflow input.',
 ];
 
 const REPO = 'swapnild2111/carromscore';
