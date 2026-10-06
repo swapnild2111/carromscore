@@ -127,6 +127,29 @@ jobs:
           grep APP_VERSION src/lib/version.ts
           grep appVersionName twa/twa-manifest.json
 
+      - name: Update RELEASE_NOTES in version.ts
+        if: ${{ inputs.notes != '' }}
+        env:
+          NOTES: ${{ inputs.notes }}
+        run: |
+          node - <<'EOF'
+          const fs = require('fs');
+          const notes = process.env.NOTES || '';
+          // Split on newlines, strip leading bullet markers (-, •, *), trim blanks
+          const lines = notes.split('\n')
+            .map(l => l.replace(/^[\s\-•*]+/, '').trim())
+            .filter(Boolean);
+          const entries = lines.map(l => `  '${l.replace(/'/g, "\\'")}'`).join(',\n');
+          const src = fs.readFileSync('src/lib/version.ts', 'utf8');
+          const updated = src.replace(
+            /export const RELEASE_NOTES: string\[\] = \[[\s\S]*?\];/,
+            `export const RELEASE_NOTES: string[] = [\n${entries},\n];`
+          );
+          if (updated === src) { console.error('RELEASE_NOTES block not found'); process.exit(1); }
+          fs.writeFileSync('src/lib/version.ts', updated);
+          console.log('RELEASE_NOTES updated:', lines);
+          EOF
+
       - name: Commit + tag + push
         run: |
           set -euo pipefail
